@@ -24,7 +24,7 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Strategy: `ask-on-risk`; the user chose a linear chain of work-unit commits on the feature branch. No PRs will be opened or published without separate authorization.
 - Implementation route: delegated direct, one writer per task. The change is multi-file and reading prepares implementation.
 - Feature branch: `feat/evogym-operational-prototype`.
-- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. Current T01 foundation commit is `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`.
+- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. T01 commits: `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5` (application foundation) and `b657765938e8c93b399538a9e01942960130ebf5` (design map/run documentation).
 - CodeGraph initialization reported no indexed source files because the workspace initially contained only Markdown. Use ordinary file tools until source exists.
 - No project skill registry exists; use available global skills and the verified React/Tailwind/Vite guidance already researched.
 
@@ -40,9 +40,9 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Route: delegated direct. Acceptance: app starts; shared design tokens and navigation are consistent; role changes update allowed demo navigation; catalog shows component states; demo data is labeled; the three checks pass.
 
 ### T02 — Members and membership collection
-- [ ] Add member search/list, member detail, demo member creation, and membership collection/review/result flow.
-- [ ] Use confirmed catalog pricing only; show unresolved eligibility, grace, credit, transfer, and date rules without silently choosing a policy.
-- [ ] Ensure one simulated confirmed payment updates the member and current shift once.
+- [x] Add member search/list, member detail, demo member creation, and membership collection/review/result flow.
+- [x] Use confirmed catalog pricing only; show unresolved eligibility, grace, credit, transfer, and date rules without silently choosing a policy.
+- [x] Ensure one simulated confirmed payment updates the member and current shift once.
 - Verification: `npm run typecheck`; `npm test`; `npm run build`; focused member/payment tests.
 - Route: delegated direct. Acceptance: search/detail/renewal navigation works; a confirmed demo payment is idempotent for duplicate submission and reflected consistently; pending outcomes are never presented as confirmed.
 
@@ -66,14 +66,14 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - [x] CodeGraph initialized; no supported source files were present at initialization.
 - [x] Feature branch created: `feat/evogym-operational-prototype`.
 - [ ] Engram mirror pending: writes for project `evogym` currently return `unknown_project`.
-- [x] T01 — application foundation commit `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`; typecheck passed, tests 7/7 passed, production build passed; independent review found no actionable issues. Package installation required explicit escalation after sandbox DNS failure. Native RDD status/assessment unavailable because `gentle-ai` is not installed; no native review receipt is claimed. Design-map and README tracking commit is pending.
-- [ ] T02 — awaiting T01.
+- [x] T01 — application foundation commit `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`; design-map/run documentation commit `b657765938e8c93b399538a9e01942960130ebf5`. Typecheck passed, tests 7/7 passed, production build passed; independent review found no actionable issues. Package installation required explicit escalation after sandbox DNS failure. Native RDD status/assessment unavailable because `gentle-ai` is not installed; no native review receipt is claimed.
+- [x] T02 — user approved Vitest thread-pool setting in `vite.config.ts`; tests 15/15 passed under standard `npm test`, typecheck/build passed, and independent review found no actionable issues. Parent also re-ran `npm test` and `git diff --check`; commit identity is pending commit.
 - [ ] T03 — awaiting T01.
 - [ ] T04 — awaiting prior flows.
 
 ## Next step
 
-Commit the T01 design-map and run documentation, then start T02 with one delegated writer.
+Create the T02 work-unit commit and record its identity; then implement T03 with one delegated writer.
 
 ## Relevant files
 

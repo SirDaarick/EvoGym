@@ -3,6 +3,9 @@ import type { DemoState } from '../domain/models';
 export function createDemoState(): DemoState {
   return {
     revision: 0,
+    currentShiftId: 'demo-shift-01',
+    payments: [],
+    ledger: [],
     members: [
       { id: 'demo-001', name: 'Mariana López', phone: '5550000001', creditMinor: 0,
         membership: { planName: 'Mensual', startsOn: '2026-09-17', endsOn: '2026-10-17' } },

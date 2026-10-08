@@ -3,6 +3,8 @@ import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from
 import type { Role } from '../domain/models';
 import { useDemo } from '../demo/DemoProvider';
 import { ComponentCatalog } from '../features/catalog/ComponentCatalog';
+import { Members, MemberDetail, NewMember } from '../features/members/Members';
+import { MembershipPayment } from '../features/payments/MembershipPayment';
 import { Button, EmptyState, Notice, PageHeader, Panel } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
 
@@ -15,7 +17,7 @@ function Placeholder({ title }: { title: string }) {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { reset } = useDemo();
+  const { reset, resetVersion } = useDemo();
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
@@ -49,7 +51,11 @@ export function App() {
       <main id="main-content" tabIndex={-1}>
         <Routes>
           <Route path="/components" element={<ComponentCatalog />} />
-          {items.map(item => <Route key={item.slug} path={rolePath(role, item.slug)} element={<Placeholder title={item.title} />} />)}
+          <Route path={rolePath(role, 'members')} element={<Members key={resetVersion} role={role} />} />
+          <Route path={rolePath(role, 'members/new')} element={<NewMember key={resetVersion} role={role} />} />
+          <Route path={rolePath(role, 'members/:memberId')} element={<MemberDetail role={role} />} />
+          <Route path={rolePath(role, 'members/:memberId/payment')} element={<MembershipPayment key={`${resetVersion}-${location.pathname}`} role={role} />} />
+          {items.filter(item => item.slug !== 'members').map(item => <Route key={item.slug} path={rolePath(role, item.slug)} element={<Placeholder title={item.title} />} />)}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
       </main>
