@@ -24,7 +24,7 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Strategy: `ask-on-risk`; the user chose a linear chain of work-unit commits on the feature branch. No PRs will be opened or published without separate authorization.
 - Implementation route: delegated direct, one writer per task. The change is multi-file and reading prepares implementation.
 - Feature branch: `feat/evogym-operational-prototype`.
-- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. T01 commits: `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5` (application foundation) and `b657765938e8c93b399538a9e01942960130ebf5` (design map/run documentation); T02 commit: `595fdd225899f5f49062eeaa70e8d7d5da9e9838`; T03 commit: `1325c8a`.
+- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. T01 commits: `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5` (application foundation) and `b657765938e8c93b399538a9e01942960130ebf5` (design map/run documentation); T02 commit: `595fdd225899f5f49062eeaa70e8d7d5da9e9838`; T03 commit: `1325c8a`; T04 commit: `d1df2c7`.
 - CodeGraph initialization reported no indexed source files because the workspace initially contained only Markdown. Use ordinary file tools until source exists.
 - No project skill registry exists; use available global skills and the verified React/Tailwind/Vite guidance already researched.
 
@@ -69,11 +69,11 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - [x] T01 — application foundation commit `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`; design-map/run documentation commit `b657765938e8c93b399538a9e01942960130ebf5`. Typecheck passed, tests 7/7 passed, production build passed; independent review found no actionable issues. Package installation required explicit escalation after sandbox DNS failure. Native RDD status/assessment unavailable because `gentle-ai` is not installed; no native review receipt is claimed.
 - [x] T02 — commit `595fdd225899f5f49062eeaa70e8d7d5da9e9838`; user approved Vitest thread-pool setting in `vite.config.ts`; tests 15/15 passed under standard `npm test`, typecheck/build passed, and independent review found no actionable issues. Parent also re-ran `npm test` and `git diff --check`.
 - [x] T03 — commit `1325c8a`; two-shift regression proves Reception sees current-shift movement totals and accurate carry-in only. Tests 28/28, typecheck, build, and diff check passed; independent review found no remaining correction-specific issue. No visual/browser QA or native RDD receipt.
-- [ ] T04 — OWNER screens and read-model implemented; independent audit found no actionable issues. Tests 37/37, typecheck, build, and diff check pass; parent reran tests 37/37. Browser visual QA is blocked (IAB unavailable, no browser inventory; Playwright absent). Commit identity pending.
+- [ ] T04 — commit `d1df2c7`; OWNER screens and read-model implemented; independent audit found no actionable issues. Tests 37/37, typecheck, build, and diff check pass; parent reran tests 37/37. Browser visual QA is blocked (IAB unavailable, no browser inventory; Playwright absent).
 
 ## Next step
 
-Record T04 implementation in the local commit chain; browser visual/responsive checks remain an explicit follow-up.
+Obtain a usable browser/Playwright runtime to finish responsive and visual validation; then update this tracker. The prototype implementation is committed, but T04 acceptance is only partial until those checks run.
 
 ## Relevant files
 
