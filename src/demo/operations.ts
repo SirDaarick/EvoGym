@@ -17,6 +17,7 @@ export function collectMembership(state: DemoState, request: PaymentRequest): Tr
   if (!request.id || !member || !plan || plan.kind !== 'membership') return fail('Socio o plan no disponible. Revisa los datos.');
   if (plan.restriction) return fail(plan.restriction);
   if (!['cash', 'card', 'transfer'].includes(request.method)) return fail('Método no disponible.');
+  if (!state.shifts.some(shift => shift.id === state.currentShiftId && shift.status === 'open')) return fail('Abre un turno antes de registrar el cobro.');
   const status = request.method === 'transfer' ? 'pending' : 'paid';
   const payment: MembershipPayment = { ...request, planName: plan.name, amountMinor: plan.amountMinor, status,
     recordedAt: new Date().toISOString(), shiftId: state.currentShiftId, effectiveDates: null };

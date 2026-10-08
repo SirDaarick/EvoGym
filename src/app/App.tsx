@@ -5,6 +5,9 @@ import { useDemo } from '../demo/DemoProvider';
 import { ComponentCatalog } from '../features/catalog/ComponentCatalog';
 import { Members, MemberDetail, NewMember } from '../features/members/Members';
 import { MembershipPayment } from '../features/payments/MembershipPayment';
+import { Sales } from '../features/sales/Sales';
+import { Inventory } from '../features/inventory/Inventory';
+import { Shifts } from '../features/shifts/Shifts';
 import { Button, EmptyState, Notice, PageHeader, Panel } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
 
@@ -55,7 +58,10 @@ export function App() {
           <Route path={rolePath(role, 'members/new')} element={<NewMember key={resetVersion} role={role} />} />
           <Route path={rolePath(role, 'members/:memberId')} element={<MemberDetail role={role} />} />
           <Route path={rolePath(role, 'members/:memberId/payment')} element={<MembershipPayment key={`${resetVersion}-${location.pathname}`} role={role} />} />
-          {items.filter(item => item.slug !== 'members').map(item => <Route key={item.slug} path={rolePath(role, item.slug)} element={<Placeholder title={item.title} />} />)}
+          <Route path={rolePath(role, 'sales')} element={<Sales key={`${resetVersion}-${role}`} role={role} />} />
+          <Route path={rolePath(role, 'inventory')} element={<Inventory key={`${resetVersion}-${role}`} role={role} />} />
+          <Route path={rolePath(role, 'shifts')} element={<Shifts key={`${resetVersion}-${role}`} role={role} />} />
+          {items.filter(item => !['members', 'sales', 'inventory', 'shifts'].includes(item.slug)).map(item => <Route key={item.slug} path={rolePath(role, item.slug)} element={<Placeholder title={item.title} />} />)}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
       </main>

@@ -24,7 +24,7 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Strategy: `ask-on-risk`; the user chose a linear chain of work-unit commits on the feature branch. No PRs will be opened or published without separate authorization.
 - Implementation route: delegated direct, one writer per task. The change is multi-file and reading prepares implementation.
 - Feature branch: `feat/evogym-operational-prototype`.
-- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. T01 commits: `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5` (application foundation) and `b657765938e8c93b399538a9e01942960130ebf5` (design map/run documentation).
+- Forecast: more than 400 authored lines across the full feature; keep work units coherent and reassess before a later commit if the delivery budget is reached. T01 commits: `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5` (application foundation) and `b657765938e8c93b399538a9e01942960130ebf5` (design map/run documentation); T02 commit: `595fdd225899f5f49062eeaa70e8d7d5da9e9838`.
 - CodeGraph initialization reported no indexed source files because the workspace initially contained only Markdown. Use ordinary file tools until source exists.
 - No project skill registry exists; use available global skills and the verified React/Tailwind/Vite guidance already researched.
 
@@ -47,9 +47,9 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Route: delegated direct. Acceptance: search/detail/renewal navigation works; a confirmed demo payment is idempotent for duplicate submission and reflected consistently; pending outcomes are never presented as confirmed.
 
 ### T03 — Sales, inventory, and shifts
-- [ ] Add product/visit sale, shift opening/current shift/close, inventory movements, physical count, and discrepancy review.
-- [ ] Keep opening float separate from sales; model expected stock as opening + restocks − sold − waste.
-- [ ] Scope reception to the current shift and keep unresolved adjustments unavailable.
+- [x] Add product/visit sale, shift opening/current shift/close, inventory movements, physical count, and discrepancy review.
+- [x] Keep opening float separate from sales; model expected stock as opening + restocks − sold − waste.
+- [x] Scope reception to the current shift and keep unresolved adjustments unavailable; carry-in stock preserves expected inventory without exposing prior movement totals.
 - Verification: `npm run typecheck`; `npm test`; `npm run build`; focused sales/inventory/shift tests.
 - Route: delegated direct. Acceptance: sales update inventory and shift totals exactly once; opening float is not revenue; inventory discrepancy remains separately visible; notebook/Excel comparison is explicitly manual.
 
@@ -67,13 +67,13 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - [x] Feature branch created: `feat/evogym-operational-prototype`.
 - [ ] Engram mirror pending: writes for project `evogym` currently return `unknown_project`.
 - [x] T01 — application foundation commit `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`; design-map/run documentation commit `b657765938e8c93b399538a9e01942960130ebf5`. Typecheck passed, tests 7/7 passed, production build passed; independent review found no actionable issues. Package installation required explicit escalation after sandbox DNS failure. Native RDD status/assessment unavailable because `gentle-ai` is not installed; no native review receipt is claimed.
-- [x] T02 — user approved Vitest thread-pool setting in `vite.config.ts`; tests 15/15 passed under standard `npm test`, typecheck/build passed, and independent review found no actionable issues. Parent also re-ran `npm test` and `git diff --check`; commit identity is pending commit.
-- [ ] T03 — awaiting T01.
+- [x] T02 — commit `595fdd225899f5f49062eeaa70e8d7d5da9e9838`; user approved Vitest thread-pool setting in `vite.config.ts`; tests 15/15 passed under standard `npm test`, typecheck/build passed, and independent review found no actionable issues. Parent also re-ran `npm test` and `git diff --check`.
+- [x] T03 — implementation complete; two-shift regression proves Reception sees current-shift movement totals and accurate carry-in only. Tests 28/28, typecheck, build, and diff check passed; independent review found no remaining correction-specific issue. Commit identity pending.
 - [ ] T04 — awaiting prior flows.
 
 ## Next step
 
-Create the T02 work-unit commit and record its identity; then implement T03 with one delegated writer.
+Commit T03 implementation and record its identity; then implement T04 owner overview, history, and visual validation.
 
 ## Relevant files
 
