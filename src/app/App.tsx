@@ -8,14 +8,11 @@ import { MembershipPayment } from '../features/payments/MembershipPayment';
 import { Sales } from '../features/sales/Sales';
 import { Inventory } from '../features/inventory/Inventory';
 import { Shifts } from '../features/shifts/Shifts';
-import { Button, EmptyState, Notice, PageHeader, Panel } from '../shared/ui';
+import { Overview } from '../features/owner/Overview';
+import { History } from '../features/owner/History';
+import { PlanCatalog } from '../features/owner/PlanCatalog';
+import { Button } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
-
-function Placeholder({ title }: { title: string }) {
-  return <><PageHeader eyebrow="PROTOTIPO OPERATIVO" title={title} description="Esta sección forma parte del mapa aprobado y está en preparación." />
-    <Panel><EmptyState title="Flujo en preparación">Todavía no se pueden registrar operaciones en esta sección. No se procesan pagos ni se modifican datos reales.</EmptyState></Panel>
-    <Notice tone="warning">La libreta física es obligatoria. Excel continúa como registro maestro; la comparación es manual.</Notice></>;
-}
 
 export function App() {
   const location = useLocation();
@@ -61,7 +58,11 @@ export function App() {
           <Route path={rolePath(role, 'sales')} element={<Sales key={`${resetVersion}-${role}`} role={role} />} />
           <Route path={rolePath(role, 'inventory')} element={<Inventory key={`${resetVersion}-${role}`} role={role} />} />
           <Route path={rolePath(role, 'shifts')} element={<Shifts key={`${resetVersion}-${role}`} role={role} />} />
-          {items.filter(item => !['members', 'sales', 'inventory', 'shifts'].includes(item.slug)).map(item => <Route key={item.slug} path={rolePath(role, item.slug)} element={<Placeholder title={item.title} />} />)}
+          {role === 'OWNER' && <>
+            <Route path="/owner/overview" element={<Overview key={resetVersion} />} />
+            <Route path="/owner/history" element={<History key={resetVersion} />} />
+            <Route path="/owner/plans" element={<PlanCatalog />} />
+          </>}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
       </main>

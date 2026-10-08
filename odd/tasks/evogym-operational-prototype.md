@@ -54,9 +54,9 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - Route: delegated direct. Acceptance: sales update inventory and shift totals exactly once; opening float is not revenue; inventory discrepancy remains separately visible; notebook/Excel comparison is explicitly manual.
 
 ### T04 — Owner overview, history, and visual validation
-- [ ] Add owner business overview, movement/shift history, and read-only catalog.
-- [ ] Validate shared layout across role screens, responsive behavior, keyboard navigation, contrast, and realistic empty/error/unknown demo states.
-- [ ] Add browser-level Playwright coverage for the principal connected workflows if runtime tooling permits.
+- [x] Add owner business overview, movement/shift history, and read-only catalog.
+- [ ] Validate shared layout across role screens, responsive behavior, keyboard navigation, contrast, and realistic empty/error/unknown demo states. Keyboard reachability and invalid-period behavior are covered by tests; browser-based visual/responsive/contrast checks remain pending because no browser surface was available.
+- [ ] Add browser-level Playwright coverage for the principal connected workflows; Playwright is absent from the current toolchain and browser automation could not be started.
 - Verification: `npm run typecheck`; `npm test`; `npm run build`; Playwright checks if available; parent spot-check of one primary workflow and branch diff.
 - Route: delegated direct. Acceptance: owner overview uses explicit period and confirmed collections, not profit or invented scores; global history is absent from reception navigation; desktop/mobile layouts preserve task order; all verification outcomes are recorded honestly.
 
@@ -69,11 +69,11 @@ The generated Stitch screens were inconsistent and introduced unsupported operat
 - [x] T01 — application foundation commit `b89f0f0fd7341a223abbf97b362dc0f55f96d0f5`; design-map/run documentation commit `b657765938e8c93b399538a9e01942960130ebf5`. Typecheck passed, tests 7/7 passed, production build passed; independent review found no actionable issues. Package installation required explicit escalation after sandbox DNS failure. Native RDD status/assessment unavailable because `gentle-ai` is not installed; no native review receipt is claimed.
 - [x] T02 — commit `595fdd225899f5f49062eeaa70e8d7d5da9e9838`; user approved Vitest thread-pool setting in `vite.config.ts`; tests 15/15 passed under standard `npm test`, typecheck/build passed, and independent review found no actionable issues. Parent also re-ran `npm test` and `git diff --check`.
 - [x] T03 — commit `1325c8a`; two-shift regression proves Reception sees current-shift movement totals and accurate carry-in only. Tests 28/28, typecheck, build, and diff check passed; independent review found no remaining correction-specific issue. No visual/browser QA or native RDD receipt.
-- [ ] T04 — awaiting prior flows.
+- [ ] T04 — OWNER screens and read-model implemented; independent audit found no actionable issues. Tests 37/37, typecheck, build, and diff check pass; parent reran tests 37/37. Browser visual QA is blocked (IAB unavailable, no browser inventory; Playwright absent). Commit identity pending.
 
 ## Next step
 
-Implement T04 owner overview, movement/shift history, and visual validation.
+Record T04 implementation in the local commit chain; browser visual/responsive checks remain an explicit follow-up.
 
 ## Relevant files
 
