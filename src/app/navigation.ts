@@ -1,6 +1,7 @@
 import type { Role } from '../domain/models';
 
 export const navigation = [
+  { slug: 'home', label: 'Inicio', title: 'Inicio de recepción', roles: ['RECEPTION'] },
   { slug: 'overview', label: 'Resumen', title: 'Resumen del negocio', roles: ['OWNER'] },
   { slug: 'members', label: 'Socios', title: 'Socios y membresías', roles: ['OWNER', 'RECEPTION'] },
   { slug: 'sales', label: 'Ventas', title: 'Venta de productos y visitas', roles: ['OWNER', 'RECEPTION'] },
@@ -10,4 +11,4 @@ export const navigation = [
   { slug: 'plans', label: 'Planes', title: 'Catálogo de planes', roles: ['OWNER'] },
 ];
 export function rolePath(role: Role, slug: string) { return `/${role.toLowerCase()}/${slug}`; }
-export function homePath(role: Role) { return rolePath(role, role === 'OWNER' ? 'overview' : 'members'); }
+export function homePath(role: Role) { return rolePath(role, role === 'OWNER' ? 'overview' : 'home'); }

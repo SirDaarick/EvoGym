@@ -16,6 +16,20 @@ function mount(path = '/owner/overview') {
 }
 
 describe('application foundation', () => {
+  it('offers only two direct demo profiles at root and can change profile', async () => {
+    mount('/');
+    expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Admin/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Recepción/ })).toBeVisible();
+    expect(screen.queryByLabelText('Rol de demostración')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/contraseña|PIN/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Recepción/ }));
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
+    expect(screen.getByRole('link', { name: /Inicio/ })).toBeVisible();
+    await userEvent.click(screen.getByRole('link', { name: 'Cambiar perfil' }));
+    await userEvent.click(screen.getByRole('button', { name: /Admin/ }));
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/overview');
+  });
   it('labels demo data and owner navigation', () => {
     mount();
     expect(screen.getByText('Datos de demostración')).toBeVisible();
@@ -26,7 +40,7 @@ describe('application foundation', () => {
   it('switches role, route and visible navigation without claiming authentication', async () => {
     mount();
     await userEvent.selectOptions(screen.getByLabelText('Rol de demostración'), 'RECEPTION');
-    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/members');
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
     expect(screen.getByText(/no autentica/)).toBeVisible();
   });
@@ -42,7 +56,7 @@ describe('application foundation', () => {
     mount('/reception/history');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Rol de demostración')).toHaveValue('RECEPTION');
-    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/members');
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
   });
   it('preserves a shared task when switching role', async () => {
     mount('/owner/shifts');

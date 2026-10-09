@@ -11,6 +11,8 @@ import { Shifts } from '../features/shifts/Shifts';
 import { Overview } from '../features/owner/Overview';
 import { History } from '../features/owner/History';
 import { PlanCatalog } from '../features/owner/PlanCatalog';
+import { ReceptionHome } from '../features/reception/ReceptionHome';
+import { OwnerQuestions } from '../features/demo/OwnerQuestions';
 import { Button } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
 
@@ -34,13 +36,32 @@ export function App() {
       ? rolePath(next, slug) : homePath(next));
   }
 
+  if (location.pathname === '/') return <div className="profile-entry">
+    <a href="#main-content" className="skip-link">Ir al contenido</a>
+    <main id="main-content" tabIndex={-1}>
+      <p className="eyebrow">EVOGYM · PROTOTIPO LOCAL</p>
+      <h1>Elige tu perfil</h1>
+      <p className="muted">Entra sin contraseña ni PIN. Esta selección no autentica ni autoriza usuarios.</p>
+      <div className="profile-grid">
+        <Button variant="secondary" className="profile-card" onClick={() => navigate(homePath('OWNER'))}>
+          <span className="profile-icon" aria-hidden="true">A</span><strong>Admin</strong><span>Resumen, planes y operación del gimnasio</span>
+        </Button>
+        <Button variant="secondary" className="profile-card" onClick={() => navigate(homePath('RECEPTION'))}>
+          <span className="profile-icon" aria-hidden="true">R</span><strong>Recepción</strong><span>Socios, productos y cierre de turno</span>
+        </Button>
+      </div>
+      <OwnerQuestions ids={['Q-13']} />
+      <p className="muted">Datos de demostración en memoria; se pierden al recargar. Cambiar perfil no borra la demo.</p>
+    </main>
+  </div>;
+
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Ir al contenido</a>
     <aside className="sidebar">
       <Link className="brand" to={homePath(role)}>EvoGym<span>OPERACIÓN DEL GIMNASIO</span></Link>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
       <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)}>{item.label}<span aria-hidden="true">↗</span></NavLink>)}</nav>
-      <div className="sidebar-bottom"><p>Prototipo local</p><Link to="/components">Sistema de componentes</Link><p className="muted">Sin conexión a datos reales.</p></div>
+      <div className="sidebar-bottom"><p>Prototipo local</p><p><Link to="/">Cambiar perfil</Link></p><Link to="/components">Sistema de componentes</Link><p className="muted">Sin conexión a datos reales.</p></div>
     </aside>
     <div className="workspace">
       <header className="demo-bar"><div><strong>Datos de demostración</strong><p>El selector simula vistas; no autentica ni autoriza usuarios.</p></div>
@@ -50,6 +71,7 @@ export function App() {
       <p className="reset-status" role="status" aria-label="Resultado de demostración">{message}</p>
       <main id="main-content" tabIndex={-1}>
         <Routes>
+          <Route path="/reception/home" element={<ReceptionHome key={resetVersion} />} />
           <Route path="/components" element={<ComponentCatalog />} />
           <Route path={rolePath(role, 'members')} element={<Members key={resetVersion} role={role} />} />
           <Route path={rolePath(role, 'members/new')} element={<NewMember key={resetVersion} role={role} />} />
