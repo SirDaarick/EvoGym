@@ -7,6 +7,7 @@ export interface Member {
   phone: string;
   creditMinor: Money;
   membership: { planName: string; startsOn: string; endsOn: string } | null;
+  demoScenario?: 'active' | 'expired' | 'expiry-today' | 'unknown';
   lastPaymentId?: string;
 }
 

@@ -16,6 +16,18 @@ function mount(path = '/owner/overview') {
 }
 
 describe('application foundation', () => {
+  it('clears stale suggestions when resetting demo or switching profile', async () => {
+    mount('/reception/home');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo');
+    expect(screen.getByRole('listbox')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
+    expect(screen.getByRole('combobox', { name: 'Búsqueda global de socios' })).toHaveValue('');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo');
+    await userEvent.selectOptions(screen.getByLabelText('Rol de demostración'), 'OWNER');
+    expect(screen.getByRole('combobox', { name: 'Búsqueda global de socios' })).toHaveValue('');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
   it('offers only two direct demo profiles at root and can change profile', async () => {
     mount('/');
     expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeVisible();
@@ -49,7 +61,7 @@ describe('application foundation', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('0');
     await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
-    expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('2');
+    expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('6');
     expect(screen.getByRole('status', { name: 'Resultado de demostración' })).toHaveTextContent('Datos de demostración restablecidos');
   });
   it('redirects an unavailable reception route to its primary task', () => {

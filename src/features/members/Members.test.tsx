@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +9,32 @@ function mount(path = '/reception/members') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
 }
 describe('member workflow', () => {
+  it('groups global suggestions and selects a member with the keyboard', async () => {
+    mount('/reception/home');
+    const input = screen.getByRole('combobox', { name: 'Búsqueda global de socios' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    await userEvent.type(input, 'Demo');
+    expect(within(screen.getByRole('listbox')).getAllByRole('group').map(group => group.getAttribute('aria-label'))).toEqual(['Activos · demo', 'Inactivos · demo', 'Sin confirmar']);
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowUp}{Enter}');
+    expect(screen.getByRole('heading', { name: 'Demo Activa' })).toBeVisible();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.getByText(/Escenario de demostración: Activa/)).toBeVisible();
+  });
+  it('shows no results and Escape closes suggestions', async () => {
+    mount();
+    const input = screen.getByRole('combobox', { name: 'Búsqueda global de socios' });
+    await userEvent.type(input, 'nobody');
+    expect(screen.getByText('Sin coincidencias de socios.')).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Sin coincidencias de socios.')).not.toBeInTheDocument();
+  });
+  it('requires renewal in the expired demo without pretending attendance exists', () => {
+    mount('/reception/members/demo-expired');
+    expect(screen.getByText('Renovar antes de registrar una nueva entrada. Sin prórroga en esta demo.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Registrar entrada' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Registrar pago de membresía' })).toBeVisible();
+  });
   it('searches members and creates a demo member with only a required name', async () => {
     mount();
     await userEvent.type(screen.getByLabelText('Buscar socio'), 'Mariana');

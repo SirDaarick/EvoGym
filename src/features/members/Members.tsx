@@ -6,6 +6,8 @@ import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney } from '../../demo/adapter';
 import { addMember } from '../../demo/operations';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
+import { memberStatus } from '../../demo/memberStatus';
+import { OwnerQuestions } from '../demo/OwnerQuestions';
 
 export const paymentMethods = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia sin confirmar' };
 export function NotebookNotice() {
@@ -44,9 +46,14 @@ export function MemberDetail({ role }: { role: Role }) {
   const member = state.members.find(item => item.id === memberId);
   if (!member) return <Panel><EmptyState title="Socio no disponible">El registro no existe o la demo fue restablecida. <Link to={rolePath(role, 'members')}>Volver a socios</Link></EmptyState></Panel>;
   const payments = state.payments.filter(payment => payment.memberId === member.id);
+  const status = memberStatus(member);
   return <><PageHeader eyebrow="SOCIO · DETALLE" title={member.name} description={`${member.id} · ${member.phone || 'Teléfono no capturado'}`} action={<Link className="button button-primary" to={rolePath(role, `members/${member.id}/payment`)}>Registrar pago de membresía</Link>} />
-    <div className="bento-grid"><Panel><h2>Membresía y fechas</h2>{member.membership ? <><p>{member.membership.planName}</p><p>{member.membership.startsOn} a {member.membership.endsOn}</p><Badge>Fechas ilustrativas de demostración</Badge></> : <p>Sin fechas de membresía registradas.</p>}
+    <div className="bento-grid"><Panel><h2>Membresía y fechas</h2><Badge tone={status.status === 'inactive' || status.provisional ? 'warning' : 'neutral'}>{status.label}</Badge>
+      {member.demoScenario && <Notice>Escenario de demostración: {status.label}. No autoriza acceso real; las fechas de ejemplo no siguen el reloj actual.</Notice>}
+      {status.status === 'inactive' && <Notice tone="warning">Renovar antes de registrar una nueva entrada. Sin prórroga en esta demo.</Notice>}
+      {status.provisional && <Notice tone="warning">Q-01 provisional: permitir entrada el día de vencimiento. Falta confirmarlo con la dueña.</Notice>}
+      {member.membership ? <><p>{member.membership.planName}</p><p>{member.membership.startsOn} a {member.membership.endsOn}</p><Badge>Fechas ilustrativas de demostración</Badge></> : <p>Sin fechas de membresía registradas.</p>}
       <Notice>Un pago completo es requisito para acceso. Las fechas efectivas, renovación mensual y excepciones siguen por definir; esta demo no autoriza acceso.</Notice></Panel>
       <Panel><h2>Saldo a favor</h2><p className="text-3xl font-bold">{formatMoney(member.creditMinor)} MXN</p><p className="muted">Crédito separado del pago; no es deuda ni método. Aplicación, recarga y devolución no disponibles.</p></Panel>
-      <Panel className="span-full"><h2>Historial del socio</h2>{payments.length ? <TableRegion label="Pagos del socio"><table><caption>Operaciones locales de demostración</caption><thead><tr><th scope="col">Plan / referencia</th><th scope="col">Total MXN</th><th scope="col">Método</th><th scope="col">Resultado</th></tr></thead><tbody>{payments.map(payment => <tr key={payment.id}><td>{payment.planName}<p className="muted">{payment.id}</p></td><td>{formatMoney(payment.amountMinor)}</td><td>{paymentMethods[payment.method]}</td><td><Badge tone={payment.status === 'paid' ? 'success' : 'warning'}>{payment.status === 'paid' ? 'Pagado · fechas por definir' : 'Transferencia pendiente'}</Badge></td></tr>)}</tbody></table></TableRegion> : <EmptyState title="Sin pagos registrados">Las fechas de muestra no son un historial de cobros.</EmptyState>}</Panel></div><NotebookNotice /><div className="flow"><Link to={rolePath(role, 'members')}>Volver a socios</Link></div></>;
+      <Panel className="span-full"><h2>Historial del socio</h2>{payments.length ? <TableRegion label="Pagos del socio"><table><caption>Operaciones locales de demostración</caption><thead><tr><th scope="col">Plan / referencia</th><th scope="col">Total MXN</th><th scope="col">Método</th><th scope="col">Resultado</th></tr></thead><tbody>{payments.map(payment => <tr key={payment.id}><td>{payment.planName}<p className="muted">{payment.id}</p></td><td>{formatMoney(payment.amountMinor)}</td><td>{paymentMethods[payment.method]}</td><td><Badge tone={payment.status === 'paid' ? 'success' : 'warning'}>{payment.status === 'paid' ? 'Pagado · fechas por definir' : 'Transferencia pendiente'}</Badge></td></tr>)}</tbody></table></TableRegion> : <EmptyState title="Sin pagos registrados">Las fechas de muestra no son un historial de cobros.</EmptyState>}</Panel></div><OwnerQuestions ids={['Q-01', 'Q-04', 'Q-05']} /><NotebookNotice /><div className="flow"><Link to={rolePath(role, 'members')}>Volver a socios</Link></div></>;
 }

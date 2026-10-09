@@ -19,6 +19,13 @@ export function createDemoState(): DemoState {
       { id: 'demo-001', name: 'Mariana López', phone: '5550000001', creditMinor: 0,
         membership: { planName: 'Mensual', startsOn: '2026-09-17', endsOn: '2026-10-17' } },
       { id: 'demo-002', name: 'Carlos Rivera', phone: '5550000002', creditMinor: 0, membership: null },
+      { id: 'demo-active', name: 'Demo Activa', phone: '', creditMinor: 0, demoScenario: 'active',
+        membership: { planName: 'Mensual · ejemplo', startsOn: '2026-10-01', endsOn: '2026-10-31' } },
+      { id: 'demo-expired', name: 'Demo Vencida', phone: '', creditMinor: 0, demoScenario: 'expired',
+        membership: { planName: 'Mensual · ejemplo', startsOn: '2026-09-01', endsOn: '2026-09-30' } },
+      { id: 'demo-expiry', name: 'Demo Vence hoy', phone: '', creditMinor: 0, demoScenario: 'expiry-today',
+        membership: { planName: 'Mensual · ejemplo', startsOn: '2026-09-09', endsOn: '2026-10-08' } },
+      { id: 'demo-unknown', name: 'Demo Sin confirmar', phone: '', creditMinor: 0, demoScenario: 'unknown', membership: null },
     ],
   };
 }

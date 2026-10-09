@@ -4,6 +4,7 @@ import type { Role } from '../domain/models';
 import { useDemo } from '../demo/DemoProvider';
 import { ComponentCatalog } from '../features/catalog/ComponentCatalog';
 import { Members, MemberDetail, NewMember } from '../features/members/Members';
+import { MemberSearch } from '../features/members/MemberSearch';
 import { MembershipPayment } from '../features/payments/MembershipPayment';
 import { Sales } from '../features/sales/Sales';
 import { Inventory } from '../features/inventory/Inventory';
@@ -65,6 +66,7 @@ export function App() {
     </aside>
     <div className="workspace">
       <header className="demo-bar"><div><strong>Datos de demostración</strong><p>El selector simula vistas; no autentica ni autoriza usuarios.</p></div>
+        <MemberSearch key={`${resetVersion}-${role}-${location.pathname}`} role={role} />
         <div className="demo-controls"><label htmlFor="demo-role">Rol de demostración<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
           <Button variant="secondary" onClick={() => { reset(); setMessage('Datos de demostración restablecidos.'); }}>Restablecer demo</Button></div>
       </header>
