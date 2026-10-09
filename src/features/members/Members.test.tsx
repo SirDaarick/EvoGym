@@ -9,6 +9,21 @@ function mount(path = '/reception/members') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
 }
 describe('member workflow', () => {
+  it('registers a measured visit and tries automatic closure without inventing time', async () => {
+    mount('/reception/members/demo-active');
+    await userEvent.click(screen.getByText('Reloj y cierre de demostración'));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Avanzar 30 minutos' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida demo' }));
+    expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Salida registrada');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Simular cierre 22:00' }));
+    expect(screen.getByText('Cierre automático · duración desconocida')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Registrar salida demo' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
+    expect(screen.getByLabelText('Hora de demostración')).toHaveTextContent('12:00');
+    expect(screen.getByRole('button', { name: 'Registrar entrada demo' })).toBeEnabled();
+  });
   it('groups global suggestions and selects a member with the keyboard', async () => {
     mount('/reception/home');
     const input = screen.getByRole('combobox', { name: 'Búsqueda global de socios' });

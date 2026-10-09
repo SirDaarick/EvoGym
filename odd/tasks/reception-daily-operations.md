@@ -27,7 +27,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 - [x] T02 Denomination-assisted cash close, safe totals, stale review and legacy compatibility.
 - [x] T03 Global member lookup and explicit illustrative membership scenarios.
 - [x] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
-- [ ] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
+- [x] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
 - [ ] T06 Cross-flow verification, responsive/keyboard checks and concise demo notes.
 
 ## Routing
@@ -51,19 +51,21 @@ T03 adds persistent role-screen combobox lookup with active/inactive/unknown gro
 
 T04 adds three illustrative product cards with local SVG placeholders, selection and quantity/remove controls, one quoted multi-line cart, explicit payment review and feedback. One pure transaction aggregates products and validates all quantities/prices/stock/IDs before any writes; confirmed success clears the cart, errors/pending preserve it. Pending transfer uses grouped line records tagged with cartId only for the demo (Q-15 open), without ledger/stock effects or confirmation functionality. Q-11/Q-12/Q-14 remain open; current navigation loss is disclosed. Exact `npm test -- src/features/sales/operations.test.ts src/features/reception/ReceptionHome.test.tsx src/features/owner/Owner.test.tsx`: RED 8 failed/12 passed (7 new cart/UI failures plus pre-existing T01 Owner fallback expectation); GREEN/readback 3 files/21 tests passed. Authorized Owner expectation corrected to Home without weakening role restrictions. `npm run typecheck` and `git diff --check` passed. Pure quote logic shared between UI and atomic registration; no sequential registerSale calls. Full suite/build/browser closure pending T06.
 
+T05 implements local demo entry/observed exit, one open visit, separate automatic closure timestamps with unknown duration, controlled clock (advance 30 minutes, 22:00 close, next day), and explicit Q-01/Q-03 provisional toggles. Original/unknown/expired scenarios cannot create new entries; changing eligibility never traps exit. The demo uses proposed America/Mexico_City/UTC-06 for its fixed 2026 scenarios (Q-02 pending); no real clock, persistent scheduler or offline guarantee. Two seeded visits belong only to fictitious Demo Activa and are labeled illustrative. An 84-day orange keyboard-inspectable calendar shows visit counts, measured time and unknown durations separately. Exact `npm test -- src/demo/attendanceOperations.test.ts src/demo/memberStatus.test.ts src/features/attendance/AttendanceCalendar.test.tsx src/features/members/Members.test.tsx`: RED exit 1 (2 missing suites + one UI failure), GREEN/readback 4 files/15 tests passed; `npm run typecheck` and `git diff --check` passed. Refactor/readback shares day/boundary/duration helpers. UTC-local day rollover, prior-day overdue visits, invalid/backward clocks, repeat/expiry toggles, unrestricted exit and reset were checked. Full suite/build/browser closure pending T06.
+
 | Task | Route | Commit | Checks | Native review assessment |
 |---|---|---|---|---|
 | T01 | delegated | a7eafdd44e57e68b0cb4ddffbf6970d495b32ff1 | 10 focused tests, typecheck, diff check passed | medium, 232 changed lines, under_budget; no START |
 | T02 | delegated | d1261e09a17ec7d7fca7d7eee89cd1db1adfab45 | 20 focused tests, typecheck, diff check passed; parent repeated exact focused tests, 20 passed | combined T01+T02 medium, 401 lines; review_due=true, slice_budget_reached; independent review pending |
 | T03 | delegated | 4d70ecbc7b66a275dbbf565f15c25b6d6066b731 | 18 focused tests, typecheck, diff check passed | medium/192 lines informational only; RDD disabled/unmanaged |
-| T04 | delegated | SHA recorded after commit | 21 focused tests, typecheck, diff check passed | RDD disabled/unmanaged; parent ordinary verification pending |
-| T05 | delegated | pending | pending | pending |
+| T04 | delegated | 3fd2a07900cb70322fc819c6deb19a6f4c3d8628 | 21 focused tests, typecheck, diff check passed | medium/234 lines informational only; RDD disabled/unmanaged |
+| T05 | delegated | SHA recorded after commit | 15 focused tests, typecheck, diff check passed | RDD disabled/unmanaged; parent ordinary verification pending |
 | T06 | delegated | pending | pending | pending |
 
 ## Recovery
 Engram mirror: odd/reception-daily-operations/tasks. SDD dependencies: proposal25, questions45, spec47, design49, tasks51. Reconcile this file and full mirror before resuming. Keep failed/skipped/pending checks explicit.
 
 ## Next step
-Status: resumed after explicit human opt-out of RDD. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Parent verifies T04 under ordinary checks before T05.
+Status: resumed after explicit human opt-out of RDD. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Parent verifies T05 under ordinary checks before T06.
 
-Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. Two tasks remain; no full suite/build ran. Work remains local feature-branch-chain, with no PR, push or merge. T04 rollback removes atomic cart/card UI/added product fixtures and tests/styles, preserving prior single-sale behavior and T01–T03.
+Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. T06 remains; no full suite/build ran. Work remains local feature-branch-chain, with no PR, push or merge. T05 rollback removes demo attendance models/fixtures/helpers/calendar/member controls and tests/styles, preserving T01–T04. Production policy approval is not implied.

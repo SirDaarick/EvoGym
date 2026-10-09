@@ -91,6 +91,9 @@ export interface Sale {
 }
 
 export interface DemoState {
+  demoClock: string;
+  attendancePolicy: { allowExpiryDay: boolean; allowRepeatVisits: boolean };
+  attendance: AttendanceVisit[];
   members: Member[];
   revision: number;
   currentShiftId: string;
@@ -101,4 +104,13 @@ export interface DemoState {
   stockMovements: StockMovement[];
   counts: PhysicalCount[];
   sales: Sale[];
+}
+
+export interface AttendanceVisit {
+  id: string;
+  memberId: string;
+  observedCheckIn: string;
+  observedCheckOut: string | null;
+  autoClosedAt: string | null;
+  illustrativeSeed?: true;
 }

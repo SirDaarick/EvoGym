@@ -2,6 +2,12 @@ import type { DemoState } from '../domain/models';
 
 export function createDemoState(): DemoState {
   return {
+    demoClock: '2026-10-08T12:00:00-06:00',
+    attendancePolicy: { allowExpiryDay: true, allowRepeatVisits: true },
+    attendance: [
+      { id: 'mock-attendance-1', memberId: 'demo-active', observedCheckIn: '2026-10-05T12:00:00-06:00', observedCheckOut: '2026-10-05T13:00:00-06:00', autoClosedAt: null, illustrativeSeed: true },
+      { id: 'mock-attendance-2', memberId: 'demo-active', observedCheckIn: '2026-10-06T12:00:00-06:00', observedCheckOut: null, autoClosedAt: '2026-10-06T22:00:00-06:00', illustrativeSeed: true },
+    ],
     revision: 0,
     currentShiftId: 'demo-shift-01',
     payments: [],
