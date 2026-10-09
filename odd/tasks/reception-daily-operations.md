@@ -18,7 +18,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 - Branch: codex/reception-daily-operations.
 - Base: c5fe08e3490b5eb05e38988fd95f17503c1480db.
 - Delivery strategy: ask-on-risk; resolved chain strategy: feature-branch-chain. Local commits define future review slices; no PRs authorized.
-- Forecast: 500–700 authored additions+deletions from SDD, subject to revision after real implementation. 400 lines is a slicing heuristic, not a code-quality limit.
+- Initial forecast: 500–700 authored additions+deletions. Actual branch before final bookkeeping: 30 files, 1,055 additions + 28 deletions = 1,083 authored lines. Forecast was low; interactive scenarios, safety tests and verification notes increased scope within the authorized demo. Coherent observed units stayed at or below 266 lines; approved feature-branch-chain remains appropriate. 400 lines is a slicing heuristic, not a code-quality limit.
 - RDD: OFF (clone_local) after explicit human opt-out; global preference remains ON. Resume ordinary functional checks and independent verification. No native review retries, START, re-enabling or native approval claims.
 - Last reviewed boundary: c5fe08e3490b5eb05e38988fd95f17503c1480db.
 
@@ -28,7 +28,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 - [x] T03 Global member lookup and explicit illustrative membership scenarios.
 - [x] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
 - [x] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
-- [ ] T06 Self-checks complete; parent browser/responsive and independent verification pending.
+- [x] T06 Cross-flow, browser/responsive and independent ordinary verification completed for the local demo.
 
 ## Routing
 All tasks: delegated direct. Trigger: multi-file non-trivial writes and preparation for writing. One writer at a time, exact allowed surfaces per task. Independent verification follows native RDD state and risk assessment; no parallel writers.
@@ -41,6 +41,7 @@ All tasks: delegated direct. Trigger: multi-file non-trivial writes and preparat
 - Demo policy defaults are visibly tentative, not approved business rules. No realistic duration is invented for missing checkout.
 
 ## Progress and proof
+The entries below preserve chronological work-unit evidence. Earlier pending checkpoints are superseded by the final verification section.
 T01 implemented: root Admin/Reception profile selection without credentials, Home with fixture product overview and existing Sales link, and reusable collapsed contextual questions. Cart, global search and attendance remain future units. Parent verified root cards → Reception Home → Shifts in the browser; denomination mode with one $500 bill showed a $500 total. Partial demo remains open in tab 5. Full suite/build and full cross-flow browser proof remain pending.
 
 T01 test-first evidence: `npm test -- src/app/App.test.tsx src/features/reception/ReceptionHome.test.tsx src/features/demo/OwnerQuestions.test.tsx` initially failed (3 App tests; 2 missing-module suites). After implementation and a precise text-query correction it passed: 3 files, 10 tests. Refactor/readback retained existing shared-role routing and reusable disclosure; no additional abstraction needed. `npm run typecheck` and `git diff --check` passed. Runtime harness: RTL profile → Home → change profile → Admin; full browser proof pending T06.
@@ -62,12 +63,22 @@ T06 self-verification: initial `npm test` passed 13 files/67 tests; added a real
 | T03 | delegated | 4d70ecbc7b66a275dbbf565f15c25b6d6066b731 | 18 focused tests, typecheck, diff check passed | medium/192 lines informational only; RDD disabled/unmanaged |
 | T04 | delegated | 3fd2a07900cb70322fc819c6deb19a6f4c3d8628 | 21 focused tests, typecheck, diff check passed | medium/234 lines informational only; RDD disabled/unmanaged |
 | T05 | delegated | e7d71ed036e94af49abb746d5e4c034ab62b120a | 15 focused tests, typecheck, diff check passed | medium/266 lines informational only; RDD disabled/unmanaged |
-| T06 | delegated | SHA recorded after commit | 68 full tests, typecheck, build, diff check passed; README readback | RDD disabled/unmanaged; parent browser/independent proof pending |
+| T06 | delegated | 53072e9ddca175866010040daa91efe1c3d32129 | 68 full tests, typecheck, build, diff check; independent #63 and parent real browser proof passed | medium/58 lines informational only; RDD disabled/unmanaged |
+
+## Final verification — local demo complete (6/6)
+- Independent ordinary verifier at source HEAD `53072e9ddca175866010040daa91efe1c3d32129`: 13 files/68 tests, typecheck, build (120 modules) and diff check passed. Ephemeral assertions covered atomic rejection, canonical idempotent retry, pending-transfer effects, exact 22:00 boundary and next-day entry. Evidence: Engram #63, `odd/reception-daily-operations/independent-verification`; no blocker.
+- Parent real browser: root profiles → Reception Home; Agua + Barra = $55, confirmed sale cleared cart and stock fell 12→11 / 8→7. ArrowDown/Enter global search opened Demo Activa; observed 12:00→12:30 exit measured 30 minutes. A second visit automatically closed at 22:00 without increasing the 90 measured minutes; unknown-duration count increased by one. Provisional toggles were visible; expired example entry was disabled with renewal notice.
+- Parent real browser cash close: initial $500 + confirmed $55 = expected $555; $500/$50/$5 counts totaled $555, review difference was zero, and confirmed close preserved the breakdown. Pending $20 water transfer retained its locked cart and stock 12 with explicit no-confirmed-collection feedback.
+- Phone viewport 390×844: page client/scroll width 375 (no page overflow); calendar client/scroll width 309/327 (contained horizontal scrolling). Live prefers-reduced-motion CSS disables transitions/scroll behavior. OS reduced-motion preference was not emulated; this is a disclosed verification limit, not a functional blocker. Locator mismatches during automation were retargeted from fresh accessibility state, not product failures.
+- Demo was finally reset and clean Reception Home left visible in browser tab 5; viewport override reset. No source edits followed independent verification. This final task-document update uses structural readback/diff checks only.
+
+## Remaining business and production limits
+Owner questions remain open/provisional/deferred; implementation is a conversation aid, not approval. Expiry-day access and repeat visits are adjustable provisional choices. Catalog, images, eligibility/renewal, payment settlement/change, timezone, out-of-hours entry and persistence still need confirmation. No authentication, backend, real payments, production scheduler, offline persistence or automatic Excel/notebook reconciliation is implemented. No SDD archive or Wiki phase change was performed.
 
 ## Recovery
 Engram mirror: odd/reception-daily-operations/tasks. SDD dependencies: proposal25, questions45, spec47, design49, tasks51. Reconcile this file and full mirror before resuming. Keep failed/skipped/pending checks explicit.
 
 ## Next step
-Status: T06 self-verification complete, pending parent independent verification and real browser responsive/keyboard proof. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable.
+Status: all six local-demo tasks verified. Present the reset interface to the owner and record policy answers before production design. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Ordinary verification is not native approval.
 
-Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. T06 remains pending external proof; full suite/typecheck/build passed. Work remains local feature-branch-chain, with no PR, push or merge. T06 rollback removes cross-flow regression, contained-calendar styling and README demo walkthrough, preserving T01–T05. Production policy approval is not implied.
+Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. Work remains local feature-branch-chain, with no PR, push or merge. Final bookkeeping is documentation only; T06 rollback removes cross-flow regression, contained-calendar styling and README demo walkthrough, preserving T01–T05. Production policy approval is not implied.
