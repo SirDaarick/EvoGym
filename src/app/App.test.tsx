@@ -16,6 +16,34 @@ function mount(path = '/owner/overview') {
 }
 
 describe('application foundation', () => {
+  it('connects profile, cart, keyboard member lookup, measured attendance and denomination close', async () => {
+    mount('/');
+    await userEvent.click(screen.getByRole('button', { name: /Recepción/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua · producto ilustrativo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Barra · producto ilustrativo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro de demostración' }));
+    expect(screen.getByRole('status', { name: 'Resultado de compra' })).toHaveTextContent('Cobro confirmado');
+    expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo Activa');
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(screen.getByRole('heading', { name: 'Demo Activa' })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
+    await userEvent.click(screen.getByText('Reloj y cierre de demostración'));
+    await userEvent.click(screen.getByRole('button', { name: 'Avanzar 30 minutos' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida demo' }));
+    expect(screen.getByText('Última visita: 30 min medidos')).toBeVisible();
+    await userEvent.click(screen.getByRole('link', { name: /^Turno/ }));
+    await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'denominations');
+    for (const value of ['$500.00', '$50.00', '$5.00']) await userEvent.type(screen.getByLabelText(`${value === '$5.00' ? 'Moneda' : 'Billete'} ${value} · cantidad`), '1');
+    expect(screen.getByLabelText('Total por denominaciones')).toHaveTextContent('$555.00');
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    expect(screen.getByText('Diferencia: $0.00 MXN')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cierre de demostración' }));
+    expect(screen.getByText('Turno cerrado')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Conteo registrado' })).toHaveTextContent('$500.00');
+    expect(screen.getByText(/Excel sigue siendo el maestro/)).toBeVisible();
+  });
   it('clears stale suggestions when resetting demo or switching profile', async () => {
     mount('/reception/home');
     await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo');

@@ -28,7 +28,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 - [x] T03 Global member lookup and explicit illustrative membership scenarios.
 - [x] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
 - [x] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
-- [ ] T06 Cross-flow verification, responsive/keyboard checks and concise demo notes.
+- [ ] T06 Self-checks complete; parent browser/responsive and independent verification pending.
 
 ## Routing
 All tasks: delegated direct. Trigger: multi-file non-trivial writes and preparation for writing. One writer at a time, exact allowed surfaces per task. Independent verification follows native RDD state and risk assessment; no parallel writers.
@@ -53,19 +53,21 @@ T04 adds three illustrative product cards with local SVG placeholders, selection
 
 T05 implements local demo entry/observed exit, one open visit, separate automatic closure timestamps with unknown duration, controlled clock (advance 30 minutes, 22:00 close, next day), and explicit Q-01/Q-03 provisional toggles. Original/unknown/expired scenarios cannot create new entries; changing eligibility never traps exit. The demo uses proposed America/Mexico_City/UTC-06 for its fixed 2026 scenarios (Q-02 pending); no real clock, persistent scheduler or offline guarantee. Two seeded visits belong only to fictitious Demo Activa and are labeled illustrative. An 84-day orange keyboard-inspectable calendar shows visit counts, measured time and unknown durations separately. Exact `npm test -- src/demo/attendanceOperations.test.ts src/demo/memberStatus.test.ts src/features/attendance/AttendanceCalendar.test.tsx src/features/members/Members.test.tsx`: RED exit 1 (2 missing suites + one UI failure), GREEN/readback 4 files/15 tests passed; `npm run typecheck` and `git diff --check` passed. Refactor/readback shares day/boundary/duration helpers. UTC-local day rollover, prior-day overdue visits, invalid/backward clocks, repeat/expiry toggles, unrestricted exit and reset were checked. Full suite/build/browser closure pending T06.
 
+T06 self-verification: initial `npm test` passed 13 files/67 tests; added a real App cross-flow regression (profile → atomic two-product sale → keyboard member lookup → measured attendance → denomination close with zero difference). Focused App tests passed 10 tests; final `npm test` passed 13 files/68 tests. `npm run typecheck`, `npm run build` (120 modules, Vite bundle) and `git diff --check` passed. No failed/skipped commands. Test-first exception: this is regression verification of already implemented behavior, so the new cross-flow test passed initially; no fabricated RED. README passive structural readback passed. Calendar overflow now stays within its grid, with outline padding; real narrow viewport/keyboard/reduced-motion checks remain parent browser work, not a jsdom layout claim. Product SVG is decorative within a named product control. Independent verification remains pending; T06 is not checked off yet.
+
 | Task | Route | Commit | Checks | Native review assessment |
 |---|---|---|---|---|
 | T01 | delegated | a7eafdd44e57e68b0cb4ddffbf6970d495b32ff1 | 10 focused tests, typecheck, diff check passed | medium, 232 changed lines, under_budget; no START |
 | T02 | delegated | d1261e09a17ec7d7fca7d7eee89cd1db1adfab45 | 20 focused tests, typecheck, diff check passed; parent repeated exact focused tests, 20 passed | combined T01+T02 medium, 401 lines; review_due=true, slice_budget_reached; independent review pending |
 | T03 | delegated | 4d70ecbc7b66a275dbbf565f15c25b6d6066b731 | 18 focused tests, typecheck, diff check passed | medium/192 lines informational only; RDD disabled/unmanaged |
 | T04 | delegated | 3fd2a07900cb70322fc819c6deb19a6f4c3d8628 | 21 focused tests, typecheck, diff check passed | medium/234 lines informational only; RDD disabled/unmanaged |
-| T05 | delegated | SHA recorded after commit | 15 focused tests, typecheck, diff check passed | RDD disabled/unmanaged; parent ordinary verification pending |
-| T06 | delegated | pending | pending | pending |
+| T05 | delegated | e7d71ed036e94af49abb746d5e4c034ab62b120a | 15 focused tests, typecheck, diff check passed | medium/266 lines informational only; RDD disabled/unmanaged |
+| T06 | delegated | SHA recorded after commit | 68 full tests, typecheck, build, diff check passed; README readback | RDD disabled/unmanaged; parent browser/independent proof pending |
 
 ## Recovery
 Engram mirror: odd/reception-daily-operations/tasks. SDD dependencies: proposal25, questions45, spec47, design49, tasks51. Reconcile this file and full mirror before resuming. Keep failed/skipped/pending checks explicit.
 
 ## Next step
-Status: resumed after explicit human opt-out of RDD. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Parent verifies T05 under ordinary checks before T06.
+Status: T06 self-verification complete, pending parent independent verification and real browser responsive/keyboard proof. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable.
 
-Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. T06 remains; no full suite/build ran. Work remains local feature-branch-chain, with no PR, push or merge. T05 rollback removes demo attendance models/fixtures/helpers/calendar/member controls and tests/styles, preserving T01–T04. Production policy approval is not implied.
+Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. T06 remains pending external proof; full suite/typecheck/build passed. Work remains local feature-branch-chain, with no PR, push or merge. T06 rollback removes cross-flow regression, contained-calendar styling and README demo walkthrough, preserving T01–T05. Production policy approval is not implied.
