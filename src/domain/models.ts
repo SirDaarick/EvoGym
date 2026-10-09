@@ -35,6 +35,7 @@ export interface LedgerEvent {
 }
 
 export type ShiftWindow = '06:00–14:00' | '14:00–22:00';
+export interface CashDenominationCount { valueMinor: Money; quantity: number; }
 export interface Shift {
   id: string;
   window: ShiftWindow;
@@ -45,6 +46,7 @@ export interface Shift {
   countedCashMinor?: Money;
   expectedCashAtCloseMinor?: Money;
   cashDifferenceMinor?: Money;
+  cashDenominations?: CashDenominationCount[];
 }
 export interface Product {
   id: string;

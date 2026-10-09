@@ -1,4 +1,5 @@
-import type { DemoState, ShiftWindow } from '../domain/models';
+import type { CashDenominationCount, DemoState, ShiftWindow } from '../domain/models';
+import { cashCountTotal } from './cashDenominations';
 import type { Transaction } from './operations';
 import { activeShift, type OperationResult } from './inventoryOperations';
 
@@ -17,14 +18,16 @@ export function shiftSummary(state: DemoState, shiftId: string) {
   const confirmedMinor = rows.reduce((sum, row) => sum + row.cash + row.card, 0);
   return { rows, cashMinor, confirmedMinor, expectedCashMinor: (shift?.openingCashMinor ?? 0) + cashMinor };
 }
-export function closeShift(state: DemoState, countedCashMinor: number): Transaction<OperationResult> {
+export function closeShift(state: DemoState, countedCashMinor: number, denominations?: readonly CashDenominationCount[]): Transaction<OperationResult> {
   const shift = activeShift(state);
   if (!shift) return { state, result: { status: 'error', message: 'No hay un turno abierto para cerrar.' } };
   if (!Number.isSafeInteger(countedCashMinor) || countedCashMinor < 0) return { state, result: { status: 'error', message: 'Revisa el efectivo contado.' } };
+  if (denominations && cashCountTotal(denominations) !== countedCashMinor) return { state, result: { status: 'error', message: 'Revisa las cantidades y el total por denominación.' } };
   const expectedCashAtCloseMinor = shiftSummary(state, shift.id).expectedCashMinor;
   return { state: { ...state, revision: state.revision + 1, shifts: state.shifts.map(item => item.id === shift.id
     ? { ...item, status: 'closed', closedAt: new Date().toISOString(), countedCashMinor, expectedCashAtCloseMinor,
-      cashDifferenceMinor: countedCashMinor - expectedCashAtCloseMinor } : item) }, result: { status: 'ok' } };
+      cashDifferenceMinor: countedCashMinor - expectedCashAtCloseMinor,
+      ...(denominations ? { cashDenominations: denominations.map(row => ({ ...row })) } : {}) } : item) }, result: { status: 'ok' } };
 }
 export function openShift(state: DemoState, request: { id: string; window: ShiftWindow; openingCashMinor: number }): Transaction<OperationResult> {
   const fail = (message: string): Transaction<OperationResult> => ({ state, result: { status: 'error', message } });

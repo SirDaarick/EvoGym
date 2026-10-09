@@ -132,4 +132,8 @@
   .owner-questions summary { cursor: pointer; color: var(--color-primary); font-weight: 600; min-height: 32px; }
   .owner-questions ul { padding: 0; list-style: none; display: grid; gap: 16px; }
   .owner-questions h3 { font-size: 16px; margin: 8px 0; }
+  .denomination-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 12px; margin: 16px 0; }
+  .denomination-row { background: var(--color-canvas); border-radius: 10px; padding: 12px; }
+  .denomination-row .field { margin: 0 0 8px; }
+  .denomination-row p { margin: 0; font-size: 14px; }
 }

@@ -24,7 +24,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 
 ## Tasks
 - [x] T01 Profile entry, Reception Home route, compact contextual owner questions.
-- [ ] T02 Denomination-assisted cash close, safe totals, stale review and legacy compatibility.
+- [x] T02 Denomination-assisted cash close, safe totals, stale review and legacy compatibility.
 - [ ] T03 Global member lookup and explicit illustrative membership scenarios.
 - [ ] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
 - [ ] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
@@ -45,10 +45,12 @@ T01 implemented: root Admin/Reception profile selection without credentials, Hom
 
 T01 test-first evidence: `npm test -- src/app/App.test.tsx src/features/reception/ReceptionHome.test.tsx src/features/demo/OwnerQuestions.test.tsx` initially failed (3 App tests; 2 missing-module suites). After implementation and a precise text-query correction it passed: 3 files, 10 tests. Refactor/readback retained existing shared-role routing and reusable disclosure; no additional abstraction needed. `npm run typecheck` and `git diff --check` passed. Runtime harness: RTL profile → Home → change profile → Admin; full browser proof pending T06.
 
+T02 implemented a visibly illustrative Q-10 denomination catalog, exclusive manual/count modes, safe integer centavo totals, validated cloned close snapshots and legacy total-only rendering. Empty count fields explicitly mean zero. Count changes require re-review; changed financial revision still refuses stale confirmation. `npm test -- src/demo/cashDenominations.test.ts src/features/shifts/ShiftFlow.test.tsx src/features/sales/operations.test.ts`: RED exit 1 (3 UI failures and one missing-module suite), GREEN exit 0 (3 files / 20 tests); `npm run typecheck` and `git diff --check` passed. Refactor/readback centralized quantity/total validation; targeted RTL close, invalid input, edit, stale revision and legacy paths passed. Browser/full checks remain pending T06.
+
 | Task | Route | Commit | Checks | Native review assessment |
 |---|---|---|---|---|
-| T01 | delegated | work-unit SHA recorded after commit | 10 focused tests, typecheck, diff check passed | parent assessment pending |
-| T02 | delegated | pending | pending | pending |
+| T01 | delegated | a7eafdd44e57e68b0cb4ddffbf6970d495b32ff1 | 10 focused tests, typecheck, diff check passed | medium, 232 changed lines, under_budget; no START |
+| T02 | delegated | SHA recorded after commit | 20 focused tests, typecheck, diff check passed | parent assessment pending |
 | T03 | delegated | pending | pending | pending |
 | T04 | delegated | pending | pending | pending |
 | T05 | delegated | pending | pending | pending |
@@ -58,4 +60,4 @@ T01 test-first evidence: `npm test -- src/app/App.test.tsx src/features/receptio
 Engram mirror: odd/reception-daily-operations/tasks. SDD dependencies: proposal25, questions45, spec47, design49, tasks51. Reconcile this file and full mirror before resuming. Keep failed/skipped/pending checks explicit.
 
 ## Next step
-Parent assesses committed T01 before authorizing T02. T01 rollback removes profile entry, Home/navigation and contextual questions with their tests/styles; existing sales, inventory and Owner screens are unchanged.
+Parent assesses T02 before T03. Last reviewed boundary remains the original base; T01 is under_budget. T02 rollback removes denomination helper/count UI/optional snapshots and its tests/styles, preserving manual close and all T01 work.
