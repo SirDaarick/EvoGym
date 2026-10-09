@@ -28,7 +28,7 @@ describe('owner views', () => {
   });
   it('does not expose owner overview, history or catalog in reception routes', () => {
     mount('/reception/overview');
-    expect(screen.getByRole('heading', { name: 'Socios y membresías' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Inicio de recepción' })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Cobros confirmados' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Historial|Resumen|Planes/ })).not.toBeInTheDocument();
   });

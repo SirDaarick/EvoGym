@@ -11,7 +11,11 @@ export function createDemoState(): DemoState {
       { id: 'demo-shift-previous', window: '14:00–22:00', openedAt: '2026-10-07T14:00:00-06:00', status: 'closed', openingCashMinor: 30000,
         closedAt: '2026-10-07T22:00:00-06:00', countedCashMinor: 30000, expectedCashAtCloseMinor: 30000, cashDifferenceMinor: 0 },
     ],
-    products: [{ id: 'demo-water', name: 'Agua · producto ilustrativo', priceMinor: 2000, openingQuantity: 12, illustrative: true }],
+    products: [
+      { id: 'demo-water', name: 'Agua · producto ilustrativo', priceMinor: 2000, openingQuantity: 12, illustrative: true },
+      { id: 'demo-bar', name: 'Barra · producto ilustrativo', priceMinor: 3500, openingQuantity: 8, illustrative: true },
+      { id: 'demo-drink', name: 'Bebida · producto ilustrativo', priceMinor: 4000, openingQuantity: 6, illustrative: true },
+    ],
     stockMovements: [],
     counts: [],
     sales: [],

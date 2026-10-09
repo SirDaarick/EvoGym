@@ -143,6 +143,15 @@
   .member-option span { color: var(--color-muted); font-size: 12px; }
   .member-option:hover, .member-option[aria-selected=true] { background: var(--color-soft); outline: 1px solid var(--color-primary); }
   .demo-bar .suggestion-note { margin-top: 12px; }
+  .reception-checkout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+  .product-select { flex-direction: column; width: 100%; padding: 8px; gap: 8px; text-align: center; }
+  .product-select .product-placeholder { width: 100%; }
+  .product-selected { border-color: var(--color-primary); background: var(--color-soft); }
+  .quantity-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .quantity-controls output { min-width: 24px; text-align: center; font-weight: 700; }
+  .cart-lines { padding: 0; list-style: none; }
+  .cart-lines li { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--color-divider); }
 }
 
 @media (max-width: 1000px) { .global-member-search { flex: none; width: 100%; max-width: none; } }
+@media (max-width: 1000px) { .reception-checkout { grid-template-columns: minmax(0, 1fr); } }

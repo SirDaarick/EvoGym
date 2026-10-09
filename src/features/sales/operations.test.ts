@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoState } from '../../demo/adapter';
-import { registerSale } from '../../demo/salesOperations';
+import { registerSale, registerCart } from '../../demo/salesOperations';
 import { expectedStock, recordMovement, recordCount } from '../../demo/inventoryOperations';
 import { closeShift, openShift, shiftSummary } from '../../demo/shiftOperations';
 import { collectMembership } from '../../demo/operations';
@@ -10,6 +10,51 @@ import { DemoProvider, useDemo } from '../../demo/DemoProvider';
 import { Inventory } from '../inventory/Inventory';
 
 describe('connected shift, sale and stock operations', () => {
+  const cart = { id: 'cart-test', method: 'cash' as const, lines: [{ productId: 'demo-water', quantity: 2 }, { productId: 'demo-bar', quantity: 1 }] };
+  it('commits every cart line atomically and retries exactly once', () => {
+    const initial = createDemoState();
+    const first = registerCart(initial, cart);
+    expect(first.result.status).toBe('confirmed');
+    expect(first.state.sales).toHaveLength(2);
+    expect(first.state.ledger).toHaveLength(2);
+    expect(first.state.stockMovements).toHaveLength(2);
+    expect(expectedStock(first.state, 'demo-water')).toBe(10);
+    expect(registerCart(first.state, cart).state).toBe(first.state);
+    expect(registerCart(first.state, { ...cart, method: 'card' }).result.status).toBe('error');
+  });
+  it('rejects an invalid second line, overselling and unsafe quantities without writes', () => {
+    const initial = createDemoState();
+    for (const line of [{ productId: 'missing', quantity: 1 }, { productId: 'demo-bar', quantity: 999 }, { productId: 'demo-bar', quantity: 1.5 }]) {
+      expect(registerCart(initial, { ...cart, lines: [cart.lines[0], line] }).state).toBe(initial);
+    }
+    expect(registerCart(initial, { ...cart, lines: [] }).result.status).toBe('error');
+    expect(registerCart(closeShift(initial, 50000).state, cart).result.status).toBe('error');
+  });
+  it('aggregates duplicate products and respects expected stock rather than physical-count correction', () => {
+    const initial = recordCount(createDemoState(), { id: 'observed', productId: 'demo-water', quantity: 99 }).state;
+    const duplicate = { ...cart, lines: [{ productId: 'demo-water', quantity: 7 }, { productId: 'demo-water', quantity: 6 }] };
+    expect(registerCart(initial, duplicate).state).toBe(initial);
+    const valid = registerCart(initial, { ...duplicate, lines: [{ productId: 'demo-water', quantity: 2 }, { productId: 'demo-water', quantity: 3 }] });
+    expect(valid.state.sales).toHaveLength(1);
+    expect(valid.state.sales[0].quantity).toBe(5);
+  });
+  it('rejects invalid prices and total overflow and keeps transfer pending with no financial/stock effects', () => {
+    const initial = createDemoState();
+    for (const priceMinor of [-1, 0.5, Infinity, Number.MAX_SAFE_INTEGER]) {
+      const state = { ...initial, products: initial.products.map(product => product.id === 'demo-water' ? { ...product, priceMinor } : product) };
+      expect(registerCart(state, cart).state).toBe(state);
+    }
+    const pending = registerCart(initial, { ...cart, method: 'transfer' });
+    expect(pending.result.status).toBe('pending');
+    expect(pending.state.ledger).toEqual(initial.ledger);
+    expect(pending.state.stockMovements).toEqual(initial.stockMovements);
+    expect(registerCart(pending.state, { ...cart, method: 'transfer' }).state).toBe(pending.state);
+    const huge = { ...initial, products: initial.products.map(product => ({ ...product, priceMinor: Number.MAX_SAFE_INTEGER })) };
+    expect(registerCart(huge, { ...cart, lines: cart.lines.map(line => ({ ...line, quantity: 1 })) }).state).toBe(huge);
+    expect(registerCart(initial, { ...cart, lines: [{ productId: 'demo-water', quantity: 0 }] }).state).toBe(initial);
+    const collision = registerSale(initial, { id: 'cart-test:line:0', kind: 'product', productId: 'demo-bar', quantity: 1, method: 'cash' }).state;
+    expect(registerCart(collision, cart).state).toBe(collision);
+  });
   const request = { id: 'sale-test', kind: 'product' as const, productId: 'demo-water', quantity: 2, method: 'cash' as const };
   it('posts one complete cash product sale and reduces stock once', () => {
     const initial = createDemoState();

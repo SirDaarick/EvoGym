@@ -26,7 +26,7 @@ Build an interactive, local EvoGym prototype so the owner can discuss reception 
 - [x] T01 Profile entry, Reception Home route, compact contextual owner questions.
 - [x] T02 Denomination-assisted cash close, safe totals, stale review and legacy compatibility.
 - [x] T03 Global member lookup and explicit illustrative membership scenarios.
-- [ ] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
+- [x] T04 Product grid and one atomic multi-item cart transaction with honest feedback.
 - [ ] T05 Attendance sessions, orange calendar, unknown-duration auto-close and demo controls.
 - [ ] T06 Cross-flow verification, responsive/keyboard checks and concise demo notes.
 
@@ -49,12 +49,14 @@ T02 implemented a visibly illustrative Q-10 denomination catalog, exclusive manu
 
 T03 adds persistent role-screen combobox lookup with active/inactive/unknown groups, arrow/Enter/Escape operation, reset/route/profile stale-suggestion clearing, and four explicit fictitious scenarios separate from legacy membership dates. Detail shows unknown/demo/provisional status and expired renewal notice, without attendance actions or payment-derived eligibility. Q-01 remains provisional; Q-04/Q-05 remain open. `npm test -- src/demo/memberStatus.test.ts src/features/members/Members.test.tsx src/app/App.test.tsx`: RED exit 1 (5 UI failures plus missing resolver suite), GREEN/readback 3 files / 18 tests passed; `npm run typecheck` and `git diff --check` passed. One test query was scoped to its listbox rather than unrelated native details groups. Refactor/readback reused the pure classifier in search/detail. Full suite/build pending T06.
 
+T04 adds three illustrative product cards with local SVG placeholders, selection and quantity/remove controls, one quoted multi-line cart, explicit payment review and feedback. One pure transaction aggregates products and validates all quantities/prices/stock/IDs before any writes; confirmed success clears the cart, errors/pending preserve it. Pending transfer uses grouped line records tagged with cartId only for the demo (Q-15 open), without ledger/stock effects or confirmation functionality. Q-11/Q-12/Q-14 remain open; current navigation loss is disclosed. Exact `npm test -- src/features/sales/operations.test.ts src/features/reception/ReceptionHome.test.tsx src/features/owner/Owner.test.tsx`: RED 8 failed/12 passed (7 new cart/UI failures plus pre-existing T01 Owner fallback expectation); GREEN/readback 3 files/21 tests passed. Authorized Owner expectation corrected to Home without weakening role restrictions. `npm run typecheck` and `git diff --check` passed. Pure quote logic shared between UI and atomic registration; no sequential registerSale calls. Full suite/build/browser closure pending T06.
+
 | Task | Route | Commit | Checks | Native review assessment |
 |---|---|---|---|---|
 | T01 | delegated | a7eafdd44e57e68b0cb4ddffbf6970d495b32ff1 | 10 focused tests, typecheck, diff check passed | medium, 232 changed lines, under_budget; no START |
 | T02 | delegated | d1261e09a17ec7d7fca7d7eee89cd1db1adfab45 | 20 focused tests, typecheck, diff check passed; parent repeated exact focused tests, 20 passed | combined T01+T02 medium, 401 lines; review_due=true, slice_budget_reached; independent review pending |
-| T03 | delegated | SHA recorded after commit | 18 focused tests, typecheck, diff check passed | RDD disabled/unmanaged; parent ordinary verification pending |
-| T04 | delegated | pending | pending | pending |
+| T03 | delegated | 4d70ecbc7b66a275dbbf565f15c25b6d6066b731 | 18 focused tests, typecheck, diff check passed | medium/192 lines informational only; RDD disabled/unmanaged |
+| T04 | delegated | SHA recorded after commit | 21 focused tests, typecheck, diff check passed | RDD disabled/unmanaged; parent ordinary verification pending |
 | T05 | delegated | pending | pending | pending |
 | T06 | delegated | pending | pending | pending |
 
@@ -62,6 +64,6 @@ T03 adds persistent role-screen combobox lookup with active/inactive/unknown gro
 Engram mirror: odd/reception-daily-operations/tasks. SDD dependencies: proposal25, questions45, spec47, design49, tasks51. Reconcile this file and full mirror before resuming. Keep failed/skipped/pending checks explicit.
 
 ## Next step
-Status: resumed after explicit human opt-out of RDD. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Parent verifies T03 under ordinary checks before T04.
+Status: resumed after explicit human opt-out of RDD. Historical preflight required an unestablished external collection input shape; no START, freeze, lineage or consent occurred. Parent disabled RDD at clone scope at the human's request; do not retry that review or re-enable. Parent verifies T04 under ordinary checks before T05.
 
-Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. Three tasks remain; no full suite/build ran. Work remains local feature-branch-chain, with no PR, push or merge. T03 rollback removes lookup/scenario/detail additions and its tests/styles, preserving T01/T02. T02 rollback removes denomination helper/count UI/optional snapshots and its tests/styles, preserving manual close and T01.
+Pre-existing unrelated untracked files were excluded in the successful assessment and remain untouched. Last reviewed boundary stays the original base. Two tasks remain; no full suite/build ran. Work remains local feature-branch-chain, with no PR, push or merge. T04 rollback removes atomic cart/card UI/added product fixtures and tests/styles, preserving prior single-sale behavior and T01–T03.

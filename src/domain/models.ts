@@ -76,6 +76,7 @@ export interface PhysicalCount {
 export type VisitArea = 'GYM' | 'BOX' | 'COMBO';
 export interface Sale {
   id: string;
+  cartId?: string;
   kind: 'product' | 'visit';
   productId?: string;
   area?: VisitArea;
