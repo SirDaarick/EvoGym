@@ -25,4 +25,21 @@ describe('shared component catalog foundation', () => {
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     expect(screen.getByRole('button', { name: 'Usar tema claro' })).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('renders sortable movement examples, accessible chart alternatives, and attendance', async () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
+
+    expect(screen.getByRole('button', { name: 'Ordenar por socio' })).toBeVisible();
+    expect(screen.getByRole('table', { name: 'Movimientos de ejemplo' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Tendencia de ingresos de muestra' })).toBeVisible();
+    expect(screen.getByRole('table', { name: 'Datos de tendencia de ejemplo' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Frecuencia de asistencia demo' })).toBeVisible();
+    expect(screen.queryByText('Semana 1')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Periodo de análisis (demo)' }), { target: { value: '12' } });
+    expect(screen.getAllByText('Semana 1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Semana 12').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Ordenar por socio' }));
+    expect(screen.getByRole('button', { name: 'Ordenar por socio' }).closest('th')).toHaveAttribute('aria-sort', 'ascending');
+  });
 });
