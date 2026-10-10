@@ -69,8 +69,33 @@ function DataViews() {
 }
 
 function WorkflowGallery() {
+  const [result, setResult] = useState<'success' | 'error'>('success');
   return <>
     <Notice tone="warning">Muestras ficticias: esta galería no representa el estado operativo ni habilita las reglas pendientes.</Notice>
+    <div className="catalog-domain-grid">
+      <Panel className="domain-composite"><h3>Socios y perfiles demo</h3><p className="muted">T01 · T02 · T09 · T10 · T11 — identidad y datos ficticios, sin autenticación.</p>
+        <article className="domain-profile"><span className="domain-avatar" aria-hidden="true">MS</span><div><strong>Mara Solís · socia de ejemplo</strong><p>Perfil de demostración · membresía desconocida</p><Badge tone="warning">Fechas y elegibilidad sin confirmar</Badge></div></article>
+        <details><summary>Ver ficha de muestra</summary><dl className="component-fiche"><dt>Visitas demo</dt><dd>2 registradas · última fecha ilustrativa: 03 oct 2026</dd><dt>Contacto</dt><dd>Dato de prueba no vinculado a una persona real</dd></dl></details>
+      </Panel>
+      <Panel className="domain-composite"><h3>Venta y resultado de muestra</h3><p className="muted">T03 · T04 · T05 · T06 · T07 · T08 — composición visual, no ejecuta movimientos.</p>
+        <div className="domain-line-item"><span>Agua · muestra × 2</span><strong>$270.00 MXN demo</strong></div>
+        <div className="domain-line-item"><span>Suplemento · 1 porción de muestra</span><strong>$45.00 MXN demo</strong></div>
+        <p className="domain-total">Total ilustrativo <strong>$315.00 MXN</strong></p>
+        <label className="catalog-period">Resultado de compra (demo)<select aria-label="Resultado de compra (demo)" value={result} onChange={event => setResult(event.target.value as 'success' | 'error')}><option value="success">Éxito simulado</option><option value="error">Error simulado</option></select></label>
+          <div role={result === 'success' ? 'status' : 'alert'} aria-label="Resultado ficticio de compra" aria-live={result === 'success' ? 'polite' : 'assertive'}><Notice tone={result === 'success' ? 'success' : 'error'}>{result === 'success' ? 'Éxito de muestra: resultado simulado; ningún dato cambió.' : 'Error de muestra: resultado simulado; ningún dato cambió.'}</Notice></div>
+      </Panel>
+      <Panel className="domain-composite"><h3>Turno, alertas y reporte demo</h3><p className="muted">T13 · T14 · T15 · T16 · T17 — resumen visual; no es un cierre ni un reporte actual.</p>
+        <dl className="domain-metrics"><div><dt>Ventas de muestra</dt><dd>$315.00</dd></div><div><dt>Gastos sin validar</dt><dd>1 ejemplo</dd></div><div><dt>Conteo físico</dt><dd>Sin dato</dd></div></dl>
+        <Notice tone="warning">La libreta física sigue siendo obligatoria; Excel continúa como maestro de conciliación.</Notice>
+        <p className="muted">No se calcula el efectivo esperado, no se atribuye una diferencia y no se permite borrar ni revertir.</p>
+      </Panel>
+      <Panel className="domain-composite"><h3>Producto e inventario demo</h3><p className="muted">T12 · T18 — conteos y tendencia ilustrativos, no disponibilidad actual.</p>
+        <div className="domain-line-item"><span>Agua · stock inicial ficticio</span><strong>24 unidades demo</strong></div>
+        <div className="domain-line-item"><span>Entradas 8 − ventas 7 − merma 1</span><strong>24 esperadas</strong></div>
+        <Notice>El conteo físico y cualquier discrepancia se registran por separado.</Notice>
+      </Panel>
+    </div>
+    <h3 className="catalog-reference-heading">Referencia completa de pantallas T01–T18</h3>
     <ul className="catalog-flow-list" aria-label="Pantallas de referencia T01 a T18">{workflowDemos.map(item => <li key={item.id}><span className="catalog-screen-id">{item.id}</span><strong>{item.title}</strong><p className="muted">{item.summary}</p></li>)}</ul>
   </>;
 }
@@ -110,7 +135,7 @@ export function ComponentCatalog() {
     <div className="catalog-tabs" role="tablist" aria-label="Secciones del catálogo">
       {catalogTabs.map((tab, index) => <button key={tab} ref={element => { tabRefs.current[index] = element; }} type="button" role="tab" id={`catalog-tab-${index}`} aria-controls="catalog-panel" aria-selected={activeTab === tab} tabIndex={activeTab === tab ? 0 : -1} className="catalog-tab" onClick={() => setActiveTab(tab)} onKeyDown={event => moveTab(event, index)}>{tab}</button>)}
     </div>
-    <section id="catalog-panel" className="catalog-content" role="tabpanel" aria-labelledby={`catalog-tab-${activeIndex}`} tabIndex={0}>
+    <section key={activeTab} id="catalog-panel" className="catalog-content" role="tabpanel" aria-labelledby={`catalog-tab-${activeIndex}`} tabIndex={0}>
       {activeTab === 'Componentes' && <ComponentFiches />}
       {activeTab === 'Vistas de datos' && <><h2>Vistas de datos</h2><p className="muted">Los gráficos respetan tokens de tema y reducen movimiento según las preferencias del sistema; cada tendencia tiene datos equivalentes fuera del SVG.</p><DataViews /></>}
       {activeTab === 'Flujos de trabajo' && <><h2>Flujos de trabajo</h2><WorkflowGallery /></>}
