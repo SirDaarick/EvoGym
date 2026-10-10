@@ -66,12 +66,14 @@
   .bento-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
   .span-full { grid-column: 1 / -1; }
   .flow { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
-  .button { display: inline-flex; justify-content: center; align-items: center; border-radius: var(--radius-control); border: 1px solid transparent; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 150ms; }
+  .button { display: inline-flex; justify-content: center; align-items: center; position: relative; isolation: isolate; overflow: hidden; border-radius: var(--radius-control); border: 1px solid transparent; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 150ms; }
   .button-primary { background: var(--color-primary); color: white; }
   .button-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
   .button-secondary { background: white; color: var(--color-ink); border-color: var(--color-boundary); }
   .button-secondary:hover:not(:disabled) { background: var(--color-canvas); }
   .button:disabled { color: var(--color-muted); background: var(--color-canvas); border-color: var(--color-boundary); }
+  .click-spark { position: absolute; z-index: 1; left: var(--click-spark-x, 50%); top: var(--click-spark-y, 50%); width: 1.5rem; aspect-ratio: 1; border-radius: 50%; pointer-events: none; background: radial-gradient(circle, rgb(38 54 68 / 18%), rgb(38 54 68 / 8%) 44%, transparent 72%); animation: click-spark-burst 420ms cubic-bezier(.2, .7, .3, 1) both; }
+  @keyframes click-spark-burst { from { opacity: .45; scale: .18; } to { opacity: 0; scale: 3; } }
   .badge { display: inline-block; font-size: 14px; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
   .badge-neutral, .notice-neutral { background: var(--color-canvas); color: var(--color-muted); }
   .badge-success, .notice-success { background: #EAF6EE; color: #175D3B; }
@@ -258,4 +260,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .button, .spotlight-card::before, .catalog-page, .catalog-content, .catalog-dialog[open], .catalog-dialog::backdrop { transition: none !important; animation: none !important; transform: none !important; translate: none !important; }
+  .click-spark { display: none !important; animation: none !important; }
 }

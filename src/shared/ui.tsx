@@ -1,7 +1,30 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import { useRef, useState } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' }) {
-  return <button type="button" className={`button button-${variant} ${className}`} {...props} />;
+  const { children, disabled, onClick, style, ...buttonProps } = props;
+  const [spark, setSpark] = useState<{ id: number; x: string; y: string } | null>(null);
+  const sparkId = useRef(0);
+
+  function handleClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    const ariaDisabled = buttonProps['aria-disabled'] === true || buttonProps['aria-disabled'] === 'true';
+    const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+    if (!disabled && !ariaDisabled && !reducedMotion) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const keyboardActivation = event.detail === 0;
+      setSpark({
+        id: ++sparkId.current,
+        x: keyboardActivation ? '50%' : `${event.clientX - bounds.left}px`,
+        y: keyboardActivation ? '50%' : `${event.clientY - bounds.top}px`,
+      });
+    }
+    onClick?.(event);
+  }
+
+  return <button type="button" className={`button button-${variant} ${className}`} {...buttonProps} disabled={disabled} style={{ ...style, ...(spark ? { '--click-spark-x': spark.x, '--click-spark-y': spark.y } as CSSProperties : {}) }} onClick={handleClick}>
+    {children}
+    {spark && <span key={spark.id} aria-hidden="true" className="click-spark" onAnimationEnd={() => setSpark(null)} />}
+  </button>;
 }
 export function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`panel spotlight-card ${className}`} onPointerMove={event => {

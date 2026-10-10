@@ -1,11 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import stylesheet from '../../styles.css?raw';
 import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Button } from '../../shared/ui';
 import { ComponentCatalog } from './ComponentCatalog';
 
 const showModalDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const closeDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+const matchMediaDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia');
 
 describe('shared component catalog foundation', () => {
   beforeEach(() => {
@@ -21,6 +23,8 @@ describe('shared component catalog foundation', () => {
     else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
     if (closeDescriptor) Object.defineProperty(HTMLDialogElement.prototype, 'close', closeDescriptor);
     else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+    if (matchMediaDescriptor) Object.defineProperty(window, 'matchMedia', matchMediaDescriptor);
+    else delete (window as Partial<Window>).matchMedia;
   });
 
   it('exposes keyboard-operable tab navigation and applies reduced-motion guidance', () => {
@@ -111,6 +115,36 @@ describe('shared component catalog foundation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cerrar diálogo de muestra' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
+  });
+
+  it('animates an enabled shared-button click from the activation point without delaying its handler', () => {
+    const onClick = vi.fn();
+    const { container } = render(<Button onClick={onClick}>Spark action</Button>);
+    const button = screen.getByRole('button', { name: 'Spark action' });
+    button.getBoundingClientRect = () => new DOMRect(10, 5, 100, 40);
+
+    fireEvent.click(button, { detail: 0 });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    const spark = container.querySelector('.click-spark');
+    expect(spark).toBeInTheDocument();
+    expect(spark).toHaveStyle({ '--click-spark-x': '50%', '--click-spark-y': '50%' });
+    fireEvent.click(button, { detail: 1, clientX: 35, clientY: 20 });
+    expect(container.querySelector('.click-spark')).toHaveStyle({ '--click-spark-x': '25px', '--click-spark-y': '15px' });
+  });
+
+  it('does not spark disabled buttons or buttons under reduced-motion preferences', () => {
+    const disabledAction = vi.fn();
+    const enabledAction = vi.fn();
+    const { container } = render(<><Button disabled onClick={disabledAction}>Disabled action</Button><Button onClick={enabledAction}>Reduced action</Button></>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disabled action' }));
+    expect(disabledAction).not.toHaveBeenCalled();
+    expect(container.querySelector('.click-spark')).not.toBeInTheDocument();
+
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Reduced action' }));
+    expect(enabledAction).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.click-spark')).not.toBeInTheDocument();
   });
 
   it('keeps dark-theme text and chart colors above their minimum contrast ratios', () => {
