@@ -207,6 +207,15 @@
   .domain-metrics div { padding: 12px; border: 1px solid var(--color-divider); border-radius: 10px; min-width: 0; }
   .domain-metrics dt { color: var(--color-muted); font-size: 13px; }
   .domain-metrics dd { margin: 4px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .catalog-dialog-example { margin-top: 16px; }
+  .catalog-dialog { width: min(32rem, calc(100vw - 32px)); max-width: calc(100vw - 32px); padding: 0; border: 1px solid var(--color-boundary); border-radius: 16px; color: var(--color-ink); background: var(--color-surface); box-shadow: 0 24px 72px rgb(0 0 0 / 0.32); }
+  .catalog-dialog::backdrop { background: rgb(0 0 0 / 0.56); animation: catalog-backdrop-in 140ms ease-out both; }
+  .catalog-dialog[open] { animation: catalog-dialog-in 180ms ease-out both; }
+  .catalog-dialog-panel { padding: clamp(20px, 5vw, 28px); }
+  .catalog-dialog-panel h3 { margin: 0 0 12px; }
+  .catalog-dialog-panel p:not(.eyebrow) { margin-bottom: 20px; }
+  @keyframes catalog-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes catalog-dialog-in { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
   .catalog-reference-heading { margin-top: 28px; }
   .catalog-screen-id { display: inline-block; margin-right: 8px; font-weight: 800; color: var(--color-primary); }
   .catalog-steps { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -248,5 +257,5 @@
   .chart-card [role="img"] { height: 200px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .button, .spotlight-card::before, .catalog-page, .catalog-content { transition: none !important; animation: none !important; transform: none !important; translate: none !important; }
+  .button, .spotlight-card::before, .catalog-page, .catalog-content, .catalog-dialog[open], .catalog-dialog::backdrop { transition: none !important; animation: none !important; transform: none !important; translate: none !important; }
 }

@@ -70,6 +70,13 @@ function DataViews() {
 
 function WorkflowGallery() {
   const [result, setResult] = useState<'success' | 'error'>('success');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogOpenerRef = useRef<HTMLButtonElement>(null);
+  const closeDialog = () => { if (dialogRef.current?.open) dialogRef.current.close(); };
+  const openDialog = () => {
+    dialogRef.current?.showModal();
+    dialogRef.current?.querySelector<HTMLButtonElement>('[data-dialog-close]')?.focus();
+  };
   return <>
     <Notice tone="warning">Muestras ficticias: esta galería no representa el estado operativo ni habilita las reglas pendientes.</Notice>
     <div className="catalog-domain-grid">
@@ -83,6 +90,18 @@ function WorkflowGallery() {
         <p className="domain-total">Total ilustrativo <strong>$315.00 MXN</strong></p>
         <label className="catalog-period">Resultado de compra (demo)<select aria-label="Resultado de compra (demo)" value={result} onChange={event => setResult(event.target.value as 'success' | 'error')}><option value="success">Éxito simulado</option><option value="error">Error simulado</option></select></label>
           <div role={result === 'success' ? 'status' : 'alert'} aria-label="Resultado ficticio de compra" aria-live={result === 'success' ? 'polite' : 'assertive'}><Notice tone={result === 'success' ? 'success' : 'error'}>{result === 'success' ? 'Éxito de muestra: resultado simulado; ningún dato cambió.' : 'Error de muestra: resultado simulado; ningún dato cambió.'}</Notice></div>
+        <div className="catalog-dialog-example">
+          <p className="muted">Patrón de diálogo ilustrativo con foco administrado.</p>
+          <button ref={dialogOpenerRef} type="button" className="button button-primary demo-dialog-trigger" onClick={openDialog}>Ver diálogo ilustrativo</button>
+          <dialog ref={dialogRef} className="catalog-dialog" aria-modal="true" aria-labelledby="catalog-dialog-title" onClose={() => dialogOpenerRef.current?.focus()} onCancel={event => { event.preventDefault(); closeDialog(); }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); closeDialog(); } }}>
+            <div className="catalog-dialog-panel">
+              <p className="eyebrow">COMPONENTE DE DEMOSTRACIÓN</p>
+              <h3 id="catalog-dialog-title">Detalle ilustrativo de muestra</h3>
+              <p>Este diálogo solo ilustra el componente. No confirma, guarda ni cambia datos.</p>
+              <Button autoFocus data-dialog-close="" variant="secondary" onClick={closeDialog}>Cerrar diálogo de muestra</Button>
+            </div>
+          </dialog>
+        </div>
       </Panel>
       <Panel className="domain-composite"><h3>Turno, alertas y reporte demo</h3><p className="muted">T13 · T14 · T15 · T16 · T17 — resumen visual; no es un cierre ni un reporte actual.</p>
         <dl className="domain-metrics"><div><dt>Ventas de muestra</dt><dd>$315.00</dd></div><div><dt>Gastos sin validar</dt><dd>1 ejemplo</dd></div><div><dt>Conteo físico</dt><dd>Sin dato</dd></div></dl>

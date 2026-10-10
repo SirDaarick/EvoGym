@@ -1,11 +1,27 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import stylesheet from '../../styles.css?raw';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ComponentCatalog } from './ComponentCatalog';
 
+const showModalDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const closeDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+
 describe('shared component catalog foundation', () => {
-  afterEach(() => { delete document.documentElement.dataset.theme; });
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute('open');
+      this.dispatchEvent(new Event('close'));
+    };
+  });
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+    if (showModalDescriptor) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', showModalDescriptor);
+    else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+    if (closeDescriptor) Object.defineProperty(HTMLDialogElement.prototype, 'close', closeDescriptor);
+    else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+  });
 
   it('exposes keyboard-operable tab navigation and applies reduced-motion guidance', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
@@ -75,6 +91,28 @@ describe('shared component catalog foundation', () => {
     expect(screen.getByRole('alert', { name: 'Resultado ficticio de compra' })).toHaveTextContent('Error de muestra');
   });
 
+  it('opens a modal dialog with focus, Escape, and focus return', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Flujos de trabajo' }));
+    const opener = screen.getByRole('button', { name: 'Ver diálogo ilustrativo' });
+    fireEvent.click(opener);
+
+    const dialog = screen.getByRole('dialog', { name: 'Detalle ilustrativo de muestra' });
+    const close = screen.getByRole('button', { name: 'Cerrar diálogo de muestra' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveTextContent('Este diálogo solo ilustra el componente. No confirma, guarda ni cambia datos.');
+    expect(close).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar diálogo de muestra' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
   it('keeps dark-theme text and chart colors above their minimum contrast ratios', () => {
     const readToken = (name: string) => stylesheet.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1];
     const luminance = (hex: string) => {
@@ -97,5 +135,6 @@ describe('shared component catalog foundation', () => {
     expect(contrast(chartTwo, surface)).toBeGreaterThanOrEqual(3);
     expect(stylesheet).toMatch(/\.catalog-content\s*\{[^}]*animation:/s);
     expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.catalog-content/);
+    expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.catalog-dialog\[open\][\s\S]*?\.catalog-dialog::backdrop/);
   });
 });
