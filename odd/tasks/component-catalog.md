@@ -42,7 +42,7 @@ The project has a small shared UI foundation and a basic catalog, but the planne
 - Independent verification finding: workflow mapping cards were text-only; dark primary label, field error, and chart-series colors had inadequate contrast; tab-content transition was missing. The independent verifier separately reported `npm run typecheck`: PASS.
 - Correction TDD: new composite, feedback, contrast, and transition tests were first observed failing; after implementation, focused catalog tests passed (7/7). Dark contrast assertions use minimum thresholds and verify reduced-motion exclusion.
 - Full correction checks: `npm run typecheck` passed; `npm test` passed (14 files, 75 tests); `npm run build` passed with Vite's non-failing main-chunk warning at 518.76 kB (>500 kB). Previous writer's checks remain recorded in TC03 above: 14 files/72 tests and a passing build with 514.53 kB warning.
-- TC03 correction implementation commit: `6154e5d` (`fix(catalog): add domain examples and dark contrast`). Evidence document commit: `685ceb0` (`docs(catalog): record correction evidence`).
+- TC03 correction implementation commit: `6154e5d` (`fix(catalog): add domain examples and dark contrast`). Evidence commits: `685ceb0` (`docs(catalog): record correction evidence`) and `5d3a7e4` (`docs(catalog): restore task evidence sections`).
 - Real dialog interaction remains explicitly pending and is not represented as implemented.
 
 ## Local feature-branch slices
@@ -52,7 +52,7 @@ The project has a small shared UI foundation and a basic catalog, but the planne
 | TC01 | `53027b7` | Shared controls, catalog tabs, theme/motion foundation and focused tests. |
 | TC02 | `7f4771f` | TanStack packages, accessible table/charts, period controls, attendance and data fixtures. |
 | TC03 | `3167a2e`, correction `6154e5d` | T01–T18 mapping and visible domain composites, theme contrast and tab transitions. |
-| TC03 evidence | `685ceb0` | Task document records findings, checks, commit IDs and pending dialog scope. |
+| TC03 evidence | `685ceb0`, `5d3a7e4` | Task document records findings, checks, commit IDs and pending dialog scope. |
 
 ## Next step
 The interactive catalog and correction are locally verified; a real dialog remains pending for a separately authorized task. No PR or push was created; those remote operations were not authorized.
