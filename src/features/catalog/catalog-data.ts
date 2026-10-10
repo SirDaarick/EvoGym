@@ -34,3 +34,24 @@ export const demoStock = [
   { id: 'P-02', product: 'Barra · muestra', opening: 12, received: 6, sold: 4, waste: 0, expected: 14 },
   { id: 'P-03', product: 'Guantes · muestra', opening: 16, received: 0, sold: 0, waste: 0, expected: 16 },
 ];
+
+export const workflowDemos = [
+  { id: 'T01', title: 'Perfil y entrada', summary: 'Perfil ficticio; selección de vista, sin autenticación ni PIN.' },
+  { id: 'T02', title: 'Perfiles de recepción', summary: 'Referencia visual de perfiles; credenciales y permisos siguen fuera de alcance.' },
+  { id: 'T03', title: 'Inicio, venta y merma', summary: 'Carrito de ejemplo; no representa inventario ni cobro real.' },
+  { id: 'T04', title: 'Gasto imprevisto', summary: 'Captura y revisión ilustrativas; reglas por confirmar.' },
+  { id: 'T05', title: 'Cambio de recepción', summary: 'Movimiento demostrativo; atribución y autorización no resueltas.' },
+  { id: 'T06', title: 'Renta de guantes', summary: 'Estados visuales de préstamo y devolución, sin disponibilidad real.' },
+  { id: 'T07', title: 'Porciones de suplemento', summary: 'Cantidad de muestra; unidad y conversión requieren validación.' },
+  { id: 'T08', title: 'Casilleros', summary: 'Asignación ilustrativa; vigencia y estado actual no calculados.' },
+  { id: 'T09', title: 'Búsqueda de socios', summary: 'Resultados ficticios, detalle y estado vacío de referencia.' },
+  { id: 'T10', title: 'Alta y visita', summary: 'Formulario de muestra; no crea registros ni acceso.' },
+  { id: 'T11', title: 'Perfil y asistencia', summary: 'Calendario reutilizado con visitas ilustrativas y duración desconocida.' },
+  { id: 'T12', title: 'Inventario y recepción', summary: 'Stock de muestra; conteo físico y discrepancia permanecen separados.' },
+  { id: 'T13', title: 'Actividad de turno', summary: 'Tabla de movimientos demostrativos, no una bitácora actual.' },
+  { id: 'T14', title: 'Corte y entrega', summary: 'Conteo visual; libreta obligatoria y Excel siguen siendo el maestro.' },
+  { id: 'T15', title: 'Estado y alertas', summary: 'Alertas de muestra; sin indicadores de negocio inventados.' },
+  { id: 'T16', title: 'Movimientos señalados', summary: 'Revisión ilustrativa; no se agrega borrar ni revertir.' },
+  { id: 'T17', title: 'Reportes de gastos', summary: 'Rango y exportación visual; cifras no confirmadas.' },
+  { id: 'T18', title: 'Productos y análisis', summary: 'Comparaciones de tendencia artificial; no son reporte operativo.' },
+];

@@ -42,4 +42,12 @@ describe('shared component catalog foundation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ordenar por socio' }));
     expect(screen.getByRole('button', { name: 'Ordenar por socio' }).closest('th')).toHaveAttribute('aria-sort', 'ascending');
   });
+
+  it('covers all eighteen planned workflow references with explicitly fictional examples', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Flujos de trabajo' }));
+
+    expect(screen.getByText(/muestras ficticias/i)).toBeVisible();
+    expect(screen.getAllByText(/^T\d{2}$/)).toHaveLength(18);
+  });
 });

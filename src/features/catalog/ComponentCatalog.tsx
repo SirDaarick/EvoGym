@@ -6,7 +6,7 @@ import type { AttendanceVisit } from '../../domain/models';
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { CatalogCharts } from './catalog-charts';
-import { demoMovements, demoStock } from './catalog-data';
+import { demoMovements, demoStock, workflowDemos } from './catalog-data';
 import type { DemoMovement } from './catalog-data';
 import { ThemeControl } from './feedback';
 
@@ -68,6 +68,13 @@ function DataViews() {
   </div>;
 }
 
+function WorkflowGallery() {
+  return <>
+    <Notice tone="warning">Muestras ficticias: esta galería no representa el estado operativo ni habilita las reglas pendientes.</Notice>
+    <ul className="catalog-flow-list" aria-label="Pantallas de referencia T01 a T18">{workflowDemos.map(item => <li key={item.id}><span className="catalog-screen-id">{item.id}</span><strong>{item.title}</strong><p className="muted">{item.summary}</p></li>)}</ul>
+  </>;
+}
+
 function ComponentFiches() {
   return <div className="bento-grid">
     <Panel><h2>Acciones y estados</h2><div className="flow"><Button>Acción principal</Button><Button variant="secondary">Acción secundaria</Button><Button disabled>Acción pendiente</Button></div>
@@ -106,7 +113,7 @@ export function ComponentCatalog() {
     <section id="catalog-panel" className="catalog-content" role="tabpanel" aria-labelledby={`catalog-tab-${activeIndex}`} tabIndex={0}>
       {activeTab === 'Componentes' && <ComponentFiches />}
       {activeTab === 'Vistas de datos' && <><h2>Vistas de datos</h2><p className="muted">Los gráficos respetan tokens de tema y reducen movimiento según las preferencias del sistema; cada tendencia tiene datos equivalentes fuera del SVG.</p><DataViews /></>}
-      {activeTab === 'Flujos de trabajo' && <><h2>Flujos de trabajo</h2><p className="muted">Galería de pantallas de demostración.</p></>}
+      {activeTab === 'Flujos de trabajo' && <><h2>Flujos de trabajo</h2><WorkflowGallery /></>}
     </section>
   </div>;
 }
