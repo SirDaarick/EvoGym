@@ -4,13 +4,18 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Button } from '../../shared/ui';
 import { ComponentCatalog } from './ComponentCatalog';
+import SwipeToast from './react-bits/SwipeToast';
 
 const showModalDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const closeDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 const matchMediaDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+const resizeObserverDescriptor = Object.getOwnPropertyDescriptor(window, 'ResizeObserver');
+const elementAnimateDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
 
 describe('shared component catalog foundation', () => {
   beforeEach(() => {
+    window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+    window.matchMedia = vi.fn().mockImplementation(query => ({ matches: false, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false }));
     HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
     HTMLDialogElement.prototype.close = function () {
       this.removeAttribute('open');
@@ -25,6 +30,10 @@ describe('shared component catalog foundation', () => {
     else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
     if (matchMediaDescriptor) Object.defineProperty(window, 'matchMedia', matchMediaDescriptor);
     else delete (window as Partial<Window>).matchMedia;
+    if (resizeObserverDescriptor) Object.defineProperty(window, 'ResizeObserver', resizeObserverDescriptor);
+    else Reflect.deleteProperty(window, 'ResizeObserver');
+    if (elementAnimateDescriptor) Object.defineProperty(Element.prototype, 'animate', elementAnimateDescriptor);
+    else Reflect.deleteProperty(Element.prototype, 'animate');
   });
 
   it('exposes keyboard-operable tab navigation and applies reduced-motion guidance', () => {
@@ -170,5 +179,67 @@ describe('shared component catalog foundation', () => {
     expect(stylesheet).toMatch(/\.catalog-content\s*\{[^}]*animation:/s);
     expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.catalog-content/);
     expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.catalog-dialog\[open\][\s\S]*?\.catalog-dialog::backdrop/);
+  });
+  it('offers nine interactive React Bits demos only in the components tab', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    for (const name of ['CodeSlots', 'JellyRadio', 'RubberSegment', 'SpringCheck', 'SquishSwitch', 'SwipeToast', 'MagicBento', 'AnimatedList', 'Stepper']) {
+      expect(screen.getByRole('heading', { name })).toBeVisible();
+    }
+    expect(screen.getByText(/NO ES AUTENTICACIÓN/i)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Mostrar aviso de muestra' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
+    expect(screen.queryByRole('heading', { name: 'CodeSlots' })).not.toBeInTheDocument();
+  });
+  it('keeps the fictional React Bits controls operable and disabled code input inert', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    const digits = screen.getByRole('textbox', { name: 'Dígitos de muestra; no es autenticación' });
+    fireEvent.keyDown(digits, { key: '1' });
+    expect(screen.getByText('Dígitos de muestra ingresados: 1 de 4')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Dígitos de muestra deshabilitados' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Muestra B' }));
+    expect(screen.getByText('Selección: Muestra B')).toBeVisible();
+    fireEvent.keyDown(screen.getByRole('radio', { name: 'Resumen' }), { key: 'ArrowRight' });
+    expect(screen.getByText('Vista: Detalle')).toBeVisible();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Marcar muestra como completa' }));
+    expect(screen.getByText('Lista de verificación: completa')).toBeVisible();
+    fireEvent.click(screen.getByRole('switch', { name: 'Preferencia de muestra' }));
+    expect(screen.getByText('Preferencia: activada')).toBeVisible();
+    fireEvent.click(screen.getAllByRole('option')[1]);
+    expect(screen.getByText('Elemento seleccionado: Muestra B')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Siguiente paso de muestra' }));
+    expect(screen.getByText('Paso actual de muestra: 2')).toBeVisible();
+  });
+  it('preserves sample errors and remains usable with reduced motion', () => {
+    window.matchMedia = vi.fn().mockImplementation(query => ({ matches: query.includes('reduced-motion'), media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false }));
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    expect(screen.getByText('Estudio de muestra')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de muestra' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Error de muestra');
+    expect(screen.getByRole('alert')).toHaveTextContent('No se modificaron datos de la aplicación.');
+    expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.react-bits-gallery/);
+  });
+  it('does not request authentication autofill and localizes the toast close control', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    expect(screen.getByRole('textbox', { name: 'Dígitos de muestra; no es autenticación' })).toHaveAttribute('autocomplete', 'off');
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de muestra' }));
+    expect(screen.getByRole('button', { name: 'Cerrar aviso' })).toBeInTheDocument();
+  });
+  it('suppresses toast Web Animations under reduced motion', () => {
+    const animate = vi.fn().mockReturnValue({ pause() {}, cancel() {}, play() {}, playState: 'running', onfinish: null });
+    Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+    render(<SwipeToast open duration={5000} reducedMotion title="Aviso de muestra" />);
+    expect(animate).not.toHaveBeenCalled();
+    expect(document.querySelector('.swipe-toast')).toHaveAttribute('data-fuse', 'none');
+  });
+  it('finishes a reduced-motion toast swipe without a scripted exit animation', () => {
+    const onClose = vi.fn();
+    render(<SwipeToast open duration={0} reducedMotion title="Aviso de muestra" onClose={onClose} />);
+    const toast = screen.getByText('Aviso de muestra').closest('[role="status"]')!;
+    fireEvent.pointerDown(toast, { button: 0, pointerId: 1, clientY: 0 });
+    fireEvent.pointerMove(toast, { pointerId: 1, clientY: 60 });
+    fireEvent.pointerMove(toast, { pointerId: 1, clientY: 120 });
+    fireEvent.pointerUp(toast, { pointerId: 1, clientY: 120 });
+    expect(onClose).toHaveBeenCalledWith('swipe');
   });
 });

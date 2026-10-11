@@ -278,3 +278,25 @@
   .button, .spotlight-card::before, .catalog-page, .catalog-content, .catalog-dialog[open], .catalog-dialog::backdrop { transition: none !important; animation: none !important; transform: none !important; translate: none !important; }
   .click-spark { display: none !important; animation: none !important; }
 }
+
+.react-bits-gallery { margin-top: 32px; min-width: 0; }
+.react-bits-gallery > h2 { margin-bottom: 4px; }
+.react-bits-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
+.react-bits-demo { min-width: 0; padding: 20px; border: 1px solid var(--color-divider); border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-clay); }
+.react-bits-demo h3 { margin-top: 0; }
+.react-bits-demo .muted { color: var(--color-muted); }
+.react-bits-demo > [role="status"] { margin-bottom: 0; }
+.react-bits-wide { grid-column: 1 / -1; }
+.react-bits-gallery .card-grid { max-width: none; padding: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.react-bits-gallery .magic-bento-card { min-height: 170px; background: var(--color-soft); color: var(--color-ink); border-color: var(--color-divider); }
+.react-bits-gallery .magic-bento-card__title, .react-bits-gallery .magic-bento-card__description, .react-bits-gallery .magic-bento-card__label { color: var(--color-ink); }
+.react-bits-gallery .magic-bento-card__description { color: var(--color-muted); }
+.react-bits-gallery .animated-list { max-width: 100%; }
+.react-bits-gallery .animated-list { --al-frame: var(--color-surface) !important; --al-tile: var(--color-soft) !important; --al-ink: var(--color-ink) !important; --al-muted: var(--color-muted) !important; --al-well: var(--color-soft) !important; --al-ring: var(--color-focus) !important; }
+.react-bits-gallery .stepper { --stepper-frame: var(--color-surface) !important; --stepper-tile: var(--color-soft) !important; --stepper-ink: var(--color-ink) !important; --stepper-muted: var(--color-muted) !important; --stepper-well: var(--color-soft) !important; --stepper-solid: var(--color-primary) !important; --stepper-solid-ink: var(--catalog-primary-label) !important; }
+.react-bits-gallery :is(button, input, [tabindex]):focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+@media (max-width: 850px) { .react-bits-grid { grid-template-columns: minmax(0, 1fr); } .react-bits-gallery .card-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) {
+  .react-bits-gallery *, .react-bits-gallery *::before, .react-bits-gallery *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .react-bits-gallery .magic-bento-card:hover { transform: none !important; }
+}

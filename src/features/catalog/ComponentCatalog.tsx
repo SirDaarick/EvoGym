@@ -9,6 +9,7 @@ import { CatalogCharts } from './catalog-charts';
 import { demoMovements, demoStock, workflowDemos } from './catalog-data';
 import type { DemoMovement } from './catalog-data';
 import { ThemeControl } from './feedback';
+import { ReactBitsGallery } from './ReactBitsGallery';
 
 const catalogTabs = ['Componentes', 'Vistas de datos', 'Flujos de trabajo'] as const;
 type CatalogTab = typeof catalogTabs[number];
@@ -155,7 +156,7 @@ export function ComponentCatalog() {
       {catalogTabs.map((tab, index) => <button key={tab} ref={element => { tabRefs.current[index] = element; }} type="button" role="tab" id={`catalog-tab-${index}`} aria-controls="catalog-panel" aria-selected={activeTab === tab} tabIndex={activeTab === tab ? 0 : -1} className="catalog-tab" onClick={() => setActiveTab(tab)} onKeyDown={event => moveTab(event, index)}>{tab}</button>)}
     </div>
     <section key={activeTab} id="catalog-panel" className="catalog-content" role="tabpanel" aria-labelledby={`catalog-tab-${activeIndex}`} tabIndex={0}>
-      {activeTab === 'Componentes' && <ComponentFiches />}
+      {activeTab === 'Componentes' && <><ComponentFiches /><ReactBitsGallery /></>}
       {activeTab === 'Vistas de datos' && <><h2>Vistas de datos</h2><p className="muted">Los gráficos respetan tokens de tema y reducen movimiento según las preferencias del sistema; cada tendencia tiene datos equivalentes fuera del SVG.</p><DataViews /></>}
       {activeTab === 'Flujos de trabajo' && <><h2>Flujos de trabajo</h2><WorkflowGallery /></>}
     </section>
