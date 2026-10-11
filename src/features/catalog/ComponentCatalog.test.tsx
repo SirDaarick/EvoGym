@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import stylesheet from '../../styles.css?raw';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,6 +71,58 @@ describe('shared component catalog foundation', () => {
     expect(screen.getAllByText('Semana 12').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Ordenar por socio' }));
     expect(screen.getByRole('button', { name: 'Ordenar por socio' }).closest('th')).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  it('filters fictional movements and keeps row selection visible across searches', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
+
+    const movementTable = screen.getByRole('table', { name: 'Movimientos de ejemplo' });
+    expect(screen.queryByRole('button', { name: 'Ordenar por selección' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Selección' })).not.toHaveAttribute('aria-sort');
+    expect(screen.getByRole('button', { name: 'Ordenar por socio' })).toBeVisible();
+    expect(screen.getByText('4 de 4 movimientos visibles')).toBeVisible();
+    expect(screen.getByText('0 movimientos seleccionados')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar movimiento M-101' }));
+    expect(screen.getByText('1 movimiento seleccionado')).toBeVisible();
+
+    const search = screen.getByRole('searchbox', { name: 'Filtrar movimientos de ejemplo' });
+    fireEvent.change(search, { target: { value: 'Diego' } });
+    expect(screen.getByText('1 de 4 movimientos visibles')).toBeVisible();
+    expect(screen.getByText('1 movimiento seleccionado')).toBeVisible();
+    expect(movementTable).not.toHaveTextContent('Mariana Solís');
+    expect(movementTable).toHaveTextContent('Diego Ramos');
+
+    fireEvent.change(search, { target: { value: 'sin coincidencia' } });
+    expect(screen.getByText('0 de 4 movimientos visibles')).toBeVisible();
+    expect(screen.getByText('Sin movimientos de ejemplo para este filtro.')).toBeVisible();
+
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByRole('checkbox', { name: 'Seleccionar movimiento M-101' })).toBeChecked();
+  });
+
+  it('compares fictional categories with an exact-value table beside the grouped chart', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
+
+    const chart = screen.getByRole('img', { name: 'Comparación de categorías ficticias' });
+    expect(chart).toBeVisible();
+    expect(chart.querySelectorAll('[fill="var(--ts-chart-1)"]').length).toBeGreaterThan(0);
+    expect(chart.querySelectorAll('[fill="var(--ts-chart-2)"]').length).toBeGreaterThan(0);
+    const legend = screen.getByRole('list', { name: 'Escenarios de categorías ficticias' });
+    expect(within(legend).getByText('Escenario A')).toBeVisible();
+    expect(within(legend).getByText('Escenario B')).toBeVisible();
+    expect(legend.querySelector('[data-series="scenario-a"]')).toHaveStyle({ backgroundColor: 'var(--ts-chart-1)' });
+    expect(legend.querySelector('[data-series="scenario-b"]')).toHaveStyle({ backgroundColor: 'var(--ts-chart-2)' });
+    const values = screen.getByRole('table', { name: 'Valores exactos de categorías ficticias' });
+    expect(values).toHaveTextContent('Bebidas');
+    expect(values).toHaveTextContent('Accesorios');
+    expect(values).toHaveTextContent('Botanas');
+    expect(values).toHaveTextContent('24');
+    expect(values).toHaveTextContent('18');
+    expect(values).toHaveTextContent('Escenario A');
+    expect(values).toHaveTextContent('Escenario B');
   });
 
   it('covers all eighteen planned workflow references with explicitly fictional examples', () => {

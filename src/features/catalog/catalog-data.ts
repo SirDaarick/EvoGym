@@ -29,6 +29,13 @@ export const demoTrend = [
   { period: 'Semana 12', amount: 1890 },
 ];
 
+// Artificial values demonstrate side-by-side categories, not stock or sales.
+export const demoCategories = [
+  { category: 'Bebidas', scenarioA: 24, scenarioB: 18 },
+  { category: 'Botanas', scenarioA: 14, scenarioB: 20 },
+  { category: 'Accesorios', scenarioA: 9, scenarioB: 12 },
+];
+
 export const demoStock = [
   { id: 'P-01', product: 'Agua · muestra', opening: 24, received: 8, sold: 7, waste: 1, expected: 24 },
   { id: 'P-02', product: 'Barra · muestra', opening: 12, received: 6, sold: 4, waste: 0, expected: 14 },

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table';
-import type { ColumnDef, SortingState } from '@tanstack/react-table';
+import { flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table';
+import type { ColumnDef, RowSelectionState, SortingState } from '@tanstack/react-table';
 import type { AttendanceVisit } from '../../domain/models';
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
@@ -15,6 +15,7 @@ const catalogTabs = ['Componentes', 'Vistas de datos', 'Flujos de trabajo'] as c
 type CatalogTab = typeof catalogTabs[number];
 
 const movementColumns: ColumnDef<DemoMovement>[] = [
+  { id: 'selection', header: 'Selección', enableSorting: false, cell: info => <input type="checkbox" aria-label={`Seleccionar movimiento ${info.row.original.id}`} checked={info.row.getIsSelected()} onChange={info.row.getToggleSelectedHandler()} /> },
   { accessorKey: 'member', header: 'Socio', cell: info => info.getValue<string>() },
   { accessorKey: 'kind', header: 'Tipo', cell: info => info.getValue<string>() },
   { accessorKey: 'amountMinor', header: 'Monto demo', cell: info => `$${(info.getValue<number>() / 100).toLocaleString('es-MX', { minimumFractionDigits: 2 })}` },
@@ -30,21 +31,39 @@ const attendanceExamples: AttendanceVisit[] = [
 
 function MovementTable() {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [filter, setFilter] = useState('');
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const table = useReactTable({
     data: demoMovements,
     columns: movementColumns,
-    state: { sorting },
+    getRowId: row => row.id,
+    state: { sorting, globalFilter: filter, rowSelection },
     onSortingChange: setSorting,
+    onGlobalFilterChange: setFilter,
+    onRowSelectionChange: setRowSelection,
+    globalFilterFn: (row, _columnId, value: string) => {
+      const query = value.trim().toLocaleLowerCase('es-MX');
+      return [row.original.id, row.original.member, row.original.kind, row.original.status]
+        .some(text => text.toLocaleLowerCase('es-MX').includes(query));
+    },
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+  const visibleCount = table.getRowModel().rows.length;
+  const selectedCount = Object.values(rowSelection).filter(Boolean).length;
 
-  return <TableRegion label="Movimientos de ejemplo"><div className="catalog-table"><table aria-label="Movimientos de ejemplo">
+  return <TableRegion label="Movimientos de ejemplo">
+    <div className="catalog-table-controls">
+      <label>Filtrar movimientos de ejemplo<input type="search" value={filter} onChange={event => setFilter(event.target.value)} /></label>
+      <p className="muted" role="status"><span>{visibleCount} de {demoMovements.length} movimientos visibles</span> · <span>{selectedCount} {selectedCount === 1 ? 'movimiento seleccionado' : 'movimientos seleccionados'}</span></p>
+    </div>
+    <div className="catalog-table"><table aria-label="Movimientos de ejemplo">
     <caption>Movimientos ficticios; no son cobros ni saldos reales.</caption>
-    <thead>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" aria-sort={header.column.getIsSorted() === 'asc' ? 'ascending' : header.column.getIsSorted() === 'desc' ? 'descending' : 'none'}>
-      {header.isPlaceholder ? null : <button type="button" aria-label={`Ordenar por ${String(header.column.columnDef.header).toLocaleLowerCase('es-MX')}`} onClick={header.column.getToggleSortingHandler()}>{flexRender(header.column.columnDef.header, header.getContext())}</button>}
+    <thead>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" aria-sort={header.column.getCanSort() ? header.column.getIsSorted() === 'asc' ? 'ascending' : header.column.getIsSorted() === 'desc' ? 'descending' : 'none' : undefined}>
+      {header.isPlaceholder ? null : header.column.getCanSort() ? <button type="button" aria-label={`Ordenar por ${String(header.column.columnDef.header).toLocaleLowerCase('es-MX')}`} onClick={header.column.getToggleSortingHandler()}>{flexRender(header.column.columnDef.header, header.getContext())}</button> : flexRender(header.column.columnDef.header, header.getContext())}
     </th>)}</tr>)}</thead>
-    <tbody>{table.getRowModel().rows.map(row => <tr key={row.id}>{row.getVisibleCells().map(cell => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody>
+    <tbody>{visibleCount === 0 ? <tr><td colSpan={movementColumns.length}>Sin movimientos de ejemplo para este filtro.</td></tr> : table.getRowModel().rows.map(row => <tr key={row.id}>{row.getVisibleCells().map(cell => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody>
   </table></div></TableRegion>;
 }
 
@@ -59,7 +78,7 @@ function StockTable() {
 function DataViews() {
   const [period, setPeriod] = useState<4 | 12>(4);
   return <div className="bento-grid">
-    <Panel className="span-full"><h2>Tabla ordenable</h2><p className="muted">Encabezados activables con teclado; usa el botón de cada columna para ordenar.</p><MovementTable /></Panel>
+    <Panel className="span-full"><h2>Tabla interactiva</h2><p className="muted">Filtra, selecciona filas y ordena con los botones de cada columna.</p><MovementTable /></Panel>
     <Panel className="span-full"><h2>Comparación y tendencia</h2><p className="muted">Vistas de consulta con equivalentes tabulares y valores exactos para teclado, lector de pantalla y captura.</p>
       <label className="catalog-period">Periodo de análisis (demo)<select aria-label="Periodo de análisis (demo)" value={period} onChange={event => setPeriod(Number(event.target.value) as 4 | 12)}><option value={4}>4 semanas</option><option value={12}>12 semanas</option></select></label>
       <CatalogCharts weeks={period} />

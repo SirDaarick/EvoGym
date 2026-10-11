@@ -198,15 +198,24 @@
   .catalog-tab[aria-selected="true"] { background: var(--color-soft); border-color: var(--color-primary); color: var(--color-primary); font-weight: 700; }
   .catalog-content { min-width: 0; animation: catalog-arrive 180ms ease-out both; }
   .catalog-table { overflow-x: auto; }
+  .catalog-table-controls { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 20px; margin-bottom: 12px; }
+  .catalog-table-controls label { display: grid; gap: 4px; font-weight: 600; }
+  .catalog-table-controls input { min-height: 40px; min-width: min(280px, 100%); padding: 8px 10px; border: 1px solid var(--color-boundary); border-radius: 8px; background: var(--color-surface); color: var(--color-ink); }
+  .catalog-table-controls p { margin: 0; }
+  .catalog-table input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--color-primary); }
   .catalog-table th button { border: 0; padding: 0; background: transparent; color: inherit; font-weight: 700; text-align: left; cursor: pointer; }
   .catalog-table [aria-sort="ascending"] button::after { content: " ↑"; }
   .catalog-table [aria-sort="descending"] button::after { content: " ↓"; }
   .catalog-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .catalog-chart-wide { grid-column: 1 / -1; }
   .catalog-period { max-width: 260px; margin: 0 0 16px; }
   .chart-card { min-width: 0; padding: 16px; border: 1px solid var(--color-divider); border-radius: 14px; color: var(--color-ink); background: var(--color-surface); --ts-chart-1: #A83D08; --ts-chart-2: #2455A4; }
   .chart-card h3 { font-size: 18px; margin: 0 0 8px; }
   .chart-card [role="img"] { width: 100%; max-width: 100%; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 0; list-style: none; font-size: 14px; }
+  .chart-series-legend { margin: 8px 0 16px; }
+  .chart-series-legend li { display: inline-flex; align-items: center; gap: 8px; }
+  .chart-series-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--color-boundary); }
   .catalog-flow-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
   .catalog-flow-list li { padding: 16px; border: 1px solid var(--color-divider); border-radius: 12px; background: var(--color-surface); min-width: 0; }
   .catalog-flow-list p { margin: 4px 0 0; }
