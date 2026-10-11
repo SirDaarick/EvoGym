@@ -40,16 +40,29 @@
 
 @layer components {
   .app-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
-  .sidebar { background: white; border-right: 1px solid var(--color-divider); padding: 32px 20px; display: flex; flex-direction: column; }
-  .brand { font-size: 28px; font-weight: 800; letter-spacing: -1px; text-decoration: none; color: var(--color-ink); border-left: 5px solid var(--color-brand); padding-left: 12px; }
-  .brand span { display: block; font-size: 10px; letter-spacing: 1.4px; color: var(--color-muted); margin-top: 4px; }
-  .sidebar-caption { font-size: 14px; margin: 32px 12px 12px; color: var(--color-muted); }
-  .sidebar nav { display: grid; gap: 4px; }
-  .sidebar nav a { display: flex; justify-content: space-between; color: var(--color-muted); text-decoration: none; border-radius: 10px; padding: 12px; border: 1px solid transparent; font-weight: 600; }
-  .sidebar nav a:hover { background: var(--color-canvas); }
-  .sidebar nav a.active { background: var(--color-soft); color: var(--color-primary); border-color: var(--color-primary); }
-  .sidebar-bottom { margin-top: auto; padding: 40px 12px 0; font-size: 14px; }
-  .sidebar-bottom p:first-child { font-weight: 700; }
+  .sidebar { box-sizing: border-box; width: 76px; min-width: 0; background: var(--color-surface); border-right: 1px solid var(--color-divider); padding: 24px 10px; display: flex; flex-direction: column; overflow: hidden; transition: width 150ms ease, padding-inline 150ms ease; }
+  .sidebar[data-expanded="true"] { width: 240px; padding-inline: 16px; }
+  .sidebar-head { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .sidebar[data-expanded="true"] .sidebar-head { flex-direction: row; justify-content: space-between; }
+  .brand { display: flex; align-items: center; min-width: 0; gap: 0; color: var(--color-ink); text-decoration: none; }
+  .sidebar[data-expanded="true"] .brand { gap: 10px; }
+  .brand img { display: block; width: 44px; height: 44px; object-fit: contain; flex: none; }
+  .brand span { display: block; max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 10px; font-weight: 700; letter-spacing: 1px; line-height: 1.25; transition: max-width 150ms ease, opacity 150ms ease; }
+  .sidebar[data-expanded="true"] .brand span { max-width: 145px; opacity: 1; white-space: normal; }
+  .sidebar-toggle { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid var(--color-divider); border-radius: 10px; color: var(--color-ink); background: var(--color-surface); cursor: pointer; }
+  .sidebar-toggle:hover { background: var(--color-soft); }
+  .sidebar-caption, .sidebar-note { display: none; }
+  .sidebar[data-expanded="true"] .sidebar-caption { display: block; font-size: 13px; margin: 20px 8px 12px; color: var(--color-muted); }
+  .sidebar nav { display: grid; gap: 4px; margin-top: 20px; }
+  .sidebar nav a, .sidebar-bottom a { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 0; gap: 0; color: var(--color-muted); text-decoration: none; border-radius: 10px; padding: 8px; border: 1px solid transparent; font-weight: 600; box-sizing: border-box; }
+  .sidebar[data-expanded="true"] nav a, .sidebar[data-expanded="true"] .sidebar-bottom a { justify-content: flex-start; gap: 12px; }
+  .sidebar-icon { width: 22px; height: 22px; flex: none; }
+  .sidebar-label { display: inline-block; max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; transition: max-width 150ms ease, opacity 150ms ease; }
+  .sidebar[data-expanded="true"] .sidebar-label { max-width: 155px; opacity: 1; text-overflow: ellipsis; }
+  .sidebar nav a:hover, .sidebar-bottom a:hover { background: var(--color-canvas); }
+  .sidebar nav a.active, .sidebar-bottom a.active { background: var(--color-soft); color: var(--color-primary); border-color: var(--color-primary); }
+  .sidebar-bottom { display: grid; gap: 4px; margin-top: auto; padding-top: 28px; font-size: 14px; }
+  .sidebar[data-expanded="true"] .sidebar-note { display: block; margin: 4px 8px; font-size: 12px; }
   .workspace { min-width: 0; }
   .demo-bar { display: flex; justify-content: space-between; gap: 24px; padding: 20px 32px; background: white; border-bottom: 1px solid var(--color-divider); align-items: center; }
   .demo-bar strong { font-size: 14px; color: var(--color-primary); }
@@ -93,19 +106,22 @@
 }
 
 @media (max-width: 1000px) {
-  .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
+  .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
   .demo-bar { align-items: start; flex-direction: column; gap: 12px; }
   .demo-bar p { max-width: none; }
 }
 @media (max-width: 720px) {
   .app-shell { display: block; }
-  .sidebar { padding: 16px; border-right: none; border-bottom: 1px solid var(--color-divider); }
-  .brand { font-size: 24px; }
-  .sidebar-caption { margin: 16px 0 8px; }
-  .sidebar nav { display: flex; flex-wrap: wrap; }
-  .sidebar nav a { padding: 10px 12px; gap: 8px; }
-  .sidebar-bottom { padding: 12px 0 0; margin: 0; }
-  .sidebar-bottom p { display: none; }
+  .sidebar, .sidebar[data-expanded="true"] { width: 100%; padding: 12px 16px; border-right: none; border-bottom: 1px solid var(--color-divider); overflow: visible; transition: none; }
+  .sidebar-head, .sidebar[data-expanded="true"] .sidebar-head { flex-direction: row; justify-content: space-between; }
+  .brand span, .sidebar[data-expanded="true"] .brand span { max-width: 145px; opacity: 1; white-space: normal; transition: none; }
+  .sidebar-toggle { display: none; }
+  .sidebar-caption, .sidebar[data-expanded="true"] .sidebar-caption { display: block; margin: 8px 0; }
+  .sidebar nav { display: flex; flex-wrap: wrap; margin-top: 0; }
+  .sidebar nav a, .sidebar[data-expanded="true"] nav a, .sidebar-bottom a, .sidebar[data-expanded="true"] .sidebar-bottom a { justify-content: flex-start; gap: 8px; padding: 8px 10px; }
+  .sidebar-label, .sidebar[data-expanded="true"] .sidebar-label { max-width: none; opacity: 1; transition: none; }
+  .sidebar-bottom { display: flex; flex-wrap: wrap; padding: 8px 0 0; margin: 0; }
+  .sidebar-note, .sidebar[data-expanded="true"] .sidebar-note { display: none; }
   .demo-bar { padding: 16px; }
   .demo-controls { width: 100%; flex-wrap: wrap; }
   .demo-controls label { max-width: none; flex: 1 1 210px; }

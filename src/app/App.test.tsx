@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -76,6 +76,34 @@ describe('application foundation', () => {
     expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
     expect(screen.getByRole('link', { name: /Historial/ })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Resumen del negocio' })).toBeVisible();
+  });
+  it('keeps compact navigation identifiable and exposes the unaltered brand asset', () => {
+    mount();
+    const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
+    expect(screen.getByRole('img', { name: 'EvoGym' })).toHaveAttribute('src', expect.stringContaining('Logo_Evo.png'));
+    const overview = screen.getByRole('link', { name: 'Resumen' });
+    expect(overview).toHaveAttribute('aria-current', 'page');
+    expect(overview).toHaveAttribute('title', 'Resumen');
+    expect(overview.querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Historial' }).querySelector('svg')).toBeInTheDocument();
+  });
+  it('expands on pointer or keyboard focus and keeps focus inside visible', async () => {
+    mount();
+    const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
+    await userEvent.hover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+    await userEvent.unhover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
+    const toggle = screen.getByRole('button', { name: 'Fijar barra lateral' });
+    fireEvent.focusIn(toggle);
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+    await userEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Liberar barra lateral' })).toHaveAttribute('aria-pressed', 'true');
+    const nextLink = screen.getByRole('link', { name: 'Resumen' });
+    fireEvent.focusOut(toggle, { relatedTarget: nextLink });
+    fireEvent.focusIn(nextLink);
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
   });
   it('switches role, route and visible navigation without claiming authentication', async () => {
     mount();

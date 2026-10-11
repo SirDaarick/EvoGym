@@ -16,6 +16,24 @@ import { ReceptionHome } from '../features/reception/ReceptionHome';
 import { OwnerQuestions } from '../features/demo/OwnerQuestions';
 import { Button } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
+import logo from '../../Logo_Evo.png';
+
+const navIcons: Record<string, React.ReactNode> = {
+  home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
+  overview: <><rect x="3" y="12" width="4" height="9" rx="1" /><rect x="10" y="7" width="4" height="14" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" /></>,
+  members: <><circle cx="9" cy="8" r="3" /><path d="M2 20v-2a6 6 0 0 1 12 0v2zM16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 4 5" /></>,
+  sales: <><path d="M3 7h18l-2 13H5zM8 7V5a4 4 0 0 1 8 0v2" /></>,
+  shifts: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  inventory: <><path d="m3 7 9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10" /></>,
+  history: <><path d="M3 12a9 9 0 1 1 3 6.7M3 17v-5h5M12 7v5l4 2" /></>,
+  plans: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
+  profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+  components: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+};
+
+function NavIcon({ name }: { name: string }) {
+  return <svg className="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{navIcons[name]}</svg>;
+}
 
 export function App() {
   const location = useLocation();
@@ -23,6 +41,10 @@ export function App() {
   const { reset, resetVersion } = useDemo();
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+  const sidebarExpanded = sidebarPinned || sidebarHovered || sidebarFocused;
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
   const items = navigation.filter(item => item.roles.includes(role));
   useEffect(() => {
@@ -58,11 +80,12 @@ export function App() {
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Ir al contenido</a>
-    <aside className="sidebar">
-      <Link className="brand" to={homePath(role)}>EvoGym<span>OPERACIÓN DEL GIMNASIO</span></Link>
+    <aside className="sidebar" aria-label="Barra lateral" data-expanded={sidebarExpanded} onMouseEnter={() => setSidebarHovered(true)} onMouseLeave={() => setSidebarHovered(false)} onFocus={() => setSidebarFocused(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSidebarFocused(false); }}>
+      <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" /><span aria-hidden="true">OPERACIÓN DEL GIMNASIO</span></Link>
+        <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
-      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)}>{item.label}<span aria-hidden="true">↗</span></NavLink>)}</nav>
-      <div className="sidebar-bottom"><p>Prototipo local</p><p><Link to="/">Cambiar perfil</Link></p><Link to="/components">Sistema de componentes</Link><p className="muted">Sin conexión a datos reales.</p></div>
+      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
+      <div className="sidebar-bottom"><p className="sidebar-note">Prototipo local</p><Link to="/" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link><p className="sidebar-note muted">Sin conexión a datos reales.</p></div>
     </aside>
     <div className="workspace">
       <header className="demo-bar"><div><strong>Datos de demostración</strong><p>El selector simula vistas; no autentica ni autoriza usuarios.</p></div>
