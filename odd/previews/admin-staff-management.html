@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EvoGym — T02: Gestión de Recepcionistas (Admin)</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --eg-orange: #FC6C06;
+      --eg-orange-hover: #e05e00;
+      --eg-action: #A83D08;
+      --eg-ink: light-dark(#202020, #FCFCFC);
+      --eg-muted: light-dark(#555555, #a3a3a3);
+      --eg-page: light-dark(#f4f1ed, #0e0e0e);
+      --eg-surface: light-dark(#FCFCFC, #1a1a1a);
+      --eg-surface-soft: light-dark(#f7f4f0, #242424);
+      --eg-line: light-dark(#d7d0c8, #383838);
+      --eg-good: light-dark(#28754a, #6dd58c);
+      --eg-good-bg: light-dark(#e8f5ed, #12301f);
+      --eg-warn: light-dark(#9a5500, #ffc06e);
+      --eg-warn-bg: light-dark(#fff4e5, #3a2416);
+      --eg-clay-shadow: light-dark(
+        0 10px 24px rgba(35, 29, 31, 0.08),
+        0 10px 28px rgba(0, 0, 0, 0.45)
+      );
+      --eg-clay-highlight: light-dark(
+        inset 1px 1px 0 rgba(255, 255, 255, 0.9),
+        inset 1px 1px 0 rgba(255, 255, 255, 0.07)
+      );
+      --eg-focus: 0 0 0 3px rgba(252, 108, 6, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--eg-page);
+      color: var(--eg-ink);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1140px;
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 20px;
+      min-height: 740px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-line);
+      border-radius: 24px;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--eg-clay-shadow);
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 8px;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: var(--eg-orange);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 4px 10px rgba(252, 108, 6, 0.35);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .brand-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .brand-logo-fallback {
+      font-weight: 800;
+      color: #080808;
+      font-size: 14px;
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      list-style: none;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      color: var(--eg-muted);
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .nav-item:hover {
+      background: var(--eg-surface-soft);
+      color: var(--eg-ink);
+    }
+
+    .nav-item.active {
+      background: color-mix(in srgb, var(--eg-orange) 15%, var(--eg-surface));
+      color: var(--eg-orange);
+      border-left: 3px solid var(--eg-orange);
+    }
+
+    .nav-item svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--eg-line);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .role-indicator {
+      font-size: 11.5px;
+      color: var(--eg-muted);
+      padding: 0 8px;
+    }
+
+    .role-indicator strong {
+      display: block;
+      color: var(--eg-ink);
+      font-size: 13px;
+    }
+
+    /* Main Workspace */
+    .workspace {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-width: 0;
+    }
+
+    .top-bar {
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-line);
+      border-radius: 20px;
+      padding: 14px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: var(--eg-clay-shadow);
+      gap: 16px;
+    }
+
+    .breadcrumbs {
+      font-size: 13px;
+      color: var(--eg-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .breadcrumbs strong {
+      color: var(--eg-ink);
+    }
+
+    .top-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .theme-toggle {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      border: 1px solid var(--eg-line);
+      background: var(--eg-surface-soft);
+      color: var(--eg-ink);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      box-shadow: var(--eg-clay-highlight);
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    .theme-toggle:hover {
+      background: var(--eg-surface);
+    }
+
+    .theme-toggle:active {
+      transform: translateY(1px);
+    }
+
+    .theme-toggle svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    /* 2-phase PIN styles */
+    .pin-2phase-container {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--eg-line);
+    }
+
+    .pin-2phase-container.show {
+      display: flex;
+    }
+
+    .pin-phase-box {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .pin-phase-box label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--eg-ink);
+    }
+
+    .pin-phase-box input {
+      letter-spacing: 8px;
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: var(--eg-ink);
+      outline: none;
+    }
+
+    .pin-phase-box input:focus {
+      border-color: var(--eg-orange);
+    }
+
+    .pin-status-msg {
+      font-size: 12px;
+      font-weight: 600;
+      min-height: 18px;
+    }
+
+    .pin-status-msg.error {
+      color: #e03131;
+    }
+
+    .pin-status-msg.success {
+      color: var(--eg-good);
+    }
+
+    /* Content Area */
+    .content-panel {
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-line);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: var(--eg-clay-shadow), var(--eg-clay-highlight);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      flex: 1;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--eg-surface-soft);
+      border: 1px solid var(--eg-line);
+      border-radius: 12px;
+      padding: 8px 14px;
+      width: 320px;
+      max-width: 100%;
+    }
+
+    .search-box svg {
+      width: 16px;
+      height: 16px;
+      color: var(--eg-muted);
+      flex-shrink: 0;
+    }
+
+    .search-box input {
+      border: none;
+      background: transparent;
+      color: var(--eg-ink);
+      font-size: 13.5px;
+      width: 100%;
+      outline: none;
+    }
+
+    .filter-group {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      background: var(--eg-surface-soft);
+      padding: 4px;
+      border-radius: 16px;
+      border: 1px solid var(--eg-line);
+    }
+
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--eg-muted);
+      cursor: pointer;
+      transition: all 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    .filter-btn:active {
+      transform: scale(0.95);
+    }
+
+    .filter-btn.active {
+      background: var(--eg-orange);
+      color: #080808;
+      box-shadow: 0 2px 10px rgba(252, 108, 6, 0.35);
+      transform: scale(1.02);
+    }
+
+    .btn-primary {
+      background: var(--eg-orange);
+      color: #080808;
+      border: 1px solid transparent;
+      padding: 10px 18px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(252, 108, 6, 0.25);
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--eg-orange-hover);
+      transform: translateY(-1px);
+    }
+
+    .table-sort-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      padding: 4px 6px;
+      margin: -4px -6px;
+      border-radius: 6px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .table-sort-btn:hover {
+      background: var(--eg-line);
+      color: var(--eg-orange);
+    }
+
+    .table-sort-btn .sort-indicator {
+      font-size: 11px;
+      opacity: 0.6;
+    }
+
+    th.sorted .table-sort-btn {
+      color: var(--eg-orange);
+    }
+
+    th.sorted .sort-indicator {
+      opacity: 1;
+      color: var(--eg-orange);
+    }
+
+    /* Table */
+    .table-wrapper {
+      border: 1px solid var(--eg-line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--eg-surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13.5px;
+    }
+
+    th {
+      background: var(--eg-surface-soft);
+      padding: 12px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--eg-muted);
+      border-bottom: 1px solid var(--eg-line);
+    }
+
+    td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--eg-line);
+      color: var(--eg-ink);
+      vertical-align: middle;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: color-mix(in srgb, var(--eg-surface-soft) 50%, var(--eg-surface));
+    }
+
+    .staff-cell {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .avatar-sm {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--eg-orange) 14%, var(--eg-surface));
+      color: var(--eg-orange);
+      border: 1px solid color-mix(in srgb, var(--eg-orange) 30%, transparent);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+
+    .staff-info strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .staff-info span {
+      font-size: 12px;
+      color: var(--eg-muted);
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 999px;
+    }
+
+    .badge-active {
+      background: var(--eg-good-bg);
+      color: var(--eg-good);
+      border: 1px solid color-mix(in srgb, var(--eg-good) 30%, transparent);
+    }
+
+    .badge-inactive {
+      background: var(--eg-surface-soft);
+      color: var(--eg-muted);
+      border: 1px solid var(--eg-line);
+    }
+
+    .badge-pin {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--eg-muted);
+    }
+
+    .actions-cell {
+      display: flex;
+      gap: 8px;
+    }
+
+    .action-btn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--eg-line);
+      background: var(--eg-surface);
+      color: var(--eg-ink);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .action-btn:hover {
+      background: var(--eg-surface-soft);
+    }
+
+    .action-btn-danger {
+      color: #c53030;
+      border-color: color-mix(in srgb, #c53030 30%, transparent);
+    }
+
+    .action-btn-danger:hover {
+      background: #fff5f5;
+    }
+
+    /* Modal Animation & Styling */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 8, 8, 0.6);
+      backdrop-filter: blur(5px);
+      display: grid;
+      place-items: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      padding: 16px;
+    }
+
+    .modal-backdrop.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-box {
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-line);
+      border-radius: 24px;
+      padding: 28px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35), var(--eg-clay-highlight);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      transform: scale(0.91) translateY(16px);
+      opacity: 0;
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-backdrop.active .modal-box {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-head h2 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .modal-close {
+      border: none;
+      background: transparent;
+      color: var(--eg-muted);
+      cursor: pointer;
+      font-size: 20px;
+      padding: 4px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+    }
+
+    .modal-close:hover {
+      background: var(--eg-surface-soft);
+      color: var(--eg-ink);
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group label {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--eg-ink);
+    }
+
+    .form-group input, .form-group select {
+      background: var(--eg-surface-soft);
+      border: 1px solid var(--eg-line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: var(--eg-ink);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .form-group input:focus, .form-group select:focus {
+      border-color: var(--eg-orange);
+    }
+
+    .pin-toggle-card {
+      background: var(--eg-surface-soft);
+      border: 1px solid var(--eg-line);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .pin-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pin-toggle-row span strong {
+      display: block;
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+
+    .pin-toggle-row span small {
+      font-size: 11.5px;
+      color: var(--eg-muted);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: var(--eg-line);
+      transition: .2s;
+      border-radius: 24px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--eg-orange);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+
+    .pin-input-area {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      padding-top: 10px;
+      border-top: 1px solid var(--eg-line);
+    }
+
+    .pin-input-area.show {
+      display: flex;
+    }
+
+    .pin-input-area input {
+      letter-spacing: 6px;
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .btn-secondary {
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--eg-line);
+      background: var(--eg-surface-soft);
+      color: var(--eg-ink);
+    }
+
+    .btn-secondary:hover {
+      background: color-mix(in srgb, var(--eg-ink) 6%, var(--eg-surface-soft));
+    }
+
+    .btn-submit {
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      background: var(--eg-orange);
+      color: #080808;
+    }
+
+    .btn-submit:hover {
+      background: var(--eg-orange-hover);
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--eg-surface);
+      border: 1px solid var(--eg-orange);
+      color: var(--eg-ink);
+      padding: 12px 20px;
+      border-radius: 14px;
+      font-size: 13.5px;
+      font-weight: 600;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.25s ease;
+      pointer-events: none;
+      z-index: 200;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 860px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        display: none;
+      }
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+      .search-box {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-shell">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <img src="../../Logo_Evo.png" alt="Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+          <span class="brand-logo-fallback" style="display:none;">EG</span>
+        </div>
+        <span class="brand-title">EvoGym</span>
+      </div>
+
+      <ul class="nav-list" role="navigation" aria-label="Navegación Admin">
+        <li><a class="nav-item" href="#overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
+          Resumen
+        </a></li>
+        <li><a class="nav-item" href="#members">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M2 20v-2a6 6 0 0 1 12 0v2zM16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 4 5"/></svg>
+          Socios
+        </a></li>
+        <li><a class="nav-item" href="#sales">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18l-2 13H5zM8 7V5a4 4 0 0 1 8 0v2"/></svg>
+          Ventas
+        </a></li>
+        <li><a class="nav-item" href="#inventory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 7 9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/></svg>
+          Inventario
+        </a></li>
+        <li><a class="nav-item active" href="#staff">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Equipo (T02)
+        </a></li>
+        <li><a class="nav-item" href="#history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 1 3 6.7M3 17v-5h5M12 7v5l4 2"/></svg>
+          Historial
+        </a></li>
+      </ul>
+
+      <div class="sidebar-footer">
+        <div class="role-indicator">
+          <span>Conectado como</span>
+          <strong>Propietario / Admin</strong>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Top header bar -->
+      <header class="top-bar">
+        <div class="breadcrumbs">
+          <div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span>Administración</span>
+              <span>/</span>
+              <strong>Gestión de Personal</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--eg-muted); margin-top: 2px;" id="staff-subtitle-counts">
+              7 activos · 0 inactivos · 7 en total
+            </p>
+          </div>
+        </div>
+
+        <div class="top-bar-right">
+          <button class="theme-toggle" id="theme-btn" type="button" aria-label="Alternar tema claro y oscuro" title="Alternar tema claro y oscuro">
+            <span id="theme-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Content / Table Panel (No KPIs) -->
+      <section class="content-panel">
+        <div class="toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" id="search-input" placeholder="Buscar por nombre o turno..." aria-label="Buscar recepcionista">
+          </div>
+
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">Todos</button>
+            <button class="filter-btn" data-filter="active" onclick="setFilter('active')">Activos</button>
+            <button class="filter-btn" data-filter="inactive" onclick="setFilter('inactive')">Inactivos</button>
+          </div>
+
+          <button class="btn-primary" type="button" onclick="openCreateModal()">
+            <span>+</span> Nuevo recepcionista
+          </button>
+        </div>
+
+        <div class="table-wrapper" id="table-wrapper">
+          <table aria-label="Listado de recepcionistas">
+            <thead>
+              <tr>
+                <th id="th-name">
+                  <button type="button" class="table-sort-btn" onclick="sortTable('name')">
+                    <span>Recepcionista</span>
+                    <span class="sort-indicator" id="sort-ind-name"> ⇅</span>
+                  </button>
+                </th>
+                <th id="th-shift">
+                  <button type="button" class="table-sort-btn" onclick="sortTable('shift')">
+                    <span>Turno</span>
+                    <span class="sort-indicator" id="sort-ind-shift"> ⇅</span>
+                  </button>
+                </th>
+                <th id="th-salary">
+                  <button type="button" class="table-sort-btn" onclick="sortTable('salary')">
+                    <span>Sueldo mensual</span>
+                    <span class="sort-indicator" id="sort-ind-salary"> ⇅</span>
+                  </button>
+                </th>
+                <th id="th-hasPin">
+                  <button type="button" class="table-sort-btn" onclick="sortTable('hasPin')">
+                    <span>Credencial</span>
+                    <span class="sort-indicator" id="sort-ind-hasPin"> ⇅</span>
+                  </button>
+                </th>
+                <th id="th-active">
+                  <button type="button" class="table-sort-btn" onclick="sortTable('active')">
+                    <span>Estado</span>
+                    <span class="sort-indicator" id="sort-ind-active"> ⇅</span>
+                  </button>
+                </th>
+                <th style="text-align: right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="staff-table-body">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal for Create / Edit Staff Profile -->
+  <div class="modal-backdrop" id="staff-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="modal-title">Nuevo recepcionista</h2>
+        <button class="modal-close" type="button" onclick="closeModal()" aria-label="Cerrar modal">&times;</button>
+      </div>
+
+      <form id="staff-form" onsubmit="handleFormSubmit(event)">
+        <input type="hidden" id="staff-id">
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label for="staff-name-input">Nombre completo *</label>
+          <input type="text" id="staff-name-input" required placeholder="Ej. Valeria Morales">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label for="staff-shift-select">Turno asignado</label>
+          <select id="staff-shift-select">
+            <option value="Matutino">Turno Matutino (06:00 – 14:00)</option>
+            <option value="Vespertino">Turno Vespertino (14:00 – 22:00)</option>
+            <option value="Mixto">Turno Mixto / Rotativo</option>
+            <option value="Fin de semana">Fin de semana</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label for="staff-salary-input">Sueldo mensual (MXN) *</label>
+          <input type="number" id="staff-salary-input" step="50" min="0" required placeholder="8000">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label style="margin-bottom: 6px; display: block; font-size: 12.5px; font-weight: 600;">Estado de la cuenta</label>
+          <div class="filter-group" style="width: fit-content;" role="radiogroup" aria-label="Estado de la cuenta">
+            <button type="button" class="filter-btn active" id="modal-status-active-btn" onclick="setModalStatus(true)">● Activo</button>
+            <button type="button" class="filter-btn" id="modal-status-inactive-btn" onclick="setModalStatus(false)">○ Inactivo</button>
+          </div>
+          <input type="hidden" id="staff-active-input" value="true">
+        </div>
+
+        <!-- Optional 2-Phase PIN section -->
+        <div class="pin-toggle-card" style="margin-bottom: 18px;">
+          <div class="pin-toggle-row">
+            <span>
+              <strong>Configurar PIN de acceso</strong>
+              <small>Opcional. Si se apaga, entrará sin PIN.</small>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="pin-checkbox" onchange="togglePinInput(this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="pin-2phase-container" id="pin-input-area">
+            <div class="pin-phase-box">
+              <label for="pin-1-input">1. Ingresa el PIN (4 dígitos)</label>
+              <input type="password" id="pin-1-input" maxlength="4" placeholder="••••" pattern="[0-9]{4}" oninput="validatePinMatch()">
+            </div>
+            <div class="pin-phase-box">
+              <label for="pin-2-input">2. Confirma el PIN (repite los 4 dígitos)</label>
+              <input type="password" id="pin-2-input" maxlength="4" placeholder="••••" pattern="[0-9]{4}" oninput="validatePinMatch()">
+            </div>
+            <div class="pin-status-msg" id="pin-status-msg"></div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" type="button" onclick="closeModal()">Cancelar</button>
+          <button class="btn-submit" type="submit" id="modal-submit-btn">Guardar perfil</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast feedback -->
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span id="toast-text">Acción completada</span>
+  </div>
+
+  <script>
+    // Initial staff data matching T01 profiles
+    let staffData = [
+      { id: 'recep-1', name: 'Valeria M.', shift: 'Matutino', salary: 8000, hasPin: true, pin: '1234', active: true },
+      { id: 'recep-2', name: 'Carlos R.', shift: 'Matutino', salary: 7500, hasPin: false, pin: '', active: true },
+      { id: 'recep-3', name: 'Sofía L.', shift: 'Vespertino', salary: 8000, hasPin: true, pin: '1234', active: true },
+      { id: 'recep-4', name: 'Mateo G.', shift: 'Vespertino', salary: 7500, hasPin: false, pin: '', active: true },
+      { id: 'recep-5', name: 'Ana P.', shift: 'Mixto', salary: 8500, hasPin: true, pin: '1234', active: true },
+      { id: 'recep-6', name: 'Diego S.', shift: 'Fin de semana', salary: 6000, hasPin: false, pin: '', active: true },
+      { id: 'recep-7', name: 'Elena T.', shift: 'Vespertino', salary: 8000, hasPin: true, pin: '1234', active: true }
+    ];
+
+    let currentFilter = 'all';
+    let searchQuery = '';
+
+    function formatMoney(amount) {
+      return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount);
+    }
+
+    function getInitials(name) {
+      return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+    }
+
+      let currentSortColumn = null;
+    let currentSortDir = 'asc';
+
+    function sortTable(column) {
+      if (currentSortColumn === column) {
+        currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSortColumn = column;
+        currentSortDir = 'asc';
+      }
+
+      ['name', 'shift', 'salary', 'hasPin', 'active'].forEach(col => {
+        const ind = document.getElementById(`sort-ind-${col}`);
+        const th = document.getElementById(`th-${col}`);
+        if (ind) {
+          if (col === currentSortColumn) {
+            ind.textContent = currentSortDir === 'asc' ? ' ▲' : ' ▼';
+            if (th) th.classList.add('sorted');
+          } else {
+            ind.textContent = ' ⇅';
+            if (th) th.classList.remove('sorted');
+          }
+        }
+      });
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('staff-table-body');
+      tbody.innerHTML = '';
+
+      let filtered = staffData.filter(staff => {
+        const matchesFilter = currentFilter === 'all' 
+          ? true 
+          : currentFilter === 'active' ? staff.active : !staff.active;
+        const matchesSearch = staff.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              staff.shift.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesFilter && matchesSearch;
+      });
+
+      if (currentSortColumn) {
+        filtered.sort((a, b) => {
+          let valA = a[currentSortColumn];
+          let valB = b[currentSortColumn];
+          if (typeof valA === 'string') {
+            const cmp = valA.localeCompare(valB);
+            return currentSortDir === 'asc' ? cmp : -cmp;
+          }
+          if (typeof valA === 'boolean') {
+            const numA = valA ? 1 : 0;
+            const numB = valB ? 1 : 0;
+            return currentSortDir === 'asc' ? numA - numB : numB - numA;
+          }
+          if (typeof valA === 'number') {
+            return currentSortDir === 'asc' ? valA - valB : valB - valA;
+          }
+          return 0;
+        });
+      }
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 32px; color: var(--eg-muted);">No se encontraron recepcionistas con los criterios actuales.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach(staff => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <div class="staff-cell">
+              <div class="avatar-sm">${getInitials(staff.name)}</div>
+              <div class="staff-info">
+                <strong>${staff.name}</strong>
+                <span>ID: ${staff.id}</span>
+              </div>
+            </div>
+          </td>
+          <td>${staff.shift}</td>
+          <td><strong>${formatMoney(staff.salary || 8000)}</strong></td>
+          <td>
+            <span class="badge-pin">
+              ${staff.hasPin ? '🔒 Con PIN' : '⚡ Acceso directo'}
+            </span>
+          </td>
+          <td>
+            <span class="badge-pill ${staff.active ? 'badge-active' : 'badge-inactive'}">
+              ${staff.active ? '● Activo' : '○ Inactivo'}
+            </span>
+          </td>
+          <td style="text-align: right;">
+            <div class="actions-cell" style="justify-content: flex-end;">
+              <button class="action-btn" type="button" onclick="openEditModal('${staff.id}')">Editar</button>
+              <button class="action-btn ${staff.active ? 'action-btn-danger' : ''}" type="button" onclick="toggleStatus('${staff.id}')">
+                ${staff.active ? 'Desactivar' : 'Activar'}
+              </button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      updateSubtitleCounts();
+    }
+
+    function updateSubtitleCounts() {
+      const activeCount = staffData.filter(s => s.active).length;
+      const inactiveCount = staffData.length - activeCount;
+      const el = document.getElementById('staff-subtitle-counts');
+      if (el) {
+        el.textContent = `${activeCount} activos · ${inactiveCount} inactivos · ${staffData.length} en total`;
+      }
+    }
+
+    let modalActiveStatus = true;
+
+    function setModalStatus(active) {
+      modalActiveStatus = active;
+      const actBtn = document.getElementById('modal-status-active-btn');
+      const inactBtn = document.getElementById('modal-status-inactive-btn');
+      if (actBtn) actBtn.classList.toggle('active', active);
+      if (inactBtn) inactBtn.classList.toggle('active', !active);
+    }
+
+    // Filter controls
+    function setFilter(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filter);
+      });
+      renderTable();
+    }
+
+    document.getElementById('search-input').addEventListener('input', (e) => {
+      searchQuery = e.target.value.trim();
+      renderTable();
+    });
+
+    // 2-Phase PIN validation
+    function validatePinMatch() {
+      const hasPin = document.getElementById('pin-checkbox').checked;
+      const submitBtn = document.getElementById('modal-submit-btn');
+      const msg = document.getElementById('pin-status-msg');
+
+      if (!hasPin) {
+        submitBtn.disabled = false;
+        msg.textContent = '';
+        msg.className = 'pin-status-msg';
+        return;
+      }
+
+      const p1 = document.getElementById('pin-1-input').value;
+      const p2 = document.getElementById('pin-2-input').value;
+
+      if (p1.length < 4 || p2.length < 4) {
+        submitBtn.disabled = true;
+        msg.textContent = '';
+        msg.className = 'pin-status-msg';
+      } else if (p1 === p2) {
+        submitBtn.disabled = false;
+        msg.textContent = '✓ PIN confirmado correctamente';
+        msg.className = 'pin-status-msg success';
+      } else {
+        submitBtn.disabled = true;
+        msg.textContent = 'Los PINs no coinciden. Por favor verifica.';
+        msg.className = 'pin-status-msg error';
+      }
+    }
+
+    // Modal controls
+    function openCreateModal() {
+      document.getElementById('modal-title').textContent = 'Nuevo recepcionista';
+      document.getElementById('modal-submit-btn').textContent = 'Crear perfil';
+      document.getElementById('staff-id').value = '';
+      document.getElementById('staff-name-input').value = '';
+      document.getElementById('staff-shift-select').value = 'Matutino';
+      document.getElementById('staff-salary-input').value = '8000';
+      setModalStatus(true);
+      document.getElementById('pin-checkbox').checked = false;
+      document.getElementById('pin-1-input').value = '';
+      document.getElementById('pin-2-input').value = '';
+      togglePinInput(false);
+      document.getElementById('staff-modal').classList.add('active');
+    }
+
+    function openEditModal(id) {
+      const staff = staffData.find(s => s.id === id);
+      if (!staff) return;
+
+      document.getElementById('modal-title').textContent = 'Editar perfil';
+      document.getElementById('modal-submit-btn').textContent = 'Guardar cambios';
+      document.getElementById('staff-id').value = staff.id;
+      document.getElementById('staff-name-input').value = staff.name;
+      document.getElementById('staff-shift-select').value = staff.shift;
+      document.getElementById('staff-salary-input').value = staff.salary || 8000;
+      setModalStatus(staff.active);
+      document.getElementById('pin-checkbox').checked = staff.hasPin;
+      document.getElementById('pin-1-input').value = staff.hasPin ? (staff.pin || '1234') : '';
+      document.getElementById('pin-2-input').value = staff.hasPin ? (staff.pin || '1234') : '';
+      togglePinInput(staff.hasPin);
+      document.getElementById('staff-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('staff-modal').classList.remove('active');
+    }
+
+    function togglePinInput(show) {
+      const pinArea = document.getElementById('pin-input-area');
+      const pin1 = document.getElementById('pin-1-input');
+      const pin2 = document.getElementById('pin-2-input');
+      const msg = document.getElementById('pin-status-msg');
+      if (show) {
+        pinArea.classList.add('show');
+        pin1.focus();
+      } else {
+        pinArea.classList.remove('show');
+        pin1.value = '';
+        pin2.value = '';
+        msg.textContent = '';
+        msg.className = 'pin-status-msg';
+      }
+      validatePinMatch();
+    }
+
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById('staff-id').value;
+      const name = document.getElementById('staff-name-input').value.trim();
+      const shift = document.getElementById('staff-shift-select').value;
+      const salary = parseFloat(document.getElementById('staff-salary-input').value) || 8000;
+      const hasPin = document.getElementById('pin-checkbox').checked;
+      const pinVal = document.getElementById('pin-1-input').value.trim();
+
+      if (id) {
+        // Edit existing
+        const index = staffData.findIndex(s => s.id === id);
+        if (index !== -1) {
+          staffData[index].name = name;
+          staffData[index].shift = shift;
+          staffData[index].salary = salary;
+          staffData[index].active = modalActiveStatus;
+          staffData[index].hasPin = hasPin;
+          if (hasPin && pinVal && pinVal !== '••••') {
+            staffData[index].pin = pinVal;
+          }
+          showToast(`Perfil de ${name} actualizado correctamente`);
+        }
+      } else {
+        // Create new
+        const newId = `recep-${staffData.length + 1}`;
+        staffData.push({
+          id: newId,
+          name,
+          shift,
+          salary,
+          hasPin,
+          pin: hasPin ? (pinVal || '1234') : '',
+          active: modalActiveStatus
+        });
+        showToast(`Recepcionista ${name} registrado con éxito`);
+      }
+
+      closeModal();
+      renderTable();
+    }
+
+    function toggleStatus(id) {
+      const staff = staffData.find(s => s.id === id);
+      if (staff) {
+        staff.active = !staff.active;
+        showToast(`Perfil de ${staff.name} ${staff.active ? 'reactivado' : 'desactivado'}`);
+        renderTable();
+      }
+    }
+
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-text').textContent = text;
+      toast.classList.add('show');
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+
+    // Theme toggle
+    const themeBtn = document.getElementById('theme-btn');
+    const themeIcon = document.getElementById('theme-icon');
+    let isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(isDark);
+
+    themeBtn.addEventListener('click', () => {
+      isDark = !isDark;
+      applyTheme(isDark);
+    });
+
+    function applyTheme(dark) {
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      themeBtn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+      themeIcon.innerHTML = dark
+        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
+    }
+
+    // Initial render
+    renderTable();
+  </script>
+</body>
+</html>
