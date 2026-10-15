@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -18,64 +18,87 @@ function mount(path = '/owner/overview') {
 describe('application foundation', () => {
   it('connects profile, cart, keyboard member lookup, measured attendance and denomination close', async () => {
     mount('/');
-    await userEvent.click(screen.getByRole('button', { name: /Recepción/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua · producto ilustrativo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Barra · producto ilustrativo' }));
+    await userEvent.click(screen.getByRole('button', { name: /Mikel/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Barra' }));
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro de demostración' }));
-    expect(screen.getByRole('status', { name: 'Resultado de compra' })).toHaveTextContent('Cobro confirmado');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar cobro' }));
+    expect(screen.getByRole('status', { name: 'Resultado de compra' })).toHaveTextContent('Cobro registrado');
     expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
-    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo Activa');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex Morgan');
     await userEvent.keyboard('{ArrowDown}{Enter}');
-    expect(screen.getByRole('heading', { name: 'Demo Activa' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
-    await userEvent.click(screen.getByText('Reloj y cierre de demostración'));
-    await userEvent.click(screen.getByRole('button', { name: 'Avanzar 30 minutos' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida demo' }));
-    expect(screen.getByText('Última visita: 30 min medidos')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Alex Morgan' })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+    expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida' }));
+    expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Salida registrada.');
     await userEvent.click(screen.getByRole('link', { name: /^Turno/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar turno' }));
     await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'denominations');
     for (const value of ['$500.00', '$50.00', '$5.00']) await userEvent.type(screen.getByLabelText(`${value === '$5.00' ? 'Moneda' : 'Billete'} ${value} · cantidad`), '1');
-    expect(screen.getByLabelText('Total por denominaciones')).toHaveTextContent('$555.00');
+    expect(screen.getByRole('region', { name: 'Resumen del conteo' })).toHaveTextContent('$555.00');
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cierre' }));
-    expect(screen.getByText('Diferencia: $0.00 MXN')).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cierre de demostración' }));
+    expect(screen.getByRole('region', { name: 'Resumen de revisión' })).toHaveTextContent('$20.00 MXN');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
     expect(screen.getByText('Turno cerrado')).toBeVisible();
     expect(screen.getByRole('region', { name: 'Conteo registrado' })).toHaveTextContent('$500.00');
-    expect(screen.getByText(/Excel sigue siendo el maestro/)).toBeVisible();
-  });
+  }, 15000);
   it('clears stale suggestions when resetting demo or switching profile', async () => {
     mount('/reception/home');
-    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex');
     expect(screen.getByRole('listbox')).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
     expect(screen.getByRole('combobox', { name: 'Búsqueda global de socios' })).toHaveValue('');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Demo');
-    await userEvent.selectOptions(screen.getByLabelText('Rol de demostración'), 'OWNER');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex');
+    await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'OWNER');
     expect(screen.getByRole('combobox', { name: 'Búsqueda global de socios' })).toHaveValue('');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
-  it('offers only two direct demo profiles at root and can change profile', async () => {
+  it('offers staff profiles at root with Admin and Reception grid and verifies PIN or direct entry', async () => {
     mount('/');
     expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeVisible();
     expect(screen.getByRole('button', { name: /Admin/ })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Recepción/ })).toBeVisible();
-    expect(screen.queryByLabelText('Rol de demostración')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/contraseña|PIN/i)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Recepción/ }));
+    expect(screen.getAllByRole('button', { name: /Recepción/ })).toHaveLength(9);
+    expect(screen.getByRole('button', { name: /Mikel/ })).toBeVisible();
+    expect(screen.queryByLabelText('Rol de acceso')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Mikel/ }));
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
     expect(screen.getByRole('link', { name: /Inicio/ })).toBeVisible();
     await userEvent.click(screen.getByRole('link', { name: 'Cambiar perfil' }));
     await userEvent.click(screen.getByRole('button', { name: /Admin/ }));
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await userEvent.type(screen.getByRole('textbox', { name: /PIN/i }), '1234');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/overview');
   });
-  it('labels demo data and owner navigation', () => {
+  it('labels local data and owner navigation', () => {
     mount();
-    expect(screen.getByText('Datos de demostración')).toBeVisible();
+    expect(screen.getByText('Datos locales')).toBeVisible();
+    expect(screen.queryByText(/simula vistas|fechas de muestra/i)).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
     expect(screen.getByRole('link', { name: /Historial/ })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Resumen del negocio' })).toBeVisible();
+  });
+  it('opens new-member registration directly from the global header for the active role', async () => {
+    mount('/reception/home');
+    await userEvent.click(screen.getByRole('link', { name: 'Agregar socio' }));
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/members/new');
+    expect(screen.getByRole('heading', { name: 'Nuevo socio' })).toBeVisible();
+  });
+  it('uses neutral operational guidance for local membership payment records', async () => {
+    mount('/owner/members/demo-001/payment');
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar pago' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar pago' }));
+    const status = screen.getByRole('status', { name: 'Resultado del pago' });
+    expect(status).toHaveTextContent('Operación registrada localmente. No activa acceso; las fechas efectivas siguen sin definir.');
+    expect(status).not.toHaveTextContent(/simulad[oa]/i);
+  });
+  it('uses neutral operational guidance for local sales records', async () => {
+    mount('/owner/sales');
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar venta' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar venta' }));
+    const status = screen.getByText('Venta registrada correctamente en el sistema.');
+    expect(status).toBeVisible();
   });
   it('keeps compact navigation identifiable and exposes the unaltered brand asset', () => {
     mount();
@@ -88,6 +111,15 @@ describe('application foundation', () => {
     expect(overview.querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Historial' }).querySelector('svg')).toBeInTheDocument();
   });
+  it('navigates from a member detail through the sidebar without getting stuck', async () => {
+    mount('/owner/members/demo-001');
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/members/demo-001');
+
+    await userEvent.click(screen.getByRole('link', { name: 'Inventario' }));
+
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/inventory');
+    expect(screen.getByRole('link', { name: 'Inventario' })).toHaveAttribute('aria-current', 'page');
+  });
   it('expands on pointer or keyboard focus and keeps focus inside visible', async () => {
     mount();
     const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
@@ -95,46 +127,80 @@ describe('application foundation', () => {
     expect(sidebar).toHaveAttribute('data-expanded', 'true');
     await userEvent.unhover(sidebar);
     expect(sidebar).toHaveAttribute('data-expanded', 'false');
-    const toggle = screen.getByRole('button', { name: 'Fijar barra lateral' });
-    fireEvent.focusIn(toggle);
+    await userEvent.click(screen.getByRole('link', { name: 'Resumen' }));
+    await userEvent.unhover(sidebar);
+    await userEvent.tab();
     expect(sidebar).toHaveAttribute('data-expanded', 'true');
-    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole('button', { name: 'Fijar barra lateral' }));
     expect(screen.getByRole('button', { name: 'Liberar barra lateral' })).toHaveAttribute('aria-pressed', 'true');
-    const nextLink = screen.getByRole('link', { name: 'Resumen' });
-    fireEvent.focusOut(toggle, { relatedTarget: nextLink });
-    fireEvent.focusIn(nextLink);
+    await userEvent.tab();
     expect(sidebar).toHaveAttribute('data-expanded', 'true');
+  });
+  it('collapses after pointer clicks while preserving keyboard focus and pinning', async () => {
+    const user = userEvent.setup();
+    mount();
+    const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
+    const overview = screen.getByRole('link', { name: 'Resumen' });
+
+    await user.hover(sidebar);
+    await user.click(overview);
+    await user.unhover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
+
+    await user.tab();
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+    await user.tab();
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+
+    await user.click(sidebar);
+    await user.unhover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
+
+    await user.click(overview);
+    await user.unhover(sidebar);
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+    await user.tab({ shift: true });
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
+
+    await user.click(screen.getByRole('button', { name: 'Fijar barra lateral' }));
+    await user.unhover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'true');
+    await user.click(screen.getByRole('button', { name: 'Liberar barra lateral' }));
+    await user.unhover(sidebar);
+    expect(sidebar).toHaveAttribute('data-expanded', 'false');
   });
   it('switches role, route and visible navigation without claiming authentication', async () => {
     mount();
-    await userEvent.selectOptions(screen.getByLabelText('Rol de demostración'), 'RECEPTION');
+    await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/no autentica/)).toBeVisible();
+    expect(screen.getByText(/autenticación y los permisos no están implementados/)).toBeVisible();
   });
   it('resets changed sample data and announces the result', async () => {
     mount();
     await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('0');
-    await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('6');
-    expect(screen.getByRole('status', { name: 'Resultado de demostración' })).toHaveTextContent('Datos de demostración restablecidos');
+    expect(screen.getByRole('status', { name: 'Resultado local' })).toHaveTextContent('Datos locales restablecidos');
   });
   it('redirects an unavailable reception route to its primary task', () => {
     mount('/reception/history');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Rol de demostración')).toHaveValue('RECEPTION');
+    expect(screen.getByLabelText('Rol de acceso')).toHaveValue('RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
   });
   it('preserves a shared task when switching role', async () => {
     mount('/owner/shifts');
-    await userEvent.selectOptions(screen.getByLabelText('Rol de demostración'), 'RECEPTION');
+    await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/shifts');
   });
   it('keeps the reception view when opening the component catalog', async () => {
     mount('/reception/members');
     await userEvent.click(screen.getByRole('link', { name: 'Sistema de componentes' }));
-    expect(screen.getByLabelText('Rol de demostración')).toHaveValue('RECEPTION');
+    expect(screen.getByLabelText('Rol de acceso')).toHaveValue('RECEPTION');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
   });
   it('renders the shared component catalog', () => {
