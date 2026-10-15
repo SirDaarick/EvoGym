@@ -13,7 +13,7 @@
   align-items: center;
   gap: 10px;
   background: var(--color-primary, #fc6c06);
-  color: #ffffff;
+  color: var(--color-primary-text, #080808);
   border: none;
   border-radius: 9999px;
   padding: 10px 18px 10px 14px;
@@ -226,7 +226,7 @@
 
 .gimi-message-bubble.user-bubble {
   background: var(--color-primary, #fc6c06);
-  color: #ffffff;
+  color: var(--color-primary-text, #080808);
   border-top-right-radius: 4px;
 }
 
@@ -259,13 +259,14 @@
 }
 
 .gimi-chip {
+  --gimi-chip-text: #a53c00;
   background: var(--color-surface, #ffffff);
   border: 1px solid var(--color-divider, #e5e7eb);
   border-radius: 12px;
   padding: 6px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--color-primary, #fc6c06);
+  color: var(--gimi-chip-text);
   cursor: pointer;
   text-align: left;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
@@ -278,12 +279,14 @@
 }
 
 :root[data-theme='dark'] .gimi-chip {
+  --gimi-chip-text: var(--color-primary, #fc6c06);
   background: #222222;
   border-color: #383838;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .gimi-chip {
+    --gimi-chip-text: var(--color-primary, #fc6c06);
     background: #222222;
     border-color: #383838;
   }
@@ -393,4 +396,30 @@
   padding: 8px 14px;
   min-height: 36px;
   border-radius: 10px;
+}
+
+/* Dynamic viewport sizing leaves the composer reachable above mobile keyboards. */
+.gimi-widget-root {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+}
+.gimi-modal-container {
+  max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.gimi-modal-header, .gimi-input-container { flex: none; }
+.gimi-modal-header { gap: 8px; flex-wrap: wrap; }
+.gimi-header-meta { min-width: 0; }
+.gimi-header-actions { flex: none; }
+.gimi-messages-body { min-height: 0; overscroll-behavior: contain; }
+.gimi-message-bubble { overflow-wrap: anywhere; }
+.gimi-input { min-width: 0; min-height: 44px; }
+.gimi-btn-icon, .gimi-mic-btn, .gimi-send-btn { min-width: 44px; min-height: 44px; flex: none; }
+.gimi-chip { min-height: 44px; white-space: normal; text-align: left; }
+.gimi-input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.gimi-speech-error { margin: 0; padding: 8px 16px; color: var(--color-ink); background: var(--color-soft); font-size: 14px; flex: none; }
+@media (prefers-reduced-motion: reduce) {
+  .gimi-widget-root *, .gimi-widget-root *::before, .gimi-widget-root *::after {
+    animation: none !important; transition: none !important; scroll-behavior: auto !important;
+  }
 }

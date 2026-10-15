@@ -4,24 +4,8 @@
   --color-primary: #fc6c06;
 }
 
-/* Claymorphism Base Card */
-.clay-card {
-  position: relative;
-  background: var(--color-surface, #fcfcfc);
-  border: 1px solid var(--color-divider, #e5e3e0);
-  border-radius: var(--radius-panel, 20px);
-  box-shadow: var(--shadow-clay, 0 10px 24px rgba(35, 29, 31, 0.1), 0 3px 7px rgba(35, 29, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9));
-  box-sizing: border-box;
-  transition: transform 140ms ease, box-shadow 160ms ease, border-color 140ms ease;
-}
-
-.clay-card:hover {
-  border-color: var(--color-boundary, #75717c);
-}
-
-[data-theme='dark'] .clay-card {
-  background: var(--color-surface, #1e1e1e);
-  border-color: var(--color-divider, #333333);
+/* Keep the overview's darker shadow local to its own cards. */
+[data-theme='dark'] .overview-page .clay-card {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45), 0 3px 7px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 

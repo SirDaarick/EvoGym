@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { Role, DemoState } from '../../domain/models';
+import type { Role } from '../../domain/models';
 import type { GimiChatMessage } from '../../domain/gimi';
 import { useDemo } from '../../demo/DemoProvider';
 import {
@@ -36,6 +36,7 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [speechError, setSpeechError] = useState('');
 
   const [messages, setMessages] = useState<GimiChatMessage[]>(() => {
     const cached = getStoredChatHistory();
@@ -58,6 +59,30 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const responseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nearBottomRef = useRef(true);
+  const scrollPositionRef = useRef(0);
+  const returnFocusRef = useRef(false);
+
+  const cancelPending = () => {
+    if (responseTimerRef.current !== null) clearTimeout(responseTimerRef.current);
+    if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
+    responseTimerRef.current = null;
+    focusTimerRef.current = null;
+  };
+
+  // A new role must never receive a response scheduled for the previous role.
+  useEffect(() => {
+    setIsTyping(false);
+    return cancelPending;
+  }, [role]);
+
+  const closeChat = () => {
+    returnFocusRef.current = true;
+    setIsOpen(false);
+  };
 
   // Sync to session storage
   useEffect(() => {
@@ -66,49 +91,62 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    if (chatBodyRef.current) {
+    if (chatBodyRef.current && nearBottomRef.current) {
       chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
     }
   }, [messages, isTyping, isOpen]);
 
-  // Focus input when opened
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 150);
+    if (isOpen && chatBodyRef.current && !nearBottomRef.current) {
+      chatBodyRef.current.scrollTop = scrollPositionRef.current;
     }
   }, [isOpen]);
 
-  // Web Speech API Voice Dictation
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
-      if (SpeechRecognition) {
-        setSpeechSupported(true);
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'es-MX';
-
-        recognition.onstart = () => setIsListening(true);
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[0]?.[0]?.transcript || '';
-          if (transcript) {
-            setInputValue(prev => (prev ? `${prev} ${transcript}` : transcript));
-          }
-        };
-        recognition.onerror = () => setIsListening(false);
-        recognition.onend = () => setIsListening(false);
-        recognitionRef.current = recognition;
-      }
+    if (isOpen) {
+      focusTimerRef.current = setTimeout(() => inputRef.current?.focus(), 150);
+    } else if (returnFocusRef.current) {
+      launcherRef.current?.focus();
+      returnFocusRef.current = false;
     }
-  }, []);
+    return () => {
+      if (focusTimerRef.current !== null) clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
+    };
+  }, [isOpen, role]);
+
+  // Recognition belongs to the open panel; detach callbacks before stopping it.
+  useEffect(() => {
+    if (!isOpen) return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    setSpeechSupported(true);
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'es-MX';
+    recognition.onstart = () => { setSpeechError(''); setIsListening(true); };
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0]?.[0]?.transcript || '';
+      if (transcript) setInputValue(prev => prev ? `${prev} ${transcript}` : transcript);
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      setSpeechError('No se pudo usar el micrófono. Revisa los permisos o escribe tu mensaje.');
+    };
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    return () => {
+      recognition.onstart = recognition.onresult = recognition.onerror = recognition.onend = null;
+      recognition.abort ? recognition.abort() : recognition.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+    };
+  }, [isOpen, role]);
 
   const handleToggleVoice = () => {
     if (!speechSupported || !recognitionRef.current) {
-      alert('Tu navegador no tiene activado el soporte para entrada de voz.');
+      setSpeechError('Tu navegador no tiene activado el soporte para entrada de voz.');
       return;
     }
     if (isListening) {
@@ -117,7 +155,7 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
       try {
         recognitionRef.current.start();
       } catch (err) {
-        console.warn('Error al iniciar micrófono:', err);
+        setSpeechError('No se pudo iniciar el micrófono. Revisa los permisos o escribe tu mensaje.');
       }
     }
   };
@@ -138,7 +176,8 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
     setIsTyping(true);
 
     // Simulate intelligent thinking delay
-    setTimeout(() => {
+    responseTimerRef.current = setTimeout(() => {
+      responseTimerRef.current = null;
       const response = answerGimiQuery(text, role, state);
       const assistantMsg: GimiChatMessage = {
         id: `gimi-${crypto.randomUUID()}`,
@@ -160,6 +199,11 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
   };
 
   const handleClearChat = () => {
+    cancelPending();
+    setIsTyping(false);
+    setInputValue('');
+    nearBottomRef.current = true;
+    inputRef.current?.focus();
     const resetMsg: GimiChatMessage = {
       id: 'welcome-reset',
       role: 'assistant',
@@ -201,6 +245,7 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
       {!isOpen && (
         <button
           type="button"
+          ref={launcherRef}
           className="gimi-launcher-btn"
           onClick={() => setIsOpen(true)}
           aria-label="Abrir asistente Gimi"
@@ -221,7 +266,8 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
 
       {/* Floating Chat Modal */}
       {isOpen && (
-        <div className="gimi-modal-container" role="dialog" aria-modal="true" aria-label="Asistente virtual Gimi">
+        <div className="gimi-modal-container" role="dialog" aria-label="Asistente virtual Gimi"
+          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closeChat(); } }}>
           {/* Header */}
           <div className="gimi-modal-header">
             <div className="gimi-header-meta">
@@ -259,7 +305,7 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
               <button
                 type="button"
                 className="gimi-btn-icon gimi-close-btn"
-                onClick={() => setIsOpen(false)}
+                onClick={closeChat}
                 title="Cerrar asistente"
                 aria-label="Cerrar asistente"
               >
@@ -272,7 +318,13 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
           </div>
 
           {/* Chat Stream */}
-          <div className="gimi-messages-body" ref={chatBodyRef}>
+          <div className="gimi-messages-body" ref={chatBodyRef}
+            role="log" aria-label="Conversación con Gimi" aria-live="polite" aria-relevant="additions text"
+            onScroll={event => {
+              const body = event.currentTarget;
+              scrollPositionRef.current = body.scrollTop;
+              nearBottomRef.current = body.scrollHeight - body.scrollTop - body.clientHeight < 64;
+            }}>
             {messages.map(msg => (
               <div key={msg.id} className={`gimi-message-wrap ${msg.role === 'user' ? 'user-side' : 'bot-side'}`}>
                 <div className={`gimi-message-bubble ${msg.role === 'user' ? 'user-bubble' : 'bot-bubble'}`}>
@@ -300,15 +352,17 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
 
             {isTyping && (
               <div className="gimi-message-wrap bot-side">
-                <div className="gimi-message-bubble bot-bubble gimi-typing-indicator" aria-label="Gimi está escribiendo">
-                  <span className="gimi-dot" />
-                  <span className="gimi-dot" />
-                  <span className="gimi-dot" />
+                <div className="gimi-message-bubble bot-bubble gimi-typing-indicator" role="status" aria-label="Gimi está escribiendo">
+                  <span className="sr-only">Gimi está escribiendo</span>
+                  <span className="gimi-dot" aria-hidden="true" />
+                  <span className="gimi-dot" aria-hidden="true" />
+                  <span className="gimi-dot" aria-hidden="true" />
                 </div>
               </div>
             )}
           </div>
 
+          {speechError && <p className="gimi-speech-error" role="alert">{speechError}</p>}
           {/* Input & Action Bar */}
           <div className="gimi-input-container">
             {speechSupported && (
@@ -331,6 +385,7 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
               ref={inputRef}
               type="text"
               className="gimi-input"
+              aria-label="Mensaje para Gimi"
               placeholder={isListening ? 'Escuchando tu voz...' : 'Pregúntale a Gimi (ej. tarifas, promos, métricas)...'}
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}

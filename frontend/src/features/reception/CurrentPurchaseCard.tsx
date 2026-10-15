@@ -44,7 +44,7 @@ export function CurrentPurchaseCard({ totalMinor, paymentMethod, onPaymentMethod
           chipColor={dark ? '#26232E' : '#EFEFED'}
           activeColor="#FC6C06"
           textColor={dark ? '#D1D0D5' : '#3F3F46'}
-          activeTextColor="#FFFFFF"
+          activeTextColor="var(--color-primary-text, #080808)"
           ariaLabel="Método de cobro"
         />
       </div>

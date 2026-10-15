@@ -537,7 +537,9 @@ export function AttendanceAnalytics() {
                 {table.getHeaderGroups().map(headerGroup => (
                   <tr key={headerGroup.id}>
                     {headerGroup.headers.map(header => (
-                      <th key={header.id} scope="col">
+                      <th key={header.id} scope="col" aria-sort={header.column.getCanSort()
+                        ? header.column.getIsSorted() === 'asc' ? 'ascending' : header.column.getIsSorted() === 'desc' ? 'descending' : 'none'
+                        : undefined}>
                         {header.isPlaceholder
                           ? null
                           : flexRender(header.column.columnDef.header, header.getContext())}

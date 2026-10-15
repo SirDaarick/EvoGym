@@ -1009,6 +1009,9 @@
 
 .members-table {
   width: 100%;
+  min-width: 44rem;
+  overflow-wrap: normal;
+  word-break: normal;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
@@ -2410,3 +2413,35 @@
 
 
 
+
+/* Shared card treatment must not depend on which route's CSS loaded last. */
+.clay-card {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-panel, 20px);
+  box-shadow: var(--shadow-clay);
+  box-sizing: border-box;
+  min-width: 0;
+  transition: transform 140ms ease, box-shadow 160ms ease, border-color 140ms ease;
+}
+.clay-card:hover { border-color: var(--color-boundary); }
+
+/* Keep controls usable without hiding content outside the page viewport. */
+.page-header, .header-actions, .header-search-group { flex-wrap: wrap; }
+.page-header > *, .panel > *, .header-search-group > * { min-width: 0; }
+.panel, .clay-card { overflow-wrap: anywhere; }
+button, select, .button, .demo-controls button, .demo-controls select,
+.header-actions .theme-toggle, .sidebar-toggle { min-height: 44px; }
+button, .button, .header-actions .theme-toggle, .sidebar-toggle { min-width: 44px; }
+@media (max-width: 640px) {
+  .demo-bar { flex-wrap: wrap; gap: 12px; }
+  .header-left-spacer { display: none; }
+  .header-search-group { flex-basis: 100%; }
+  .header-actions { max-width: 100%; }
+  .page-header { align-items: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clay-card, .overview-page *, .overview-page *::before,
+  .overview-page *::after { animation: none !important; transition: none !important; }
+}

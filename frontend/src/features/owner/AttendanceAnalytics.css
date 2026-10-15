@@ -6,21 +6,6 @@
   gap: 24px;
 }
 
-/* Claymorphism Base Card */
-.clay-card {
-  position: relative;
-  background: var(--color-surface);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-panel, 20px);
-  box-shadow: var(--shadow-clay);
-  box-sizing: border-box;
-  transition: transform 140ms ease, box-shadow 160ms ease, border-color 140ms ease;
-}
-
-.clay-card:hover {
-  border-color: var(--color-boundary);
-}
-
 /* Period Filter Bar */
 .att-period-bar {
   display: flex;
@@ -504,6 +489,9 @@
 
 .att-occupants-table {
   width: 100%;
+  min-width: 40rem;
+  overflow-wrap: normal;
+  word-break: normal;
   border-collapse: collapse;
 }
 
@@ -723,4 +711,13 @@
   color: var(--color-muted);
   margin-top: auto;
   padding-top: 6px;
+}
+
+.att-period-pills { flex-wrap: wrap; max-width: 100%; }
+.att-period-pill, .att-sort-btn { min-height: 44px; }
+.att-table-head, .att-panel-head { flex-wrap: wrap; }
+.att-table-search { max-width: 100%; min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .attendance-analytics-page *, .attendance-analytics-page *::before,
+  .attendance-analytics-page *::after { animation: none !important; transition: none !important; }
 }

@@ -93,7 +93,7 @@ export function Overview() {
   }, [state.sales, isValid, period.from, period.to]);
 
   return (
-    <>
+    <div className="overview-page">
       <PageHeader
         eyebrow="PROPIETARIO · VISIÓN DEL PERIODO"
         title="Resumen del negocio"
@@ -453,6 +453,6 @@ export function Overview() {
       )}
 
       <NotebookNotice />
-    </>
+    </div>
   );
 }

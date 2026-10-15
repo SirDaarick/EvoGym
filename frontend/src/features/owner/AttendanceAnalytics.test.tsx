@@ -27,6 +27,16 @@ function mountApp(path = '/owner/attendance') {
 }
 
 describe('AttendanceAnalytics component', () => {
+  it('exposes the current table sorting direction', async () => {
+    renderAttendanceAnalytics();
+    const header = screen.getByRole('button', { name: /Socio en sala/ }).closest('th');
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    await userEvent.setup().click(screen.getByRole('button', { name: /Socio en sala/ }));
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    await userEvent.setup().click(screen.getByRole('button', { name: /Socio en sala/ }));
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+  });
+
   it('renders the page header and period selector buttons', () => {
     renderAttendanceAnalytics();
 
