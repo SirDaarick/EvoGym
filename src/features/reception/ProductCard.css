@@ -1,0 +1,9 @@
+.product-card {
+  min-width: 0;
+}
+
+.product-card .product-tile-btn:focus-visible,
+.product-card .qty-btn:focus-visible {
+  outline: 3px solid var(--color-focus, #2455a4);
+  outline-offset: 3px;
+}

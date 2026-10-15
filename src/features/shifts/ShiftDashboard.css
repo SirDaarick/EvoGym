@@ -1,0 +1,50 @@
+.shift-dashboard-grid { display: grid; grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr); gap: 1.25rem; }
+.shift-chart-grid, .shift-chart-grid section { min-width: 0; }
+.shift-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.25rem; }
+.shift-kpi { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--color-boundary); border-radius: 24px; padding: 1.35rem; color: var(--color-ink); background: var(--color-surface); box-shadow: var(--shadow-clay); }
+.shift-kpi:nth-child(1) { border-top: 3px solid var(--color-primary); }
+.shift-kpi:nth-child(2) { border-top: 3px solid #2455A4; }
+.shift-kpi:nth-child(3) { border-top: 3px solid var(--color-primary); }
+.shift-kpi h2 { margin: .7rem 0 .4rem; font-size: .95rem; }
+.shift-kpi p { margin: .35rem 0 0; line-height: 1.45; }
+.shift-kpi-value { font-size: clamp(1.65rem, 2.3vw, 2.35rem); font-weight: 800; letter-spacing: -.045em; overflow-wrap: anywhere; }
+.shift-formula { margin-top: .55rem; font-size: .8rem; }
+.shift-formula summary { width: fit-content; color: var(--color-primary); cursor: pointer; }
+.shift-formula p { margin: .35rem 0 0; color: var(--color-muted); font-size: .78rem; }
+.shift-kpi-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 14px; color: var(--color-primary); background: var(--color-surface-raised); }
+.shift-kpi:nth-child(2) .shift-kpi-icon { color: #2455A4; }
+.shift-close-panel { margin: 1rem 0; }
+.shift-method-panel h2, .shift-activity-panel h2, .shift-inventory-panel h2 { display: flex; align-items: center; gap: .55rem; }
+.shift-payment-methods { display: grid; justify-items: center; gap: .4rem; }
+.shift-donut-wrap { position: relative; width: min(100%, 15rem); min-height: 210px; }
+.shift-donut-wrap svg { overflow: visible; }
+.shift-donut-center { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; pointer-events: none; }
+.shift-donut-center strong { font-size: 2rem; line-height: 1; letter-spacing: -.05em; }
+.shift-donut-center span { color: var(--color-ink-muted, #65716a); font-size: .8rem; }
+.shift-donut-empty { width: 168px; height: 168px; margin: 21px auto; border: 17px solid var(--color-divider, #d9dfdc); border-radius: 50%; }
+.shift-payment-legend { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); width: 100%; gap: .5rem; }
+.shift-legend-item { display: flex; align-items: center; gap: .5rem; min-width: 0; padding: .6rem .7rem; border: 1px solid var(--color-divider, #d9dfdc); border-radius: 13px; color: inherit; background: var(--color-surface, #fff); cursor: pointer; text-align: left; }
+.shift-legend-item strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+.shift-legend-dot { flex: 0 0 .7rem; width: .7rem; height: .7rem; border-radius: 50%; background: #FC6C06; }
+.shift-legend-card .shift-legend-dot { background: #2455A4; }
+.shift-method-detail { min-height: 1.3em; margin: .25rem 0; font-size: .82rem; font-weight: 650; }
+.shift-transfer-pending { width: 100%; display: flex; justify-content: space-between; gap: .5rem; margin: .25rem 0 0; padding-top: .65rem; border-top: 1px solid var(--color-divider, #d9dfdc); font-size: .85rem; }
+.shift-chart-amounts { display: flex; flex-wrap: wrap; gap: .35rem .85rem; margin-top: .45rem; color: var(--color-muted); font-size: .75rem; }
+.shift-chart-empty { padding: 2rem 1rem; border: 1px dashed var(--color-boundary); border-radius: 16px; color: var(--color-muted); text-align: center; }
+.shift-table-filters { display: grid; grid-template-columns: minmax(10rem, 1.7fr) repeat(2, minmax(8rem, 1fr)); gap: .75rem; margin: 1rem 0; }
+.shift-inventory-filters { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(10rem, .6fr); gap: .75rem; margin: 1rem 0; }
+.shift-table-filters label, .shift-inventory-filters label { display: grid; gap: .35rem; font-weight: 600; }
+.shift-table-filters input, .shift-table-filters select, .shift-inventory-filters input, .shift-inventory-filters select { min-width: 0; width: 100%; }
+.shift-table-filters + .table-region th button, .shift-inventory-filters + .table-region th button { border: 0; background: none; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.shift-pagination { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+.shift-pagination span { margin-right: auto; color: var(--muted, #5d6863); }
+.shift-pagination label { display: flex; align-items: center; gap: .4rem; }
+.shift-status-label { margin-top: -.75rem; color: var(--muted, #5d6863); }
+.shift-dashboard-grid > .panel, .shift-kpis > .panel { min-width: 0; border-radius: 24px; box-shadow: var(--shadow-clay); }
+.shift-dashboard-grid > .panel { padding: clamp(1rem, 2vw, 1.5rem); }
+.page-header:has(#shift-close-trigger) .eyebrow, .page-header:has(#shift-close-trigger) .muted { display: none; }
+.shift-legend-item:focus-visible, .shift-table-filters :focus-visible, .shift-inventory-filters :focus-visible, .shift-pagination :focus-visible, .shift-table-filters th button:focus-visible, .shift-inventory-filters th button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+@media (max-width: 1440px) { .shift-dashboard-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); } }
+@media (max-width: 1024px) { .shift-dashboard-grid { grid-template-columns: minmax(0,1fr); } .shift-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } .shift-table-filters { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 390px) { .page-header:has(#shift-close-trigger) { flex-direction: column; align-items: stretch; gap: .75rem; } #shift-close-trigger { width: 100%; } .shift-kpis, .shift-dashboard-grid { grid-template-columns: minmax(0,1fr); width: 100%; } .shift-table-filters { grid-template-columns: minmax(0,1fr); } .shift-pagination { flex-wrap: wrap; } .shift-pagination span { flex-basis: 100%; } .shift-inventory-filters { grid-template-columns: minmax(0,1fr); } }
+@media (prefers-reduced-motion: reduce) { .shift-dashboard-grid *, .shift-kpis * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

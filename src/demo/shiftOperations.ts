@@ -2,6 +2,7 @@ import type { CashDenominationCount, DemoState, ShiftWindow } from '../domain/mo
 import { cashCountTotal } from './cashDenominations';
 import type { Transaction } from './operations';
 import { activeShift, type OperationResult } from './inventoryOperations';
+import { shiftDashboard } from './shiftDashboard';
 
 export function shiftSummary(state: DemoState, shiftId: string) {
   const shift = state.shifts.find(item => item.id === shiftId);
@@ -16,9 +17,10 @@ export function shiftSummary(state: DemoState, shiftId: string) {
   }));
   const cashMinor = rows.reduce((sum, row) => sum + row.cash, 0);
   const confirmedMinor = rows.reduce((sum, row) => sum + row.cash + row.card, 0);
-  return { rows, cashMinor, confirmedMinor, expectedCashMinor: (shift?.openingCashMinor ?? 0) + cashMinor };
+  const dashboard = shift ? shiftDashboard(state, shiftId) : null;
+  return { rows, cashMinor, confirmedMinor, expectedCashMinor: dashboard?.expectedCashMinor ?? (shift?.openingCashMinor ?? 0) + cashMinor };
 }
-export function closeShift(state: DemoState, countedCashMinor: number, denominations?: readonly CashDenominationCount[]): Transaction<OperationResult> {
+export function closeShift(state: DemoState, countedCashMinor: number, denominations?: readonly CashDenominationCount[], closingNotes?: string): Transaction<OperationResult> {
   const shift = activeShift(state);
   if (!shift) return { state, result: { status: 'error', message: 'No hay un turno abierto para cerrar.' } };
   if (!Number.isSafeInteger(countedCashMinor) || countedCashMinor < 0) return { state, result: { status: 'error', message: 'Revisa el efectivo contado.' } };
@@ -27,11 +29,12 @@ export function closeShift(state: DemoState, countedCashMinor: number, denominat
   return { state: { ...state, revision: state.revision + 1, shifts: state.shifts.map(item => item.id === shift.id
     ? { ...item, status: 'closed', closedAt: new Date().toISOString(), countedCashMinor, expectedCashAtCloseMinor,
       cashDifferenceMinor: countedCashMinor - expectedCashAtCloseMinor,
-      ...(denominations ? { cashDenominations: denominations.map(row => ({ ...row })) } : {}) } : item) }, result: { status: 'ok' } };
+      ...(denominations ? { cashDenominations: denominations.map(row => ({ ...row })) } : {}),
+      ...(closingNotes?.trim() ? { closingNotes: closingNotes.trim() } : {}) } : item) }, result: { status: 'ok' } };
 }
 export function openShift(state: DemoState, request: { id: string; window: ShiftWindow; openingCashMinor: number }): Transaction<OperationResult> {
   const fail = (message: string): Transaction<OperationResult> => ({ state, result: { status: 'error', message } });
-  if (state.shifts.some(item => item.status === 'open')) return fail('Ya existe un turno abierto en la demo.');
+  if (state.shifts.some(item => item.status === 'open')) return fail('Ya existe un turno abierto.');
   if (!request.id || state.shifts.some(item => item.id === request.id)) return fail('Referencia de turno no disponible.');
   if (!['06:00–14:00', '14:00–22:00'].includes(request.window) || !Number.isSafeInteger(request.openingCashMinor) || request.openingCashMinor < 0) return fail('Revisa horario y fondo inicial.');
   return { state: { ...state, revision: state.revision + 1, currentShiftId: request.id,

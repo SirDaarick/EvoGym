@@ -1,0 +1,30 @@
+.cash-tender-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border, #e4e4e7);
+  border-radius: 14px;
+  background: var(--surface-muted, #fafafa);
+}
+
+.cash-tender-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cash-tender-input-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.cash-change-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cash-tender-shortfall {
+  color: var(--color-danger, #b42318);
+  font-size: 0.875rem;
+}

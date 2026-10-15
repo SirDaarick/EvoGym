@@ -1,0 +1,7 @@
+.current-purchase-card > .cart-header-top { display: flex; flex-direction: column; gap: 12px; }
+.current-purchase-card > .cart-payment-methods-box { margin-top: 16px; }
+.current-purchase-card .assigned-member-info { display: flex; flex-direction: column; gap: 4px; }
+.current-purchase-card .assigned-member-tag { font-size: .75rem; color: var(--color-muted, #64748b); }
+.current-purchase-card--registration .registration-purchase-line { margin-block: 8px; }
+.current-purchase-card--registration .registration-purchase-line .cart-lines { padding: 0; }
+.current-purchase-card--registration .registration-actions { margin-top: 8px; }
