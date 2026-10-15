@@ -2,11 +2,11 @@
   --hue: 27;
   --sat: 69%;
   --white: hsl(0, 0%, 100%);
-  --purple-primary: rgba(132, 0, 255, 1);
-  --purple-glow: rgba(132, 0, 255, 0.2);
-  --purple-border: rgba(132, 0, 255, 0.8);
-  --border-color: #2F293A;
-  --background-dark: #120F17;
+  --orange-primary: rgba(252, 108, 6, 1);
+  --orange-glow: rgba(252, 108, 6, 0.12);
+  --orange-border: rgba(252, 108, 6, 0.4);
+  --border-color: var(--color-divider, #E5E3E0);
+  --background-dark: var(--color-surface, #FCFCFC);
 }
 
 .card-grid {
@@ -42,7 +42,8 @@
 
 .magic-bento-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(252, 108, 6, 0.10);
 }
 
 .magic-bento-card__header,
@@ -147,11 +148,11 @@
   content: '';
   position: absolute;
   inset: 0;
-  padding: 6px;
+  padding: 2px;
   background: radial-gradient(
     var(--glow-radius) circle at var(--glow-x) var(--glow-y),
-    rgba(132, 0, 255, calc(var(--glow-intensity) * 0.8)) 0%,
-    rgba(132, 0, 255, calc(var(--glow-intensity) * 0.4)) 30%,
+    rgba(var(--glow-color, 252, 108, 6), calc(var(--glow-intensity) * 0.35)) 0%,
+    rgba(var(--glow-color, 252, 108, 6), calc(var(--glow-intensity) * 0.12)) 30%,
     transparent 60%
   );
   border-radius: inherit;
@@ -174,9 +175,8 @@
 }
 
 .magic-bento-card--border-glow:hover {
-  box-shadow:
-    0 4px 20px rgba(46, 24, 78, 0.4),
-    0 0 30px var(--purple-glow);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(252, 108, 6, 0.10);
 }
 
 .particle-container {
@@ -191,15 +191,14 @@
   left: -2px;
   right: -2px;
   bottom: -2px;
-  background: rgba(132, 0, 255, 0.2);
+  background: rgba(var(--glow-color, 252, 108, 6), 0.2);
   border-radius: 50%;
   z-index: -1;
 }
 
 .particle-container:hover {
-  box-shadow:
-    0 4px 20px rgba(46, 24, 78, 0.2),
-    0 0 30px var(--purple-glow);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px rgba(252, 108, 6, 0.10);
 }
 
 /* Global spotlight styles */

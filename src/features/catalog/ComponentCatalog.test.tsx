@@ -62,11 +62,11 @@ describe('shared component catalog foundation', () => {
 
     expect(screen.getByRole('button', { name: 'Ordenar por socio' })).toBeVisible();
     expect(screen.getByRole('table', { name: 'Movimientos de ejemplo' })).toBeVisible();
-    expect(screen.getByRole('img', { name: 'Tendencia de ingresos de muestra' })).toBeVisible();
-    expect(screen.getByRole('table', { name: 'Datos de tendencia de ejemplo' })).toBeVisible();
-    expect(screen.getByRole('region', { name: 'Frecuencia de asistencia demo' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Tendencia de ingresos de referencia' })).toBeVisible();
+    expect(screen.getByRole('table', { name: 'Datos de tendencia de referencia' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Frecuencia de asistencia' })).toBeVisible();
     expect(screen.queryByText('Semana 1')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Periodo de análisis (demo)' }), { target: { value: '12' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Periodo de análisis' }), { target: { value: '12' } });
     expect(screen.getAllByText('Semana 1').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Semana 12').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Ordenar por socio' }));
@@ -106,16 +106,16 @@ describe('shared component catalog foundation', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
 
-    const chart = screen.getByRole('img', { name: 'Comparación de categorías ficticias' });
+    const chart = screen.getByRole('img', { name: 'Comparación de categorías de referencia' });
     expect(chart).toBeVisible();
     expect(chart.querySelectorAll('[fill="var(--ts-chart-1)"]').length).toBeGreaterThan(0);
     expect(chart.querySelectorAll('[fill="var(--ts-chart-2)"]').length).toBeGreaterThan(0);
-    const legend = screen.getByRole('list', { name: 'Escenarios de categorías ficticias' });
+    const legend = screen.getByRole('list', { name: 'Escenarios de categorías de referencia' });
     expect(within(legend).getByText('Escenario A')).toBeVisible();
     expect(within(legend).getByText('Escenario B')).toBeVisible();
     expect(legend.querySelector('[data-series="scenario-a"]')).toHaveStyle({ backgroundColor: 'var(--ts-chart-1)' });
     expect(legend.querySelector('[data-series="scenario-b"]')).toHaveStyle({ backgroundColor: 'var(--ts-chart-2)' });
-    const values = screen.getByRole('table', { name: 'Valores exactos de categorías ficticias' });
+    const values = screen.getByRole('table', { name: 'Valores exactos de categorías de referencia' });
     expect(values).toHaveTextContent('Bebidas');
     expect(values).toHaveTextContent('Accesorios');
     expect(values).toHaveTextContent('Botanas');
@@ -129,7 +129,7 @@ describe('shared component catalog foundation', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     fireEvent.click(screen.getByRole('tab', { name: 'Flujos de trabajo' }));
 
-    expect(screen.getByText(/muestras ficticias/i)).toBeVisible();
+    expect(screen.getByText('Datos de referencia: esta galería no representa el estado operativo ni habilita las reglas pendientes.')).toBeVisible();
     expect(screen.getAllByText(/^T\d{2}$/)).toHaveLength(18);
   });
 
@@ -137,23 +137,24 @@ describe('shared component catalog foundation', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     fireEvent.click(screen.getByRole('tab', { name: 'Flujos de trabajo' }));
 
-    expect(screen.getByRole('heading', { name: 'Socios y perfiles demo' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Socios y perfiles de referencia' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Venta y resultado de muestra' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Turno, alertas y reporte demo' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Producto e inventario demo' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Turno, alertas y reporte de referencia' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Producto e inventario de referencia' })).toBeVisible();
     expect(screen.getByText('Mara Solís · socia de ejemplo')).toBeVisible();
     expect(screen.getByText(/Agua · muestra × 2/)).toBeVisible();
   });
 
-  it('announces simulated success and error outcomes without changing demo records', () => {
+  it('announces neutral preview outcomes without changing catalog data', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     fireEvent.click(screen.getByRole('tab', { name: 'Flujos de trabajo' }));
-    const result = screen.getByRole('combobox', { name: 'Resultado de compra (demo)' });
+    const result = screen.getByRole('combobox', { name: 'Resultado de compra (vista previa)' });
 
     fireEvent.change(result, { target: { value: 'success' } });
-    expect(screen.getByRole('status', { name: 'Resultado ficticio de compra' })).toHaveTextContent('Éxito de muestra');
+    expect(screen.getByRole('status', { name: 'Resultado de compra en vista previa' })).toHaveTextContent('Vista previa de resultado: registro disponible. Ningún dato cambió.');
     fireEvent.change(result, { target: { value: 'error' } });
-    expect(screen.getByRole('alert', { name: 'Resultado ficticio de compra' })).toHaveTextContent('Error de muestra');
+    expect(screen.getByRole('alert', { name: 'Resultado de compra en vista previa' })).toHaveTextContent('Vista previa de resultado: error. Ningún dato cambió.');
+    expect(screen.getByRole('alert', { name: 'Resultado de compra en vista previa' })).not.toHaveTextContent(/demo|fictici|simulad/i);
   });
 
   it('opens a modal dialog with focus, Escape, and focus return', () => {
@@ -162,10 +163,10 @@ describe('shared component catalog foundation', () => {
     const opener = screen.getByRole('button', { name: 'Ver diálogo ilustrativo' });
     fireEvent.click(opener);
 
-    const dialog = screen.getByRole('dialog', { name: 'Detalle ilustrativo de muestra' });
-    const close = screen.getByRole('button', { name: 'Cerrar diálogo de muestra' });
+    const dialog = screen.getByRole('dialog', { name: 'Detalle ilustrativo' });
+    const close = screen.getByRole('button', { name: 'Cerrar diálogo' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(dialog).toHaveTextContent('Este diálogo solo ilustra el componente. No confirma, guarda ni cambia datos.');
+    expect(dialog).toHaveTextContent('Este diálogo solo muestra el componente. No confirma, guarda ni cambia datos.');
     expect(close).toHaveFocus();
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -173,7 +174,7 @@ describe('shared component catalog foundation', () => {
     expect(opener).toHaveFocus();
 
     fireEvent.click(opener);
-    fireEvent.click(screen.getByRole('button', { name: 'Cerrar diálogo de muestra' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar diálogo' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
   });
@@ -218,13 +219,13 @@ describe('shared component catalog foundation', () => {
       const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
       return (light + 0.05) / (dark + 0.05);
     };
-    const surface = '#1A1D23';
+    const surface = '#202020';
     const primaryLabel = readToken('--catalog-primary-label')!;
     const fieldError = readToken('--catalog-field-error')!;
     const chartOne = readToken('--catalog-chart-1')!;
     const chartTwo = readToken('--catalog-chart-2')!;
 
-    expect(contrast(primaryLabel, '#FF9A54')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(primaryLabel, '#FC6C06')).toBeGreaterThanOrEqual(4.5);
     expect(contrast(fieldError, surface)).toBeGreaterThanOrEqual(4.5);
     expect(contrast(chartOne, surface)).toBeGreaterThanOrEqual(3);
     expect(contrast(chartTwo, surface)).toBeGreaterThanOrEqual(3);
@@ -238,9 +239,13 @@ describe('shared component catalog foundation', () => {
       expect(screen.getByRole('heading', { name })).toBeVisible();
     }
     expect(screen.getByText(/NO ES AUTENTICACIÓN/i)).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Mostrar aviso de muestra' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Mostrar aviso de vista previa' })).toBeEnabled();
     fireEvent.click(screen.getByRole('tab', { name: 'Vistas de datos' }));
     expect(screen.queryByRole('heading', { name: 'CodeSlots' })).not.toBeInTheDocument();
+  });
+  it('uses neutral preview language throughout the component showcase', () => {
+    render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
+    expect(document.querySelector('.catalog-page')).not.toHaveTextContent(/demo|demostraci[oó]n|fictici|simulad/i);
   });
   it('keeps the fictional React Bits controls operable and disabled code input inert', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
@@ -253,28 +258,28 @@ describe('shared component catalog foundation', () => {
     expect(screen.getByText('Selección: Muestra B')).toBeVisible();
     fireEvent.keyDown(screen.getByRole('radio', { name: 'Resumen' }), { key: 'ArrowRight' });
     expect(screen.getByText('Vista: Detalle')).toBeVisible();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Marcar muestra como completa' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Marcar elemento como completo' }));
     expect(screen.getByText('Lista de verificación: completa')).toBeVisible();
-    fireEvent.click(screen.getByRole('switch', { name: 'Preferencia de muestra' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Preferencia visual' }));
     expect(screen.getByText('Preferencia: activada')).toBeVisible();
     fireEvent.click(screen.getAllByRole('option')[1]);
     expect(screen.getByText('Elemento seleccionado: Muestra B')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Siguiente paso de muestra' }));
-    expect(screen.getByText('Paso actual de muestra: 2')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Siguiente paso' }));
+    expect(screen.getByText('Paso actual: 2')).toBeVisible();
   });
   it('preserves sample errors and remains usable with reduced motion', () => {
     window.matchMedia = vi.fn().mockImplementation(query => ({ matches: query.includes('reduced-motion'), media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false }));
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     expect(screen.getByText('Estudio de muestra')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de muestra' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Error de muestra');
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de vista previa' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Error de vista previa');
     expect(screen.getByRole('alert')).toHaveTextContent('No se modificaron datos de la aplicación.');
     expect(stylesheet).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*?\.react-bits-gallery/);
   });
   it('does not request authentication autofill and localizes the toast close control', () => {
     render(<MemoryRouter><ComponentCatalog /></MemoryRouter>);
     expect(screen.getByRole('textbox', { name: 'Dígitos de muestra; no es autenticación' })).toHaveAttribute('autocomplete', 'off');
-    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de muestra' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar error de vista previa' }));
     expect(screen.getByRole('button', { name: 'Cerrar aviso' })).toBeInTheDocument();
   });
   it('suppresses toast Web Animations under reduced motion', () => {

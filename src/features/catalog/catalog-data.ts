@@ -29,7 +29,7 @@ export const demoTrend = [
   { period: 'Semana 12', amount: 1890 },
 ];
 
-// Artificial values demonstrate side-by-side categories, not stock or sales.
+// Illustrative values support side-by-side category comparisons, not stock or sales.
 export const demoCategories = [
   { category: 'Bebidas', scenarioA: 24, scenarioB: 18 },
   { category: 'Botanas', scenarioA: 14, scenarioB: 20 },
@@ -43,19 +43,19 @@ export const demoStock = [
 ];
 
 export const workflowDemos = [
-  { id: 'T01', title: 'Perfil y entrada', summary: 'Perfil ficticio; selección de vista, sin autenticación ni PIN.' },
+  { id: 'T01', title: 'Perfil y entrada', summary: 'Perfil de referencia; selección de vista, sin autenticación ni PIN.' },
   { id: 'T02', title: 'Perfiles de recepción', summary: 'Referencia visual de perfiles; credenciales y permisos siguen fuera de alcance.' },
   { id: 'T03', title: 'Inicio, venta y merma', summary: 'Carrito de ejemplo; no representa inventario ni cobro real.' },
   { id: 'T04', title: 'Gasto imprevisto', summary: 'Captura y revisión ilustrativas; reglas por confirmar.' },
-  { id: 'T05', title: 'Cambio de recepción', summary: 'Movimiento demostrativo; atribución y autorización no resueltas.' },
+  { id: 'T05', title: 'Cambio de recepción', summary: 'Movimiento de referencia; atribución y autorización no resueltas.' },
   { id: 'T06', title: 'Renta de guantes', summary: 'Estados visuales de préstamo y devolución, sin disponibilidad real.' },
   { id: 'T07', title: 'Porciones de suplemento', summary: 'Cantidad de muestra; unidad y conversión requieren validación.' },
   { id: 'T08', title: 'Casilleros', summary: 'Asignación ilustrativa; vigencia y estado actual no calculados.' },
-  { id: 'T09', title: 'Búsqueda de socios', summary: 'Resultados ficticios, detalle y estado vacío de referencia.' },
+  { id: 'T09', title: 'Búsqueda de socios', summary: 'Resultados de referencia, detalle y estado vacío.' },
   { id: 'T10', title: 'Alta y visita', summary: 'Formulario de muestra; no crea registros ni acceso.' },
   { id: 'T11', title: 'Perfil y asistencia', summary: 'Calendario reutilizado con visitas ilustrativas y duración desconocida.' },
   { id: 'T12', title: 'Inventario y recepción', summary: 'Stock de muestra; conteo físico y discrepancia permanecen separados.' },
-  { id: 'T13', title: 'Actividad de turno', summary: 'Tabla de movimientos demostrativos, no una bitácora actual.' },
+  { id: 'T13', title: 'Actividad de turno', summary: 'Tabla de movimientos de referencia, no una bitácora actual.' },
   { id: 'T14', title: 'Corte y entrega', summary: 'Conteo visual; libreta obligatoria y Excel siguen siendo el maestro.' },
   { id: 'T15', title: 'Estado y alertas', summary: 'Alertas de muestra; sin indicadores de negocio inventados.' },
   { id: 'T16', title: 'Movimientos señalados', summary: 'Revisión ilustrativa; no se agrega borrar ni revertir.' },

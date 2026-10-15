@@ -1,0 +1,35 @@
+.registration-checkout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); grid-template-areas: "details checkout"; gap: 24px; align-items: start; }
+.new-registration-form { display: contents; }
+.registration-main { grid-area: details; display: grid; gap: 1.6rem; min-width: 0; }
+.registration-current-purchase { grid-area: checkout; align-self: start; }
+.registration-section { display: grid; gap: .65rem; }
+.registration-section h2 { margin: 0; font-size: 1.15rem; letter-spacing: -.02em; }
+.registration-kicker { color: var(--muted, #64748b); font-size: .7rem; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+.registration-type-jelly { width: 100%; justify-content: space-between; }
+.registration-type-jelly .jelly-radio__chip { flex: 1 1 0; }
+.registration-details-card { padding: 1.2rem; display: grid; gap: 1.4rem; }
+.registration-plan-list { width: 100%; }
+.registration-plan-list .animated-list__viewport { max-height: 290px; }
+.registration-plan-list .animated-list__item { min-height: 4.1rem; }
+.registration-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem 1rem; }
+.registration-fields > :first-child { grid-column: 1 / -1; }
+.registration-field { display: grid; gap: .4rem; font-weight: 600; }
+.registration-field select { width: min(100%, 24rem); min-height: 2.75rem; padding: .55rem .7rem; border: 1px solid var(--border, #cbd5e1); border-radius: .65rem; color: inherit; background: var(--surface, #fff); }
+.registration-payment-details { display: grid; gap: .5rem; padding: 1rem; border: 1px solid var(--color-divider, #d8dee8); border-radius: .75rem; background: var(--color-canvas, #f7f8fb); font-size: .9rem; line-height: 1.5; }
+.registration-payment-details h3, .registration-payment-details p { margin: 0; }
+.registration-payment-details h3 { font-size: .95rem; }
+.registration-money-input { display: flex; align-items: center; gap: .4rem; }
+.registration-money-input input { min-height: 2.5rem; width: 100%; padding: .45rem .6rem; border: 1px solid var(--border, #cbd5e1); border-radius: .55rem; color: inherit; background: var(--surface, #fff); }
+.registration-actions { display: grid; justify-items: start; gap: .8rem; }
+.registration-actions .button { width: 100%; }
+@media (max-width: 1000px) {
+  .registration-checkout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "details" "checkout"; }
+  .registration-main { grid-row: 1; }
+  .registration-current-purchase { grid-row: 2; }
+}
+@media (max-width: 520px) {
+  .registration-type-jelly { gap: 3px; }
+  .registration-type-jelly .jelly-radio__chip { min-width: 0; }
+  .registration-fields { grid-template-columns: minmax(0, 1fr); }
+  .registration-fields > :first-child { grid-column: auto; }
+}

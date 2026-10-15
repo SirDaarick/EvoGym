@@ -38,7 +38,7 @@ export function recordMovement(state: DemoState, request: { id: string; productI
   if (!request.id || !state.products.some(item => item.id === request.productId) || !['restock', 'waste'].includes(request.kind)) return fail('Producto o movimiento no disponible.');
   if (!Number.isSafeInteger(request.quantity) || request.quantity <= 0) return fail('La cantidad debe ser un entero positivo.');
   if (request.kind === 'waste' && request.quantity > expectedStock(state, request.productId)) return fail('La merma supera la existencia esperada.');
-  if (!Number.isSafeInteger(expectedStock(state, request.productId) + request.quantity)) return fail('La cantidad excede el límite de la demo.');
+  if (!Number.isSafeInteger(expectedStock(state, request.productId) + request.quantity)) return fail('La cantidad excede el límite permitido.');
   return { state: { ...state, revision: state.revision + 1, stockMovements: [...state.stockMovements,
     { ...request, shiftId: state.currentShiftId, recordedAt: new Date().toISOString() }] }, result: { status: 'ok' } };
 }

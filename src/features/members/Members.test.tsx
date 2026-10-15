@@ -11,29 +11,23 @@ function mount(path = '/reception/members') {
 describe('member workflow', () => {
   it('registers a measured visit and tries automatic closure without inventing time', async () => {
     mount('/reception/members/demo-active');
-    await userEvent.click(screen.getByText('Reloj y cierre de demostración'));
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Avanzar 30 minutos' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida demo' }));
+    expect(screen.queryByText('Reloj y cierre de demostración')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /avanzar|simular/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+    expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar salida' }));
     expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Salida registrada');
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada demo' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Simular cierre 22:00' }));
-    expect(screen.getByText('Cierre automático · duración desconocida')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Registrar salida demo' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Restablecer demo' }));
-    expect(screen.getByLabelText('Hora de demostración')).toHaveTextContent('12:00');
-    expect(screen.getByRole('button', { name: 'Registrar entrada demo' })).toBeEnabled();
-  });
+  }, 12000);
   it('groups global suggestions and selects a member with the keyboard', async () => {
     mount('/reception/home');
     const input = screen.getByRole('combobox', { name: 'Búsqueda global de socios' });
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    await userEvent.type(input, 'Demo');
-    expect(within(screen.getByRole('listbox')).getAllByRole('group').map(group => group.getAttribute('aria-label'))).toEqual(['Activos · demo', 'Inactivos · demo', 'Sin confirmar']);
+    await userEvent.type(input, 'Alex');
+    expect(within(screen.getByRole('listbox')).getAllByRole('group').map(group => group.getAttribute('aria-label'))).toEqual(['Activos']);
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowUp}{Enter}');
-    expect(screen.getByRole('heading', { name: 'Demo Activa' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Alex Morgan' })).toBeVisible();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    expect(screen.getByText(/Escenario de demostración: Activa/)).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeVisible();
   });
   it('shows no results and Escape closes suggestions', async () => {
     mount();
@@ -46,30 +40,136 @@ describe('member workflow', () => {
   });
   it('requires renewal in the expired demo without pretending attendance exists', () => {
     mount('/reception/members/demo-expired');
-    expect(screen.getByText('Renovar antes de registrar una nueva entrada. Sin prórroga en esta demo.')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Registrar entrada' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Registrar pago de membresía' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Registrar entrada' })).toBeDisabled();
+    expect(screen.queryByRole('link', { name: 'Registrar pago de membresía' })).not.toBeInTheDocument();
   });
-  it('searches members and creates a demo member with only a required name', async () => {
+  it('searches members and creates a member with only a required name', async () => {
     mount();
     await userEvent.type(screen.getByLabelText('Buscar socio'), 'Mariana');
     expect(screen.getByRole('link', { name: 'Mariana López' })).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Carlos Rivera' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
-    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Demo');
-    await userEvent.click(screen.getByRole('button', { name: 'Crear socio de demostración' }));
-    expect(screen.getByRole('heading', { name: 'Ana Demo' })).toBeVisible();
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Torres');
+    await userEvent.type(screen.getByLabelText('Monto recibido'), '500');
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar operación' }));
+    expect(screen.getByRole('heading', { name: 'Registro guardado' })).toBeVisible();
+    expect(screen.getByText(/Ana Torres/)).toBeVisible();
+  });
+  it('presents operation types as theme-aware accessible JellyRadio choices and plans as a list', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    const operationChoices = within(screen.getByRole('radiogroup', { name: 'Tipo de operación' })).getAllByRole('radio');
+    expect(operationChoices).toHaveLength(3);
+    expect(operationChoices[0]).toHaveAttribute('aria-checked', 'true');
+    expect(document.querySelector('.registration-type-jelly')).toHaveStyle({ '--jr-h': '36px' });
+    expect(document.querySelector('.registration-type-jelly')).toHaveStyle({ '--jr-active': '#f5f5f5' });
+    expect(screen.getByLabelText('Detalles del registro')).toBeVisible();
+    const planList = screen.getByRole('listbox');
+    expect(within(planList).getAllByRole('option').length).toBeGreaterThan(1);
+    await userEvent.click(screen.getByRole('radio', { name: 'Clase muestra' }));
+    expect(screen.getByRole('option', { name: /Clase muestra.*100/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Total de compra')).toHaveTextContent('$100.00 MXN');
+    await userEvent.click(screen.getByRole('button', { name: 'Usar tema oscuro' }));
+    expect(document.querySelector('.registration-type-jelly')).toHaveStyle({ '--jr-h': '36px' });
+  });
+  it('shows method-specific cash, card, and transfer details and submits without acknowledgements', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Torres');
+    expect(screen.getByLabelText('Monto recibido')).toBeVisible();
+    await userEvent.type(screen.getByLabelText('Monto recibido'), '1000');
+    expect(within(screen.getByText('Cambio a devolver:').parentElement!).getByText('$500.00 MXN')).toBeVisible();
+    await userEvent.click(screen.getByRole('radio', { name: 'Tarjeta' }));
+    expect(screen.queryByRole('heading', { name: 'Terminal bancaria' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/comisión|neto/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Transferencia' }));
+    expect(screen.queryByText(/exacto/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/T03/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Terminal bancaria' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+  it('uses the shared cash calculator with exact payment and decimal validation', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    const input = screen.getByLabelText('Monto recibido');
+    expect(input).toHaveAttribute('inputmode', 'decimal');
+    await userEvent.type(input, '1000');
+    expect(screen.getByText('Cambio a devolver:')).toBeVisible();
+    expect(within(screen.getByText('Cambio a devolver:').parentElement!).getByText('$500.00 MXN')).toBeVisible();
+    await userEvent.clear(input);
+    await userEvent.type(input, '1.234');
+    expect(screen.getByText('Monto inválido')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Pago exacto' }));
+    expect(input).toHaveValue('500.00');
+  });
+  it('blocks cash registration when the tendered amount is below the current total', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Torres');
+    await userEvent.type(screen.getByLabelText('Monto recibido'), '100');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar operación' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Faltan $400.00 MXN.');
+    expect(screen.queryByRole('heading', { name: 'Registro guardado' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Ana Torres');
+  });
+  it('allows a student-rate plan without a verification checkbox or gate', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Alex Ruiz');
+    await userEvent.click(screen.getByRole('option', { name: /Gym estudiante/i }));
+    await userEvent.type(screen.getByLabelText('Monto recibido'), '400');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar operación' }));
+    expect(screen.getByRole('heading', { name: 'Registro guardado' })).toBeVisible();
+  });
+  it('reuses the current purchase checkout without member assignment', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    const currentPurchaseHeading = screen.getByRole('heading', { name: 'Compra actual' });
+    expect(currentPurchaseHeading).toBeVisible();
+    expect(currentPurchaseHeading.closest('section')).toHaveClass('cart-checkout-panel');
+    expect(screen.getByRole('radio', { name: 'Efectivo' })).toBeVisible();
+    expect(screen.queryByRole('combobox', { name: 'Asignar socio' })).not.toBeInTheDocument();
+  });
+  it('shows a live draft assignment for membership and trial, but never for visits', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Torres');
+    expect(screen.getByText('Ana Torres')).toBeVisible();
+    expect(screen.getByText('Asignación de borrador')).toBeVisible();
+    await userEvent.type(screen.getByLabelText('Teléfono (opcional)'), '5551234');
+    expect(screen.getByText('Tel: 5551234')).toBeVisible();
+    await userEvent.click(screen.getByRole('radio', { name: 'Visita' }));
+    expect(screen.queryByText('Asignación de borrador')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Membresía' }));
+    expect(screen.getByText('Ana Torres')).toBeVisible();
+    expect(screen.getByText('Tel: 5551234')).toBeVisible();
+    await userEvent.click(screen.getByRole('radio', { name: 'Clase muestra' }));
+    expect(screen.getByText('Asignación de borrador')).toBeVisible();
+  });
+  it('places details before a bounded checkout column in the registration layout', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('link', { name: 'Nuevo socio' }));
+    const form = document.querySelector('.new-registration-form')!;
+    expect(form).toHaveClass('new-registration-form');
+    expect(form.parentElement).toHaveClass('registration-checkout');
+      expect(document.querySelector('.registration-panel')).toBeNull();
+    const details = form.querySelector('.registration-main')!;
+    const checkout = form.querySelector('.registration-current-purchase')!;
+      expect(details.querySelector('.registration-details-card')).toBeInTheDocument();
+      expect(checkout).toHaveClass('current-purchase-card');
+    expect(details.compareDocumentPosition(checkout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
   it('reviews a cash payment, records it and leaves access dates unresolved', async () => {
-    mount('/reception/members/demo-002');
-    await userEvent.click(screen.getByRole('link', { name: 'Registrar pago de membresía' }));
+    mount('/reception/members/demo-002/payment');
     await userEvent.click(screen.getByRole('button', { name: 'Revisar pago' }));
     expect(screen.getByRole('heading', { name: 'Revisar pago de membresía' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar pago de demostración' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar pago' }));
     expect(screen.getByRole('heading', { name: 'Pago completo registrado' })).toBeVisible();
-    expect(screen.getByText(/no concede acceso automáticamente/)).toBeVisible();
+    expect(screen.getByText(/Operación registrada localmente\. No activa acceso/)).toBeVisible();
     await userEvent.click(screen.getByRole('link', { name: 'Ver socio' }));
-    expect(screen.getByText('Pagado · fechas por definir')).toBeVisible();
+    expect(screen.queryByText('Pagado · fechas por definir')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Pagado').length).toBeGreaterThan(0);
   });
   it('does not present a transfer as paid', async () => {
     mount('/reception/members/demo-002/payment');

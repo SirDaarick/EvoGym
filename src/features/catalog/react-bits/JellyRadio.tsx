@@ -175,19 +175,32 @@ const JellyRadio: React.FC<JellyRadioProps> = ({
     widths.current = chipRefs.current.map(el => el?.offsetWidth ?? 0);
     const chipH = chipRefs.current[0]?.offsetHeight ?? 0;
     const maxW = Math.max(0, ...widths.current);
-    group.style.setProperty('--jr-pad-x', `${Math.ceil((maxW * swell * 1.3) / 2 + barge) + 2}px`);
-    group.style.setProperty('--jr-pad-y', `${Math.ceil((chipH * swell) / 2) + 2}px`);
+    const padX = `${Math.ceil((maxW * swell * 1.3) / 2 + barge) + 2}px`;
+    const padY = `${Math.ceil((chipH * swell) / 2) + 2}px`;
+    if (group.style.getPropertyValue('--jr-pad-x') !== padX) {
+      group.style.setProperty('--jr-pad-x', padX);
+    }
+    if (group.style.getPropertyValue('--jr-pad-y') !== padY) {
+      group.style.setProperty('--jr-pad-y', padY);
+    }
   };
   useLayoutEffect(() => {
+    let rafId: number | null = null;
     const settle = () => {
       measure();
       apply(applied.current, true);
     };
     settle();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(settle);
-    if (groupRef.current) observer?.observe(groupRef.current);
-    document.fonts?.ready.then(settle);
-    return () => observer?.disconnect();
+    const handleResize = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(settle);
+    };
+    window.addEventListener('resize', handleResize);
+    document.fonts?.ready?.then(settle);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', handleResize);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemsKey, size, gap, swell, barge, shrink]);
   useEffect(() => {

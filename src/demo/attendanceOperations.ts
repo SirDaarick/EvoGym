@@ -34,21 +34,21 @@ function reconciledVisits(state: DemoState, now: string) {
   });
 }
 export function advanceAttendanceClock(state: DemoState, now: string): Transaction<OperationResult> {
-  if (!validClock(state, now)) return fail(state, 'La hora demo no puede retroceder ni ser inválida.');
+  if (!validClock(state, now)) return fail(state, 'La hora no puede retroceder ni ser inválida.');
   return { state: { ...state, demoClock: new Date(now).toISOString(), revision: state.revision + 1,
     attendance: reconciledVisits(state, now) }, result: { status: 'ok' } };
 }
 export function enterMember(state: DemoState, request: { id: string; memberId: string; now: string }): Transaction<OperationResult> {
-  if (!validClock(state, request.now)) return fail(state, 'Revisa la hora de demostración.');
+  if (!validClock(state, request.now)) return fail(state, 'Revisa la hora.');
   const member = state.members.find(item => item.id === request.memberId);
-  if (!member || memberStatus(member).status !== 'active') return fail(state, 'Renueva la membresía o elige un escenario activo de demostración.');
-  if (member.demoScenario === 'expiry-today' && !state.attendancePolicy.allowExpiryDay) return fail(state, 'Q-01: entrada en vencimiento desactivada para esta prueba.');
+  if (!member || memberStatus(member).status !== 'active') return fail(state, 'Renueva la membresía antes de registrar la entrada.');
+  if (member.demoScenario === 'expiry-today' && !state.attendancePolicy.allowExpiryDay) return fail(state, 'Q-01: entrada en vencimiento desactivada.');
   if (!request.id.trim() || state.attendance.some(visit => visit.id === request.id)) return fail(state, 'Referencia de asistencia no disponible.');
   const day = attendanceDay(request.now)!;
-  if (Date.parse(request.now) >= Date.parse(attendanceClosing(request.now)!)) return fail(state, 'Q-09: esta prueba no registra entradas después del cierre.');
+  if (Date.parse(request.now) >= Date.parse(attendanceClosing(request.now)!)) return fail(state, 'Q-09: no se registran entradas después del cierre.');
   const visits = reconciledVisits(state, request.now);
   if (visits.some(visit => visit.memberId === member.id && openAttendance(visit))) return fail(state, 'El socio ya tiene una entrada abierta.');
-  if (!state.attendancePolicy.allowRepeatVisits && visits.some(visit => visit.memberId === member.id && attendanceDay(visit.observedCheckIn) === day)) return fail(state, 'Q-03: visitas repetidas desactivadas para esta prueba.');
+  if (!state.attendancePolicy.allowRepeatVisits && visits.some(visit => visit.memberId === member.id && attendanceDay(visit.observedCheckIn) === day)) return fail(state, 'Q-03: las visitas repetidas están desactivadas.');
   return { state: { ...state, demoClock: new Date(request.now).toISOString(), revision: state.revision + 1,
     attendance: [...visits, { id: request.id, memberId: member.id, observedCheckIn: new Date(request.now).toISOString(), observedCheckOut: null, autoClosedAt: null }] }, result: { status: 'ok' } };
 }

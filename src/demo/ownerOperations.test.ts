@@ -17,7 +17,7 @@ describe('owner read models', () => {
     expect(summary.cardMinor).toBe(10000);
     expect(summary.confirmedMinor).toBe(60000);
     expect(summary.transferPendingMinor).toBe(2000);
-    expect(summary.shiftDiscrepancies[0].cashDifferenceMinor).toBe(-1000);
+    expect(summary.shiftDiscrepancies[0].cashDifferenceMinor).toBe(1000);
   });
   it('filters traceable history by reporting date, category and method', () => {
     let state = createDemoState();

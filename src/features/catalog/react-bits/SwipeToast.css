@@ -1,7 +1,7 @@
 .swipe-toast {
-  --st-bg: #27272a;
-  --st-ink: #f5f5f5;
-  --st-fuse: #f5a524;
+  --st-bg: var(--color-surface);
+  --st-ink: var(--color-ink);
+  --st-fuse: var(--color-primary);
   --st-fuse-h: 2px;
   --st-w: 356px;
   --st-radius: 12px;
@@ -114,9 +114,10 @@
   border-radius: var(--st-radius);
   overflow: hidden;
   background: var(--st-bg);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-divider);
+  color: var(--st-ink);
+  box-shadow: var(--shadow-clay);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
   cursor: grab;
   outline: none;
   touch-action: none;
@@ -124,6 +125,11 @@
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.swipe-toast__card:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 14px rgba(252, 108, 6, 0.12);
 }
 
 .swipe-toast__card[data-swiping] {
@@ -156,12 +162,13 @@
 }
 
 .swipe-toast__title {
+  color: var(--st-ink);
   font-weight: 500;
   line-height: 1.5;
 }
 
 .swipe-toast__desc {
-  color: color-mix(in srgb, var(--st-ink) 66%, transparent);
+  color: var(--color-muted);
   font-weight: 400;
   line-height: 1.4;
 }
@@ -185,10 +192,14 @@
   height: 24px;
   padding: 0 8px;
   border-radius: 5px;
-  background: var(--st-ink);
-  color: var(--st-bg);
+  background: var(--color-primary);
+  color: var(--color-primary-text, #080808);
   font-size: 12px;
   font-weight: 500;
+}
+
+.swipe-toast__action:hover {
+  background: var(--color-primary-hover);
 }
 
 .swipe-toast__close {
@@ -199,7 +210,13 @@
   height: 24px;
   border-radius: 5px;
   background: transparent;
-  color: inherit;
+  color: var(--color-muted);
+}
+
+.swipe-toast__close:hover {
+  color: var(--color-ink);
+  background: var(--color-soft);
+  border-color: var(--color-divider);
 }
 
 .swipe-toast__close::before {
@@ -215,11 +232,13 @@
 
 @media (hover: hover) and (pointer: fine) {
   .swipe-toast__action:hover {
-    opacity: 0.88;
+    background: var(--color-primary-hover);
   }
 
   .swipe-toast__close:hover {
-    background: color-mix(in srgb, var(--st-ink) 10%, transparent);
+    color: var(--color-ink);
+    background: var(--color-soft);
+    border-color: var(--color-divider);
   }
 }
 
