@@ -2414,6 +2414,9 @@
 
 
 
+/* Reserve proportionate space while a route loads without sizing every panel. */
+.route-loading { min-height: clamp(12rem, 40dvh, 24rem); }
+
 /* Shared card treatment must not depend on which route's CSS loaded last. */
 .clay-card {
   position: relative;

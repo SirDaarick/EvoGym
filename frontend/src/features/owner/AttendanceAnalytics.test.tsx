@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -16,14 +16,15 @@ function renderAttendanceAnalytics() {
   );
 }
 
-function mountApp(path = '/owner/attendance') {
-  return render(
+async function mountApp(path = '/owner/attendance') {
+  render(
     <MemoryRouter initialEntries={[path]}>
       <DemoProvider>
         <App />
       </DemoProvider>
     </MemoryRouter>
   );
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 
 describe('AttendanceAnalytics component', () => {
@@ -37,7 +38,7 @@ describe('AttendanceAnalytics component', () => {
     expect(header).toHaveAttribute('aria-sort', 'descending');
   });
 
-  it('renders the page header and period selector buttons', () => {
+  it('renders the page header and period selector buttons', async () => {
     renderAttendanceAnalytics();
 
     expect(
@@ -69,7 +70,7 @@ describe('AttendanceAnalytics component', () => {
     expect(weekBtn).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('renders all Bento KPI cards with capacity and traffic metrics', () => {
+  it('renders all Bento KPI cards with capacity and traffic metrics', async () => {
     renderAttendanceAnalytics();
 
     // KPI Titles
@@ -88,7 +89,7 @@ describe('AttendanceAnalytics component', () => {
     expect(screen.getByText(/Estándar fitness 60–75 min/)).toBeInTheDocument();
   });
 
-  it('renders TanStack Charts containers for hourly and weekly traffic', () => {
+  it('renders TanStack Charts containers for hourly and weekly traffic', async () => {
     renderAttendanceAnalytics();
 
     expect(
@@ -104,7 +105,7 @@ describe('AttendanceAnalytics component', () => {
     expect(screen.getByText(/Día estelar/)).toBeInTheDocument();
   });
 
-  it('renders operational time slots (Matutino, Vespertino, Nocturno)', () => {
+  it('renders operational time slots (Matutino, Vespertino, Nocturno)', async () => {
     renderAttendanceAnalytics();
 
     expect(
@@ -150,7 +151,7 @@ describe('AttendanceAnalytics component', () => {
     expect(screen.getByText('No se encontraron socios que coincidan con la búsqueda.')).toBeInTheDocument();
   });
 
-  it('renders strategic recommendations panel for the gym owner', () => {
+  it('renders strategic recommendations panel for the gym owner', async () => {
     renderAttendanceAnalytics();
 
     expect(
@@ -166,8 +167,8 @@ describe('AttendanceAnalytics component', () => {
     expect(screen.getAllByText('Acción recomendada:').length).toBeGreaterThan(0);
   });
 
-  it('navigates to /owner/attendance within App shell and highlights navigation item', () => {
-    mountApp('/owner/attendance');
+  it('navigates to /owner/attendance within App shell and highlights navigation item', async () => {
+    await mountApp('/owner/attendance');
 
     expect(
       screen.getByRole('heading', { name: 'Afluencia y capacidad del gimnasio' })

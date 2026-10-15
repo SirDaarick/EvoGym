@@ -20,8 +20,9 @@ afterEach(() => {
   HTMLDialogElement.prototype.close = originalClose;
 });
 
-function mount(path: string) {
+async function mount(path: string) {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 async function openCloseForm() {
   await userEvent.click(screen.getByRole('button', { name: 'Cerrar turno' }));
@@ -30,13 +31,13 @@ async function openCloseForm() {
 }
 describe('operational demo screens', () => {
   it('opens the native dialog and exposes an expandable expected-cash breakdown', async () => {
-    mount('/reception/shifts');
+    await mount('/reception/shifts');
     await openCloseForm();
     expect(screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' })).toHaveAttribute('open');
     expect(screen.getByText('Desglose del efectivo esperado')).toBeInTheDocument();
   });
   it('rejects fractional quantities and keeps manual total separate', async () => {
-    mount('/reception/shifts');
+    await mount('/reception/shifts');
     await openCloseForm();
     await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
     await userEvent.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
@@ -51,7 +52,7 @@ describe('operational demo screens', () => {
     expect(screen.getByRole('region', { name: 'Resumen de revisión' })).toHaveTextContent('$500.00');
   });
   it('counts denominations, invalidates edits and preserves their close snapshot', async () => {
-    mount('/reception/shifts');
+    await mount('/reception/shifts');
     await openCloseForm();
     await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'denominations');
     expect(screen.queryByLabelText('Efectivo contado (MXN)')).not.toBeInTheDocument();
@@ -82,19 +83,19 @@ describe('operational demo screens', () => {
     expect(screen.getByText('Turno abierto')).toBeVisible();
   });
   it('renders legacy total-only cash records without fabricated quantities', async () => {
-    mount('/owner/shifts');
+    await mount('/owner/shifts');
     await userEvent.selectOptions(screen.getByLabelText('Turno a consultar'), 'demo-shift-previous');
     expect(screen.getByText('Sin desglose por denominación registrado.')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Conteo registrado' })).not.toBeInTheDocument();
   });
   it('reviews and confirms an illustrative product sale', async () => {
-    mount('/reception/sales');
+    await mount('/reception/sales');
     await userEvent.click(screen.getByRole('button', { name: 'Revisar venta' }));
     await userEvent.click(screen.getByRole('button', { name: 'Registrar venta' }));
     expect(screen.getByRole('heading', { name: 'Venta registrada' })).toBeVisible();
   });
   it('closes the current shift and opens another with a separate float', async () => {
-    mount('/reception/shifts');
+    await mount('/reception/shifts');
     await openCloseForm();
     await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
     await userEvent.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
@@ -105,17 +106,17 @@ describe('operational demo screens', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Abrir turno' }));
     expect(screen.getByText('Turno abierto')).toBeVisible();
   });
-  it('shows all shift selection only to the owner view', () => {
-    mount('/owner/shifts');
+  it('shows all shift selection only to the owner view', async () => {
+    await mount('/owner/shifts');
     expect(screen.getByLabelText('Turno a consultar')).toBeVisible();
   });
-  it('does not expose old shift selection in reception', () => {
-    mount('/reception/shifts');
+  it('does not expose old shift selection in reception', async () => {
+    await mount('/reception/shifts');
     expect(screen.queryByLabelText('Turno a consultar')).not.toBeInTheDocument();
     expect(screen.queryByText('demo-shift-previous')).not.toBeInTheDocument();
   });
   it('keeps a visit transfer pending rather than showing a confirmed sale', async () => {
-    mount('/reception/sales');
+    await mount('/reception/sales');
     await userEvent.selectOptions(screen.getByLabelText('Tipo de venta'), 'visit');
     await userEvent.selectOptions(screen.getByLabelText('Área de visita'), 'COMBO');
     await userEvent.selectOptions(screen.getByLabelText('Método de venta'), 'transfer');
@@ -125,7 +126,7 @@ describe('operational demo screens', () => {
     expect(screen.getByText(/Transferencia registrada pendiente/)).toBeVisible();
   });
   it('keeps the inventory receipt preview non-persistent', async () => {
-    mount('/reception/inventory');
+    await mount('/reception/inventory');
     expect(screen.getByRole('heading', { name: 'Recepción de inventario' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Confirmar recepción' })).toBeDisabled();
     expect(screen.getByText(/No se guardará ningún movimiento/)).toBeVisible();

@@ -7,7 +7,7 @@ import { useDemo } from '../../demo/DemoProvider';
 import { collectMembership, type PaymentResult } from '../../demo/operations';
 import { useActivePlans } from '../../demo/plans';
 import { Button, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
-import { NotebookNotice, paymentMethods } from '../members/Members';
+import { NotebookNotice, paymentMethods } from '../../shared/operationPresentation';
 
 export function MembershipPayment({ role }: { role: Role }) {
   const { memberId } = useParams();

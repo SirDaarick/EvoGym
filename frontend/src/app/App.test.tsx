@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -11,15 +11,26 @@ function DemoProbe() {
   return <><output aria-label="Socios de prueba">{state.members.length}</output>
     <button onClick={() => update(current => ({ ...current, members: [] }))}>Vaciar prueba</button></>;
 }
-function mount(path = '/owner/overview') {
+async function mount(path = '/owner/overview') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /><Location /><DemoProbe /></DemoProvider></MemoryRouter>);
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 
 describe('application foundation', () => {
+  it('preserves provider data and shell controls across lazy route changes', async () => {
+    await mount('/owner/overview');
+    await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Historial' }));
+    expect(await screen.findByRole('heading', { name: 'Historial de movimientos' }, { timeout: 10000 })).toBeVisible();
+    expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('0');
+    expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Abrir asistente Gimi' })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
+  });
   it('connects profile, cart, keyboard member lookup, measured attendance and denomination close', async () => {
-    mount('/');
+    await mount('/');
     await userEvent.click(screen.getByRole('button', { name: /Mikel/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Agua' }, { timeout: 10000 }));
     await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Barra' }));
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
     await userEvent.click(screen.getByRole('button', { name: 'Registrar cobro' }));
@@ -27,13 +38,13 @@ describe('application foundation', () => {
     expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
     await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex Morgan');
     await userEvent.keyboard('{ArrowDown}{Enter}');
-    expect(screen.getByRole('heading', { name: 'Alex Morgan' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Alex Morgan' }, { timeout: 10000 })).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
     expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
     await userEvent.click(screen.getByRole('button', { name: 'Registrar salida' }));
     expect(screen.getByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Salida registrada.');
     await userEvent.click(screen.getByRole('link', { name: /^Turno/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Cerrar turno' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cerrar turno' }, { timeout: 10000 }));
     await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'denominations');
     for (const value of ['$500.00', '$50.00', '$5.00']) await userEvent.type(screen.getByLabelText(`${value === '$5.00' ? 'Moneda' : 'Billete'} ${value} · cantidad`), '1');
     expect(screen.getByRole('region', { name: 'Resumen del conteo' })).toHaveTextContent('$555.00');
@@ -44,7 +55,7 @@ describe('application foundation', () => {
     expect(screen.getByRole('region', { name: 'Conteo registrado' })).toHaveTextContent('$500.00');
   }, 15000);
   it('clears stale suggestions when resetting demo or switching profile', async () => {
-    mount('/reception/home');
+    await mount('/reception/home');
     await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex');
     expect(screen.getByRole('listbox')).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
@@ -56,7 +67,7 @@ describe('application foundation', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
   it('offers staff profiles at root with Admin and Reception grid and verifies PIN or direct entry', async () => {
-    mount('/');
+    await mount('/');
     expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeVisible();
     expect(screen.getByRole('button', { name: /Admin/ })).toBeVisible();
     expect(screen.getAllByRole('button', { name: /Recepción/ })).toHaveLength(9);
@@ -71,8 +82,8 @@ describe('application foundation', () => {
     await userEvent.type(screen.getByRole('textbox', { name: /PIN/i }), '1234');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/overview');
   });
-  it('labels local data and owner navigation', () => {
-    mount();
+  it('labels local data and owner navigation', async () => {
+    await mount();
     expect(screen.getByText('Datos locales')).toBeVisible();
     expect(screen.queryByText(/simula vistas|fechas de muestra/i)).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
@@ -80,13 +91,13 @@ describe('application foundation', () => {
     expect(screen.getByRole('heading', { name: 'Resumen del negocio' })).toBeVisible();
   });
   it('opens new-member registration directly from the global header for the active role', async () => {
-    mount('/reception/home');
+    await mount('/reception/home');
     await userEvent.click(screen.getByRole('link', { name: 'Agregar socio' }));
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/members/new');
-    expect(screen.getByRole('heading', { name: 'Nuevo socio' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Nuevo socio' }, { timeout: 10000 })).toBeVisible();
   });
   it('uses neutral operational guidance for local membership payment records', async () => {
-    mount('/owner/members/demo-001/payment');
+    await mount('/owner/members/demo-001/payment');
     await userEvent.click(screen.getByRole('button', { name: 'Revisar pago' }));
     await userEvent.click(screen.getByRole('button', { name: 'Registrar pago' }));
     const status = screen.getByRole('status', { name: 'Resultado del pago' });
@@ -94,17 +105,19 @@ describe('application foundation', () => {
     expect(status).not.toHaveTextContent(/simulad[oa]/i);
   });
   it('uses neutral operational guidance for local sales records', async () => {
-    mount('/owner/sales');
+    await mount('/owner/sales');
     await userEvent.click(screen.getByRole('button', { name: 'Revisar venta' }));
     await userEvent.click(screen.getByRole('button', { name: 'Registrar venta' }));
     const status = screen.getByText('Venta registrada correctamente en el sistema.');
     expect(status).toBeVisible();
   });
-  it('keeps compact navigation identifiable and exposes the unaltered brand asset', () => {
-    mount();
+  it('keeps compact navigation identifiable and exposes the unaltered brand asset', async () => {
+    await mount();
     const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
     expect(sidebar).toHaveAttribute('data-expanded', 'false');
-    expect(screen.getByRole('img', { name: 'EvoGym' })).toHaveAttribute('src', expect.stringContaining('Logo_Evo.png'));
+    expect(screen.getByRole('img', { name: 'EvoGym' })).toHaveAttribute('src', expect.stringContaining('evogym-logo-128.webp'));
+    expect(screen.getByRole('img', { name: 'EvoGym' })).toHaveAttribute('width', '128');
+    expect(screen.getByRole('img', { name: 'EvoGym' })).toHaveAttribute('height', '124');
     const overview = screen.getByRole('link', { name: 'Resumen' });
     expect(overview).toHaveAttribute('aria-current', 'page');
     expect(overview).toHaveAttribute('title', 'Resumen');
@@ -112,7 +125,7 @@ describe('application foundation', () => {
     expect(screen.getByRole('link', { name: 'Historial' }).querySelector('svg')).toBeInTheDocument();
   });
   it('navigates from a member detail through the sidebar without getting stuck', async () => {
-    mount('/owner/members/demo-001');
+    await mount('/owner/members/demo-001');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/members/demo-001');
 
     await userEvent.click(screen.getByRole('link', { name: 'Inventario' }));
@@ -121,7 +134,7 @@ describe('application foundation', () => {
     expect(screen.getByRole('link', { name: 'Inventario' })).toHaveAttribute('aria-current', 'page');
   });
   it('expands on pointer or keyboard focus and keeps focus inside visible', async () => {
-    mount();
+    await mount();
     const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
     await userEvent.hover(sidebar);
     expect(sidebar).toHaveAttribute('data-expanded', 'true');
@@ -138,7 +151,7 @@ describe('application foundation', () => {
   });
   it('collapses after pointer clicks while preserving keyboard focus and pinning', async () => {
     const user = userEvent.setup();
-    mount();
+    await mount();
     const sidebar = screen.getByRole('complementary', { name: 'Barra lateral' });
     const overview = screen.getByRole('link', { name: 'Resumen' });
 
@@ -172,39 +185,39 @@ describe('application foundation', () => {
     expect(sidebar).toHaveAttribute('data-expanded', 'false');
   });
   it('switches role, route and visible navigation without claiming authentication', async () => {
-    mount();
+    await mount();
     await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
     expect(screen.getByText(/autenticación y los permisos no están implementados/)).toBeVisible();
   });
   it('resets changed sample data and announces the result', async () => {
-    mount();
+    await mount();
     await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('0');
     await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('12');
     expect(screen.getByRole('status', { name: 'Resultado local' })).toHaveTextContent('Datos locales restablecidos');
   });
-  it('redirects an unavailable reception route to its primary task', () => {
-    mount('/reception/history');
+  it('redirects an unavailable reception route to its primary task', async () => {
+    await mount('/reception/history');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Rol de acceso')).toHaveValue('RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/home');
   });
   it('preserves a shared task when switching role', async () => {
-    mount('/owner/shifts');
+    await mount('/owner/shifts');
     await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'RECEPTION');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/shifts');
   });
   it('keeps the reception view when opening the component catalog', async () => {
-    mount('/reception/members');
+    await mount('/reception/members');
     await userEvent.click(screen.getByRole('link', { name: 'Sistema de componentes' }));
     expect(screen.getByLabelText('Rol de acceso')).toHaveValue('RECEPTION');
     expect(screen.queryByRole('link', { name: /Historial/ })).not.toBeInTheDocument();
   });
-  it('renders the shared component catalog', () => {
-    mount('/components');
+  it('renders the shared component catalog', async () => {
+    await mount('/components');
     expect(screen.getByRole('heading', { name: 'Componentes compartidos' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Acción pendiente' })).toBeDisabled();
   });

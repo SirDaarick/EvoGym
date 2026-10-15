@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +32,7 @@ function RouteProbe() {
 describe('member detail presentation', () => {
   it('navigates back from a member detail route to the members list', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><><App /><RouteProbe /></></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 
     await userEvent.click(screen.getByRole('link', { name: 'Volver a socios' }));
 
@@ -40,6 +41,7 @@ describe('member detail presentation', () => {
 
   it('opens and closes the note editor from the notes section', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
     await userEvent.click(screen.getByRole('button', { name: '+ Agregar nota' }));
     expect(screen.getByLabelText('Nueva nota')).toBeVisible();
     const noteForm = screen.getByLabelText('Nueva nota').closest('form')!;
@@ -47,8 +49,9 @@ describe('member detail presentation', () => {
     expect(screen.queryByLabelText('Nueva nota')).not.toBeInTheDocument();
   });
 
-  it('places membership and rentals down the left, attendance and notes down the right, then purchases full width', () => {
+  it('places membership and rentals down the left, attendance and notes down the right, then purchases full width', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
     const layout = screen.getByRole('main').querySelector('.member-detail-sections') as HTMLElement;
     const left = layout.querySelector('.member-detail-left-column') as HTMLElement;
     const right = layout.querySelector('.member-detail-right-column') as HTMLElement;
@@ -59,8 +62,9 @@ describe('member detail presentation', () => {
     expect(purchases).toHaveClass('member-detail-purchases');
   });
 
-  it('shows the explicitly labeled sample note for the seeded member immediately', () => {
+  it('shows the explicitly labeled sample note for the seeded member immediately', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
     expect(screen.getByText('Nota de muestra — Información para mostrar el historial de notas.')).toBeVisible();
     expect(screen.getByText(/Valeria M./)).toBeVisible();
     expect(screen.getByText(/8 oct 2026/)).toBeVisible();
@@ -68,6 +72,7 @@ describe('member detail presentation', () => {
 
   it('keeps membership first and purchase history last while preserving the remaining wireframe sections', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-active']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
     const main = screen.getByRole('main');
     expect(within(main).getByRole('heading', { level: 1, name: 'Alex Morgan' })).toBeVisible();
     expect(within(main).getByRole('button', { name: 'Registrar entrada' })).toBeVisible();

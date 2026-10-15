@@ -25,7 +25,7 @@ import { getStoredConversations } from '../gimi/gimiStore';
 import type { DemoState } from '../../domain/models';
 import type { GimiConversation } from '../../domain/gimi';
 import { Badge, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
-import { NotebookNotice } from '../members/Members';
+import { NotebookNotice } from '../../shared/operationPresentation';
 import { PeriodFields } from './PeriodFields';
 import './Overview.css';
 

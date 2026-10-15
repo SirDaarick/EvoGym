@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -16,18 +16,19 @@ function renderAlertCenter() {
   );
 }
 
-function mountApp(path = '/owner/alerts') {
-  return render(
+async function mountApp(path = '/owner/alerts') {
+  render(
     <MemoryRouter initialEntries={[path]}>
       <DemoProvider>
         <App />
       </DemoProvider>
     </MemoryRouter>
   );
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 
 describe('AlertCenter component', () => {
-  it('renders the page header and period selector buttons', () => {
+  it('renders the page header and period selector buttons', async () => {
     renderAlertCenter();
 
     expect(
@@ -47,7 +48,7 @@ describe('AlertCenter component', () => {
     );
   });
 
-  it('renders the 3 top KPI summary panels with direct actionable context', () => {
+  it('renders the 3 top KPI summary panels with direct actionable context', async () => {
     renderAlertCenter();
 
     expect(screen.getByText('Alertas activas')).toBeInTheDocument();
@@ -65,7 +66,7 @@ describe('AlertCenter component', () => {
     );
   });
 
-  it('displays category distribution donut chart and legend', () => {
+  it('displays category distribution donut chart and legend', async () => {
     renderAlertCenter();
 
     expect(
@@ -75,7 +76,7 @@ describe('AlertCenter component', () => {
     expect(screen.getByText('Gasto')).toBeInTheDocument();
   });
 
-  it('renders the interactive table with correct column headers and seed data rows', () => {
+  it('renders the interactive table with correct column headers and seed data rows', async () => {
     renderAlertCenter();
 
     expect(screen.getByRole('region', { name: 'Centro de alertas operativas' })).toBeInTheDocument();
@@ -124,8 +125,8 @@ describe('AlertCenter component', () => {
     ).toBeInTheDocument();
   });
 
-  it('navigates to /owner/alerts within the App shell for OWNER role', () => {
-    mountApp('/owner/alerts');
+  it('navigates to /owner/alerts within the App shell for OWNER role', async () => {
+    await mountApp('/owner/alerts');
 
     // App sidebar should show 'Alertas' active link
     const alertsNav = screen.getByRole('link', { name: 'Alertas' });
@@ -138,8 +139,8 @@ describe('AlertCenter component', () => {
     ).toBeVisible();
   });
 
-  it('does not expose /owner/alerts to RECEPTION role', () => {
-    mountApp('/reception/alerts');
+  it('does not expose /owner/alerts to RECEPTION role', async () => {
+    await mountApp('/reception/alerts');
 
     // Reception should be redirected to /reception/home
     expect(

@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,14 +18,15 @@ function renderExpenseReport() {
   );
 }
 
-function mountApp(path = '/owner/expenses') {
-  return render(
+async function mountApp(path = '/owner/expenses') {
+  render(
     <MemoryRouter initialEntries={[path]}>
       <DemoProvider>
         <App />
       </DemoProvider>
     </MemoryRouter>
   );
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 
 describe('ExpenseReport component', () => {
@@ -38,7 +39,7 @@ describe('ExpenseReport component', () => {
     }
   });
 
-  it('renders the page header, title, and PDF export button', () => {
+  it('renders the page header, title, and PDF export button', async () => {
     renderExpenseReport();
 
     expect(
@@ -61,7 +62,7 @@ describe('ExpenseReport component', () => {
     printSpy.mockRestore();
   });
 
-  it('displays the 3 Bento business KPIs (Punto de equilibrio, Variables, Total comprometido)', () => {
+  it('displays the 3 Bento business KPIs (Punto de equilibrio, Variables, Total comprometido)', async () => {
     renderExpenseReport();
 
     expect(screen.getByText('Punto de equilibrio')).toBeInTheDocument();
@@ -78,7 +79,7 @@ describe('ExpenseReport component', () => {
     expect(screen.getByText('$164,070.00 MXN')).toBeInTheDocument(); // Consolidated total
   });
 
-  it('renders the visual organizer with TanStack Chart and major cost blocks', () => {
+  it('renders the visual organizer with TanStack Chart and major cost blocks', async () => {
     renderExpenseReport();
 
     expect(
@@ -238,7 +239,7 @@ describe('ExpenseReport component', () => {
   });
 
   it('navigates to /owner/staff via "Gestionar equipo y sueldos →" button', async () => {
-    mountApp('/owner/expenses');
+    await mountApp('/owner/expenses');
 
     // Switch to fixed tab
     await userEvent.click(screen.getByRole('tab', { name: 'Estructura Fija y Nómina' }));
@@ -249,7 +250,7 @@ describe('ExpenseReport component', () => {
     await userEvent.click(staffLinkBtn);
 
     // Navigates to Staff Management
-    expect(screen.getByRole('heading', { name: 'Equipo de Recepción' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Equipo de Recepción' })).toBeInTheDocument();
   });
 
   it('immediately reflects staff modifications in the payroll table and KPIs', async () => {
@@ -287,7 +288,7 @@ describe('ExpenseReport component', () => {
     expect(within(silviaRow!).getByText('$2,500.00 MXN')).toBeInTheDocument();
   });
 
-  it('renders sortable itemized table with seed expense data and category pills in Variables tab', () => {
+  it('renders sortable itemized table with seed expense data and category pills in Variables tab', async () => {
     renderExpenseReport();
 
     expect(
@@ -345,8 +346,8 @@ describe('ExpenseReport component', () => {
     ).toBeInTheDocument();
   });
 
-  it('integrates into App shell navigation and route for OWNER', () => {
-    mountApp('/owner/expenses');
+  it('integrates into App shell navigation and route for OWNER', async () => {
+    await mountApp('/owner/expenses');
 
     // Navigation link in sidebar
     const expensesNavLink = screen.getByRole('link', { name: 'Gastos' });
@@ -359,8 +360,8 @@ describe('ExpenseReport component', () => {
     ).toBeVisible();
   });
 
-  it('does not allow RECEPTION role to access /reception/expenses', () => {
-    mountApp('/reception/expenses');
+  it('does not allow RECEPTION role to access /reception/expenses', async () => {
+    await mountApp('/reception/expenses');
 
     // Should redirect to reception home
     expect(

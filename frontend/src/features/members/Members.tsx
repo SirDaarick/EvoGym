@@ -13,6 +13,7 @@ import { useDemo } from '../../demo/DemoProvider';
 import { addMember } from '../../demo/operations';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import type { Tone } from '../../shared/ui';
+import { NotebookNotice } from '../../shared/operationPresentation';
 import { memberStatus } from '../../demo/memberStatus';
 import { enterMember, exitMember, openAttendance } from '../../demo/attendanceOperations';
 import { MemberDetailSections } from './MemberDetail';
@@ -20,10 +21,6 @@ import { formatAttendanceError } from './memberDetailUtils';
 import { NewMemberRegistration } from './NewMemberRegistration';
 import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 
-export const paymentMethods = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia sin confirmar' };
-export function NotebookNotice() {
-  return null;
-}
 function getMemberInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '—';

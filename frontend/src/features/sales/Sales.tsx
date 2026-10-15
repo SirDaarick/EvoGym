@@ -7,7 +7,7 @@ import { formatMoney } from '../../demo/adapter';
 import { activeShift, expectedStock } from '../../demo/inventoryOperations';
 import { registerSale, saleQuote, visitAreas, visitPrice, type SaleRequest, type SaleResult } from '../../demo/salesOperations';
 import { Button, EmptyState, Field, Notice, PageHeader, Panel } from '../../shared/ui';
-import { NotebookNotice, paymentMethods } from '../members/Members';
+import { NotebookNotice, paymentMethods } from '../../shared/operationPresentation';
 
 export function Sales({ role }: { role: Role }) {
   const { state, transact } = useDemo();

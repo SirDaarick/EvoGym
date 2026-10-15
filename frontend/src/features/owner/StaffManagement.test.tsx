@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -6,7 +6,7 @@ import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { resetStaff } from '../staff/staffStore';
 
-function mount(path = '/owner/staff') {
+async function mount(path = '/owner/staff') {
   render(
     <MemoryRouter initialEntries={[path]}>
       <DemoProvider>
@@ -14,6 +14,7 @@ function mount(path = '/owner/staff') {
       </DemoProvider>
     </MemoryRouter>
   );
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
 }
 
 describe('StaffManagement (T02 — Admin Staff Management)', () => {
@@ -21,8 +22,8 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
     resetStaff();
   });
 
-  it('renders reception staff table with salary and without KPI summary cards', () => {
-    mount('/owner/staff');
+  it('renders reception staff table with salary and without KPI summary cards', async () => {
+    await mount('/owner/staff');
 
     expect(screen.getByRole('heading', { name: 'Equipo de Recepción' })).toBeVisible();
     // Verify NO KPI cards are rendered
@@ -38,7 +39,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
   });
 
   it('filters staff by search query and status filter buttons', async () => {
-    mount('/owner/staff');
+    await mount('/owner/staff');
 
     // Search for Sheila
     await userEvent.type(screen.getByLabelText('Buscar recepcionista'), 'Sheila');
@@ -61,7 +62,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
   });
 
   it('toggles staff active/inactive status and reflects in profile selection', async () => {
-    mount('/owner/staff');
+    await mount('/owner/staff');
 
     // Find Sheila row and deactivate her
     const deactivateButtons = screen.getAllByRole('button', { name: 'Desactivar' });
@@ -76,7 +77,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
   });
 
   it('validates 2-phase PIN matching when creating a new receptionist with salary', async () => {
-    mount('/owner/staff');
+    await mount('/owner/staff');
 
     await userEvent.click(screen.getByRole('button', { name: '+ Nuevo recepcionista' }));
     expect(screen.getByRole('dialog')).toBeVisible();
@@ -114,7 +115,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
   });
 
   it('displays active and inactive counts and allows selecting status in the modal with JellyRadio', async () => {
-    mount('/owner/staff');
+    await mount('/owner/staff');
 
     // Header displays counts
     expect(screen.getByText(/9 en total/)).toHaveTextContent('9 activos · 0 inactivos · 9 en total');
@@ -138,7 +139,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
   });
 
   it('supports interactive column sorting with TanStack Table', async () => {
-    mount('/owner/staff');
+    await mount('/owner/staff');
 
     // Initially in default list order: Emigdio is first row
     const rowsInitial = screen.getAllByRole('row');

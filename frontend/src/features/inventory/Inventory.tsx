@@ -3,7 +3,7 @@ import type { Role } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { activeShift, currentShiftStockBreakdown, recordCount, recordMovement, stockBreakdown } from '../../demo/inventoryOperations';
 import { Button, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
-import { NotebookNotice } from '../members/Members';
+import { NotebookNotice } from '../../shared/operationPresentation';
 import { expectedStock } from '../../demo/inventoryOperations';
 import { ProductCard } from '../reception/ProductCard';
 import { InventoryAnalytics } from '../owner/InventoryAnalytics';

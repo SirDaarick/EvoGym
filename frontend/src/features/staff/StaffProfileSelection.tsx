@@ -5,7 +5,7 @@ import { homePath } from '../../app/navigation';
 import { Button, Panel } from '../../shared/ui';
 import CodeSlots, { type CodeSlotsStatus } from '../catalog/react-bits/CodeSlots';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
-import logo from '../../../Logo_Evo.png';
+import logo from '../../assets/evogym-logo-128.webp';
 
 import { setSelectedStaff, useStaff, type StaffProfile } from './staffStore';
 
@@ -151,7 +151,7 @@ export function StaffProfileSelection() {
         <header className="staff-header">
           <div className="staff-brand">
             <div className="staff-logo-mark" aria-hidden="true">
-              <img src={logo} alt="EvoGym" />
+              <img src={logo} alt="EvoGym" width={128} height={124} />
             </div>
             <span className="staff-brand-name">EvoGym</span>
           </div>

@@ -20,7 +20,7 @@ import {
   type HistoryRecord,
 } from '../../demo/ownerOperations';
 import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
-import { NotebookNotice, paymentMethods } from '../members/Members';
+import { NotebookNotice, paymentMethods } from '../../shared/operationPresentation';
 import { PeriodFields } from './PeriodFields';
 
 export function History() {

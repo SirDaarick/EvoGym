@@ -1,28 +1,33 @@
-import { Profiler, useEffect, useRef, useState } from 'react';
+import { Profiler, lazy, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router';
 import type { Role } from '../domain/models';
 import { useDemo } from '../demo/DemoProvider';
-import { ComponentCatalog } from '../features/catalog/ComponentCatalog';
-import { Members, MemberDetail, NewMember } from '../features/members/Members';
 import { MemberSearch } from '../features/members/MemberSearch';
-import { MembershipPayment } from '../features/payments/MembershipPayment';
-import { Sales } from '../features/sales/Sales';
-import { Inventory } from '../features/inventory/Inventory';
-import { Shifts } from '../features/shifts/Shifts';
-import { Overview } from '../features/owner/Overview';
-import { AlertCenter } from '../features/owner/AlertCenter';
-import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
-import { ExpenseReport } from '../features/owner/ExpenseReport';
-import { History } from '../features/owner/History';
-import { PlanCatalog } from '../features/owner/PlanCatalog';
-import { ReceptionHome } from '../features/reception/ReceptionHome';
-import { StaffProfileSelection } from '../features/staff/StaffProfileSelection';
-import { StaffManagement } from '../features/owner/StaffManagement';
-import { GimiDashboard } from '../features/gimi/GimiDashboard';
 import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
-import logo from '../../Logo_Evo.png';
+import logo from '../assets/evogym-logo-128.webp';
+
+import { RouteBoundary } from './RouteBoundary';
+
+const ComponentCatalog = lazy(() => import('../features/catalog/ComponentCatalog').then(module => ({ default: module.ComponentCatalog })));
+const MembershipPayment = lazy(() => import('../features/payments/MembershipPayment').then(module => ({ default: module.MembershipPayment })));
+const Sales = lazy(() => import('../features/sales/Sales').then(module => ({ default: module.Sales })));
+const Inventory = lazy(() => import('../features/inventory/Inventory').then(module => ({ default: module.Inventory })));
+const Shifts = lazy(() => import('../features/shifts/Shifts').then(module => ({ default: module.Shifts })));
+const Overview = lazy(() => import('../features/owner/Overview').then(module => ({ default: module.Overview })));
+const AlertCenter = lazy(() => import('../features/owner/AlertCenter').then(module => ({ default: module.AlertCenter })));
+const AttendanceAnalytics = lazy(() => import('../features/owner/AttendanceAnalytics').then(module => ({ default: module.AttendanceAnalytics })));
+const ExpenseReport = lazy(() => import('../features/owner/ExpenseReport').then(module => ({ default: module.ExpenseReport })));
+const History = lazy(() => import('../features/owner/History').then(module => ({ default: module.History })));
+const PlanCatalog = lazy(() => import('../features/owner/PlanCatalog').then(module => ({ default: module.PlanCatalog })));
+const ReceptionHome = lazy(() => import('../features/reception/ReceptionHome').then(module => ({ default: module.ReceptionHome })));
+const StaffProfileSelection = lazy(() => import('../features/staff/StaffProfileSelection').then(module => ({ default: module.StaffProfileSelection })));
+const StaffManagement = lazy(() => import('../features/owner/StaffManagement').then(module => ({ default: module.StaffManagement })));
+const GimiDashboard = lazy(() => import('../features/gimi/GimiDashboard').then(module => ({ default: module.GimiDashboard })));
+const Members = lazy(() => import('../features/members/Members').then(module => ({ default: module.Members })));
+const MemberDetail = lazy(() => import('../features/members/Members').then(module => ({ default: module.MemberDetail })));
+const NewMember = lazy(() => import('../features/members/Members').then(module => ({ default: module.NewMember })));
 
 const navIcons: Record<string, React.ReactNode> = {
   home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
@@ -168,7 +173,7 @@ export function App() {
       ? rolePath(next, slug) : homePath(next));
   }
 
-  if (location.pathname === '/') return <StaffProfileSelection />;
+  if (location.pathname === '/') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Ir al contenido</a>
@@ -199,7 +204,7 @@ export function App() {
         setSidebarFocused(false);
       }
     }}>
-      <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" /><span aria-hidden="true">EvoGym</span></Link>
+      <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" width={128} height={124} /><span aria-hidden="true">EvoGym</span></Link>
         <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
       <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
@@ -257,6 +262,7 @@ export function App() {
             baseDurationMs: Math.round(baseDuration * 100) / 100,
           });
         }}>
+        <RouteBoundary key={location.pathname}>
         <Routes>
           <Route path="/reception/home" element={<ReceptionHome key={resetVersion} />} />
           <Route path="/components" element={<ComponentCatalog />} />
@@ -279,6 +285,7 @@ export function App() {
           </>}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
+        </RouteBoundary>
         </Profiler>
       </main>
       <GimiChatWidget role={role} />

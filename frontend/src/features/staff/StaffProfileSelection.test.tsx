@@ -6,6 +6,13 @@ import { StaffProfileSelection } from './StaffProfileSelection';
 import { getSelectedStaff, setSelectedStaff } from './staffStore';
 
 describe('staff profile author identity lifecycle', () => {
+  it('uses the optimized brand image with intrinsic dimensions', () => {
+    render(<MemoryRouter><StaffProfileSelection /></MemoryRouter>);
+    const logo = document.querySelector('.staff-logo-mark img');
+    expect(logo).toHaveAttribute('src', expect.stringContaining('evogym-logo-128.webp'));
+    expect(logo).toHaveAttribute('width', '128');
+    expect(logo).toHaveAttribute('height', '124');
+  });
   it('sets identity only after a successful PIN and clears it on selector entry', async () => {
     const user = userEvent.setup();
     setSelectedStaff({ id: 'old', name: 'Previous employee' });
