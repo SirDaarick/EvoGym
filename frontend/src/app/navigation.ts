@@ -11,6 +11,7 @@ export const navigation = [
   { slug: 'staff', label: 'Equipo', title: 'Gestión del personal', roles: ['OWNER'] },
   { slug: 'history', label: 'Historial', title: 'Historial de movimientos', roles: ['OWNER'] },
   { slug: 'plans', label: 'Planes', title: 'Catálogo de planes', roles: ['OWNER'] },
+  { slug: 'gimi', label: 'Gimi AI', title: 'Monitor y Conocimiento de Gimi', roles: ['OWNER'] },
 ];
 export function rolePath(role: Role, slug: string) { return `/${role.toLowerCase()}/${slug}`; }
 export function homePath(role: Role) { return rolePath(role, role === 'OWNER' ? 'overview' : 'home'); }

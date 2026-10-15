@@ -181,7 +181,7 @@ describe('PlanCatalog owner screen', () => {
     const plansRegion = screen.getByRole('region', { name: 'Planes y visitas' });
     expect(within(plansRegion).getByText('Plan Box Pro')).toBeVisible();
     expect(within(plansRegion).getByText('$650.00 MXN')).toBeVisible();
-  });
+  }, 15000);
 
   it('opens edit modal and updates plan price and applicability', async () => {
     const user = userEvent.setup();

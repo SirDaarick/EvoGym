@@ -17,6 +17,8 @@ import { PlanCatalog } from '../features/owner/PlanCatalog';
 import { ReceptionHome } from '../features/reception/ReceptionHome';
 import { StaffProfileSelection } from '../features/staff/StaffProfileSelection';
 import { StaffManagement } from '../features/owner/StaffManagement';
+import { GimiDashboard } from '../features/gimi/GimiDashboard';
+import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button } from '../shared/ui';
 import { homePath, navigation, rolePath } from './navigation';
 import logo from '../../Logo_Evo.png';
@@ -33,6 +35,7 @@ const navIcons: Record<string, React.ReactNode> = {
   staff: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
   history: <><path d="M3 12a9 9 0 1 1 3 6.7M3 17v-5h5M12 7v5l4 2" /></>,
   plans: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
+  gimi: <><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM4 11a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-7z" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /><path d="M9 18h6" /></>,
   profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   components: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
 };
@@ -269,11 +272,13 @@ export function App() {
             <Route path="/owner/staff" element={<StaffManagement key={resetVersion} />} />
             <Route path="/owner/history" element={<History key={resetVersion} />} />
             <Route path="/owner/plans" element={<PlanCatalog />} />
+            <Route path="/owner/gimi" element={<GimiDashboard key={resetVersion} />} />
           </>}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
         </Profiler>
       </main>
+      <GimiChatWidget role={role} />
       <footer className="workspace-footer sr-only">
         <div className="demo-footer-card">
           <div className="demo-bar-info">

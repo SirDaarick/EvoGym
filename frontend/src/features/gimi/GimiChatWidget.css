@@ -1,0 +1,396 @@
+/* Gimi Floating Chat Assistant Widget */
+
+.gimi-widget-root {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 999;
+}
+
+/* Launcher Button */
+.gimi-launcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-primary, #fc6c06);
+  color: #ffffff;
+  border: none;
+  border-radius: 9999px;
+  padding: 10px 18px 10px 14px;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  box-shadow: 0 8px 24px rgba(252, 108, 6, 0.35), 0 2px 6px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  position: relative;
+}
+
+.gimi-launcher-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 12px 28px rgba(252, 108, 6, 0.45);
+}
+
+.gimi-launcher-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gimi-launcher-label {
+  letter-spacing: 0.02em;
+}
+
+.gimi-launcher-pulse {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid var(--color-surface, #ffffff);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+/* Floating Modal Window */
+.gimi-modal-container {
+  width: 380px;
+  height: 540px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 100px);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: var(--radius-panel, 20px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: gimiPopIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes gimiPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+:root[data-theme='dark'] .gimi-modal-container {
+  background: var(--color-surface, #1e1e1e);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-modal-container {
+    background: var(--color-surface, #1e1e1e);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+/* Modal Header */
+.gimi-modal-header {
+  padding: 14px 18px;
+  background: var(--color-soft, #f9fafb);
+  border-bottom: 1px solid var(--color-divider, #e5e7eb);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+:root[data-theme='dark'] .gimi-modal-header {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-modal-header {
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
+
+.gimi-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gimi-avatar-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(252, 108, 6, 0.12);
+  color: var(--color-primary, #fc6c06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gimi-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-ink, #111827);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gimi-role-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  margin-top: 2px;
+}
+
+.gimi-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gimi-btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--color-ink-muted, #65716a);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gimi-btn-icon:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-ink, #111827);
+}
+
+:root[data-theme='dark'] .gimi-btn-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Messages Body */
+.gimi-messages-body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.gimi-message-wrap {
+  display: flex;
+  flex-direction: column;
+  max-width: 86%;
+}
+
+.gimi-message-wrap.bot-side {
+  align-self: flex-start;
+}
+
+.gimi-message-wrap.user-side {
+  align-self: flex-end;
+}
+
+.gimi-message-bubble {
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  position: relative;
+}
+
+.gimi-message-bubble.bot-bubble {
+  background: var(--color-soft, #f3f4f6);
+  color: var(--color-ink, #1f2937);
+  border-top-left-radius: 4px;
+}
+
+:root[data-theme='dark'] .gimi-message-bubble.bot-bubble {
+  background: #2a2a2a;
+  color: #f3f4f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-message-bubble.bot-bubble {
+    background: #2a2a2a;
+    color: #f3f4f6;
+  }
+}
+
+.gimi-message-bubble.user-bubble {
+  background: var(--color-primary, #fc6c06);
+  color: #ffffff;
+  border-top-right-radius: 4px;
+}
+
+.gimi-msg-line {
+  margin: 0 0 6px 0;
+}
+
+.gimi-msg-line:last-of-type {
+  margin-bottom: 0;
+}
+
+.gimi-msg-spacer {
+  height: 6px;
+}
+
+.gimi-message-time {
+  display: block;
+  font-size: 0.6875rem;
+  margin-top: 6px;
+  opacity: 0.7;
+  text-align: right;
+}
+
+/* Suggestion Chips */
+.gimi-suggestions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.gimi-chip {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: 12px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-primary, #fc6c06);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.gimi-chip:hover {
+  background: rgba(252, 108, 6, 0.08);
+  border-color: var(--color-primary, #fc6c06);
+  transform: translateY(-1px);
+}
+
+:root[data-theme='dark'] .gimi-chip {
+  background: #222222;
+  border-color: #383838;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-chip {
+    background: #222222;
+    border-color: #383838;
+  }
+}
+
+/* Typing Indicator */
+.gimi-typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+}
+
+.gimi-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--color-ink-muted, #9ca3af);
+  border-radius: 50%;
+  animation: gimiBounce 1.4s infinite ease-in-out both;
+}
+
+.gimi-dot:nth-child(1) { animation-delay: -0.32s; }
+.gimi-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes gimiBounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+/* Input Bar */
+.gimi-input-container {
+  padding: 12px;
+  background: var(--color-soft, #f9fafb);
+  border-top: 1px solid var(--color-divider, #e5e7eb);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-theme='dark'] .gimi-input-container {
+  background: #181818;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-input-container {
+    background: #181818;
+  }
+}
+
+.gimi-input {
+  flex: 1;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  color: var(--color-ink, #111827);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.gimi-input:focus {
+  border-color: var(--color-primary, #fc6c06);
+}
+
+:root[data-theme='dark'] .gimi-input {
+  background: #242424;
+  border-color: #383838;
+  color: #f3f4f6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .gimi-input {
+    background: #242424;
+    border-color: #383838;
+    color: #f3f4f6;
+  }
+}
+
+.gimi-mic-btn {
+  background: transparent;
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-muted, #65716a);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gimi-mic-btn.listening {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+  animation: gimiPulseMic 1s infinite alternate;
+}
+
+@keyframes gimiPulseMic {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+
+.gimi-send-btn {
+  padding: 8px 14px;
+  min-height: 36px;
+  border-radius: 10px;
+}
