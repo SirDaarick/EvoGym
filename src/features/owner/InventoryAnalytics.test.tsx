@@ -125,9 +125,9 @@ describe('InventoryAnalytics owner screen', () => {
     expect(screen.getByRole('button', { name: /Inactivos/ })).toBeInTheDocument();
 
     // Seed products listed in table
-    expect(screen.getByText('Agua · producto ilustrativo')).toBeInTheDocument();
-    expect(screen.getByText('Barra · producto ilustrativo')).toBeInTheDocument();
-    expect(screen.getByText('Bebida · producto ilustrativo')).toBeInTheDocument();
+    expect(screen.getByText('Agua')).toBeInTheDocument();
+    expect(screen.getByText('Barra')).toBeInTheDocument();
+    expect(screen.getByText('Bebida')).toBeInTheDocument();
   });
 
   it('filters table by search query', async () => {
@@ -136,8 +136,8 @@ describe('InventoryAnalytics owner screen', () => {
     const searchInput = screen.getByLabelText('Buscar productos');
     await userEvent.type(searchInput, 'Agua');
 
-    expect(screen.getByText('Agua · producto ilustrativo')).toBeInTheDocument();
-    expect(screen.queryByText('Barra · producto ilustrativo')).not.toBeInTheDocument();
+    expect(screen.getByText('Agua')).toBeInTheDocument();
+    expect(screen.queryByText('Barra')).not.toBeInTheDocument();
   });
 
   it('opens and closes "Nuevo producto" modal with form validation', async () => {
@@ -181,12 +181,12 @@ describe('InventoryAnalytics owner screen', () => {
   it('opens edit modal and updates product details', async () => {
     await renderInventoryAnalytics();
 
-    const editBtn = screen.getByLabelText('Editar Agua · producto ilustrativo');
+    const editBtn = screen.getByLabelText('Editar Agua');
     await userEvent.click(editBtn);
 
     expect(screen.getByRole('dialog', { name: 'Editar producto' })).toBeInTheDocument();
     const nameInput = screen.getByLabelText(/Nombre del producto/);
-    expect(nameInput).toHaveValue('Agua · producto ilustrativo');
+    expect(nameInput).toHaveValue('Agua');
 
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, 'Agua Mineral 600ml');
@@ -203,7 +203,7 @@ describe('InventoryAnalytics owner screen', () => {
   it('opens confirmation modal and deactivates a product', async () => {
     await renderInventoryAnalytics();
 
-    const toggleBtn = screen.getByLabelText('Desactivar Agua · producto ilustrativo');
+    const toggleBtn = screen.getByLabelText('Desactivar Agua');
     await userEvent.click(toggleBtn);
 
     expect(screen.getByRole('dialog', { name: '¿Desactivar producto?' })).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe('InventoryAnalytics owner screen', () => {
     const inactivePill = screen.getByRole('button', { name: /Inactivos/ });
     await userEvent.click(inactivePill);
 
-    expect(screen.getByText('Agua · producto ilustrativo')).toBeInTheDocument();
+    expect(screen.getByText('Agua')).toBeInTheDocument();
     expect(screen.getByText('Inactivo')).toBeInTheDocument();
   });
 

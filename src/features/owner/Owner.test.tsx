@@ -19,12 +19,12 @@ describe('owner views', () => {
     await userEvent.selectOptions(screen.getByLabelText('Categoría'), 'membership');
     expect(screen.getByRole('heading', { name: 'Sin movimientos para estos filtros' })).toBeVisible();
   });
-  it('renders confirmed tariffs and clearly illustrative products read-only', () => {
+  it('renders confirmed tariffs and products catalog with management controls', () => {
     mount('/owner/plans');
     expect(screen.getByRole('heading', { name: 'Catálogo de planes' })).toBeVisible();
     expect(screen.getByText('Gym + Box mensual')).toBeVisible();
-    expect(screen.getByText(/Precio y cantidad ilustrativos/)).toBeVisible();
-    expect(screen.queryByRole('button', { name: /editar|eliminar|crear plan/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Precio y cantidad registrados/)).toBeVisible();
+    expect(screen.getByRole('button', { name: /Nuevo plan/i })).toBeVisible();
   });
   it('does not expose owner overview, history or catalog in reception routes', () => {
     mount('/reception/overview');

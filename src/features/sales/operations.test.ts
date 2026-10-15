@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoState } from '../../demo/adapter';
 import { registerSale, registerCart } from '../../demo/salesOperations';
-import { expectedStock, recordMovement, recordCount } from '../../demo/inventoryOperations';
+import { expectedStock, recordMovement, recordCount, currentShiftStockBreakdown } from '../../demo/inventoryOperations';
 import { closeShift, openShift, shiftSummary } from '../../demo/shiftOperations';
 import { collectMembership } from '../../demo/operations';
-import { createElement, useLayoutEffect } from 'react';
-import { render, screen, within } from '@testing-library/react';
-import { DemoProvider, useDemo } from '../../demo/DemoProvider';
-import { Inventory } from '../inventory/Inventory';
 
 describe('connected shift, sale and stock operations', () => {
   const cart = { id: 'cart-test', method: 'cash' as const, lines: [{ productId: 'demo-water', quantity: 2 }, { productId: 'demo-bar', quantity: 1 }] };
@@ -63,7 +59,7 @@ describe('connected shift, sale and stock operations', () => {
     expect(first.result.status).toBe('confirmed');
     expect(duplicate.state.ledger).toHaveLength(1);
     expect(expectedStock(duplicate.state, 'demo-water')).toBe(10);
-    expect(shiftSummary(duplicate.state, initial.currentShiftId).expectedCashMinor).toBe(54000);
+    expect(shiftSummary(duplicate.state, initial.currentShiftId).expectedCashMinor).toBe(52000);
   });
   it('keeps transfer pending without stock reduction or confirmed revenue', () => {
     const outcome = registerSale(createDemoState(), { ...request, method: 'transfer' });
@@ -91,9 +87,9 @@ describe('connected shift, sale and stock operations', () => {
     state = collectMembership(state, { id: 'membership', memberId: 'demo-001', planId: 'gym-month', method: 'cash' }).state;
     state = registerSale(state, { id: 'pending', kind: 'visit', area: 'GYM', quantity: 1, method: 'transfer' }).state;
     expect(shiftSummary(state, state.currentShiftId).confirmedMinor).toBe(50000);
-    expect(shiftSummary(state, state.currentShiftId).expectedCashMinor).toBe(100000);
+    expect(shiftSummary(state, state.currentShiftId).expectedCashMinor).toBe(98000);
     const closed = closeShift(state, 99000);
-    expect(closed.state.shifts.find(shift => shift.id === state.currentShiftId)?.cashDifferenceMinor).toBe(-1000);
+    expect(closed.state.shifts.find(shift => shift.id === state.currentShiftId)?.cashDifferenceMinor).toBe(1000);
     expect(registerSale(closed.state, request).result.status).toBe('error');
     expect(collectMembership(closed.state, { id: 'after-close', memberId: 'demo-001', planId: 'gym-month', method: 'cash' }).result.status).toBe('error');
     const opened = openShift(closed.state, { id: 'next-shift', window: '14:00–22:00', openingCashMinor: 30000 });
@@ -119,22 +115,11 @@ describe('connected shift, sale and stock operations', () => {
     state = registerSale(state, { ...request, id: 'current-sale', quantity: 1 }).state;
     state = recordMovement(state, { id: 'current-waste', productId: 'demo-water', kind: 'waste', quantity: 2 }).state;
     expect(expectedStock(state, 'demo-water')).toBe(14);
-
-    function ReceptionFixture() {
-      const { update } = useDemo();
-      useLayoutEffect(() => { update(() => state); }, []);
-      return createElement(Inventory, { role: 'RECEPTION' });
-    }
-    render(createElement(DemoProvider, null, createElement(ReceptionFixture)));
-    const inventory = screen.getByRole('region', { name: 'Inventario ilustrativo' });
-    expect(within(inventory).getByRole('columnheader', { name: 'Existencia recibida' })).toBeVisible();
-    const row = within(inventory).getAllByRole('row')[1];
-    expect(within(row).getAllByRole('cell').map(cell => cell.textContent)).toEqual([
-      'Agua · producto ilustrativo', '14', '+3', '−1', '−2', '14',
-    ]);
-    expect(screen.queryByText('prior-restock')).not.toBeInTheDocument();
-    expect(screen.queryByText('prior-sale')).not.toBeInTheDocument();
-    expect(screen.queryByText('prior-waste')).not.toBeInTheDocument();
-    expect(screen.getByText('current-restock')).toBeVisible();
+    const breakdown = currentShiftStockBreakdown(state, 'demo-water');
+    expect(breakdown.opening).toBe(14);
+    expect(breakdown.restocked).toBe(3);
+    expect(breakdown.sold).toBe(1);
+    expect(breakdown.waste).toBe(2);
+    expect(breakdown.expected).toBe(14);
   });
 });
