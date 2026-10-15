@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { DemoState } from '../domain/models';
 import type { CashDenominationCount } from '../domain/models';
 import { createDemoState } from './adapter';
+import { createRichDemoState } from './richDemoState';
 import type { Transaction } from './operations';
 import { acquireExclusiveWriter, emptyPersistenceRecord, hydratePersistence, savePersistenceRecord, type PersistenceRecord, type ShiftDrafts } from './shiftPersistence';
 import { closeShift } from './shiftOperations';
@@ -12,6 +13,7 @@ interface DemoContextValue {
   state: DemoState;
   update: (operation: (current: DemoState) => DemoState) => boolean;
   reset: () => boolean;
+  loadSampleData: () => boolean;
   transact: <T>(operation: (current: DemoState) => Transaction<T>) => T;
   resetVersion: number;
   persistenceStatus: PersistenceStatus;
@@ -119,6 +121,12 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         record.current = fresh; draftsRef.current = {}; setDrafts({}); current.current = fresh.state; setState(fresh.state);
         setPersistenceStatus('ready'); setPersistenceError(null); setResetVersion(version => version + 1); return true;
       } catch (error) { setPersistenceError(error instanceof Error ? error.message : 'Unable to reset local data'); setPersistenceStatus('error'); return false; }
+    },
+    loadSampleData: () => {
+      const rich = createRichDemoState();
+      const ok = replace(rich);
+      if (ok) setResetVersion(version => version + 1);
+      return ok;
     } }}>
     {children}
   </DemoContext.Provider>;

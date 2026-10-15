@@ -85,7 +85,7 @@ function readPerformanceDebugFlag() {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { reset, resetVersion } = useDemo();
+  const { reset, resetVersion, loadSampleData } = useDemo();
   const [debugPerformance] = useState(readPerformanceDebugFlag);
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
@@ -289,8 +289,9 @@ export function App() {
             <p>El selector cambia la vista activa; la autenticación y los permisos no están implementados.</p>
           </div>
           <div className="demo-controls">
-        <label htmlFor="demo-role">Rol de acceso<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
-        <Button variant="secondary" onClick={() => { reset(); setMessage('Datos locales restablecidos.'); }}>Restablecer datos</Button>
+            <label htmlFor="demo-role">Rol de acceso<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
+            <Button variant="secondary" onClick={() => { loadSampleData(); setMessage('Datos de prueba completos cargados.'); }}>Cargar datos demo</Button>
+            <Button variant="secondary" onClick={() => { reset(); setMessage('Datos locales restablecidos.'); }}>Restablecer datos</Button>
           </div>
         </div>
         <p className="reset-status" role="status" aria-label="Resultado local">{message}</p>
