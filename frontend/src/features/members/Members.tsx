@@ -196,6 +196,9 @@ export function Members({ role }: { role: Role }) {
         <OwnerMemberAnalytics
           members={state.members}
           referenceDate={state.demoClock.slice(0, 10)}
+          attendanceVisits={state.attendance}
+          sales={state.sales}
+          supplementSales={state.supplementSales}
         />
       )}
       <Panel>
@@ -292,7 +295,19 @@ export function MemberDetail({ role }: { role: Role }) {
   if (!member) return <Panel><EmptyState title="Socio no disponible">No se encontró el perfil solicitado. <Link to={rolePath(role, 'members')}>Volver a socios</Link></EmptyState></Panel>;
   const payments = state.payments.filter(payment => payment.memberId === member.id);
   return <><PageHeader eyebrow="Socio" title={member.name} description={member.phone || 'Teléfono no capturado'} action={<MemberAttendance key={`${member.id}-${resetVersion}`} memberId={member.id} />} />
-    <MemberDetailSections member={member} now={state.demoClock} visits={state.attendance.filter(visit => visit.memberId === member.id)} gloves={state.gloves ?? []} gloveRentals={state.gloveRentals ?? []} lockers={state.lockers ?? []} lockerRentals={state.lockerRentals ?? []} payments={payments} supplementSales={state.supplementSales ?? []} />
+    <MemberDetailSections
+      member={member}
+      now={state.demoClock}
+      visits={state.attendance.filter(visit => visit.memberId === member.id)}
+      gloves={state.gloves ?? []}
+      gloveRentals={state.gloveRentals ?? []}
+      lockers={state.lockers ?? []}
+      lockerRentals={state.lockerRentals ?? []}
+      payments={payments}
+      supplementSales={state.supplementSales ?? []}
+      sales={state.sales ?? []}
+      role={role}
+    />
     <div className="flow"><Link to={rolePath(role, 'members')}>Volver a socios</Link></div></>;
 }
 

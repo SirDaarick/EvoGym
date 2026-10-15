@@ -664,3 +664,190 @@
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Member Habits & Preferences Section */
+.member-detail-habits {
+  width: 100%;
+  min-width: 0;
+}
+
+.member-detail-habits > .panel {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.member-habits-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.member-habits-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.member-habits-title-wrap h2 {
+  margin: 0;
+}
+
+.member-habits-subtitle {
+  font-size: 0.875rem;
+  color: var(--color-ink-muted, #65716a);
+}
+
+.member-habits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.member-habit-block {
+  background: var(--color-soft, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: var(--radius-panel, 16px);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow-clay, 0 2px 8px rgba(0, 0, 0, 0.04));
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+:root[data-theme='dark'] .member-habit-block {
+  background: var(--color-surface, #1e1e1e);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .member-habit-block {
+    background: var(--color-surface, #1e1e1e);
+  }
+}
+
+.member-habit-block:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
+}
+
+.member-habit-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-ink-muted, #65716a);
+}
+
+.member-habit-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--color-ink, #111827);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.member-habit-value small {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-ink-muted, #65716a);
+}
+
+.member-habit-desc {
+  font-size: 0.8125rem;
+  color: var(--color-ink-muted, #65716a);
+  line-height: 1.4;
+  margin-top: auto;
+}
+
+.member-favorite-products-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.member-fav-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  color: var(--color-ink, #111827);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme='dark'] .member-fav-chip {
+  background: var(--color-surface-raised, #2a2a2a);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .member-fav-chip {
+    background: var(--color-surface-raised, #2a2a2a);
+  }
+}
+
+.member-fav-rank {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--color-primary, #fc6c06);
+}
+
+.member-habit-empty {
+  font-size: 0.875rem;
+  padding: 4px 0;
+  color: var(--color-ink-muted, #65716a);
+}
+
+.member-habit-action {
+  background: rgba(252, 108, 6, 0.04);
+  border-color: rgba(252, 108, 6, 0.25);
+}
+
+:root[data-theme='dark'] .member-habit-action {
+  background: rgba(252, 108, 6, 0.08);
+  border-color: rgba(252, 108, 6, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .member-habit-action {
+    background: rgba(252, 108, 6, 0.08);
+    border-color: rgba(252, 108, 6, 0.3);
+  }
+}
+
+.member-habit-suggestion-text {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-ink, #111827);
+  margin: 0;
+}
+
+.member-habit-tip-hint {
+  font-size: 0.8125rem;
+  color: var(--color-primary, #fc6c06);
+  font-weight: 600;
+  background: rgba(252, 108, 6, 0.08);
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin-top: 6px;
+  line-height: 1.35;
+}
+
+.member-habits-recommendation {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-panel, 14px);
+  background: rgba(252, 108, 6, 0.06);
+  border-left: 4px solid var(--color-primary, #fc6c06);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-ink, #111827);
+}
+

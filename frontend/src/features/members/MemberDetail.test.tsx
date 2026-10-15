@@ -118,7 +118,7 @@ describe('member detail presentation', () => {
     expect(screen.getByRole('columnheader', { name: 'Producto' })).toBeVisible();
     expect(screen.getByRole('columnheader', { name: 'Importe' })).toBeVisible();
     expect(screen.getByRole('columnheader', { name: 'Método' })).toBeVisible();
-    expect(screen.getByText('Proteína')).toBeVisible();
+    expect(screen.getAllByText('Proteína')[0]).toBeVisible();
     expect(screen.queryByText('Unlinked')).not.toBeInTheDocument();
     const detailTables = screen.getAllByRole('table');
     expect(detailTables).toHaveLength(2);
@@ -196,5 +196,51 @@ describe('member detail presentation', () => {
       tableCallGuard.active = false;
       tableCallGuard.calls = 0;
     }
+  });
+
+  it('renders habits and preferences section with front-desk tips in reception role', () => {
+    render(
+      <DemoProvider>
+        <MemberDetailSections
+          member={{ id: 'demo-001', name: 'Mariana López', phone: '5550000001', creditMinor: 0, membership: null }}
+          now="2026-10-08T12:00:00-06:00"
+          gloves={[]}
+          gloveRentals={[]}
+          lockers={[]}
+          lockerRentals={[]}
+          payments={[]}
+          supplementSales={[]}
+          role="RECEPTION"
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.getByText('Hábitos y preferencias de consumo')).toBeVisible();
+    expect(screen.getByText('Sugerencia de mostrador')).toBeVisible();
+    expect(screen.getByText(/Ofrecer su batido habitual/)).toBeVisible();
+    expect(screen.queryByText('Ticket promedio mostrador')).not.toBeInTheDocument();
+  });
+
+  it('renders habits section with commercial and financial breakdown in owner role', () => {
+    render(
+      <DemoProvider>
+        <MemberDetailSections
+          member={{ id: 'demo-active', name: 'Alex Morgan', phone: '5550000003', creditMinor: 0, membership: null }}
+          now="2026-10-08T12:00:00-06:00"
+          gloves={[]}
+          gloveRentals={[]}
+          lockers={[]}
+          lockerRentals={[]}
+          payments={[]}
+          supplementSales={[]}
+          role="OWNER"
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.getByText('Hábitos y preferencias de consumo')).toBeVisible();
+    expect(screen.getByText('Ticket promedio mostrador')).toBeVisible();
+    expect(screen.getByText('Gasto total en mostrador')).toBeVisible();
+    expect(screen.getByRole('note', { name: 'Estrategia de retención' })).toBeVisible();
   });
 });

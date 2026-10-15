@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, SupplementSale } from '../../domain/models';
+import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, Role, Sale, SupplementSale } from '../../domain/models';
 import { formatMoney } from '../../demo/adapter';
 import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
+import { getMemberHabits } from '../../demo/memberAnalyticsSelector';
 import { useDemo } from '../../demo/DemoProvider';
 import { getSelectedStaff } from '../staff/staffStore';
 import { rentalStatus } from './memberDetailUtils';
@@ -75,8 +76,30 @@ function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; 
   </div>;
 }
 
-export function MemberDetailSections({ member, now, visits = [], gloves, gloveRentals, lockers, lockerRentals, payments, supplementSales }: {
-  member: Member; now: string; visits?: AttendanceVisit[]; gloves: GloveItem[]; gloveRentals: GloveRentalRecord[]; lockers: LockerItem[]; lockerRentals: LockerRentalRecord[]; payments: MembershipPayment[]; supplementSales: SupplementSale[];
+export function MemberDetailSections({
+  member,
+  now,
+  visits = [],
+  gloves,
+  gloveRentals,
+  lockers,
+  lockerRentals,
+  payments,
+  supplementSales,
+  sales = [],
+  role = 'RECEPTION',
+}: {
+  member: Member;
+  now: string;
+  visits?: AttendanceVisit[];
+  gloves: GloveItem[];
+  gloveRentals: GloveRentalRecord[];
+  lockers: LockerItem[];
+  lockerRentals: LockerRentalRecord[];
+  payments: MembershipPayment[];
+  supplementSales: SupplementSale[];
+  sales?: Sale[];
+  role?: Role;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
   const streak = membershipRenewalStreak(payments, member.id);
@@ -107,6 +130,16 @@ export function MemberDetailSections({ member, now, visits = [], gloves, gloveRe
     { accessorKey: 'date', header: 'Vigencia / fecha de pago', cell: info => info.row.original.current ? String(info.getValue()) : new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(String(info.getValue()))) },
   ], []);
   const membershipTable = useReactTable({ data: membershipRows, columns: membershipColumns, getCoreRowModel: getCoreRowModel() });
+
+  const habits = useMemo(
+    () => getMemberHabits(member.id, visits, supplementSales, sales, now.slice(0, 10)),
+    [member.id, visits, supplementSales, sales, now]
+  );
+  const totalPaidMinor = useMemo(
+    () => purchases.filter(p => p.status === 'Pagado').reduce((sum, p) => sum + p.amount, 0),
+    [purchases]
+  );
+
   return <section className="member-detail-sections">
     <div className="member-detail-columns">
       <div className="member-detail-left-column">
@@ -120,6 +153,103 @@ export function MemberDetailSections({ member, now, visits = [], gloves, gloveRe
         <div className="member-detail-attendance"><Panel><h2>Asistencia previa</h2><AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} /></Panel></div>
         <div className="member-detail-notes"><MemberNotes member={member} now={now} /></div>
       </div>
+    </div>
+    <div className="member-detail-habits">
+      <Panel>
+        <div className="member-habits-header">
+          <div className="member-habits-title-wrap">
+            <h2>Hábitos y preferencias de consumo</h2>
+            <span className="muted member-habits-subtitle">
+              {role === 'OWNER'
+                ? 'Comportamiento de consumo, frecuencia de entrenamiento e inteligencia comercial.'
+                : 'Frecuencia de visita y preferencias para atención personalizada en mostrador.'}
+            </span>
+          </div>
+          <Badge
+            tone={
+              habits.engagementLevel === 'high'
+                ? 'success'
+                : habits.engagementLevel === 'low'
+                  ? 'warning'
+                  : 'neutral'
+            }
+          >
+            {habits.engagementLabel}
+          </Badge>
+        </div>
+
+        <div className="member-habits-grid">
+          <div className="member-habit-block">
+            <span className="member-habit-label">Frecuencia de asistencia</span>
+            <span className="member-habit-value">
+              {habits.weeklyVisits} <small>días / sem</small>
+            </span>
+            <span className="member-habit-desc">
+              Promedio de {habits.monthlyVisits} visitas registradas en el mes.
+            </span>
+          </div>
+
+          <div className="member-habit-block">
+            <span className="member-habit-label">Productos y suplementos favoritos</span>
+            {habits.favoriteProducts.length > 0 ? (
+              <div className="member-favorite-products-list">
+                {habits.favoriteProducts.map((prod, idx) => (
+                  <span key={prod.name} className="member-fav-chip">
+                    <span className="member-fav-rank">{idx + 1}°</span>
+                    <strong>{prod.name}</strong>
+                    <span className="muted">({prod.units} {prod.units === 1 ? 'ud' : 'uds'})</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="muted member-habit-empty">Sin compras registradas en mostrador.</span>
+            )}
+            <span className="member-habit-desc">
+              Basado en el historial de consumos y ventas de suplementos.
+            </span>
+          </div>
+
+          {role === 'OWNER' ? (
+            <>
+              <div className="member-habit-block">
+                <span className="member-habit-label">Ticket promedio mostrador</span>
+                <span className="member-habit-value">
+                  {formatMoney(habits.averageTicketMinor)} <small>MXN</small>
+                </span>
+                <span className="member-habit-desc">
+                  Gasto promedio por compra de producto o suplemento.
+                </span>
+              </div>
+              <div className="member-habit-block">
+                <span className="member-habit-label">Gasto total en mostrador</span>
+                <span className="member-habit-value">
+                  {formatMoney(habits.totalRetailSpendMinor)} <small>MXN</small>
+                </span>
+                <span className="member-habit-desc">
+                  Ventas de cafetería y suplementación (LTV total: {formatMoney(totalPaidMinor)} MXN).
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="member-habit-block member-habit-action">
+              <span className="member-habit-label">Sugerencia de mostrador</span>
+              <p className="member-habit-suggestion-text">{habits.serviceRecommendation}</p>
+              {habits.favoriteProducts[0] && (
+                <div className="member-habit-tip-hint">
+                  💡 Ofrecer habitual: <strong>{habits.favoriteProducts[0].name}</strong> al registrar entrada o salida.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {role === 'OWNER' && (
+          <div className="member-habits-recommendation" role="note" aria-label="Estrategia de retención">
+            <strong>Recomendación comercial: </strong>
+            {habits.serviceRecommendation}
+          </div>
+        )}
+      </Panel>
     </div>
     <div className="member-detail-purchases"><Panel><h2>Historial de compras</h2>{purchases.length ? <TableRegion label="Historial de compras"><div className="member-purchase-table-scroll"><table className="member-detail-table"><caption>Operaciones atribuidas al socio</caption><thead>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col">{flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody>{table.getRowModel().rows.map(row => <tr key={row.id}>{row.getVisibleCells().map(cell => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}</tbody></table></div></TableRegion> : <EmptyState title="Sin compras registradas">No hay operaciones atribuibles a este socio.</EmptyState>}</Panel></div>
   </section>;

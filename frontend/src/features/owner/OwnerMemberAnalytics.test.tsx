@@ -96,4 +96,18 @@ describe('OwnerMemberAnalytics', () => {
     expect(screen.getByRole('region', { name: 'Insight estratégico' })).toBeVisible();
     expect(screen.getByText(/Criterio de retención:/)).toBeVisible();
   });
+
+  it('renders all 6 Bento KPIs and the Top Products ranking', () => {
+    render(<OwnerMemberAnalytics members={sampleMembers} referenceDate="2026-10-08" />);
+
+    // KPI 5: Frecuencia Promedio
+    expect(screen.getByText('Frecuencia Promedio')).toBeVisible();
+
+    // KPI 6: Ticket Mostrador (Retail)
+    expect(screen.getByText('Ticket Mostrador (Retail)')).toBeVisible();
+
+    // Top products ranking panel
+    expect(screen.getByText('Top productos y suplementos favoritos')).toBeVisible();
+    expect(screen.getByLabelText('Ranking de productos de mostrador')).toBeVisible();
+  });
 });

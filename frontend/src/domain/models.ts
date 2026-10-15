@@ -97,6 +97,8 @@ export interface Sale {
   status: 'confirmed' | 'pending';
   shiftId: string;
   recordedAt: string;
+  memberId?: string | null;
+  memberName?: string | null;
 }
 
 export interface DemoState {
