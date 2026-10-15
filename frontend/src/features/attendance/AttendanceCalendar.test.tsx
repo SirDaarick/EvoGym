@@ -1,9 +1,24 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AttendanceCalendar, buildAttendanceYearCells } from './AttendanceCalendar';
 
 describe('attendance calendar disclosure', () => {
+  it('groups visits once while preserving gym-local leap-day values and unknown duration', () => {
+    const readCheckIn = vi.fn(() => '2024-03-01T01:00:00Z');
+    const cells = buildAttendanceYearCells(2024, [
+      { id: 'measured', memberId: 'm', get observedCheckIn() { return readCheckIn(); }, observedCheckOut: '2024-03-01T02:30:00Z', autoClosedAt: null },
+      { id: 'unknown', memberId: 'm', observedCheckIn: '2024-02-29T22:00:00-06:00', observedCheckOut: null, autoClosedAt: '2024-02-29T22:00:00-06:00' },
+      { id: 'invalid', memberId: 'm', observedCheckIn: 'invalid', observedCheckOut: null, autoClosedAt: null },
+      { id: 'future', memberId: 'm', observedCheckIn: '2024-03-02T08:00:00-06:00', observedCheckOut: '2024-03-02T08:00:00-06:00', autoClosedAt: null },
+    ], '2024-03-01T12:00:00-06:00');
+    expect(cells).toHaveLength(366);
+    expect(cells.find(cell => cell.date === '2024-02-29')).toMatchObject({ count: 2, minutes: 90, unknown: 1, level: 2, future: false });
+    expect(cells.find(cell => cell.date === '2024-03-02')).toMatchObject({ count: 1, minutes: 0, unknown: 0, level: 0, future: true });
+    // One date lookup and one duration calculation, independent of the year's length.
+    expect(readCheckIn).toHaveBeenCalledTimes(2);
+  });
+
   it('separates attendance frequency, measured duration and unknown time', () => {
     render(<AttendanceCalendar now="2026-10-08T12:00:00-06:00" visits={[
       { id: 'a', memberId: 'demo', observedCheckIn: '2026-10-07T12:00:00-06:00', observedCheckOut: '2026-10-07T12:30:00-06:00', autoClosedAt: null },

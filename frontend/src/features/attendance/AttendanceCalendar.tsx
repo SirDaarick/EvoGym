@@ -35,15 +35,24 @@ export function buildAttendanceYearCells(year: number, visits: AttendanceVisit[]
   const today = attendanceDay(now) ?? now.slice(0, 10);
   const count = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
   const offset = (start.getUTCDay() + 6) % 7;
+  const totalsByDay = new Map<string, { count: number; minutes: number; unknown: number }>();
+  for (const visit of visits) {
+    const day = attendanceDay(visit.observedCheckIn);
+    if (day === null) continue;
+    const total = totalsByDay.get(day) ?? { count: 0, minutes: 0, unknown: 0 };
+    const duration = attendanceDuration(visit);
+    total.count += 1;
+    total.minutes += duration ?? 0;
+    total.unknown += duration === null ? 1 : 0;
+    totalsByDay.set(day, total);
+  }
   return Array.from({ length: count }, (_, index) => {
     const date = new Date(start.getTime() + index * 86400000).toISOString().slice(0, 10);
-    const daily = visits.filter(visit => attendanceDay(visit.observedCheckIn) === date);
-    const minutes = daily.reduce((sum, visit) => sum + (attendanceDuration(visit) ?? 0), 0);
-    const unknown = daily.filter(visit => attendanceDuration(visit) === null).length;
+    const { count: visitsOnDay, minutes, unknown } = totalsByDay.get(date) ?? { count: 0, minutes: 0, unknown: 0 };
     const weekday = (offset + index) % 7;
     return { date, x0: Math.floor((offset + index) / 7), x1: Math.floor((offset + index) / 7) + 1,
       // The chart y scale maps zero to the bottom, so invert rows to put Monday at the top.
-      y0: 6 - weekday, y1: 7 - weekday, count: daily.length, minutes, unknown,
+      y0: 6 - weekday, y1: 7 - weekday, count: visitsOnDay, minutes, unknown,
       level: minutes === 0 ? 0 : minutes <= 60 ? 1 : minutes <= 120 ? 2 : 3, future: date > today };
   });
 }
