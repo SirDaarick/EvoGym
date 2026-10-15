@@ -11,6 +11,7 @@ import { Inventory } from '../features/inventory/Inventory';
 import { Shifts } from '../features/shifts/Shifts';
 import { Overview } from '../features/owner/Overview';
 import { AlertCenter } from '../features/owner/AlertCenter';
+import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
 import { ExpenseReport } from '../features/owner/ExpenseReport';
 import { History } from '../features/owner/History';
 import { PlanCatalog } from '../features/owner/PlanCatalog';
@@ -27,6 +28,7 @@ const navIcons: Record<string, React.ReactNode> = {
   home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
   overview: <><rect x="3" y="12" width="4" height="9" rx="1" /><rect x="10" y="7" width="4" height="14" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" /></>,
   alerts: <><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></>,
+  attendance: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11l-3-3-3 3" /></>,
   expenses: <><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" /><path d="M14 8H8" /><path d="M16 12H8" /><path d="M13 16H8" /></>,
   members: <><circle cx="9" cy="8" r="3" /><path d="M2 20v-2a6 6 0 0 1 12 0v2zM16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 4 5" /></>,
   sales: <><path d="M3 7h18l-2 13H5zM8 7V5a4 4 0 0 1 8 0v2" /></>,
@@ -241,7 +243,7 @@ export function App() {
               {dark ? <SunIcon /> : <MoonIcon />}
             </span>
           </Button>
-          <Link to="/" className="button button-secondary header-profile-btn">Perfil</Link>
+          <Link to="/" tabIndex={-1} className="button button-secondary header-profile-btn">Perfil</Link>
         </div>
       </header>
       <main id="main-content" tabIndex={-1}>
@@ -268,6 +270,7 @@ export function App() {
           {role === 'OWNER' && <>
             <Route path="/owner/overview" element={<Overview key={resetVersion} />} />
             <Route path="/owner/alerts" element={<AlertCenter key={resetVersion} />} />
+            <Route path="/owner/attendance" element={<AttendanceAnalytics key={resetVersion} />} />
             <Route path="/owner/expenses" element={<ExpenseReport key={resetVersion} />} />
             <Route path="/owner/staff" element={<StaffManagement key={resetVersion} />} />
             <Route path="/owner/history" element={<History key={resetVersion} />} />
