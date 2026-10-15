@@ -32,11 +32,22 @@ export interface AnimatedListEntry {
 
 export type AnimatedListItem = string | AnimatedListEntry;
 
+export interface AnimatedListGroup {
+  label: string;
+  items: AnimatedListItem[];
+}
+
 type Animation = 'pop' | 'slide' | 'fade';
 type State = 'in' | 'above' | 'below';
 
 interface AnimatedListProps {
   items?: AnimatedListItem[];
+  groups?: { label: string; items: AnimatedListItem[] }[];
+  selectedIndex?: number;
+  onSelectedIndexChange?: (index: number) => void;
+  id?: string;
+  listboxId?: string;
+  tabIndex?: number;
   onItemSelect?: (item: AnimatedListItem, index: number) => void;
   renderItem?: (item: AnimatedListItem, index: number, isSelected: boolean) => ReactNode;
   initialSelectedIndex?: number;
@@ -70,41 +81,41 @@ interface Engine {
 
 const THEMES: Record<'dark' | 'light', Record<string, string>> = {
   dark: {
-    '--al-frame': 'rgba(38, 35, 46, 0.66)',
-    '--al-frame-edge': 'rgba(255, 255, 255, 0.08)',
-    '--al-frame-highlight': 'rgba(255, 255, 255, 0.07)',
-    '--al-frame-shadow': '0 22px 44px -20px rgba(0, 0, 0, 0.8), 0 6px 16px -8px rgba(0, 0, 0, 0.5)',
-    '--al-tile': 'linear-gradient(180deg, #3a3644 0%, #27242f 100%)',
-    '--al-tile-edge': 'rgba(255, 255, 255, 0.07)',
-    '--al-tile-highlight': 'rgba(255, 255, 255, 0.12)',
-    '--al-tile-shadow': '0 4px 10px -4px rgba(0, 0, 0, 0.7)',
-    '--al-well': 'rgba(255, 255, 255, 0.08)',
-    '--al-ink': '#f4f4f5',
-    '--al-muted': 'rgba(244, 244, 245, 0.55)',
-    '--al-thumb': 'rgba(255, 255, 255, 0.16)',
-    '--al-ring': 'rgba(244, 244, 245, 0.3)',
-    '--al-ring-fill': 'rgba(244, 244, 245, 0.05)',
-    '--al-hover': 'brightness(1.12)',
-    '--al-press': 'brightness(0.85)',
-    '--al-active': 'brightness(1.16)'
+    '--al-frame': 'var(--color-surface, #202020)',
+    '--al-frame-edge': 'var(--color-divider, #333333)',
+    '--al-frame-highlight': 'rgba(255, 255, 255, 0.05)',
+    '--al-frame-shadow': '0 12px 26px rgba(0, 0, 0, 0.48), 0 2px 6px rgba(0, 0, 0, 0.30)',
+    '--al-tile': 'var(--color-surface-raised, #2A2A2A)',
+    '--al-tile-edge': 'var(--color-divider, #333333)',
+    '--al-tile-highlight': 'rgba(255, 255, 255, 0.07)',
+    '--al-tile-shadow': '0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+    '--al-well': 'var(--color-soft, #2A2A2A)',
+    '--al-ink': 'var(--color-ink, #FCFCFC)',
+    '--al-muted': 'var(--color-muted, #CCCCCC)',
+    '--al-thumb': 'rgba(255, 255, 255, 0.2)',
+    '--al-ring': 'var(--color-primary, #FC6C06)',
+    '--al-ring-fill': 'rgba(252, 108, 6, 0.14)',
+    '--al-hover': 'brightness(1.08)',
+    '--al-press': 'brightness(0.92)',
+    '--al-active': 'brightness(1.12)'
   },
   light: {
-    '--al-frame': 'rgba(240, 240, 243, 0.8)',
-    '--al-frame-edge': 'rgba(24, 24, 27, 0.07)',
+    '--al-frame': 'var(--color-surface, #FCFCFC)',
+    '--al-frame-edge': 'var(--color-divider, #E5E3E0)',
     '--al-frame-highlight': 'rgba(255, 255, 255, 0.95)',
-    '--al-frame-shadow': '0 22px 44px -22px rgba(24, 24, 27, 0.3), 0 6px 16px -10px rgba(24, 24, 27, 0.16)',
-    '--al-tile': 'linear-gradient(180deg, #ffffff 0%, #f6f6f8 100%)',
-    '--al-tile-edge': 'rgba(24, 24, 27, 0.08)',
+    '--al-frame-shadow': '0 10px 24px rgba(35, 29, 31, 0.10), 0 3px 7px rgba(35, 29, 31, 0.06)',
+    '--al-tile': 'var(--color-surface, #FFFFFF)',
+    '--al-tile-edge': 'var(--color-divider, #E5E3E0)',
     '--al-tile-highlight': 'rgba(255, 255, 255, 1)',
-    '--al-tile-shadow': '0 4px 10px -5px rgba(24, 24, 27, 0.25)',
-    '--al-well': 'rgba(24, 24, 27, 0.05)',
-    '--al-ink': '#27272a',
-    '--al-muted': 'rgba(39, 39, 42, 0.55)',
-    '--al-thumb': 'rgba(24, 24, 27, 0.16)',
-    '--al-ring': 'rgba(24, 24, 27, 0.28)',
-    '--al-ring-fill': 'transparent',
-    '--al-hover': 'brightness(0.97)',
-    '--al-press': 'brightness(0.92)',
+    '--al-tile-shadow': '0 4px 10px rgba(35, 29, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+    '--al-well': 'var(--color-soft, #FFF8F2)',
+    '--al-ink': 'var(--color-ink, #202020)',
+    '--al-muted': 'var(--color-muted, #555555)',
+    '--al-thumb': 'rgba(32, 32, 32, 0.2)',
+    '--al-ring': 'var(--color-primary, #FC6C06)',
+    '--al-ring-fill': 'rgba(252, 108, 6, 0.08)',
+    '--al-hover': 'brightness(0.98)',
+    '--al-press': 'brightness(0.94)',
     '--al-active': 'none'
   }
 };
@@ -153,6 +164,12 @@ const size = (value: number | string) => (typeof value === 'number' ? `${value}p
 
 const AnimatedList = ({
   items = DEFAULT_ITEMS,
+  groups,
+  selectedIndex: selectedIndexProp,
+  onSelectedIndexChange,
+  id: customId,
+  listboxId,
+  tabIndex = 0,
   onItemSelect,
   renderItem,
   initialSelectedIndex = -1,
@@ -176,6 +193,9 @@ const AnimatedList = ({
   itemClassName = '',
   style
 }: AnimatedListProps) => {
+  const flattenedItems = groups ? groups.flatMap(group => group.items) : (items ?? DEFAULT_ITEMS);
+  const effectiveItems = flattenedItems;
+
   const rootRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -185,10 +205,24 @@ const AnimatedList = ({
   const engineRef = useRef<Engine | null>(null);
   const keyboardRef = useRef(false);
   const navigatingRef = useRef(false);
-  const [selected, setSelected] = useState(initialSelectedIndex);
-  const baseId = useId();
+
+  const [internalSelected, setInternalSelected] = useState(initialSelectedIndex);
+  const isControlled = selectedIndexProp !== undefined;
+  const selected = isControlled ? selectedIndexProp : internalSelected;
+
+  const setSelected = (index: number) => {
+    if (!isControlled) {
+      setInternalSelected(index);
+    }
+    onSelectedIndexChange?.(index);
+  };
+
+  const autoId = useId();
+  const baseId = customId || autoId;
+
   const settings = {
-    items,
+    items: effectiveItems,
+    groups,
     onItemSelect,
     selected,
     selectOnHover,
@@ -482,7 +516,7 @@ const AnimatedList = ({
 
   useIsomorphicLayoutEffect(() => {
     engineRef.current?.sync();
-  }, [items, animation]);
+  }, [effectiveItems, animation]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -540,10 +574,11 @@ const AnimatedList = ({
     >
       <div
         ref={viewportRef}
+        id={listboxId}
         className={`animated-list__viewport${displayScrollbar ? '' : ' animated-list__viewport--bare'}`}
         role="listbox"
-        tabIndex={0}
-        aria-activedescendant={selected >= 0 && selected < items.length ? `${baseId}-${selected}` : undefined}
+        tabIndex={tabIndex}
+        aria-activedescendant={selected >= 0 && selected < effectiveItems.length ? `${baseId}-${selected}` : undefined}
         style={{
           maxHeight: size(maxHeight),
           maskImage: showGradients ? FADE_MASK : undefined,
@@ -551,44 +586,94 @@ const AnimatedList = ({
         }}
       >
         <div ref={trackRef} className="animated-list__track">
-          {items.map((item, index) => {
-            const entry: AnimatedListEntry = item !== null && typeof item === 'object' ? item : { title: item };
-            const isSelected = index === selected;
-            return (
-              <div
-                key={entry.id ?? index}
-                ref={element => {
-                  itemRefs.current[index] = element;
-                }}
-                id={`${baseId}-${index}`}
-                className={`animated-list__item ${itemClassName}`.trim()}
-                role="option"
-                aria-selected={isSelected}
-                data-index={index}
-                data-selected={isSelected ? '' : undefined}
-                onPointerEnter={selectOnHover ? () => hover(index) : undefined}
-                onClick={() => choose(item, index)}
-              >
-                {renderItem ? (
-                  renderItem(item, index, isSelected)
-                ) : (
-                  <>
-                    {(entry.image || entry.icon) && (
-                      <span className="animated-list__lead">
-                        {entry.image ? <img src={entry.image} alt="" draggable={false} /> : entry.icon}
+          {groups ? (
+            (() => {
+              let globalIndex = 0;
+              return groups.map((group, groupIndex) => (
+                <div key={group.label || groupIndex} role="group" aria-label={group.label} className="animated-list__group">
+                  <p className="suggestion-group-title" aria-hidden="true">{group.label}</p>
+                  {group.items.map(item => {
+                    const index = globalIndex++;
+                    const entry: AnimatedListEntry = item !== null && typeof item === 'object' ? item : { title: item };
+                    const isSelected = index === selected;
+                    return (
+                      <div
+                        key={entry.id ?? index}
+                        ref={element => {
+                          itemRefs.current[index] = element;
+                        }}
+                        id={`${baseId}-${index}`}
+                        className={`animated-list__item ${itemClassName}`.trim()}
+                        role="option"
+                        aria-selected={isSelected}
+                        data-index={index}
+                        data-selected={isSelected ? '' : undefined}
+                        onPointerEnter={selectOnHover ? () => hover(index) : undefined}
+                        onClick={() => choose(item, index)}
+                      >
+                        {renderItem ? (
+                          renderItem(item, index, isSelected)
+                        ) : (
+                          <>
+                            {(entry.image || entry.icon) && (
+                              <span className="animated-list__lead">
+                                {entry.image ? <img src={entry.image} alt="" draggable={false} /> : entry.icon}
+                              </span>
+                            )}
+                            <span className="animated-list__text">
+                              <span className="animated-list__title">{entry.title}</span>
+                              {entry.description && <span className="animated-list__description">{entry.description}</span>}
+                            </span>
+                            {entry.meta && <span className="animated-list__meta">{entry.meta}</span>}
+                          </>
+                        )}
+                        <span className="animated-list__rim" aria-hidden="true" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ));
+            })()
+          ) : (
+            effectiveItems.map((item, index) => {
+              const entry: AnimatedListEntry = item !== null && typeof item === 'object' ? item : { title: item };
+              const isSelected = index === selected;
+              return (
+                <div
+                  key={entry.id ?? index}
+                  ref={element => {
+                    itemRefs.current[index] = element;
+                  }}
+                  id={`${baseId}-${index}`}
+                  className={`animated-list__item ${itemClassName}`.trim()}
+                  role="option"
+                  aria-selected={isSelected}
+                  data-index={index}
+                  data-selected={isSelected ? '' : undefined}
+                  onPointerEnter={selectOnHover ? () => hover(index) : undefined}
+                  onClick={() => choose(item, index)}
+                >
+                  {renderItem ? (
+                    renderItem(item, index, isSelected)
+                  ) : (
+                    <>
+                      {(entry.image || entry.icon) && (
+                        <span className="animated-list__lead">
+                          {entry.image ? <img src={entry.image} alt="" draggable={false} /> : entry.icon}
+                        </span>
+                      )}
+                      <span className="animated-list__text">
+                        <span className="animated-list__title">{entry.title}</span>
+                        {entry.description && <span className="animated-list__description">{entry.description}</span>}
                       </span>
-                    )}
-                    <span className="animated-list__text">
-                      <span className="animated-list__title">{entry.title}</span>
-                      {entry.description && <span className="animated-list__description">{entry.description}</span>}
-                    </span>
-                    {entry.meta && <span className="animated-list__meta">{entry.meta}</span>}
-                  </>
-                )}
-                <span className="animated-list__rim" aria-hidden="true" />
-              </div>
-            );
-          })}
+                      {entry.meta && <span className="animated-list__meta">{entry.meta}</span>}
+                    </>
+                  )}
+                  <span className="animated-list__rim" aria-hidden="true" />
+                </div>
+              );
+            })
+          )}
           <span ref={indicatorRef} className="animated-list__indicator" aria-hidden="true">
             <span ref={ringRef} className="animated-list__ring" />
           </span>
