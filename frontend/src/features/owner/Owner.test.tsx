@@ -35,7 +35,8 @@ describe('owner views', () => {
   it('does not display zero totals for an invalid reporting period', async () => {
     mount('/owner/overview');
     await userEvent.clear(screen.getByLabelText('Desde'));
-    expect(screen.getByRole('alert')).toHaveTextContent('No se calculan resultados para un periodo inválido');
+    const alerts = screen.getAllByRole('alert');
+    expect(alerts.some(alert => alert.textContent?.includes('No se calculan resultados para un periodo inválido'))).toBe(true);
     expect(screen.queryByRole('heading', { name: 'Cobros confirmados' })).not.toBeInTheDocument();
   });
   it('keeps the skip link and reporting period controls keyboard reachable', async () => {
