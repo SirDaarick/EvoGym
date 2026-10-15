@@ -85,7 +85,7 @@ function readPerformanceDebugFlag() {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { reset, resetVersion, loadSampleData } = useDemo();
+  const { reset, resetVersion } = useDemo();
   const [debugPerformance] = useState(readPerformanceDebugFlag);
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
@@ -290,7 +290,6 @@ export function App() {
           </div>
           <div className="demo-controls">
             <label htmlFor="demo-role">Rol de acceso<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
-            <Button variant="secondary" onClick={() => { loadSampleData(); setMessage('Datos de prueba completos cargados.'); }}>Cargar datos demo</Button>
             <Button variant="secondary" onClick={() => { reset(); setMessage('Datos locales restablecidos.'); }}>Restablecer datos</Button>
           </div>
         </div>

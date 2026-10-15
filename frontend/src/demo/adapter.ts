@@ -1,6 +1,18 @@
 import type { DemoState, Product } from '../domain/models';
+import { createRichDemoState } from './richDemoState';
+
+export function isRichDemoEnabled(): boolean {
+  return import.meta.env.VITE_USE_RICH_DEMO === 'true';
+}
 
 export function createDemoState(): DemoState {
+  if (isRichDemoEnabled()) {
+    return createRichDemoState();
+  }
+  return createBaselineDemoState();
+}
+
+export function createBaselineDemoState(): DemoState {
   return {
     demoClock: '2026-10-08T12:00:00-06:00',
     attendancePolicy: { allowExpiryDay: true, allowRepeatVisits: true },

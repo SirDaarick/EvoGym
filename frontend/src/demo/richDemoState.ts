@@ -277,9 +277,6 @@ export function createRichDemoState(): DemoState {
     { id: 'att-02-1', memberId: 'demo-001', observedCheckIn: '2026-10-02T07:00:00-06:00', observedCheckOut: '2026-10-02T08:15:00-06:00', autoClosedAt: null, illustrativeSeed: true },
     { id: 'att-02-2', memberId: 'demo-active', observedCheckIn: '2026-10-02T08:30:00-06:00', observedCheckOut: '2026-10-02T09:45:00-06:00', autoClosedAt: null, illustrativeSeed: true },
     { id: 'att-02-3', memberId: 'demo-007', observedCheckIn: '2026-10-02T11:00:00-06:00', observedCheckOut: '2026-10-02T12:15:00-06:00', autoClosedAt: null, illustrativeSeed: true },
-    { id: 'att-02-4', memberId: 'demo-008', observedCheckIn: '2026-10-02T18:30:00-06:00', observedCheckOut: '2026-10-02T19:45:00-06:00', autoClosedAt: null, illustrativeSeed: true },
-    { id: 'att-02-5', memberId: 'demo-010', observedCheckIn: '2026-10-02T19:15:00-06:00', observedCheckOut: '2026-10-02T20:30:00-06:00', autoClosedAt: null, illustrativeSeed: true },
-    { id: 'att-02-6', memberId: 'demo-012', observedCheckIn: '2026-10-02T20:00:00-06:00', observedCheckOut: '2026-10-02T21:15:00-06:00', autoClosedAt: null, illustrativeSeed: true },
   ];
 
   const sales: Sale[] = [

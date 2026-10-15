@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { DemoState } from '../domain/models';
 import type { CashDenominationCount } from '../domain/models';
-import { createDemoState } from './adapter';
+import { createBaselineDemoState, createDemoState, isRichDemoEnabled } from './adapter';
 import { createRichDemoState } from './richDemoState';
 import type { Transaction } from './operations';
-import { acquireExclusiveWriter, emptyPersistenceRecord, hydratePersistence, savePersistenceRecord, type PersistenceRecord, type ShiftDrafts } from './shiftPersistence';
+import { acquireExclusiveWriter, createPersistenceRecord, hydratePersistence, savePersistenceRecord, type PersistenceRecord, type ShiftDrafts } from './shiftPersistence';
 import { closeShift } from './shiftOperations';
+
+const RICH_DATASET_ID = 'evogym-rich-demo-v1';
 
 export type PersistenceStatus = 'loading' | 'ready' | 'blocked' | 'unavailable' | 'recovery-required' | 'error';
 
@@ -31,7 +33,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [resetVersion, setResetVersion] = useState(0);
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>('loading');
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  const record = useRef<PersistenceRecord>(emptyPersistenceRecord());
+  const record = useRef<PersistenceRecord>(
+    createPersistenceRecord(state, {}, isRichDemoEnabled() ? RICH_DATASET_ID : undefined)
+  );
   const [drafts, setDrafts] = useState<ShiftDrafts>({});
   const draftsRef = useRef<ShiftDrafts>({});
   const hydratedForWrites = useRef(false);
@@ -59,11 +63,42 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       try {
         const hydrated = hydratePersistence(localStorage);
         if (hydrated.status === 'unsupported' || hydrated.status === 'corrupt') { setPersistenceStatus('recovery-required'); return; }
+        const richEnabled = isRichDemoEnabled();
         if (hydrated.status === 'ready') {
-          record.current = hydrated.record; current.current = hydrated.record.state;
-          setState(hydrated.record.state); draftsRef.current = hydrated.record.drafts; setDrafts(hydrated.record.drafts);
+          if (richEnabled && hydrated.record.datasetId !== RICH_DATASET_ID) {
+            const richState = createRichDemoState();
+            const upgraded = createPersistenceRecord(richState, {}, RICH_DATASET_ID);
+            savePersistenceRecord(localStorage, upgraded);
+            record.current = upgraded;
+            current.current = richState;
+            setState(richState);
+            draftsRef.current = {};
+            setDrafts({});
+          } else if (!richEnabled && hydrated.record.datasetId === RICH_DATASET_ID) {
+            const baselineState = createBaselineDemoState();
+            const reverted = createPersistenceRecord(baselineState, {});
+            savePersistenceRecord(localStorage, reverted);
+            record.current = reverted;
+            current.current = baselineState;
+            setState(baselineState);
+            draftsRef.current = {};
+            setDrafts({});
+          } else {
+            record.current = hydrated.record;
+            current.current = hydrated.record.state;
+            setState(hydrated.record.state);
+            draftsRef.current = hydrated.record.drafts;
+            setDrafts(hydrated.record.drafts);
+          }
         } else {
-          record.current = emptyPersistenceRecord(); savePersistenceRecord(localStorage, record.current);
+          const freshState = createDemoState();
+          const initialRecord = createPersistenceRecord(freshState, {}, richEnabled ? RICH_DATASET_ID : undefined);
+          record.current = initialRecord;
+          savePersistenceRecord(localStorage, record.current);
+          current.current = initialRecord.state;
+          setState(initialRecord.state);
+          draftsRef.current = {};
+          setDrafts({});
         }
         hydratedForWrites.current = true;
         setPersistenceStatus('ready');
@@ -113,7 +148,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   return <DemoContext.Provider value={{ state, transact, resetVersion, persistenceStatus, persistenceError, drafts, saveDraft, getDraft, commitShiftClose,
     update: operation => replace(operation(current.current)),
     reset: () => {
-      const fresh = emptyPersistenceRecord();
+      const richEnabled = isRichDemoEnabled();
+      const freshState = createDemoState();
+      const fresh = createPersistenceRecord(freshState, {}, richEnabled ? RICH_DATASET_ID : undefined);
       if (!releaseWriter.current) { setPersistenceError('This tab is not authorized to reset local data'); return false; }
       try {
         savePersistenceRecord(localStorage, fresh);
