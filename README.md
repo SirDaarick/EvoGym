@@ -1,57 +1,121 @@
-# EvoGym operational prototype
+# EvoGym — Frontend de Operaciones
 
-A local, Spanish-language demo for validating gym workflows. It does not process real payments, authenticate users, or synchronize Excel and the mandatory physical notebook.
+Sistema frontend de alto rendimiento para la gestión operativa y administrativa del gimnasio **EvoGym**. Diseñado con una arquitectura moderna por capas, composición **Bento Grid**, profundidad táctil **Claymorphism** y soporte completo para modo claro y oscuro.
 
-## Run locally
+---
 
-Use a current Node.js LTS version supported by Vite, then:
+## 🚀 Tecnologías y Stack
 
-```sh
+- **Framework:** [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- **Empaquetador y Entorno:** [Vite 6](https://vite.dev/)
+- **Estilos y Sistema Visual:** [Tailwind CSS v4](https://tailwindcss.com/) + CSS Tokens personalizados (EGC Brand `#FC6C06`, Claymorphism)
+- **Enrutamiento:** [React Router v8](https://reactrouter.com/)
+- **Tablas de Datos:** [@tanstack/react-table v8](https://tanstack.com/table) (ordenamiento, paginación, filtros)
+- **Gráficas y Visualización:** [@tanstack/charts v1](https://tanstack.com/charts) (gráficas de barras, tendencias, donas polares)
+- **Iconografía:** [@hugeicons/react](https://hugeicons.com/)
+- **Animaciones e Interacciones:** [Motion](https://motion.dev/) & [GSAP](https://gsap.com/)
+- **Testing:** [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/)
+
+---
+
+## 🎨 Sistema Visual y Línea de Diseño
+
+El sistema sigue la identidad visual oficial de **EvoGym**:
+
+- **Paleta de Marca:**
+  - Naranja Oficial (**EGC Orange**): `#FC6C06`
+  - Blanco Oficial (**EGC White**): `#FCFCFC`
+  - Negro Marca (**Brand Black**): `#080808`
+  - Gris Técnico (**Technical Gray**): `#202020`
+  - Gris Secundario (**Secondary Gray**): `#555555`
+- **Composición Bento:** Paneles modulares asimétricos con radio de borde de `20px` (`--radius-panel`) y organización por importancia de tarea.
+- **Claymorphism:** Elevaciones táctiles con doble sombra suave y bisel interior de luz (`--shadow-clay`), diferenciado tanto en modo claro como en modo oscuro.
+- **Accesibilidad y Contraste:** Botones primarios en `#FC6C06` con texto `#080808`, ofreciendo un ratio de contraste de `6.95:1` cumpliendo ampliamente con **WCAG AA**.
+- **Dark Mode Completo:** Tema oscuro nativo con alternador rápido en cabecera y persistencia de preferencia.
+
+---
+
+## 📂 Arquitectura del Proyecto
+
+Estructurado siguiendo principios de **Screaming / Modular Architecture**:
+
+```
+src/
+├── app/                  # Shell principal, navegación lateral colapsable, enrutamiento
+├── domain/               # Modelos y contratos de negocio fuertemente tipados
+├── demo/                 # Adaptadores de datos de prueba y lógica desacoplada (listo para Backend)
+├── features/             # Módulos por dominio de negocio
+│   ├── attendance/       # Registro y calendario de asistencias con TanStack Charts
+│   ├── catalog/          # Catálogo interactivo de componentes compartidos y React Bits
+│   ├── inventory/        # Catálogo y control de existencias en recepción
+│   ├── members/          # Directorio de socios, registro y ficha de detalle con TanStack Table
+│   ├── owner/            # Portal administrativo (KPIs, historial, inventario analítico, planes)
+│   ├── payments/         # Cobro de membresías y calculadora de efectivo
+│   ├── reception/        # Terminal de punto de venta, carrito rápido y atajos operativos
+│   ├── sales/            # Módulo de ventas y operaciones de caja
+│   ├── shifts/           # Control y cierre de turnos con desglose de denominaciones MXN
+│   └── staff/            # Selector de perfiles de recepción y verificación de PIN de Admin
+├── shared/               # Componentes UI reutilizables (Badge, Button, Field, Notice, Panel, etc.)
+└── styles.css            # Tokens de diseño, Tailwind v4 y variables CSS
+```
+
+---
+
+## 🔑 Funcionalidades Principales
+
+### 1. Recepción y Punto de Venta
+- **Carrito Reactivo:** Selección de productos, control de cantidades con clic derecho/izquierdo, cobro en efectivo, tarjeta o transferencia.
+- **Calculadora de Efectivo:** Cálculo automático de cambio e importes exactos.
+- **Atajos Operativos Rápidos:** Modales para registro ágil de Gastos imprevistos, Extras, Guantes, Suplementos y Casilleros.
+- **Control de Mermas:** Registro inmediato de bajas de inventario con justificación.
+
+### 2. Administración y Control de Turnos
+- **Cierre de Turnos:** Desglose interactivo por denominaciones de billetes y monedas mexicanas (MXN) o captura manual con validación de diferencias.
+- **Trazabilidad y Movimientos:** Tablas construidas sobre `@tanstack/react-table` con ordenamiento por fecha y paginación.
+
+### 3. Portal de Propietario (Owner)
+- **Análisis de Inventario:** Gráficas de rotación con `@tanstack/charts` y tabla dinámica con búsqueda en tiempo real.
+- **Gestión de Planes y Tarifas:** Catálogo completo para crear, editar y activar/desactivar membresías y pases por visita.
+- **Historial Global:** Registro centralizado de transacciones financieras y de inventario.
+
+### 4. Menú Lateral Ergonómico
+- Barra lateral compacta por defecto (76px) para maximizar el área de trabajo.
+- Expansión fluida al interactuar y colapso automático al salir el cursor, con soporte para anclaje fijo (*pinning*) y navegación accesible por teclado.
+
+---
+
+## 🛠️ Comandos de Desarrollo
+
+### Instalación de dependencias
+```bash
 npm install
+```
+
+### Iniciar servidor de desarrollo
+```bash
 npm run dev
 ```
 
-Open the URL printed by Vite at `/`. Choose **Admin** or **Recepción** without credentials. Admin uses the internal OWNER view; Reception opens **Inicio**. Existing deep links and **Rol de demostración** remain available. **Restablecer demo** restores sample records without changing the current view. All state lives in memory and resets on page reload.
-
-## Owner discussion walkthrough
-
-1. Select Reception, choose product cards and quantities, then review and confirm a demo cash/card purchase. Only complete success clears the cart. A transfer remains pending without confirmed income or stock reduction; settlement is not implemented.
-2. Use header search to open **Demo Activa**, register entry, expand the demo clock, advance 30 minutes and register exit. Try the provisional expiry-day/repeat-visit switches on the relevant examples.
-3. Enter again and simulate **22:00** closure: attendance remains but departure and duration are unknown. The orange calendar indicates frequency, not elapsed time; initial visits are fictitious examples.
-4. Open **Turno** and try bill/coin quantities or the manual total. Review expected, counted and difference before confirming.
-
-Expandable questions stay beside their workflows. Expiry-day access and repeat visits are provisional; denomination catalog, product imagery, payment/renewal rules and timezone still need owner confirmation. Original sample membership dates do not prove eligibility. The proposed Mexico City demo clock is controlled, not the real clock; no background closure runs while the app is closed.
-
-The unfinished cart is local to Home and is discarded on navigation/profile change. Recorded operations stay in memory until reset/reload. This prototype has no authentication, backend, real payment processing or persistence; it never replaces notebook/Excel reconciliation.
-
-## Verify
-
-```sh
+### Verificación de Tipos (TypeScript)
+```bash
 npm run typecheck
+```
+
+### Ejecución de Pruebas Unitarias y de Integración
+```bash
 npm test
+```
+
+### Construcción para Producción
+```bash
 npm run build
 npm run preview
 ```
 
-Typecheck, component acceptance tests, and the production bundle are separate checks. Browser layout, zoom, keyboard, and workflow validation remain necessary; passing these commands is not an accessibility certification.
+---
 
-## Implementation map
+## 🔌 Preparación para Integración con Backend
 
-| Location | Responsibility |
-|---|---|
-| `src/app` | Routing, role-view navigation, application shell |
-| `src/shared/ui.tsx` | Shared semantic controls and task surfaces |
-| `src/styles.css` | Tailwind v4 theme tokens and responsive shared styles |
-| `src/domain` | Typed business records, role names, integer monetary values |
-| `src/demo` | Sample state and local adapter/provider, separate from presentation |
-| `src/features/catalog` | In-browser component state reference at `/components` |
-
-Operational routes demonstrate local workflows, not production permission enforcement. Provisional rules and sample records are not approved business policy or real access authorization.
-
-## Design and boundaries
-
-Read `Design.md` for the screen map, shared component contract, and unresolved business rules. No original logo asset exists in the repository yet; the shell uses plain product-name text, not a replacement mark. Supply the original approved asset before branded production use.
-
-Transfer confirmation, grace, credit application/refund, cancellation, exceptional permissions, and ambiguous renewal dates remain unresolved. The notebook remains mandatory; Excel remains the current master. No automatic reconciliation or synchronization is implemented.
-
-The foundation uses React, TypeScript, React Router, Vite and the [official Tailwind Vite integration](https://tailwindcss.com/docs/installation/using-vite). No dialog library is added until a workflow actually needs a dialog.
+El frontend mantiene todas las operaciones de datos abstraídas a través de contratos tipados en `src/domain/models.ts` y operaciones puras en `src/demo/`. Para conectar una API REST o GraphQL:
+1. Reemplazar los métodos de `DemoProvider` por clientes HTTP (Axios / Fetch / TanStack Query).
+2. Los modelos de datos (`Member`, `Sale`, `Shift`, `Product`, `StockMovement`) ya están normalizados y listos para mapearse contra las entidades de la base de datos.

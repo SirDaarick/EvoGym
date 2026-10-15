@@ -32,25 +32,25 @@ Do not expose these actions as generally available until the permission matrix i
 The scholarship selected by the boxing coach does not introduce a coach login.
 Show role-appropriate navigation, but enforce authorization outside presentation in implementation.
 
-## 3. Visual direction: structured, light, athletic
+## 3. Visual direction: structured, athletic, and tactile
 
 **Bento is composition; clay is depth. Neither is a reason to add content.**
 - Use asymmetric summary groups only when one item has greater task importance.
 - Keep transactions and inventory in readable tables or lists, not separate tiles per record.
-- Express sports identity through orange accents, confident type, generous space, and concise actions.
-- Use white surfaces on a quiet off-white background; keep shadows shallow.
+- Express sports identity through the official EGC orange, confident type, generous space, and concise actions.
+- Light is the default theme: use the official near-white on a quiet off-white canvas, with clear text and restrained gray details. Dark mode is a complete alternate theme, not an inversion filter.
+- Make claymorphism more visible on Bento panels through layered soft shadows, a gentle top-edge highlight, and rounded surfaces; keep one clear elevation per panel rather than stacking floating cards.
+- Keep text, essential borders, and keyboard focus crisp and high-contrast; decorative depth never substitutes for a control boundary or state label.
 - Avoid inset clay effects on inputs: a real control must remain unmistakably interactive.
 - Do not use decorative athlete photography in operational screens.
 - Keep navigation stable between tasks; do not reorder cards automatically while people work.
 
 ### Brand source
 
-Reference image: `C:/Users/edani/AppData/Local/Temp/codex-clipboard-b59af7af-88d1-43b1-bf12-0da469b3f2e7.png`.
-Read-only pixel sampling found common flat pixels `#F58231` orange, `#231D1F` dark, and white.
-These are raster observations, **not official brand specifications**. Gray is visually present but not precisely sampled here.
-Retain the supplied original logo; request a vector/high-resolution asset before production use.
-Do not redraw the mark, distort it, or claim to identify the exact logo font.
-Use the full mark where legible; a compact approved asset is pending, not an invented monogram.
+Official palette supplied by the owner: EGC Orange `#FC6C06` and EGC White `#FCFCFC`; supporting colors are Black `#080808`, Technical Gray `#202020`, and Secondary Gray `#555555`.
+Use the repository logo asset `Logo_Evo.png` as supplied. Preserve its aspect ratio and original artwork; do not redraw, recolor, crop, or distort the mark.
+The official orange paired with official black text `#080808` provides 6.95:1 contrast for primary buttons, satisfying WCAG AA in both light and dark themes.
+Keep the light theme as the default; dark mode uses the same hierarchy and Bento layout with the official black/technical grays as its base surfaces.
 The tagline belongs only in an optional welcome/brand context, never repeated across operational cards.
 
 ## 4. Proposed design tokens
@@ -59,13 +59,14 @@ The tagline belongs only in an optional welcome/brand context, never repeated ac
 
 | Token | Value | Purpose |
 |---|---|---|
-| brand.orange | `#F58231` | Brand accent, selected decoration; not a white-text button default. |
+| brand.orange | `#FC6C06` | Official EGC brand accent; paired with `#080808` text for primary actions. |
 | background | `#F7F7F5` | Page canvas. |
-| surface | `#FFFFFF` | Cards, tables, form surfaces. |
-| text.primary | `#242124` | Main text and numeric values. |
-| text.secondary | `#62616A` | Supporting text on white surfaces; check other pairings. |
-| action.primary | `#A83D08` | Accessible darker orange candidate for primary controls. |
-| action.hover | `#873006` | Primary control hover/pressed candidate. |
+| surface | `#FCFCFC` | Official EGC White for cards, tables, and form surfaces. |
+| text.primary | `#202020` | Official Technical Gray for main text and numeric values. |
+| text.secondary | `#555555` | Official Secondary Gray for supporting text; check other pairings. |
+| brand.black | `#080808` | Official Black for selected high-contrast details; not a default page background. |
+| action.primary | `#FC6C06` | Official EGC Orange paired with `#080808` text; official black text provides 6.95:1 contrast meeting WCAG AA. |
+| action.hover | `#E05A00` | Primary control hover/pressed candidate. |
 | action.soft | `#FFF8F2` | Quiet orange grouping background. |
 | boundary.essential | `#75717C` | Necessary input/button boundary against white or page canvas. |
 | border.decorative | `#E5E3E0` | Nonessential card separators only. |
@@ -77,6 +78,28 @@ The tagline belongs only in an optional welcome/brand context, never repeated ac
 Brand orange is never the sole indicator of selected, overdue, or allowed status.
 Pair statuses with text; reserve warning/error colors for meaningful conditions, not visual variety.
 
+### Dark theme palette
+
+Dark mode keeps the same logo, orange accent, roles, and content hierarchy. It does not simply invert the light theme. Official brand colors remain unchanged; derived dark-theme surfaces and status colors below are interface tokens, not additional official brand colors.
+
+| Token | Value | Purpose |
+|---|---|---|
+| dark.background | `#080808` | Official Black for the page canvas and navigation. |
+| dark.surface | `#202020` | Official Technical Gray for standard panels, tables, and forms. |
+| dark.surface.raised | `#2A2A2A` | Derived raised surface for a selected or higher-priority Bento panel. |
+| dark.surface.sunken | `#141414` | Derived inset region for grouping only; never use to make an input look disabled. |
+| dark.text.primary | `#FCFCFC` | Official EGC White for primary content. |
+| dark.text.secondary | `#CCCCCC` | Derived supporting text with readable contrast on dark surfaces. |
+| dark.action.primary | `#FC6C06` | Official EGC Orange for the primary action; pair with dark text, not white. |
+| dark.action.text | `#080808` | Official Black on orange primary actions. |
+| dark.border.essential | `#8A8A8A` | Derived visible boundary for controls on `#202020`. |
+| dark.focus | `#9CC5FF` | Derived keyboard focus color that remains distinct on both dark surfaces. |
+| dark.success | `#6DD58C` on `#12301F` | Derived success state. |
+| dark.warning | `#FDBA74` on `#3A2416` | Derived warning state. |
+| dark.error | `#FF8B8B` on `#391B1B` | Derived error state. |
+
+Use readable text labels with every status color. Do not reuse light-theme status backgrounds or reduce opacity to create dark variants.
+
 ### Measured contrast, not a compliance claim
 
 Calculated using WCAG sRGB relative luminance; ratios below are truncated to two decimals.
@@ -84,15 +107,20 @@ Checks apply only to the named opaque pairs, not arbitrary shadows, overlays, or
 
 | Foreground / background | Ratio | Intended check |
 |---|---:|---|
-| `#242124` / `#FFFFFF` | 15.93:1 | Normal text >= 4.5:1. |
-| `#62616A` / `#FFFFFF` | 6.10:1 | Normal text >= 4.5:1. |
-| `#FFFFFF` / `#A83D08` | 6.29:1 | Primary button text >= 4.5:1. |
-| `#FFFFFF` / `#873006` | 8.55:1 | Hover button text >= 4.5:1. |
+| `#202020` / `#FCFCFC` | 15.88:1 | Normal text >= 4.5:1. |
+| `#555555` / `#FCFCFC` | 7.27:1 | Normal text >= 4.5:1. |
+| `#080808` / `#FC6C06` | 6.95:1 | Primary button text >= 4.5:1. |
+| `#080808` / `#E05A00` | 5.31:1 | Hover button text >= 4.5:1. |
 | `#A83D08` / `#FFF8F2` | 5.98:1 | Soft action text >= 4.5:1. |
-| `#75717C` / `#FFFFFF` | 4.76:1 | Essential boundary >= 3:1. |
+| `#75717C` / `#FCFCFC` | 4.64:1 | Essential boundary >= 3:1. |
 | `#75717C` / `#F7F7F5` | 4.43:1 | Boundary only; not normal text on canvas. |
-| `#2455A4` / white / canvas | 7.21 / 6.72:1 | Focus against these adjacent surfaces >= 3:1. |
+| `#2455A4` / official white / canvas | 7.03 / 6.73:1 | Focus against these adjacent surfaces >= 3:1. |
 | Success / warning / error pairs above | 7.09 / 6.68 / 6.63:1 | Normal status text >= 4.5:1. |
+| Dark primary text / canvas (`#FCFCFC` / `#080808`) | 19.52:1 | Normal text >= 4.5:1. |
+| Dark secondary text / surface (`#CCCCCC` / `#202020`) | 10.15:1 | Normal text >= 4.5:1. |
+| Dark action text / orange (`#080808` / `#FC6C06`) | 6.95:1 | Primary button text >= 4.5:1. |
+| Dark focus / canvas and surface (`#9CC5FF`) | 11.30 / 9.19:1 | Focus against these adjacent surfaces >= 3:1. |
+| Dark success / warning / error pairs above | 7.86 / 8.62 / 6.92:1 | Normal status text >= 4.5:1. |
 
 Use a 2px focus outline with a 2px separating gap; inspect actual adjacency in the prototype.
 Recheck every rendered text, boundary, selected, focus, hover, and error pairing.
@@ -108,10 +136,11 @@ The target is WCAG 2.2 AA; this document and these calculations **do not establi
 | Numbers | Tabular numerals for money/counts; currency and period always explicit. |
 | Spacing | 4/8/12/16/24/32px scale; 24px card padding desktop, 16px narrow. |
 | Radius | Cards 20px, controls 10px, small labels 6px; avoid pill-shaped everything. |
-| Depth | Cards: 0 4px 14px rgba(35,29,31,.06); optional 0 1px 0 rgba(255,255,255,.8) inset. |
+| Depth, light | Bento panels: 0 10px 24px rgba(35,29,31,.10), 0 3px 7px rgba(35,29,31,.06), and 0 1px 0 rgba(255,255,255,.9) inset. |
+| Depth, dark | Bento panels: 0 12px 26px rgba(0,0,0,.48), 0 2px 6px rgba(0,0,0,.30), and 0 1px 0 rgba(255,255,255,.07) inset. |
 | Controls | Solid fill or essential boundary; never rely on shadow alone to identify a button. |
 
-Keep clay depth on a few panel surfaces; avoid stacked floating layers, gloss, and soft text edges.
+Use the more visible clay depth on primary Bento panels and the page shell; keep tables, dialogs, and secondary cards flatter. Avoid stacked floating layers, gloss, bright orange glows, and soft text edges. Honor `prefers-reduced-motion`; depth and hover do not depend on animation.
 
 ## 5. Interaction and accessibility contract
 
@@ -131,9 +160,28 @@ Keep clay depth on a few panel surfaces; avoid stacked floating layers, gloss, a
 - If the outcome is unknown, show an explicit pending/unknown result and a safe verification path.
 - Backend transaction/idempotency semantics remain to be defined; UI locking alone is insufficient.
 - Cancellation/refund controls require agreed permissions and traceability; no universal edit/delete.
-- Motion is optional: 120–180ms state transitions, no loops; honor prefers-reduced-motion.
+- Motion is a consistent, purposeful layer across the product, using selected React Bits components where they improve orientation or feedback. Keep ordinary transitions around 120–180ms, avoid idle loops, and honor `prefers-reduced-motion` with reduced or removed nonessential effects.
+- Light is the default visual theme; dark mode uses its own tokens rather than filter inversion. If a theme control is shown, it must be labeled, keyboard accessible, and preserve the current task when switched.
 - Support zoom and reflow at 320 CSS px; a genuine two-dimensional table may use scoped scrolling.
 - Do not hide essential financial review behind a hover, animation, or responsive breakpoint.
+
+### Collapsible sidebar
+
+- Keep the primary navigation in a stable left rail. In its resting desktop state, it is compact: show the unaltered EvoGym logo mark at the top and one recognizable icon for each available navigation destination (for example, a package/box for Inventory); hide the wordmark and visible item labels while collapsed.
+- When the pointer enters the rail, expand it to show the EvoGym name and each navigation icon with its text label. Collapse it after the pointer leaves the rail; do not collapse while keyboard focus remains inside it. Keep the active destination visibly identifiable in both widths.
+- Provide an explicit, labeled toggle so keyboard and touch users are not dependent on hover. On touch/narrow layouts, use that toggle instead of hover; close the expanded navigation after a destination is selected when appropriate.
+- Icon-only destinations retain accessible names and a discoverable label on hover and keyboard focus. Tooltips supplement, but never replace, programmatic names or keyboard operation. Preserve the skip link and visible focus outline.
+- Use a short width/content transition consistent with the motion system. The sidebar must not cover or unexpectedly shift essential transaction content, and it must remain usable at zoom and narrow widths.
+
+### React Bits motion language
+
+- Use React Bits as the source for selected motion components and effects across the shared shell and screens: sidebar expansion, route/content transitions, purposeful card hover/selection, dialog entry, and success/error feedback are good candidates. Choose effects that make a state change or task relationship easier to perceive; do not decorate every element simply because it can move.
+- Adapt every selected effect to EvoGym's visual language before use: recolor it with the approved light/dark and EGC tokens, and tune its scale, speed, easing, depth, and contrast to the restrained claymorphism and athletic Bento layout. Do not ship a React Bits demo's default neon palette, unrelated gradients, glass/gloss treatment, or oversized/bouncy motion if it conflicts with this identity.
+- Keep all motion treatments coherent across screens: share a small set of transition/easing/duration patterns, use orange only as the brand accent (never as the only status cue), and preserve established semantic status colors. A distinct effect is acceptable only when it still feels like the same product.
+- Prefer brief, event-driven transitions. Do not animate prices, stock counts, form values, or financial confirmation in ways that obscure their final value; do not delay a control or payment action until a decorative animation finishes.
+- Do not use ambient/continuous motion in operational screens. Never make motion the only indication of selected, pending, successful, failed, or overdue state.
+- Respect `prefers-reduced-motion`: disable looping/parallax/large travel, shorten or remove nonessential transitions, and preserve immediate state feedback. Check animation smoothness and resource use on representative lower-powered devices.
+- Before implementation, verify each chosen React Bits component's current source, license/access tier, dependencies, and compatibility with the existing React/Vite/Tailwind stack. Prefer only the components needed; do not add a broad animation runtime or copy premium-only code without authorization.
 
 ## 6. Information inclusion rule
 
@@ -150,7 +198,7 @@ Limit summary groups to meaningful priorities, not a predetermined count of deco
 
 Distinguish zero, empty, loading, error, stale, and unknown; unavailable is never displayed as $0.
 Show a defined reporting period and source timestamp where necessary for interpretation.
-No disconnected charts, fake forecasts, progress rings, productivity scores, or random gradients.
+No disconnected charts, fake forecasts, progress rings, productivity scores, or random gradients. Use a chart only when trend, comparison, or distribution is materially easier to understand visually than in a table; retain the exact values, period, source, and an accessible text/table equivalent.
 Demo records use a persistent “Datos de demostración” label; never imply production results.
 Do not show connectivity, AI, or synchronization status unless it reflects implemented behavior.
 
@@ -221,7 +269,7 @@ Business uncertainties block related behavior, not exploration of unrelated typo
 ## 10. Reusable prototype brief
 
 Create two clearly labeled demo screens: OWNER overview and RECEPTION membership/payment.
-Use EvoGym sports identity, white/off-white Bento grouping, restrained clay shadows, and the tokens above.
+Use the supplied `Logo_Evo.png`, official EGC colors, light Bento grouping, more visible but controlled clay depth, and the light/dark tokens above.
 Use neutral es-MX copy, realistic labeled sample data, and no fabricated capabilities or operational claims.
 Apply information inclusion rules and preserve notebook/Excel reconciliation and unresolved business states.
 Provide keyboard-visible controls, payment review, failure/unknown states, and responsive task ordering.
@@ -250,8 +298,8 @@ Operational routes are prefixed `/owner/` or `/reception/`; the role switch pres
 
 | Shared element | Required states / behavior |
 |---|---|
-| Application shell | Persistent demo label, role simulation, reset action, stable role navigation, skip link, responsive task order. |
-| Page header and panel | Clear task title and context; optional single primary action; purposeful Bento sizing and restrained depth. |
+| Application shell | Persistent demo label, role simulation, reset action, collapsible icon-rail navigation with pointer/focus/touch behavior, skip link, responsive task order. |
+| Page header and panel | Clear task title and context; optional single primary action; purposeful Bento sizing and consistent tactile depth in both themes. |
 | Button | Primary, secondary, disabled with adjacent explanation, visible keyboard focus; semantic button type. |
 | Field | Persistent label, typed value, error association, invalid state; preserve input on recoverable failure. |
 | Badge and notice | Text with neutral, confirmed, pending/warning, and error states; color is never the only signal. |
@@ -259,16 +307,32 @@ Operational routes are prefixed `/owner/` or `/reception/`; the role switch pres
 | Table region | Caption, scoped headers, readable rows, contained horizontal scroll and keyboard focus. |
 | Financial review/result | Member/item, period, MXN total, method and explicit credit; confirmed, pending/unknown, error, processing. Implemented with the owning workflow, not a generic unused framework. |
 
+### TanStack ecosystem candidates — evaluate per need, not as a bundle
+
+The current prototype uses React, Vite, Tailwind, and React Router; TanStack packages are not currently installed. Add only a library that solves a concrete screen or data-flow need, and keep its presentation aligned with this design system.
+
+| Library | Recommendation for EvoGym | Fit and tradeoff |
+|---|---|---|
+| [TanStack Charts](https://tanstack.com/charts/latest) | Preferred candidate when an OWNER or operational report genuinely benefits from a trend, comparison, or distribution chart. | Typed, responsive chart grammar with SVG as the default renderer; React adapter supports React 18/19. Style chart colors, type, labels, tooltips, and dark/light surfaces with EGC/design tokens. It is not a reason to turn simple histories, transaction rows, or every number into a chart. Define trusted source, period, and business meaning before graphing; the current OWNER overview uses period summaries and tables, not chart series. |
+| [TanStack Table](https://tanstack.com/table/latest/docs/overview) | Consider for member/inventory lists if real sorting, filtering, pagination, grouping, or row selection becomes sufficiently complex. | Headless: keeps full control of EvoGym markup and styling, but the app still owns semantic HTML, responsive behavior, accessibility, and visual treatment. Current simple tables do not require it yet. |
+| [TanStack Query](https://tanstack.com/query/latest/docs/framework/react) | Consider when a real backend/API supplies shared or frequently refreshed data. | Manages asynchronous server state, cache freshness, and mutation updates; it does not provide the API, database, authorization, or offline-sync guarantee. The current in-memory demo has no server-state problem to solve. |
+| [TanStack Form](https://tanstack.com/form/latest/docs/framework/react) | Re-evaluate if conditional multi-step registration/payment forms become difficult to validate and maintain with native React form state. | Flexible typed field/form validation, but introduces another form-state model; do not migrate straightforward forms before complexity warrants it. |
+| [TanStack Virtual](https://tanstack.com/virtual/latest/docs/introduction) | Add only if measured long product/member/history lists create a rendering bottleneck. | Headless virtualization preserves style ownership but complicates row measurement, focus, and screen-reader navigation; current demo-sized lists do not justify it. |
+| [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) | Not recommended as an additional router. | The project already uses React Router. TanStack Router has useful type-safe route/search APIs, but adopting it would be a migration decision; never run two competing routing systems for the same app. |
+
 - Feature-oriented routes reuse shared primitives and tokens; business records and operations live outside presentation.
 - Demo amounts use integer MXN centavos; format only at presentation boundaries and derive totals from records.
 - Keep exactly OWNER and RECEPTION. The selector does not establish identity, permissions, or backend authorization.
 - In-memory state resets on reload or explicit reset. Do not claim persistence, connectivity, real-time data, or synchronization.
 - Use the Tailwind Vite plugin and CSS theme tokens. No unused dialog dependency or separate Storybook is needed for the initial in-browser component reference.
-- No approved logo asset is present in the repository. Plain product-name text is temporary; do not redraw the source mark.
+- Use `Logo_Evo.png` from the repository root without altering the source artwork; plain product-name text may remain where the full mark does not fit legibly.
 - Treat measured tokens as candidates. Validate rendered contrast, focus, 200% text enlargement, and 320px reflow before any accessibility conformance claim.
 - Acceptance tests cover shell, role navigation, route changes, catalog, and reset. Later tasks add deterministic operation tests before behavior changes when runnable.
+- Use React Bits components selectively for the shared motion language; make motion nonessential, accessible, performant, and consistent rather than adding a continuous effect to every control.
+- Use TanStack Charts as the preferred charting candidate only when it clarifies a validated analytical question; evaluate Table, Query, Form, or Virtual only when their specific trigger above exists. Do not add the TanStack ecosystem wholesale.
 
 ## References
 
 WCAG 2.2: [text contrast](https://www.w3.org/TR/WCAG22/#contrast-minimum), [non-text contrast](https://www.w3.org/TR/WCAG22/#non-text-contrast), [focus visible](https://www.w3.org/TR/WCAG22/#focus-visible), [focus not obscured](https://www.w3.org/TR/WCAG22/#focus-not-obscured-minimum), [target size](https://www.w3.org/TR/WCAG22/#target-size-minimum), [financial error prevention](https://www.w3.org/TR/WCAG22/#error-prevention-legal-financial-data), [reflow](https://www.w3.org/TR/WCAG22/#reflow).
+Animation source: [React Bits animated React components](https://www.reactbits.dev/get-started/index); verify the selected component's source and license/access tier before implementation.
 Business evidence: owner interview messages and user decisions in this conversation; Wiki was not reread or modified for this document.
