@@ -37,5 +37,5 @@ export function addMember(state: DemoState, id: string, name: string, phone: str
   if (!name.trim()) return { state, result: { error: 'Escribe el nombre del socio.' } };
   if (state.members.some(member => member.id === id)) return { state, result: { error: 'La referencia ya existe.' } };
   return { state: { ...state, revision: state.revision + 1, members: [...state.members,
-    { id, name: name.trim(), phone: phone.trim(), creditMinor: 0, membership: null }] }, result: { id } };
+    { id, name: name.trim(), phone: phone.trim(), creditMinor: 0, membership: null, joinedOn: state.demoClock.slice(0, 10) }] }, result: { id } };
 }

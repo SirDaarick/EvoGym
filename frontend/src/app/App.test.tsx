@@ -183,7 +183,7 @@ describe('application foundation', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
     expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('0');
     await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
-    expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('6');
+    expect(screen.getByLabelText('Socios de prueba')).toHaveTextContent('12');
     expect(screen.getByRole('status', { name: 'Resultado local' })).toHaveTextContent('Datos locales restablecidos');
   });
   it('redirects an unavailable reception route to its primary task', () => {

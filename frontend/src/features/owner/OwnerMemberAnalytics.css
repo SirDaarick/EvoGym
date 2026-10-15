@@ -1,0 +1,345 @@
+/* Owner Member Analytics Styles - EvoGym Bento & Claymorphism */
+
+.owner-member-analytics {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+/* 4-KPI Bento Grid */
+.member-analytics-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.member-kpi-card {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: var(--radius-panel, 20px);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-clay, 0 4px 14px rgba(0, 0, 0, 0.05));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.member-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+.member-kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.member-kpi-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-ink-muted, #65716a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.member-kpi-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(252, 108, 6, 0.08);
+  color: var(--color-primary, #fc6c06);
+}
+
+.member-kpi-icon-wrap.tone-success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.member-kpi-icon-wrap.tone-warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.member-kpi-icon-wrap.tone-neutral {
+  background: rgba(100, 116, 139, 0.1);
+  color: #64748b;
+}
+
+.member-kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.member-kpi-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--color-ink, #080808);
+  letter-spacing: -0.03em;
+}
+
+.member-kpi-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-ink-muted, #65716a);
+  line-height: 1.3;
+}
+
+/* Charts Bento Section */
+.member-analytics-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.25rem;
+}
+
+.member-chart-panel {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-divider, #e5e7eb);
+  border-radius: var(--radius-panel, 20px);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-clay, 0 4px 14px rgba(0, 0, 0, 0.05));
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.member-chart-title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--color-ink, #080808);
+  margin: 0;
+}
+
+.member-chart-desc {
+  font-size: 0.8125rem;
+  color: var(--color-ink-muted, #65716a);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Donut Chart Presentation */
+.member-donut-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+@media (min-width: 480px) {
+  .member-donut-container {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-around;
+  }
+}
+
+.member-donut-wrap {
+  position: relative;
+  width: 190px;
+  height: 190px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.member-donut-wrap svg {
+  overflow: visible;
+}
+
+.member-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.member-donut-center strong {
+  font-size: 1.875rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-ink, #080808);
+  letter-spacing: -0.04em;
+}
+
+.member-donut-center span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-ink-muted, #65716a);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.member-donut-empty {
+  width: 160px;
+  height: 160px;
+  border: 18px solid var(--color-divider, #e5e7eb);
+  border-radius: 50%;
+}
+
+.member-donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  width: 100%;
+  max-width: 220px;
+}
+
+.member-legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+}
+
+.member-legend-label-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.member-legend-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.member-legend-label {
+  color: var(--color-ink, #080808);
+  font-weight: 500;
+}
+
+.member-legend-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.member-legend-count {
+  font-weight: 700;
+  color: var(--color-ink, #080808);
+}
+
+.member-legend-pct {
+  color: var(--color-ink-muted, #65716a);
+  font-size: 0.75rem;
+}
+
+/* Cohort / Bar Chart Presentation */
+.member-cohorts-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.member-cohort-chart-wrap {
+  width: 100%;
+  min-height: 180px;
+}
+
+.member-cohort-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--color-divider, #e5e7eb);
+}
+
+.member-cohort-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface-subtle, rgba(0, 0, 0, 0.02));
+  border-radius: 10px;
+  border: 1px solid var(--color-divider, #e5e7eb);
+}
+
+.member-cohort-pill-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.member-cohort-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-ink, #080808);
+}
+
+.member-cohort-count {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-primary, #fc6c06);
+}
+
+.member-cohort-desc {
+  font-size: 0.6875rem;
+  color: var(--color-ink-muted, #65716a);
+}
+
+/* Strategic Insight Banner */
+.member-retention-insight-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem;
+  background: rgba(252, 108, 6, 0.05);
+  border: 1px solid rgba(252, 108, 6, 0.2);
+  border-radius: 12px;
+  font-size: 0.8125rem;
+  color: var(--color-ink, #080808);
+  line-height: 1.4;
+}
+
+.member-insight-icon {
+  color: var(--color-primary, #fc6c06);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.member-retention-insight-banner strong {
+  color: var(--color-primary, #fc6c06);
+}
+
+/* Dark theme overrides */
+[data-theme='dark'] .member-kpi-card,
+[data-theme='dark'] .member-chart-panel {
+  background: #141414;
+  border-color: #262626;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme='dark'] .member-kpi-value,
+[data-theme='dark'] .member-chart-title,
+[data-theme='dark'] .member-donut-center strong,
+[data-theme='dark'] .member-legend-label,
+[data-theme='dark'] .member-legend-count,
+[data-theme='dark'] .member-cohort-name {
+  color: #fcfcfc;
+}
+
+[data-theme='dark'] .member-cohort-pill {
+  background: #1a1a1a;
+  border-color: #2b2b2b;
+}
+
+[data-theme='dark'] .member-retention-insight-banner {
+  background: rgba(252, 108, 6, 0.1);
+  border-color: rgba(252, 108, 6, 0.3);
+  color: #e5e5e5;
+}

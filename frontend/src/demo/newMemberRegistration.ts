@@ -58,7 +58,7 @@ export function registerNewMember(state: DemoState, request: NewMemberRegistrati
     : fail('La referencia ya pertenece a otra operación.');
   if (state.members.some(member => member.id === memberId)) return fail('La referencia ya existe.');
   const pending = request.method === 'transfer';
-  const member = { id: memberId, name, phone: request.phone?.trim() ?? '', ...(request.email?.trim() ? { email: request.email.trim() } : {}), creditMinor: 0, membership: null };
+  const member = { id: memberId, name, phone: request.phone?.trim() ?? '', ...(request.email?.trim() ? { email: request.email.trim() } : {}), creditMinor: 0, membership: null, joinedOn: state.demoClock.slice(0, 10) };
   const payment = { id: request.id, memberId, planId: plan.id, planName: plan.name, amountMinor: plan.amountMinor,
     method: request.method, status: pending ? 'pending' as const : 'paid' as const, recordedAt: new Date().toISOString(), shiftId: shift.id, effectiveDates: null };
   const ledger = pending ? state.ledger : [...state.ledger, { id: `event-${request.id}`, paymentId: request.id,

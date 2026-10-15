@@ -49,7 +49,7 @@ describe('ShiftCloseDialog', () => {
     await waitFor(() => expect(dialog).toHaveAttribute('open'));
     await screen.findByLabelText('Forma de conteo');
     expect(screen.getByLabelText('Forma de conteo')).toHaveValue('denominations');
-    expect(screen.getByLabelText('Billete $1,000.00 · cantidad')).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText('Billete $1,000.00 · cantidad')).toHaveFocus());
   });
 
   it('autosaves raw values and notes while preserving both count modes', async () => {

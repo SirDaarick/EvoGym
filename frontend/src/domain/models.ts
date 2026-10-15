@@ -10,6 +10,7 @@ export interface Member {
   membership: { planName: string; startsOn: string; endsOn: string } | null;
   demoScenario?: 'active' | 'expired' | 'expiry-today' | 'unknown';
   lastPaymentId?: string;
+  joinedOn?: string;
 }
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer';

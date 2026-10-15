@@ -179,4 +179,17 @@ describe('member workflow', () => {
     expect(screen.getByRole('heading', { name: 'Transferencia sin confirmar' })).toBeVisible();
     expect(screen.queryByText('Pago completo registrado')).not.toBeInTheDocument();
   });
+  it('renders owner member analytics in /owner/members and keeps reception view clean', () => {
+    mount('/owner/members');
+    expect(screen.getByRole('region', { name: 'Analítica de socios y membresías' })).toBeVisible();
+    expect(screen.getByText('Directorio y análisis de socios')).toBeVisible();
+    expect(screen.getByText('Socios Activos')).toBeVisible();
+    expect(screen.getByText('Antigüedad (Mediana)')).toBeVisible();
+    expect(screen.getByText('Desglose por disciplina y plan')).toBeVisible();
+  });
+  it('does not render owner analytics in reception view', () => {
+    mount('/reception/members');
+    expect(screen.queryByRole('region', { name: 'Analítica de socios y membresías' })).not.toBeInTheDocument();
+    expect(screen.getByText('Socios y membresías')).toBeVisible();
+  });
 });

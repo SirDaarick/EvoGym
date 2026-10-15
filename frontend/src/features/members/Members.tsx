@@ -18,6 +18,7 @@ import { enterMember, exitMember, openAttendance } from '../../demo/attendanceOp
 import { MemberDetailSections } from './MemberDetail';
 import { formatAttendanceError } from './memberDetailUtils';
 import { NewMemberRegistration } from './NewMemberRegistration';
+import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 
 export const paymentMethods = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia sin confirmar' };
 export function NotebookNotice() {
@@ -178,15 +179,25 @@ export function Members({ role }: { role: Role }) {
   return (
     <>
       <PageHeader
-        eyebrow="RECEPCIÓN · SOCIOS"
-        title="Socios y membresías"
-        description="Encuentra a la persona antes de registrar una operación."
+        eyebrow={role === 'OWNER' ? 'PROPIETARIO · INTELIGENCIA DE SOCIOS' : 'RECEPCIÓN · SOCIOS'}
+        title={role === 'OWNER' ? 'Directorio y análisis de socios' : 'Socios y membresías'}
+        description={
+          role === 'OWNER'
+            ? 'Métricas de retención, distribución de membresías y antigüedad de la base activa.'
+            : 'Encuentra a la persona antes de registrar una operación.'
+        }
         action={
           <Link className="button button-primary" to={rolePath(role, 'members/new')}>
             Nuevo socio
           </Link>
         }
       />
+      {role === 'OWNER' && (
+        <OwnerMemberAnalytics
+          members={state.members}
+          referenceDate={state.demoClock.slice(0, 10)}
+        />
+      )}
       <Panel>
         <Field
           id="member-search"
