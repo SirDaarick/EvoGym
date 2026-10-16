@@ -105,6 +105,10 @@ export function App() {
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [sidebarFocused, setSidebarFocused] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const mobileNavOpener = useRef<HTMLButtonElement>(null);
+  const mobileNavClose = useRef<HTMLButtonElement>(null);
   const sidebarExpanded = sidebarPinned || sidebarHovered || sidebarFocused;
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
   const items = navigation.filter(item => item.roles.includes(role));
@@ -114,6 +118,19 @@ export function App() {
     setSidebarHovered(false);
     setSidebarFocused(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    mobileNavClose.current?.focus();
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+        mobileNavOpener.current?.focus();
+      }
+    }
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     function syncTheme() {
@@ -176,9 +193,24 @@ export function App() {
 
   if (location.pathname === '/') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
 
-  return <div className="app-shell">
+  return <div className="app-shell" onTouchStart={event => {
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, button, a, [contenteditable="true"], [data-horizontal-scroll]')) return;
+    const touch = event.touches[0];
+    touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }} onTouchEnd={event => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (dx > 0 && start.x < 32) setMobileNavOpen(true);
+  }}>
     <a href="#main-content" className="skip-link">Ir al contenido</a>
-    <aside className="sidebar" aria-label="Barra lateral" data-expanded={sidebarExpanded} onClickCapture={event => {
+    {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Descartar menú" onClick={() => setMobileNavOpen(false)} />}
+    <aside className="sidebar" aria-label={mobileNavOpen ? 'Navegación principal' : 'Barra lateral'} role={mobileNavOpen ? 'dialog' : undefined} aria-modal={mobileNavOpen ? true : undefined} data-mobile-open={mobileNavOpen} data-expanded={sidebarExpanded} onClickCapture={event => {
       if (!debugPerformance || !(event.target instanceof Element)) return;
       const link = event.target.closest('a');
       if (link) console.info('[evogym:perf] Sidebar navigation click', {
@@ -206,13 +238,15 @@ export function App() {
       }
     }}>
       <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" width={128} height={124} /><span aria-hidden="true">EvoGym</span></Link>
+        <button ref={mobileNavClose} className="mobile-nav-close" type="button" tabIndex={mobileNavOpen ? 0 : -1} aria-label="Cerrar navegación" onClick={() => { setMobileNavOpen(false); mobileNavOpener.current?.focus(); }}>×</button>
         <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
-      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
+      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
       <div className="sidebar-bottom"><Link to="/" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
     </aside>
     <div className="workspace">
       <header className="demo-bar">
+        <button ref={mobileNavOpener} className="mobile-brand-opener" type="button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><img src={logo} alt="" width={32} height={32} /></button>
         <div className="header-left-spacer" aria-hidden="true" />
         <div className="header-search-group">
           <MemberSearch key={`${resetVersion}-${role}`} role={role} />

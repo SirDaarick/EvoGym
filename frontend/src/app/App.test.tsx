@@ -124,6 +124,15 @@ describe('application foundation', () => {
     expect(overview.querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Historial' }).querySelector('svg')).toBeInTheDocument();
   });
+  it('opens the mobile navigation drawer from the compact brand control', async () => {
+    await mount();
+    const opener = document.querySelector<HTMLButtonElement>('.mobile-brand-opener');
+    expect(opener).toHaveAttribute('aria-label', 'Abrir navegación');
+    await userEvent.click(opener!);
+    expect(screen.getByRole('dialog', { name: 'Navegación principal' })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar navegación' }));
+    expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument();
+  });
   it('navigates from a member detail through the sidebar without getting stuck', async () => {
     await mount('/owner/members/demo-001');
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/members/demo-001');
