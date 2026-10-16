@@ -25,20 +25,22 @@ At phone widths the current sidebar occupies a full-width block above the page, 
   - Route: delegated direct (shared shell and interaction tests span multiple files).
   - Acceptance: search/logo/profile fit without a navigation block above content; menu opens by right-swipe and tap; desktop navigation behavior remains unchanged; vertical scroll and text entry continue working.
   - Checks: focused App tests; mobile viewport/touch verification if browser harness is available.
-  - Evidence: corrective work units add modal focus containment, inert background, focus restoration on Escape/backdrop/close/navigation, desktop breakpoint reset with focus moved to `#main-content`, cancellation-safe single-touch swipe tracking and reduced-motion drawer handling. `npm --prefix frontend run test -- src/app/App.test.tsx` passed (21 tests); `npm --prefix frontend run typecheck` passed. The desktop fallback is asserted in jsdom; computed CSS visibility and real-device/browser touch behavior remain unverified.
-- [ ] M02 — Move existing section-specific right-hand detail content into a mobile contextual drawer, preserving existing state and section semantics.
+  - Evidence: commits `bace71e`, `610de55`, `640c6a7`; corrective work units add modal focus containment, inert background, focus restoration on Escape/backdrop/close/navigation, desktop breakpoint reset with focus moved to `#main-content`, cancellation-safe single-touch swipe tracking and reduced-motion drawer handling. `npm --prefix frontend run test -- src/app/App.test.tsx` passed (21 tests); `npm --prefix frontend run typecheck` passed. Independent verification found no remaining findings after the last correction. Assessment outcome: unavailable/unassessable high because Git review-index access was denied. The desktop fallback is asserted in jsdom; computed CSS visibility and real-device/browser touch behavior remain unverified.
+- [x] M02 — Move existing section-specific right-hand detail content into a mobile contextual drawer, preserving existing state and section semantics.
   - Route: delegated direct (multiple feature consumers and integration tests).
   - Acceptance: left-swipe and visible trigger open details; only one drawer is open; close restores catalog context; transaction is neither submitted nor cleared; inventory preview stays non-transactional.
   - Checks: focused Reception, Inventory and App tests; typecheck.
+  - Evidence: commit `7875f92` adds a shared modal drawer for the reception purchase, reception inventory preview, and new-member summary. Each feature retains ownership of its selection/draft state; closing leaves the existing content mounted, and inventory still shows unavailable costs/totals with disabled receipt actions. Touch recognition is single-pointer, horizontal, and avoids controls, text selection, horizontal scrollers and the system edge zone. `npm --prefix frontend run test -- src/app/App.test.tsx src/features/reception/ReceptionHome.test.tsx src/features/inventory/Inventory.test.tsx src/features/members/Members.test.tsx src/shared/MobileDetailPanel.test.tsx` passed (59 tests); `npm --prefix frontend run typecheck` passed. No browser or real-device responsive/touch proof was run.
 - [ ] M03 — Compact product cards into two columns and verify mobile content density, touch targets and chat/drawer coexistence.
   - Route: delegated direct (shared catalog card, CSS and tests).
   - Acceptance: two cards fit at 320px without horizontal page overflow; names/prices/stock/action remain readable and usable; desktop card layout remains intact.
   - Checks: focused card/Inventory tests; typecheck and production build; browser checks at 320/360/390/430px where available.
 
 ## Forecast and delivery
-- Forecast: approximately 350 authored changed lines (additions plus deletions; generated files excluded), across one coherent mobile UX feature.
-- Delivery strategy: ask-on-risk; no chain strategy selected because forecast is below the current ~400-line threshold.
-- Work-unit commit identities and review assessment outcomes: pending.
+- Forecast: approximately 600 authored changed lines (additions plus deletions; generated files excluded), across one coherent mobile UX feature.
+- Delivery strategy: feature-branch chain, selected by the user. This records PR stacking preference only; no push or PR creation is authorized.
+- M01 commit identities: `bace71e`, `610de55`, `640c6a7` (all on `feat/mobile-contextual-panels`). Review assessment after each was due but unassessable/high because access to the Git review index was denied; M01 received independent verification, which found no outstanding findings after the final bounded correction.
+- M02 commit identity: `7875f92` (`feat(mobile): add contextual detail drawers`); assessment remains unassessable/high due denied Git review-index access; no review lifecycle commands were run. M03 commit identity and outcome: pending.
 
 ## Verification
 - Test-first where applicable: observe a focused test failure before implementing each behavior, then green and refactor checks.
@@ -47,7 +49,7 @@ At phone widths the current sidebar occupies a full-width block above the page, 
 - Runtime/browser gesture proof is pending; DOM unit tests alone do not verify real touch arbitration.
 
 ## Next step
-Implement M02 in its own work unit, preserving existing contextual panel state and transaction semantics.
+Implement M03 in its own work unit, preserving desktop card presentation while compacting mobile catalog cards.
 
 ## Relevant files
 - `frontend/src/app/App.tsx` — application shell, navigation and global header.
