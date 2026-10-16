@@ -114,7 +114,10 @@ export function App() {
   function closeMobileNav() {
     if (!mobileNavOpen) return;
     setMobileNavOpen(false);
-    queueMicrotask(() => mobileNavOpener.current?.focus());
+    const focusTarget = window.matchMedia?.('(min-width: 721px)').matches
+      ? document.getElementById('main-content')
+      : mobileNavOpener.current;
+    queueMicrotask(() => focusTarget?.focus());
   }
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
   const items = navigation.filter(item => item.roles.includes(role));

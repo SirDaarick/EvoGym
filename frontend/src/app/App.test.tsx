@@ -166,7 +166,7 @@ describe('application foundation', () => {
     Object.defineProperty(media, 'matches', { value: true });
     listener?.({ matches: true, media: media.media } as MediaQueryListEvent);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument());
-    expect(opener).toHaveFocus();
+    expect(document.getElementById('main-content')).toHaveFocus();
     Object.defineProperty(window, 'matchMedia', { configurable: true, value: previousMatchMedia });
   });
   it('navigates from a member detail through the sidebar without getting stuck', async () => {
