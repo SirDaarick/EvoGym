@@ -189,6 +189,7 @@
   .workspace-footer, .reset-status { padding-left: 16px; padding-right: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { .sidebar { transition: none !important; } }
 
 @layer components {
   .profile-entry { min-height: 100vh; display: grid; align-items: center; }

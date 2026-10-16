@@ -109,7 +109,13 @@ export function App() {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const mobileNavOpener = useRef<HTMLButtonElement>(null);
   const mobileNavClose = useRef<HTMLButtonElement>(null);
+  const sidebarElement = useRef<HTMLElement>(null);
   const sidebarExpanded = sidebarPinned || sidebarHovered || sidebarFocused;
+  function closeMobileNav() {
+    if (!mobileNavOpen) return;
+    setMobileNavOpen(false);
+    queueMicrotask(() => mobileNavOpener.current?.focus());
+  }
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
   const items = navigation.filter(item => item.roles.includes(role));
 
@@ -117,6 +123,7 @@ export function App() {
     // Reset transient expansion on route transitions
     setSidebarHovered(false);
     setSidebarFocused(false);
+    closeMobileNav();
   }, [location.pathname]);
 
   useEffect(() => {
@@ -124,12 +131,30 @@ export function App() {
     mobileNavClose.current?.focus();
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setMobileNavOpen(false);
-        mobileNavOpener.current?.focus();
+        closeMobileNav();
       }
     }
     document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
+    function containFocus(event: FocusEvent) {
+      if (window.matchMedia?.('(min-width: 721px)').matches) return;
+      if (!sidebarElement.current?.contains(event.target as Node)) mobileNavClose.current?.focus();
+    }
+    document.addEventListener('focusin', containFocus);
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('focusin', containFocus);
+    };
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    const desktop = window.matchMedia?.('(min-width: 721px)');
+    if (!desktop) return;
+    function resetForDesktop(event: MediaQueryListEvent | MediaQueryList) {
+      if (event.matches) closeMobileNav();
+    }
+    resetForDesktop(desktop);
+    desktop.addEventListener?.('change', resetForDesktop);
+    return () => desktop.removeEventListener?.('change', resetForDesktop);
   }, [mobileNavOpen]);
 
   useEffect(() => {
@@ -194,36 +219,54 @@ export function App() {
   if (location.pathname === '/') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
 
   return <div className="app-shell" onTouchStart={event => {
+    touchStart.current = null;
+    if (event.touches.length !== 1) return;
     const target = event.target as HTMLElement;
     if (target.closest('input, textarea, select, button, a, [contenteditable="true"], [data-horizontal-scroll]')) return;
     const touch = event.touches[0];
     touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
-  }} onTouchEnd={event => {
+  }} onTouchCancel={() => { touchStart.current = null; }} onTouchEnd={event => {
     const start = touchStart.current;
     touchStart.current = null;
+    if (event.touches.length > 0 || event.changedTouches.length !== 1) return;
     const touch = event.changedTouches[0];
     if (!start || !touch) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
     if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-    if (dx > 0 && start.x < 32) setMobileNavOpen(true);
+    if (dx > 0 && start.x >= 24 && start.x <= 48) setMobileNavOpen(true);
   }}>
-    <a href="#main-content" className="skip-link">Ir al contenido</a>
-    {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Descartar menú" onClick={() => setMobileNavOpen(false)} />}
-    <aside className="sidebar" aria-label={mobileNavOpen ? 'Navegación principal' : 'Barra lateral'} role={mobileNavOpen ? 'dialog' : undefined} aria-modal={mobileNavOpen ? true : undefined} data-mobile-open={mobileNavOpen} data-expanded={sidebarExpanded} onClickCapture={event => {
-      if (!debugPerformance || !(event.target instanceof Element)) return;
+    <a href="#main-content" className="skip-link" inert={mobileNavOpen}>Ir al contenido</a>
+    {mobileNavOpen && <div className="mobile-nav-backdrop" aria-hidden="true" onClick={closeMobileNav} />}
+    <aside ref={sidebarElement} className="sidebar" aria-label={mobileNavOpen ? 'Navegación principal' : 'Barra lateral'} role={mobileNavOpen ? 'dialog' : undefined} aria-modal={mobileNavOpen ? true : undefined} data-mobile-open={mobileNavOpen} data-expanded={sidebarExpanded} onClickCapture={event => {
+      if (!(event.target instanceof Element)) return;
       const link = event.target.closest('a');
-      if (link) console.info('[evogym:perf] Sidebar navigation click', {
+      if (debugPerformance && link) console.info('[evogym:perf] Sidebar navigation click', {
         from: location.pathname,
         to: link.pathname,
         label: link.getAttribute('aria-label') ?? link.textContent?.trim(),
       });
+      if (link) closeMobileNav();
+    }} onKeyDownCapture={event => {
+      if (mobileNavOpen && event.key === 'Tab') {
+        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+          .filter(element => element.tabIndex >= 0);
+        if (focusable.length === 0) event.preventDefault();
+        else {
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && (document.activeElement === first || !event.currentTarget.contains(document.activeElement))) {
+            event.preventDefault(); last.focus();
+          } else if (!event.shiftKey && (document.activeElement === last || !event.currentTarget.contains(document.activeElement))) {
+            event.preventDefault(); first.focus();
+          }
+        }
+      }
+      isPointerRef.current = false;
+      if (event.currentTarget.contains(document.activeElement)) setSidebarFocused(true);
     }} onPointerDownCapture={() => {
       isPointerRef.current = true;
       setSidebarFocused(false);
-    }} onKeyDownCapture={event => {
-      isPointerRef.current = false;
-      if (event.currentTarget.contains(document.activeElement)) setSidebarFocused(true);
     }} onMouseEnter={() => setSidebarHovered(true)} onMouseLeave={() => {
       setSidebarHovered(false);
       if (isPointerRef.current) setSidebarFocused(false);
@@ -238,13 +281,13 @@ export function App() {
       }
     }}>
       <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" width={128} height={124} /><span aria-hidden="true">EvoGym</span></Link>
-        <button ref={mobileNavClose} className="mobile-nav-close" type="button" tabIndex={mobileNavOpen ? 0 : -1} aria-label="Cerrar navegación" onClick={() => { setMobileNavOpen(false); mobileNavOpener.current?.focus(); }}>×</button>
+        <button ref={mobileNavClose} className="mobile-nav-close" type="button" tabIndex={mobileNavOpen ? 0 : -1} aria-label="Cerrar navegación" onClick={closeMobileNav}>×</button>
         <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
       <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
       <div className="sidebar-bottom"><Link to="/" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
     </aside>
-    <div className="workspace">
+    <div className="workspace" inert={mobileNavOpen}>
       <header className="demo-bar">
         <button ref={mobileNavOpener} className="mobile-brand-opener" type="button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><img src={logo} alt="" width={32} height={32} /></button>
         <div className="header-left-spacer" aria-hidden="true" />

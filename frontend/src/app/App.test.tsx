@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { DemoProvider, useDemo } from '../demo/DemoProvider';
 
@@ -132,6 +132,42 @@ describe('application foundation', () => {
     expect(screen.getByRole('dialog', { name: 'Navegación principal' })).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar navegación' }));
     expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument();
+  });
+  it('contains drawer focus, makes the workspace inert, and restores focus on every dismissal', async () => {
+    await mount();
+    const opener = document.querySelector<HTMLButtonElement>('.mobile-brand-opener')!;
+    const workspace = document.querySelector<HTMLElement>('.workspace')!;
+    await userEvent.click(opener);
+    const dialog = screen.getByRole('dialog', { name: 'Navegación principal' });
+    expect(workspace).toHaveAttribute('inert');
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    await userEvent.keyboard('{Escape}');
+    expect(opener).toHaveFocus();
+    await userEvent.click(opener);
+    await userEvent.click(document.querySelector('.mobile-nav-backdrop')!);
+    expect(opener).toHaveFocus();
+    await userEvent.click(opener);
+    await userEvent.click(screen.getByRole('link', { name: 'Historial' }));
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/owner/history');
+    expect(opener).toHaveFocus();
+    expect(workspace).not.toHaveAttribute('inert');
+  });
+  it('resets the mobile drawer when the viewport enters desktop layout', async () => {
+    const previousMatchMedia = window.matchMedia;
+    let listener: ((event: MediaQueryListEvent) => void) | undefined;
+    const media = { matches: false, media: '(min-width: 721px)', onchange: null, addEventListener: vi.fn((_type: string, callback: (event: MediaQueryListEvent) => void) => { listener = callback; }), removeEventListener: vi.fn() } as unknown as MediaQueryList;
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: vi.fn(() => media) });
+    await mount();
+    const opener = document.querySelector<HTMLButtonElement>('.mobile-brand-opener')!;
+    await userEvent.click(opener);
+    expect(screen.getByRole('dialog', { name: 'Navegación principal' })).toBeVisible();
+    Object.defineProperty(media, 'matches', { value: true });
+    listener?.({ matches: true, media: media.media } as MediaQueryListEvent);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: previousMatchMedia });
   });
   it('navigates from a member detail through the sidebar without getting stuck', async () => {
     await mount('/owner/members/demo-001');

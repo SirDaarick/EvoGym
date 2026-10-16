@@ -25,7 +25,7 @@ At phone widths the current sidebar occupies a full-width block above the page, 
   - Route: delegated direct (shared shell and interaction tests span multiple files).
   - Acceptance: search/logo/profile fit without a navigation block above content; menu opens by right-swipe and tap; desktop navigation behavior remains unchanged; vertical scroll and text entry continue working.
   - Checks: focused App tests; mobile viewport/touch verification if browser harness is available.
-  - Evidence: `npm --prefix frontend run test -- src/app/App.test.tsx` passed (19 tests); `npm --prefix frontend run typecheck` passed. Added tap-open/close coverage; swipe arbitration is implemented in the shared shell. No real-device/browser touch verification was available, so gesture behavior remains unverified outside DOM logic.
+  - Evidence: corrective work unit adds modal focus containment, inert background, focus restoration on Escape/backdrop/close/navigation, desktop breakpoint reset, cancellation-safe single-touch swipe tracking and reduced-motion drawer handling. `npm --prefix frontend run test -- src/app/App.test.tsx` passed (21 tests); `npm --prefix frontend run typecheck` passed. No real-device/browser touch verification was available, so gesture behavior remains unverified outside DOM logic.
 - [ ] M02 — Move existing section-specific right-hand detail content into a mobile contextual drawer, preserving existing state and section semantics.
   - Route: delegated direct (multiple feature consumers and integration tests).
   - Acceptance: left-swipe and visible trigger open details; only one drawer is open; close restores catalog context; transaction is neither submitted nor cleared; inventory preview stays non-transactional.
