@@ -188,5 +188,24 @@ describe('Reception Home overview', () => {
     expect(screen.queryByRole('dialog', { name: 'Compra actual' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Total de compra')).toHaveTextContent('$20.00 MXN');
   });
+
+  it('dismisses member suggestions before closing the mobile purchase detail on Escape', async () => {
+    render(<MemoryRouter><DemoProvider><ReceptionHome /></DemoProvider></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua' }));
+    await userEvent.click(document.querySelector('.mobile-detail-trigger')!);
+
+    const assignInput = screen.getByRole('combobox', { name: 'Asignar socio' });
+    await userEvent.type(assignInput, 'Mariana');
+    expect(assignInput).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: 'Compra actual' })).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+    expect(assignInput).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('dialog', { name: 'Compra actual' })).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Compra actual' })).not.toBeInTheDocument();
+  });
 });
+
 

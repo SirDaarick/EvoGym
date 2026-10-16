@@ -41,7 +41,13 @@ export function MobileDetailPanel({ title, triggerLabel, children, contentClassN
       branch = parent;
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') close();
+      if (event.key === 'Escape') {
+        const activeElement = document.activeElement;
+        const nestedPopupOpen = activeElement instanceof HTMLElement
+          && activeElement.getAttribute('role') === 'combobox'
+          && activeElement.getAttribute('aria-expanded') === 'true';
+        if (!nestedPopupOpen) close();
+      }
       if (event.key !== 'Tab' || !dialogRef.current) return;
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(element => element.tabIndex >= 0);
       if (focusable.length === 0) { event.preventDefault(); return; }
