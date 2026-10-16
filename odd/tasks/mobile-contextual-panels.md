@@ -32,16 +32,17 @@ At phone widths the current sidebar occupies a full-width block above the page, 
   - Checks: focused Reception, Inventory and App tests; typecheck.
   - Evidence: commit `7875f92` adds a shared modal drawer for the reception purchase, reception inventory preview, and new-member summary. Each feature retains ownership of its selection/draft state; closing leaves the existing content mounted, and inventory still shows unavailable costs/totals with disabled receipt actions. Touch recognition is single-pointer, horizontal, and avoids controls, text selection, horizontal scrollers and the system edge zone. `npm --prefix frontend run test -- src/app/App.test.tsx src/features/reception/ReceptionHome.test.tsx src/features/inventory/Inventory.test.tsx src/features/members/Members.test.tsx src/shared/MobileDetailPanel.test.tsx` passed (59 tests); `npm --prefix frontend run typecheck` passed. No browser or real-device responsive/touch proof was run.
   - Escape correction: an open `role="combobox"` with `aria-expanded="true"` now owns Escape before the enclosing detail dialog; the regression test proves the first Escape dismisses suggestions and the second closes the drawer. Test-first RED: `npm --prefix frontend run test -- src/features/reception/ReceptionHome.test.tsx -t "dismisses member suggestions before closing"` failed because first Escape closed the dialog. GREEN: that focused command passed (1 test); `npm --prefix frontend run test -- src/features/reception/ReceptionHome.test.tsx` passed (13 tests); `npm --prefix frontend run typecheck` passed. Runtime browser/device harness: N/A (none available); jsdom does not verify real browser keyboard/touch behavior. Correction commit: `db88d45` (`fix(mobile): defer Escape to open combobox`).
-- [ ] M03 — Compact product cards into two columns and verify mobile content density, touch targets and chat/drawer coexistence.
+- [x] M03 — Compact product cards into two columns and verify mobile content density, touch targets and chat/drawer coexistence.
   - Route: delegated direct (shared catalog card, CSS and tests).
   - Acceptance: two cards fit at 320px without horizontal page overflow; names/prices/stock/action remain readable and usable; desktop card layout remains intact.
   - Checks: focused card/Inventory tests; typecheck and production build; browser checks at 320/360/390/430px where available.
+  - Evidence: `frontend/src/features/reception/ProductCard.css` now applies a two-column, minmax-safe grid at mobile widths, compact cards with wrapped name/price content, 44px quantity controls, and safe-area-aware trailing grid space so the floating chat can be scrolled clear. Desktop selectors/layout are unchanged. Test-first exception: this is CSS-only responsive layout; the available jsdom tests do not calculate media-query layout, so no meaningful RED test exists. The focused tests passed before and after styling: `npm --prefix frontend run test -- src/features/reception/ProductCard.test.tsx src/features/inventory/Inventory.test.tsx` passed (8 tests); `npm --prefix frontend run typecheck` passed; `npm --prefix frontend run build` passed (Vite/PWA generation succeeded; existing chunk-size warning remains). Browser/device viewport checks at 320/360/390/430px: not performed; CUA reported no browsers or apps available. M03 commit: `c857711` (`feat(mobile): compact catalog into two-column cards`).
 
 ## Forecast and delivery
 - Forecast: approximately 600 authored changed lines (additions plus deletions; generated files excluded), across one coherent mobile UX feature.
 - Delivery strategy: feature-branch chain, selected by the user. This records PR stacking preference only; no push or PR creation is authorized.
 - M01 commit identities: `bace71e`, `610de55`, `640c6a7` (all on `feat/mobile-contextual-panels`). Review assessment after each was due but unassessable/high because access to the Git review index was denied; M01 received independent verification, which found no outstanding findings after the final bounded correction.
-- M02 commit identity: `7875f92` (`feat(mobile): add contextual detail drawers`); assessment remains unassessable/high due denied Git review-index access; no review lifecycle commands were run. M03 commit identity and outcome: pending.
+- M02 commit identity: `7875f92` (`feat(mobile): add contextual detail drawers`); assessment remains unassessable/high due denied Git review-index access; no review lifecycle commands were run. M03 commit identity: `c857711` (`feat(mobile): compact catalog into two-column cards`); check outcomes are recorded above.
 
 ## Verification
 - Test-first where applicable: observe a focused test failure before implementing each behavior, then green and refactor checks.
@@ -50,7 +51,7 @@ At phone widths the current sidebar occupies a full-width block above the page, 
 - Runtime/browser gesture proof is pending; DOM unit tests alone do not verify real touch arbitration.
 
 ## Next step
-Implement M03 in its own work unit, preserving desktop card presentation while compacting mobile catalog cards.
+Parent to assess and spot-check M03's compact catalog work; mobile viewport and device proof remains unavailable.
 
 ## Relevant files
 - `frontend/src/app/App.tsx` — application shell, navigation and global header.
