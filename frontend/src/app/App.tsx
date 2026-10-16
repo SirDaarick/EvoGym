@@ -5,6 +5,7 @@ import { useDemo } from '../demo/DemoProvider';
 import { MemberSearch } from '../features/members/MemberSearch';
 import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button } from '../shared/ui';
+import { PwaInstallPrompt } from '../shared/PwaInstallPrompt';
 import { homePath, navigation, rolePath } from './navigation';
 import logo from '../assets/evogym-logo-128.webp';
 
@@ -251,6 +252,7 @@ export function App() {
           <Link to="/" tabIndex={-1} className="button button-secondary header-profile-btn">Perfil</Link>
         </div>
       </header>
+      <PwaInstallPrompt />
       <main id="main-content" tabIndex={-1}>
         <Profiler id="route-content" onRender={(id, phase, actualDuration, baseDuration) => {
           if (!debugPerformance) return;
