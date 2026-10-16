@@ -77,3 +77,13 @@
     justify-self: center;
   }
 }
+
+@media (max-width: 359px) {
+  .product-grid {
+    gap: 6px;
+  }
+
+  .product-card.product-clay-card {
+    padding-inline: 4px;
+  }
+}
