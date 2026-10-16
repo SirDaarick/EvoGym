@@ -8,6 +8,7 @@ import { expectedStock } from '../../demo/inventoryOperations';
 import { ProductCard } from '../reception/ProductCard';
 import { InventoryAnalytics } from '../owner/InventoryAnalytics';
 import './Inventory.css';
+import { MobileDetailPanel } from '../../shared/MobileDetailPanel';
 
 export function Inventory({ role }: { role: Role }) {
   if (role === 'OWNER') {
@@ -46,6 +47,7 @@ export function Inventory({ role }: { role: Role }) {
           {matchingProducts.length ? <div className="product-grid">{matchingProducts.map(product => <ProductCard key={product.id} product={product} stock={expectedStock(state, product.id)} quantity={quantities[product.id] ?? 0} onQuantityChange={quantity => changeQuantity(product.id, quantity)} />)}</div> : <p className="muted" role="status">No se encontraron productos.</p>}
         </Panel>
       </section>
+      <MobileDetailPanel title="Vista previa de recepción" triggerLabel="Ver vista previa" className="inventory-receipt-slot">
       <aside className="inventory-receipt" aria-labelledby="inventory-receipt-heading">
         <Panel className="inventory-receipt-panel">
           <p className="eyebrow">VISTA PREVIA</p><h2 id="inventory-receipt-heading">Recepción de inventario</h2>
@@ -57,6 +59,7 @@ export function Inventory({ role }: { role: Role }) {
           <div className="inventory-receipt-actions"><Button disabled>Crear producto</Button><Button variant="secondary" disabled>Confirmar recepción</Button></div>
         </Panel>
       </aside>
+      </MobileDetailPanel>
     </div>
   </>;
 }

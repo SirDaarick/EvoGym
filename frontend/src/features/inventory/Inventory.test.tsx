@@ -80,4 +80,20 @@ describe('Inventory catalog preview', () => {
     expect(screen.getByLabelText(/Cantidad de Agua/)).toHaveTextContent('1');
     expect(screen.getByLabelText(/Cantidad de Barra/)).toHaveTextContent('1');
   });
+
+  it('opens the non-transactional receiving preview without inventing a total', async () => {
+    render(<DemoProvider><Inventory role="RECEPTION" /><StateProbe /></DemoProvider>);
+    fireEvent.click(screen.getByRole('button', { name: /Seleccionar Agua/ }));
+    const stateBefore = screen.getByLabelText('Persisted state').textContent;
+    fireEvent.click(document.querySelector('.mobile-detail-trigger')!);
+    expect(screen.getByRole('dialog', { name: 'Vista previa de recepción' })).toBeVisible();
+    expect(screen.getByText('Cantidad recibida').parentElement).toHaveTextContent('1');
+    expect(screen.getByText('Costo unitario').parentElement).toHaveTextContent('No disponible');
+    expect(screen.getByText('Total de recepción').parentElement).toHaveTextContent('No disponible');
+    expect(screen.getByRole('button', { name: 'Confirmar recepción' })).toBeDisabled();
+    fireEvent.click(document.querySelector('.mobile-detail-close')!);
+    expect(screen.queryByRole('dialog', { name: 'Vista previa de recepción' })).not.toBeInTheDocument();
+    expect(screen.getByText('Cantidad recibida').parentElement).toHaveTextContent('1');
+    expect(screen.getByLabelText('Persisted state').textContent).toBe(stateBefore);
+  });
 });

@@ -202,4 +202,14 @@ describe('member workflow', () => {
     expect(screen.queryByRole('region', { name: 'Analítica de socios y membresías' })).not.toBeInTheDocument();
     expect(screen.getByText('Socios y membresías')).toBeVisible();
   });
+  it('opens the registration summary without submitting the draft', async () => {
+    await mount('/reception/members/new');
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Ana Torres');
+    await userEvent.click(document.querySelector('.mobile-detail-trigger')!);
+    expect(screen.getByRole('dialog', { name: 'Resumen del registro' })).toBeVisible();
+    expect(screen.getByText('Ana Torres')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Registro guardado' })).not.toBeInTheDocument();
+    await userEvent.click(document.querySelector('.mobile-detail-close')!);
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Ana Torres');
+  });
 });

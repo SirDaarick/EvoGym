@@ -11,6 +11,7 @@ import { AssignedMemberSummary } from '../reception/AssignedMemberSummary';
 import AnimatedList, { type AnimatedListEntry } from '../catalog/react-bits/AnimatedList';
 import { Button, Field, Notice, PageHeader, Panel } from '../../shared/ui';
 import { useIsDarkMode } from '../../shared/theme';
+import { MobileDetailPanel } from '../../shared/MobileDetailPanel';
 import JellyRadio from '../catalog/react-bits/JellyRadio';
 import { CashTenderCalculator } from '../payments/CashTenderCalculator';
 import './NewMemberRegistration.css';
@@ -91,6 +92,7 @@ export function NewMemberRegistration({ role }: { role: Role }) {
           </div>}
           </Panel>
         </section>
+        <MobileDetailPanel title="Resumen del registro" triggerLabel="Ver resumen del registro" className="registration-current-purchase-slot">
         <CurrentPurchaseCard
           className="registration-current-purchase current-purchase-card--registration"
           totalMinor={totalMinor}
@@ -109,6 +111,7 @@ export function NewMemberRegistration({ role }: { role: Role }) {
           <Notice tone="warning">Registro local únicamente: confirma la operación según la libreta y el proceso de caja. No representa un cobro real ni activa acceso.</Notice>
           <div className="registration-actions"><Button type="submit">Registrar operación</Button><Link to={rolePath(role, 'members')}>Volver a socios</Link></div>
         </CurrentPurchaseCard>
+        </MobileDetailPanel>
       </form>
       </div>
     </>;

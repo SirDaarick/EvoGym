@@ -18,6 +18,7 @@ import { GastoModal } from './GastoModal';
 import { ExtraModal } from './ExtraModal';
 import { CashTenderCalculator } from '../payments/CashTenderCalculator';
 import { ProductCard } from './ProductCard';
+import { MobileDetailPanel } from '../../shared/MobileDetailPanel';
 
 function TrashIcon() {
   return (
@@ -370,6 +371,7 @@ export function ReceptionHome() {
         </div>
 
         {/* Right Column: Cart Panel ("Carrito") */}
+        <MobileDetailPanel title="Compra actual" triggerLabel="Ver compra actual" className="reception-current-purchase-slot">
         <CurrentPurchaseCard
           totalMinor={totalMinor}
           paymentMethod={method}
@@ -679,6 +681,7 @@ export function ReceptionHome() {
             )}
           </div>
         </CurrentPurchaseCard>
+        </MobileDetailPanel>
       </div>
 
       {/* Merma Modal Dialog */}

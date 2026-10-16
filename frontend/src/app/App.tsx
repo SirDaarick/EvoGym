@@ -225,13 +225,13 @@ export function App() {
     touchStart.current = null;
     if (event.touches.length !== 1) return;
     const target = event.target as HTMLElement;
-    if (target.closest('input, textarea, select, button, a, [contenteditable="true"], [data-horizontal-scroll]')) return;
+    if ((window.getSelection()?.toString().length ?? 0) > 0 || target.closest('input, textarea, select, button, a, [contenteditable="true"], [data-horizontal-scroll], .animated-list__viewport, [role="listbox"], [role="dialog"]')) return;
     const touch = event.touches[0];
     touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
   }} onTouchCancel={() => { touchStart.current = null; }} onTouchEnd={event => {
     const start = touchStart.current;
     touchStart.current = null;
-    if (event.touches.length > 0 || event.changedTouches.length !== 1) return;
+    if (event.touches.length > 0 || event.changedTouches.length !== 1 || (window.getSelection()?.toString().length ?? 0) > 0) return;
     const touch = event.changedTouches[0];
     if (!start || !touch) return;
     const dx = touch.clientX - start.x;

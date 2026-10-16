@@ -177,5 +177,16 @@ describe('Reception Home overview', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar modal de casilleros' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('opens the mobile purchase detail without clearing the current selection', async () => {
+    render(<MemoryRouter><DemoProvider><ReceptionHome /></DemoProvider></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua' }));
+    await userEvent.click(document.querySelector('.mobile-detail-trigger')!);
+    expect(screen.getByRole('dialog', { name: 'Compra actual' })).toBeVisible();
+    expect(screen.getByLabelText('Total de compra')).toHaveTextContent('$20.00 MXN');
+    await userEvent.click(document.querySelector('.mobile-detail-close')!);
+    expect(screen.queryByRole('dialog', { name: 'Compra actual' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Total de compra')).toHaveTextContent('$20.00 MXN');
+  });
 });
 

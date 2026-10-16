@@ -1,0 +1,52 @@
+@media (min-width: 721px) {
+  .mobile-detail-panel,
+  .mobile-detail-dialog,
+  .mobile-detail-content { display: contents; }
+  .mobile-detail-trigger,
+  .mobile-detail-header { display: none; }
+}
+
+@media (max-width: 720px) {
+  .mobile-detail-panel[data-open="false"] > .mobile-detail-trigger { display: inline-flex; }
+  .mobile-detail-panel[data-open="false"] > .mobile-detail-dialog { display: none; }
+  .mobile-detail-panel:not([data-open="true"]) { display: block; }
+  .mobile-detail-panel[data-open="true"] {
+    position: fixed;
+    inset: 0;
+    display: block;
+    z-index: 1000;
+    isolation: isolate;
+  }
+  .mobile-detail-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgb(15 23 42 / 48%);
+    z-index: 0;
+  }
+  .mobile-detail-panel[data-open="true"] > .mobile-detail-dialog {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    width: min(100vw, 440px);
+    height: 100%;
+    box-sizing: border-box;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+    overflow: hidden;
+    background: var(--color-canvas, #f8f8f7);
+    color: var(--color-ink, #1f2937);
+    box-shadow: -12px 0 32px rgb(0 0 0 / 16%);
+  }
+  .mobile-detail-dialog { display: flex; }
+  .mobile-detail-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--color-divider, #e5e3e0); }
+  .mobile-detail-header > span { margin: 0; font-size: 1.1rem; font-weight: 700; }
+  .mobile-detail-close { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border: 1px solid var(--color-divider, #e5e3e0); border-radius: 10px; background: var(--color-surface, #fff); color: inherit; font-size: 1.5rem; }
+  .mobile-detail-content { display: block; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-block: 12px; }
+  .mobile-detail-content > :first-child { margin-top: 0; }
+  .mobile-detail-trigger { min-height: 44px; align-items: center; justify-content: center; padding: 8px 12px; border: 1px solid var(--color-divider, #e5e3e0); border-radius: 10px; background: var(--color-surface, #fff); color: var(--color-ink, #1f2937); font-weight: 650; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-detail-dialog { transition: none !important; }
+}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -131,6 +131,14 @@ describe('application foundation', () => {
     await userEvent.click(opener!);
     expect(screen.getByRole('dialog', { name: 'Navegación principal' })).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar navegación' }));
+    expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument();
+  });
+  it('does not reinterpret a gesture inside the detail drawer as the menu swipe', async () => {
+    await mount('/reception/home');
+    await userEvent.click(document.querySelector('.mobile-detail-trigger')!);
+    const detail = screen.getByRole('dialog', { name: 'Compra actual' });
+    fireEvent.touchStart(detail, { touches: [{ clientX: 36, clientY: 200 }] });
+    fireEvent.touchEnd(detail, { touches: [], changedTouches: [{ clientX: 140, clientY: 202 }] });
     expect(screen.queryByRole('dialog', { name: 'Navegación principal' })).not.toBeInTheDocument();
   });
   it('contains drawer focus, makes the workspace inert, and restores focus on every dismissal', async () => {
