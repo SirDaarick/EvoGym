@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import type { Role } from '../../domain/models';
 import { homePath } from '../../app/navigation';
 import { Button, Panel } from '../../shared/ui';
+import { PwaInstallPrompt } from '../../shared/PwaInstallPrompt';
 import CodeSlots, { type CodeSlotsStatus } from '../catalog/react-bits/CodeSlots';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import logo from '../../assets/evogym-logo-128.webp';
@@ -147,6 +148,7 @@ export function StaffProfileSelection() {
     <div className="staff-selection-page">
       <a href="#main-content" className="skip-link">Ir al contenido</a>
       <Panel className="staff-selection-container">
+        <PwaInstallPrompt />
         {/* Header */}
         <header className="staff-header">
           <div className="staff-brand">

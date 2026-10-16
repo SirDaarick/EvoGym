@@ -185,4 +185,66 @@ describe('PwaInstallPrompt', () => {
     const { container } = render(<PwaInstallPrompt />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('displays Android manual guidance on Android when beforeinstallprompt has not fired', () => {
+    setUserAgent('Mozilla/5.0 (Linux; Android 12; ELS-AN00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36');
+    render(<PwaInstallPrompt />);
+
+    expect(screen.getByRole('region', { name: /instalación de la aplicación para android/i })).toBeInTheDocument();
+    expect(screen.getByText('Instala EvoGym en tu dispositivo')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Añade la app a tu pantalla de inicio desde el menú de tu navegador/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('list')).toHaveTextContent(/Toca el menú de tres puntos \(⋮\) en la esquina superior de tu navegador/i);
+    expect(screen.getByRole('list')).toHaveTextContent(/Selecciona 'Instalar aplicación' o 'Añadir a la pantalla principal'/i);
+    expect(screen.queryByRole('button', { name: 'Instalar App' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /entendido/i })).toBeInTheDocument();
+  });
+
+  it('renders 1-click install button on Android when beforeinstallprompt is received', () => {
+    setUserAgent('Mozilla/5.0 (Linux; Android 12; ELS-AN00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36');
+    render(<PwaInstallPrompt />);
+
+    const { event } = createBeforeInstallPromptEvent();
+    act(() => {
+      window.dispatchEvent(event);
+    });
+
+    expect(screen.getByRole('region', { name: 'Instalación de la aplicación' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Instalar App' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /descartar/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Añade la app a tu pantalla de inicio desde el menú de tu navegador/i)).not.toBeInTheDocument();
+  });
+
+  it('allows dismissing Android manual instructions gracefully', async () => {
+    const user = userEvent.setup();
+    setUserAgent('Mozilla/5.0 (Linux; Android 12; ELS-AN00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36');
+    render(<PwaInstallPrompt />);
+
+    const dismissBtn = screen.getByRole('button', { name: /entendido/i });
+    await user.click(dismissBtn);
+
+    expect(screen.queryByRole('region', { name: /instalación de la aplicación/i })).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(PWA_DISMISS_KEY)).toBe('1');
+  });
+
+  it('does not display Android banner if already running in standalone mode', () => {
+    setUserAgent('Mozilla/5.0 (Linux; Android 12; ELS-AN00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36');
+    mockMatchMedia(true);
+
+    const { container } = render(<PwaInstallPrompt />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('does not display Android banner if navigator.standalone is true', () => {
+    setUserAgent('Mozilla/5.0 (Linux; Android 12; ELS-AN00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36');
+    Object.defineProperty(window.navigator, 'standalone', {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const { container } = render(<PwaInstallPrompt />);
+    expect(container).toBeEmptyDOMElement();
+  });
 });

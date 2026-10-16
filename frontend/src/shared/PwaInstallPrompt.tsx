@@ -2,7 +2,7 @@ import { usePwaInstall } from './usePwaInstall';
 import { Button } from './ui';
 
 export function PwaInstallPrompt() {
-  const { canInstall, isInstalled, isIos, promptInstall, dismiss } = usePwaInstall();
+  const { canInstall, isInstalled, isIos, isAndroid, hasNativePrompt, promptInstall, dismiss } = usePwaInstall();
 
   if (!canInstall || isInstalled) {
     return null;
@@ -57,44 +57,92 @@ export function PwaInstallPrompt() {
     );
   }
 
-  return (
-    <aside
-      className="pwa-install-banner"
-      role="region"
-      aria-label="Instalación de la aplicación"
-    >
-      <div className="pwa-banner-main">
-        <div className="pwa-banner-icon" aria-hidden="true">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
+  if (hasNativePrompt) {
+    return (
+      <aside
+        className="pwa-install-banner"
+        role="region"
+        aria-label="Instalación de la aplicación"
+      >
+        <div className="pwa-banner-main">
+          <div className="pwa-banner-icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </div>
+          <div className="pwa-banner-text">
+            <strong className="pwa-banner-title">Instala EvoGym en tu dispositivo</strong>
+            <p className="pwa-banner-desc">
+              Instala la aplicación para un acceso rápido y experiencia fluida en pantalla completa.
+            </p>
+          </div>
         </div>
-        <div className="pwa-banner-text">
-          <strong className="pwa-banner-title">Instala EvoGym en tu dispositivo</strong>
-          <p className="pwa-banner-desc">
-            Instala la aplicación para un acceso rápido y experiencia fluida en pantalla completa.
-          </p>
+        <div className="pwa-banner-actions">
+          <Button
+            variant="primary"
+            className="pwa-install-btn"
+            onClick={promptInstall}
+          >
+            Instalar App
+          </Button>
+          <Button
+            variant="secondary"
+            className="pwa-dismiss-btn"
+            onClick={dismiss}
+            aria-label="Descartar aviso de instalación"
+          >
+            Descartar
+          </Button>
         </div>
-      </div>
-      <div className="pwa-banner-actions">
-        <Button
-          variant="primary"
-          className="pwa-install-btn"
-          onClick={promptInstall}
-        >
-          Instalar App
-        </Button>
-        <Button
-          variant="secondary"
-          className="pwa-dismiss-btn"
-          onClick={dismiss}
-          aria-label="Descartar aviso de instalación"
-        >
-          Descartar
-        </Button>
-      </div>
-    </aside>
-  );
+      </aside>
+    );
+  }
+
+  if (isAndroid) {
+    return (
+      <aside
+        className="pwa-install-banner pwa-install-android"
+        role="region"
+        aria-label="Instalación de la aplicación para Android"
+      >
+        <div className="pwa-banner-main">
+          <div className="pwa-banner-icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="3" />
+              <line x1="12" y1="18" x2="12.01" y2="18" />
+            </svg>
+          </div>
+          <div className="pwa-banner-text">
+            <strong className="pwa-banner-title">Instala EvoGym en tu dispositivo</strong>
+            <div className="pwa-android-tip" role="note" aria-label="Instrucciones para Android">
+              <p className="pwa-android-instruction">
+                Añade la app a tu pantalla de inicio desde el menú de tu navegador.
+              </p>
+              <ol className="pwa-android-steps">
+                <li>
+                  Toca el menú de tres puntos (<strong>⋮</strong>) en la esquina superior de tu navegador.
+                </li>
+                <li>
+                  Selecciona &apos;Instalar aplicación&apos; o &apos;Añadir a la pantalla principal&apos;.
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+        <div className="pwa-banner-actions">
+          <Button
+            variant="secondary"
+            className="pwa-dismiss-btn"
+            onClick={dismiss}
+          >
+            Entendido
+          </Button>
+        </div>
+      </aside>
+    );
+  }
+
+  return null;
 }

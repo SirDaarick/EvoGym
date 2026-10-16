@@ -89,11 +89,12 @@
   .pwa-banner-title { display: block; font-size: 14px; font-weight: 700; color: var(--color-ink); }
   .pwa-banner-desc { margin: 2px 0 0; font-size: 13px; color: var(--color-muted); }
   .pwa-banner-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .pwa-ios-tip { margin-top: 4px; font-size: 13px; color: var(--color-muted); }
-  .pwa-ios-instruction { margin: 2px 0 4px; font-weight: 600; color: var(--color-ink); }
-  .pwa-ios-steps { margin: 4px 0 0 16px; padding: 0; font-size: 12px; }
-  .pwa-ios-steps li { margin-bottom: 2px; }
+  .pwa-ios-tip, .pwa-android-tip { margin-top: 4px; font-size: 13px; color: var(--color-muted); }
+  .pwa-ios-instruction, .pwa-android-instruction { margin: 2px 0 4px; font-weight: 600; color: var(--color-ink); }
+  .pwa-ios-steps, .pwa-android-steps { margin: 4px 0 0 16px; padding: 0; font-size: 12px; }
+  .pwa-ios-steps li, .pwa-android-steps li { margin-bottom: 2px; }
   .pwa-ios-share-icon { display: inline-block; vertical-align: middle; margin: 0 2px; color: var(--color-primary); }
+  .staff-selection-container .pwa-install-banner { border: 1px solid var(--color-divider); border-radius: var(--radius-control); padding: 12px 20px; }
   main { width: 100%; max-width: 1720px; margin: 0 auto; padding: 24px 32px 40px; box-sizing: border-box; }
   @media (min-width: 2200px) { main { max-width: 1920px; } }
   .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }

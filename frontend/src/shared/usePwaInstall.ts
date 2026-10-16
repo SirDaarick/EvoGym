@@ -49,10 +49,36 @@ export function isSessionDismissed(): boolean {
   }
 }
 
+export function isAndroidDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  try {
+    const ua = navigator.userAgent || '';
+    return /Android/i.test(ua);
+  } catch {
+    return false;
+  }
+}
+
+export function isMobileDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  try {
+    const ua = navigator.userAgent || '';
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  } catch {
+    return false;
+  }
+}
+
 export interface UsePwaInstallReturn {
   canInstall: boolean;
   isInstalled: boolean;
   isIos: boolean;
+  isAndroid: boolean;
+  hasNativePrompt: boolean;
   isDismissed: boolean;
   promptInstall: () => Promise<boolean>;
   dismiss: () => void;
@@ -64,6 +90,8 @@ export function usePwaInstall(): UsePwaInstallReturn {
   const [isDismissed, setIsDismissed] = useState<boolean>(() => isSessionDismissed());
 
   const isIos = isIosDevice();
+  const isAndroid = isAndroidDevice();
+  const hasNativePrompt = Boolean(deferredPrompt);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -136,6 +164,7 @@ export function usePwaInstall(): UsePwaInstallReturn {
       await deferredPrompt.prompt();
       const choice = await deferredPrompt.userChoice;
       if (choice.outcome === 'accepted') {
+        setIsInstalled(true);
         setDeferredPrompt(null);
         return true;
       }
@@ -147,12 +176,14 @@ export function usePwaInstall(): UsePwaInstallReturn {
   }, [deferredPrompt]);
 
   const currentlyInstalled = isInstalled || isStandaloneMode();
-  const canInstall = !currentlyInstalled && !isDismissed && (Boolean(deferredPrompt) || isIos);
+  const canInstall = !currentlyInstalled && !isDismissed && (hasNativePrompt || isIos || isAndroid);
 
   return {
     canInstall,
     isInstalled: currentlyInstalled,
     isIos,
+    isAndroid,
+    hasNativePrompt,
     isDismissed,
     promptInstall,
     dismiss,
