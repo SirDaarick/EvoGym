@@ -31,8 +31,8 @@ Existing expense reporting mixes recorded cash outflows with configured costs. F
 - Delivery strategy: `ask-on-risk`.
 - Chain strategy: `feature-branch-chain`, explicitly selected by the user (option 1).
 - Feature branch: `codex/finance-tabs`, created from `580fbdd` with existing working changes preserved.
-- Projection commit: `704856c`. No pushes or PRs created. Planned slices: projection and tests; integrated finance tabs; export/responsive validation.
-- Running authored line count: 423 (346 source/tests + 77 tracking).
+- Work-unit commits: `704856c` (projection) and `b3e4386` (integrated tabs/export). No pushes or PRs created.
+- Running authored line count: 4,451 through `b3e4386` (423 projection/tracking + 4,028 UI reorganization/tracking). The initial forecast underestimated replacement deletions and complete component/test coverage; future PR slicing is not prepared or published.
 - Engram mirror topic: `odd/finance-tabs/tasks`.
 
 ## Tasks
@@ -89,7 +89,8 @@ F1–F4 implemented and independently verified. F5 is partial: functional suites
 - Rollback boundary: navigation label, ExpenseReport shell/CSS/tests and new owner/finance files; the independent F1 selector can remain.
 - UI scope is a cohesive replacement of a large legacy screen and its styles, not a 400-line target; actual size is recorded from staged/committed diff. No whitespace/code compression used to meet a line budget.
 - Native read-only risk assessment remains high/unassessable due pre-existing untracked inventory; RDD remains disabled/unmanaged. No native review lifecycle, remote publication or PR.
-- Commit identity: pending parent commit.
+- Final normalization removed only extra EOF blank lines flagged by staged `diff --check`; it was unrelated to the advisory size heuristic. Post-normalization parent BalanceView spot test passed 1/1 and staged whitespace check passed.
+- Commit identity for F2, F3 and F4: `b3e4386` — `feat(finance): integrate accessible reporting tabs`.
 
 ### F5 — Remaining verification
 - [x] Independent focused and full functional suites.
