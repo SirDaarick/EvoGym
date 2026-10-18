@@ -5,7 +5,7 @@ export const navigation = [
   { slug: 'overview', label: 'Resumen', title: 'Resumen del negocio', roles: ['OWNER'] },
   { slug: 'alerts', label: 'Alertas', title: 'Centro de alertas operativas', roles: ['OWNER'] },
   { slug: 'attendance', label: 'Afluencia', title: 'Afluencia y capacidad del gimnasio', roles: ['OWNER'] },
-  { slug: 'expenses', label: 'Gastos', title: 'Reporte de gastos', roles: ['OWNER'] },
+  { slug: 'expenses', label: 'Finanzas', title: 'Finanzas del negocio', roles: ['OWNER'] },
   { slug: 'members', label: 'Socios', title: 'Socios y membresías', roles: ['OWNER', 'RECEPTION'] },
   { slug: 'shifts', label: 'Turno', title: 'Turno de trabajo', roles: ['OWNER', 'RECEPTION'] },
   { slug: 'inventory', label: 'Inventario', title: 'Inventario y conteo físico', roles: ['OWNER', 'RECEPTION'] },

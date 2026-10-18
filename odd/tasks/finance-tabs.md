@@ -31,8 +31,8 @@ Existing expense reporting mixes recorded cash outflows with configured costs. F
 - Delivery strategy: `ask-on-risk`.
 - Chain strategy: `feature-branch-chain`, explicitly selected by the user (option 1).
 - Feature branch: `codex/finance-tabs`, created from `580fbdd` with existing working changes preserved.
-- No commits, pushes, or PRs created yet. Planned slices: projection and tests; integrated finance tabs; export/responsive validation.
-- Running authored line count: 0.
+- Projection commit: `704856c`. No pushes or PRs created. Planned slices: projection and tests; integrated finance tabs; export/responsive validation.
+- Running authored line count: 423 (346 source/tests + 77 tracking).
 - Engram mirror topic: `odd/finance-tabs/tasks`.
 
 ## Tasks
@@ -40,15 +40,15 @@ Existing expense reporting mixes recorded cash outflows with configured costs. F
   - Route: delegated direct; preparation and non-trivial implementation require a writer.
   - Acceptance: all supported sources reconcile; refunds, pending transfers, extras, opening float exclusion, date boundaries, missing data and zero comparisons are explicit.
   - Checks: new selector tests and existing expense-selector regression tests; observed RED → GREEN where meaningful.
-- [ ] F2 — Integrate the shared period toolbar and accessible four-tab navigation.
+- [x] F2 — Integrate the shared period toolbar and accessible four-tab navigation.
   - Route: delegated direct; multi-file React implementation.
   - Acceptance: existing route works, nav label becomes Finanzas, URL/state preservation and keyboard operation work without changing Resumen or other destinations.
   - Checks: focused shell/navigation/period tests.
-- [ ] F3 — Implement Balance and Cobros using the shared projection and purposeful charts.
+- [x] F3 — Implement Balance and Cobros using the shared projection and purposeful charts.
   - Route: delegated direct; multi-file views and visualization.
   - Acceptance: amounts, chart bins and unpaginated filtered rows reconcile; pending money remains separate; exact values are available without hover.
   - Checks: view/filter/chart data tests and browser inspection.
-- [ ] F4 — Reorganize Gastos and Presupuesto and scope active-tab export.
+- [x] F4 — Reorganize Gastos and Presupuesto and scope active-tab export.
   - Route: delegated direct; coordinated existing-feature refactor.
   - Acceptance: existing expense and fixed-cost controls retained; actuals and assumptions separated; no unsupported audit wording; printed content matches active scope.
   - Checks: expense/budget/export regression tests.
@@ -64,7 +64,7 @@ Observed by delegated GPT-6 Luna worker before source changes:
 - Full suite/build/browser matrix: not run yet.
 
 ## Progress and next step
-F1 implemented and independently verified. Delegate the integrated finance shell/views (F2–F4) next, preserving the current route and existing fixed-cost controls. Read back this file and its full Engram mirror before resuming.
+F1–F4 implemented and independently verified. F5 is partial: functional suites and browser layout/keyboard checks are observed; typecheck/build remain blocked by the baseline reception error, and visual PDF, real screen-reader and zoom/reduced-motion interaction checks remain pending. No unrelated repair is authorized by this feature. Read back this file and its full Engram mirror before resuming.
 
 ## Work-unit evidence
 ### F1 — Canonical projection
@@ -74,4 +74,26 @@ F1 implemented and independently verified. Delegate the integrated finance shell
 - Typecheck still fails only at the documented pre-existing reception `Tone` error.
 - Native read-only assessment was high/unassessable because of pre-existing untracked inventory; independent verification used. RDD remains off/unmanaged; no review lifecycle invoked.
 - Rollback boundary: the two new finance selector files; no runtime UI connected yet, so browser interaction is N/A for this unit.
+- Commit identity: `704856c` — `feat(finance): add reconciled monetary projection`.
+
+### F2–F4 — Integrated tabbed finance views
+- GPT-6 Luna writer created readable shell, toolbar, Balance/Cobros/Gastos/Presupuesto views, TanStack Charts definitions and TanStack Table rendering; existing expense route and budget controls retained.
+- A partial draft lacking actual TanStack charts/component separation was not accepted; the single active writer completed the agreed requirements before independent review.
+- Observed RED for interaction/filter behavior and mixed-sign extras/chart-placement regressions. Final focused suite: 6 files / 47 tests passed. Companion suite: 4 files / 43 tests passed.
+- Independent final suite: 58 files / 460 tests passed. Typecheck and build fail only at the documented baseline reception `Tone` mismatch.
+- Independent review caught mixed-sign extras gross-flow divergence; KPIs now sum the same signed bins as the chart. Source ranking moved to filtered Cobros; Balance retains the temporal chart only.
+- Parent browser check found a mobile CSS specificity regression and a chart occupying only one desktop grid track. Two mechanical scoped CSS corrections were applied and observed: 320px KPIs are one column (241px cards), desktop chart fills its 1469px container.
+- Parent spot test after mobile correction: BalanceView test 1/1 passed; final CSS whitespace check passed. No subsequent functional source changes.
+- Browser observations: Balance had no root overflow at 320/390/768/1024/1440px; all four tabs had root scroll width equal to client width at 320px. Cobros filter changed totals and rows together; manual keyboard focus/activation worked; light/dark renderings inspected; viewport reset afterward.
+- Print markup uses active-tab all-filtered data, not the current pagination page. Automated/static scope checks pass; visual print/PDF rendering remains unverified.
+- Rollback boundary: navigation label, ExpenseReport shell/CSS/tests and new owner/finance files; the independent F1 selector can remain.
+- UI scope is a cohesive replacement of a large legacy screen and its styles, not a 400-line target; actual size is recorded from staged/committed diff. No whitespace/code compression used to meet a line budget.
+- Native read-only risk assessment remains high/unassessable due pre-existing untracked inventory; RDD remains disabled/unmanaged. No native review lifecycle, remote publication or PR.
 - Commit identity: pending parent commit.
+
+### F5 — Remaining verification
+- [x] Independent focused and full functional suites.
+- [x] Parent browser review and scoped CSS corrections; explicit file-only staging.
+- [ ] Typecheck and build: blocked by pre-existing `DevolucionesModal.tsx:402` error, outside scope.
+- [ ] Visual PDF/print pagination and real screen-reader verification.
+- [ ] Full 200%/400% zoom and reduced-motion interaction matrix; CSS support exists, no compliance claim made.
