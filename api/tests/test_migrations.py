@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect, text
 API_DIR = Path(__file__).resolve().parents[1]
 
 
-def test_fresh_and_repeated_baseline_upgrade_use_only_alembic_version(tmp_path, monkeypatch):
+def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'fresh.db').as_posix()}"
     monkeypatch.setenv("EVOGYM_ENV", "test")
@@ -23,8 +23,10 @@ def test_fresh_and_repeated_baseline_upgrade_use_only_alembic_version(tmp_path, 
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert inspect(connection).get_table_names() == ["alembic_version"]
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0001_baseline"
+            assert set(inspect(connection).get_table_names()) == {
+                "alembic_version", "staff_users", "staff_credentials", "security_events"
+            }
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0002_staff_credentials"
     finally:
         engine.dispose()
 
@@ -45,6 +47,9 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     generated_sql = captured.out
     assert "CREATE TABLE alembic_version" in generated_sql
     assert "0001_baseline" in generated_sql
+    assert "CREATE TABLE staff_users" in generated_sql
+    assert "CREATE TABLE staff_credentials" in generated_sql
+    assert "CREATE TABLE security_events" in generated_sql
     assert "offline-only" not in captured.out + captured.err
 
 
@@ -76,6 +81,6 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0001_baseline"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0002_staff_credentials"
     finally:
         engine.dispose()
