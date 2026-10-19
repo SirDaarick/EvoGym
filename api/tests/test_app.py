@@ -7,9 +7,11 @@ from app.settings import Settings
 
 
 @pytest.fixture(autouse=True)
-def clear_settings_environment(monkeypatch):
+def clear_settings_environment(monkeypatch, tmp_path):
     monkeypatch.delenv("EVOGYM_ENV", raising=False)
     monkeypatch.delenv("EVOGYM_DEBUG", raising=False)
+    monkeypatch.delenv("EVOGYM_DATABASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
 
 
 def request(app, path):
