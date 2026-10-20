@@ -1,0 +1,77 @@
+name: API verification
+
+on:
+  push:
+    paths:
+      - "api/**"
+      - "docs/backend-plan/**"
+      - "odd/tasks/backend-implementation.md"
+      - ".github/workflows/api.yml"
+  pull_request:
+    paths:
+      - "api/**"
+      - "docs/backend-plan/**"
+      - "odd/tasks/backend-implementation.md"
+      - ".github/workflows/api.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: evogym_test
+          POSTGRES_PASSWORD: synthetic-test-only
+          POSTGRES_DB: evogym_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U evogym_test -d evogym_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      EVOGYM_ENV: test
+      EVOGYM_DEBUG: "false"
+      EVOGYM_TEST_POSTGRES_URL: postgresql+psycopg://evogym_test:synthetic-test-only@127.0.0.1:5432/evogym_test
+      EVOGYM_DATABASE_URL: postgresql+psycopg://evogym_test:synthetic-test-only@127.0.0.1:5432/evogym_test
+      PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=15000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install package and test dependencies
+        run: python -m pip install -e "api[test]"
+      - name: Check dependency consistency
+        run: python -m pip check
+      - name: Prepare a fresh PostgreSQL 0003 predecessor for the 0004 upgrade test
+        working-directory: api
+        run: python -m alembic upgrade 0003_authorization_sessions
+      - name: Run deterministic API suite without PostgreSQL opt-ins
+        env:
+          EVOGYM_TEST_POSTGRES_URL: ""
+        run: python -m pytest -q api/tests
+      - name: Verify the isolated 0003-to-0004 migration, audit transaction, and readiness probe
+        run: python -m pytest -q api/tests/test_observability_postgres.py
+      - name: Exercise current authorization on the migrated PostgreSQL database
+        run: python -m pytest -q api/tests/test_authorization_postgres.py
+      - name: Reset the synthetic test database for the legacy credential migration fixture
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, make_url, text
+          url = make_url(os.environ["EVOGYM_DATABASE_URL"])
+          admin_url = url.set(database="postgres")
+          engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+          with engine.connect() as connection:
+              connection.execute(text("DROP DATABASE IF EXISTS evogym_test WITH (FORCE)"))
+              connection.execute(text("CREATE DATABASE evogym_test OWNER evogym_test"))
+          engine.dispose()
+          PY
+      - name: Exercise credential concurrency and lockout on an isolated fresh database
+        run: python -m pytest -q api/tests/test_credentials_postgres.py

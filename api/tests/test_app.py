@@ -53,6 +53,11 @@ def test_app_does_not_expose_configuration_values():
     assert not hasattr(app.state, "settings")
 
 
+def test_debug_setting_never_enables_exception_detail_pages():
+    app = create_test_app(Settings(environment="test", debug=True, _env_file=None))
+    assert app.debug is False
+
+
 def test_app_lifespan_context_is_entered_in_process():
     app = create_test_app(Settings(environment="test", debug=False, _env_file=None))
 
@@ -67,3 +72,18 @@ def test_app_lifespan_context_is_entered_in_process():
     response = asyncio.run(run_lifespan())
 
     assert response.status_code == 200
+
+
+def test_health_responses_are_correlated_and_readiness_fails_closed_without_database():
+    app = create_test_app(Settings(environment="test", debug=False, _env_file=None))
+
+    live = request(app, "/health/live")
+    ready = request(app, "/health/ready")
+    missing = request(app, "/never-existed")
+
+    assert live.status_code == 200 and live.json() == {"status": "ok"}
+    assert ready.status_code == 503 and ready.json() == {"status": "unavailable"}
+    for response in (live, ready, missing):
+        assert response.headers["x-request-id"]
+        assert response.headers["x-request-id"] == response.json().get("request_id", response.headers["x-request-id"])
+    assert app.state.request_metrics.snapshot()

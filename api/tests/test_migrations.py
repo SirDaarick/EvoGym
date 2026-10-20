@@ -35,9 +35,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert set(inspect(connection).get_table_names()) == {
-                "alembic_version", "staff_users", "staff_credentials", "security_events", "branches", "staff_role_grants", "staff_sessions"
+                "alembic_version", "staff_users", "staff_credentials", "security_events", "branches", "staff_role_grants", "staff_sessions", "audit_events"
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0003_authorization_sessions"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0004_audit_events"
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
             assert connection.execute(text("select id from staff_credentials where id=:id"), {"id": credential_id}).scalar_one() == credential_id
             assert connection.execute(text("select id from security_events where id=:id"), {"id": event_id}).scalar_one() == event_id
@@ -69,6 +69,7 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "CREATE TABLE branches" in generated_sql
     assert "CREATE TABLE staff_role_grants" in generated_sql
     assert "CREATE TABLE staff_sessions" in generated_sql
+    assert "CREATE TABLE audit_events" in generated_sql
     assert "uq_staff_role_grants_org_admin" in generated_sql
     assert "WHERE role = 'admin' AND scope_kind = 'organization'" in generated_sql
     assert "offline-only" not in captured.out + captured.err
@@ -102,6 +103,6 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0003_authorization_sessions"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0004_audit_events"
     finally:
         engine.dispose()

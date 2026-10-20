@@ -1,0 +1,139 @@
+# Implementation Phases and Execution Cards
+
+This is the detailed work plan for BK tasks in the [master ledger](../../odd/tasks/backend-implementation.md). Only the master ledger records status; these cards define scope and acceptance. Dependency decisions can block individual cards without authorizing assumptions.
+
+## Execution method
+
+Deliver one coherent vertical slice at a time. Start with a relevant deterministic failing test when such a runner and clear expected result exist; observe RED, implement the smallest change, observe GREEN, then refactor with tests green. For passive docs, missing runners, or no meaningful deterministic RED, record why and use proportional checks. Do not invent tests/results or make a test framework choice just because one exists in frontend.
+
+For substantial implementation, use one bounded writer with exact edit surfaces and checks. BK-012 is authorized locally; its parent owns the work-unit commit, and the master ledger plus all eight plan documents must accompany every backend commit. Before that commit, normalize and verify; RDD remains user-owned and currently off. No hosted CI, remote service, deployment, or frontend auth changes are authorized by this slice.
+
+## Phase gates
+
+| Gate | Required exit evidence | Stop when |
+|---|---|---|
+| G0 First-slice domain ready | BK-001,BK-002,BK-006,BK-007,BK-061 scope and offline capability map ready; first member fields/source map agreed | scope/identity/first-slice privacy unresolved; BK-003..BK-005 and D-027..D-030 gate only consuming policies/commands |
+| G1 Foundation ready | auth, migrations, request/error/audit plus scoped local store, bootstrap, receipt and pull primitives tested | scope isolation, journal durability or secret handling unproven |
+| G2 Read-only slice | member list/detail API, one local-first adapter, scoped snapshot and offline/as-of read state use one query boundary | demo/live duplicate ownership, cross-scope cache or stale state represented as current |
+| G3 Operational core | member/catalog/shift prerequisites and opening evidence persist | shift races or denominator/inventory semantics unresolved |
+| G4 Money/access | order/payment/settlement/membership/attendance invariants pass for cash/transfer plus both required Mercado Pago channels and cross-channel exactly-once rules | unknown provider outcome, duplicate renewal attempt or activation ambiguity |
+| G5 Operations | POS/stock/rental/refund/finance reconciliation pass | ledger inconsistency or unresolved disposition |
+| G6 Integrations/data/release | Gimi verified renewal link, both provider channels, admin lifecycle, approved dry run, offline sync/conflict proof, backup/restore and rollback evidence | missing identity proof/authorization, PII exposure, unexplained reconciliation, cursor gap or lost unacknowledged operations misrepresented as saved |
+
+## Phase cards
+
+### P0 — Domain and rules (BK-001–BK-007)
+
+- **BK-001:** Decide organization/branch/tenant boundary, membership identity scope, query isolation expectations, and whether this is single-operator software or future multi-tenant service. **Accept:** D-001 records owner answer and abuse/isolation tests required.
+- **BK-002:** Approve IDs plus date/time conventions required by the first member slice, including branch timezone semantics. **Accept:** D-002,D-004 provide examples and schema/API constraints. Money/currency/rounding D-003 is resolved before its money-bearing consumers, not as a read-only-slice gate.
+- **BK-003:** Decide membership activation, interval endpoints, calendar duration, renewal overlap, cancellation and timezone. **Accept:** R-001..R-003 examples cover boundaries and retry.
+- **BK-004:** Decide money/currency/rounding conventions (D-003), payment methods, transfer verifier/evidence, pending and unknown status, allocation, fees/taxes, stock and entitlement effects. **Accept:** pending vs confirmed transitions are unambiguous; external payment execution separately authorized; downstream money-bearing tasks cannot proceed until D-003/D-006 are settled.
+- **BK-005:** Decide partial returns/refunds/disposition, rental return/release/overdue, supplement yield and stock valuation. **Accept:** D-007..D-009 define lifecycle and failure path.
+- **BK-006:** Decide baseline staff auth/scope and minimum member-field purpose/access needed for the first read-only member slice (D-011,D-012). Defer Gimi and D-020 retention/evidence-file policy, rental, refund and other later-domain rules to the phases that use them. **Accept:** minimum field and role matrix covers the first slice; later gaps are explicitly listed, not globally blocking.
+- **BK-007:** Reconcile glossary, proposed logical tables, workflows and frontend ownership; mark schema as proposal or approved. **Accept:** first-slice entities and sources of truth are clear; unresolved later-module policies remain explicitly open and do not block unrelated slices.
+- **BK-061:** Define command-level offline capability, freshness, provisional-result and conflict policy (D-027), plus staged rollout. **Accept:** each first-slice read/write is explicitly allowed/provisional/blocked with actor/scope, local/server effect, stale-data warning and reconciliation class; provider calls, membership activation and exclusive-resource grants remain online-only by default. Record all unanswered owner decisions instead of choosing unapproved business behavior.
+
+### P1 — Foundation, Admin/device enrollment and local-first sync substrate (BK-008–BK-012, BK-058–BK-060, BK-062–BK-074)
+
+- **BK-008:** Create isolated backend service structure/configuration boundary that does not reuse notebook data paths; select runtime/tool versions only after compatibility check. **Accept:** safe startup without committed secrets and documented local settings.
+- **BK-009:** Establish DB/session lifecycle and migrations. **Accept:** fresh DB and supported upgrade both succeed; downgrade/data-loss hazards are explicit; no schema auto-create on production startup.
+- **BK-010:** Implement staff authentication using approved provider/credential choice, secure hash, rate limiting/lockout, safe error and credential reset. **Accept:** positive and negative auth tests plus secret/log scan.
+- **BK-011:** Implement role/scope authorization and session expiration/revocation. Receptionists require explicit Admin branch assignments; Admin org scope must be explicit. **Accept:** cross-branch/org denial, least-privilege matrix, current-grant checks and revoked-token denial. No production TTL or device-proof policy is implied.
+- **BK-012:** Add correlation IDs, safe structured logs, error envelope, health/readiness, audit, metrics baseline and early CI smoke pipeline. **Accept:** logs redact secrets/PII; health distinguishes process from dependency readiness; pipeline runs selected baseline checks and migration smoke check. This is not production release readiness.
+- **BK-058:** Add explicit Admin login, own-account recovery, session review/revocation and policy-controlled MFA/recovery gates. Generic staff authentication in BK-010/011 is a foundation, not proof of the Admin lifecycle. **Accept:** D-025 policy established; enumeration-resistant recovery, role denial and revoke tests; sessions expose no tokens.
+- **BK-059:** Allow an authorized Admin to issue, list and revoke employee enrollment codes. **Accept:** code is one-time, expiration/attempt limits are decided, only a hash persists, plaintext appears once, and issue/use/revoke are audited.
+- **BK-060:** Allow Admin to issue 6-digit device pairing, list paired devices and revoke a device. **Accept:** bounded TTL/attempts, replay denial, binding to an enrolled staff identity, immediate revoke, audit; no plaintext code/token in logs.
+- **BK-062:** Cache only a versioned PWA application shell for an already provisioned device. **Accept:** previously installed phone/PC launches without WAN and displays build/connection state; authenticated API responses, member notes and credentials are not indiscriminately cached; a clean first install may require internet.
+- **BK-063:** Add scoped IndexedDB projection, operation journal stores and versioned migrations. **Accept:** test durable transactions/readback, quota denial, storage persistence denial, corruption and upgrade recovery; must not use whole-state demo localStorage as production source.
+- **BK-064:** Route every API-backed UI command through one local submission boundary. **Accept:** immutable operation ID/hash, actor/scope reference, base version, per-install sequence, dependencies and versioned payload are persisted atomically with safe provisional projection; online requests flush this same command. Client time/actor/price/scope remain untrusted.
+- **BK-065:** Implement authenticated bootstrap for an enrolled installation. **Accept:** minimal server-authorized scope snapshot, consistent initial cursor, schema/client support and bounded grant arrive together; no first-ever offline provisioning promise; one device cannot bootstrap another actor/scope.
+- **BK-066:** Implement FastAPI command ingestion for bounded batches and durable per-command receipts. **Accept:** server resolves actor/scope and invokes domain use cases; accepted effect, operation dedupe receipt, audit and change/outbox record commit atomically; same ID/hash returns original receipt, changed hash is rejected; no all-batch success fiction.
+- **BK-067:** Implement canonical pull pages, snapshot boundary, opaque cursor and tombstones. **Accept:** cursor is commit ordered, page applies atomically before advance, replay is idempotent, and retention-expired cursor requires full consistent snapshot without silently losing unsynced client commands.
+- **BK-068:** Resolve and enforce offline grants, expiry, reauthentication, shared-device lock and revocation semantics (D-028). **Accept:** numbers and owner tradeoff are explicit; server checks current actor/device permission during sync; disconnected device is not claimed immediately revoked; no infinite offline Admin grant.
+- **BK-069:** Classify missing dependencies and domain conflicts (D-027). **Accept:** duplicate, additive observation, disjoint field, stale same-field and high-consequence financial/stock/entitlement/rental/shift cases have explicit dispositions; no last-write-wins for non-commutative records.
+- **BK-070:** Add online Admin/domain-owner conflict review and resolution. **Accept:** base/local/canonical values, device/actor, dependencies and severity are visible with minimized PII; reauthorize role/scope; resolution ID plus expected revision prevents concurrent duplicate resolution; remedy creates audited domain event/compensation, never rewrites original journal.
+- **BK-071:** Build resumable client sync orchestration and operator-facing state. **Accept:** foreground/resume/reconnect/manual retry, bounded backoff, partial per-command results, lost-ack exact-ID replay, dependency holds and unsynced count/last-sync timestamps are visible; `navigator.onLine`/Background Sync are hints/optimizations only.
+- **BK-072:** Enforce the capability matrix before side effects. **Accept:** each command says offline allowed/provisional/blocked, freshness and outcome; online-only Point/link/Gimi/new exclusive resource/admin functions refuse before promising success; domain policy unresolved remains gated.
+- **BK-073:** Protect multi-tab sequencing, queued schema compatibility and recovery. **Accept:** origin sequence allocation survives concurrent tabs/restart, version upgrade preserves pending commands, stale client prompts safe resnapshot/upgrade, incompatible queue becomes recoverable read-only rather than dropped.
+- **BK-074:** Verify sync/security invariants with synthetic partition, replay, reordering, permission, quota, update and conflict-resolution cases. **Accept:** local provisional vs canonical acceptance is asserted; financial/resource cases never auto-merge; no test or production result is claimed before observed. P1 foundation proof is incremental and domain tests extend with each slice.
+
+### P2 — Read-only vertical slice with scoped offline projection (BK-013–BK-015)
+
+- **BK-013:** Add member list/detail read query and explicit DTO/OpenAPI contract; no write endpoint yet. **Accept:** scoped pagination/filter/sort and unauthorized response tests.
+- **BK-014:** Route one frontend member-list slice through the shared local-first repository and API adapter; use scoped cached snapshot when offline. Preserve synthetic demo fallback only for untouched features, not dual ownership of same members. **Accept:** empty/loading/error/retry/as-of states, explicit stale warning, and no localStorage overwrite of live results.
+- **BK-015:** Add API contract and schema smoke checks with selected runner. **Accept:** fresh DB + endpoint + DTO field whitelist checked in automated environment.
+
+### P3 — Members and catalog (BK-016–BK-019)
+
+- **BK-016:** Persist members, restricted notes and eligibility attestations with scope, audit and retention metadata. **Accept:** birth_date/preferred_name optionality, member number uniqueness, note access and deletion behavior verified.
+- **BK-017:** Persist services, plans, plan versions and plan-service mapping. **Accept:** published versions immutable; eligibility fields and historical purchase mapping tested.
+- **BK-018:** Implement member create/update/search with validation and concurrency. **Accept:** duplicate member numbers conflict within approved scope; shared names/contact remain allowed.
+- **BK-019:** Integrate create/edit/profile and catalog screens incrementally with API DTO mapping. **Accept:** per-screen one source of truth, no parallel duplicate mutation.
+
+### P4 — Shift opening prerequisites (BK-020–BK-022)
+
+- **BK-020:** Persist terminals, registers and shift opening. **Accept:** concurrent open attempts yield one open shift; opening cash and actor/time retained.
+- **BK-021:** Capture opening denomination counts and required inventory audit as observations. **Accept:** no count silently mutates stock; reconciliation evidence retrievable.
+- **BK-022:** Implement posting lock, close transition and overtime flag semantics. **Accept:** concurrent sale/close test proves serialization and final expected cash snapshot is immutable.
+
+### P5 — Sales, settlement, memberships and both Mercado Pago channels (BK-023–BK-028, BK-053–BK-056)
+
+- **BK-023:** Persist order/item snapshots and typed sale source references. **Accept:** calculated totals are server-derived, constrained, and historical values do not change with catalog edits.
+- **BK-024:** Add payments, allocations, idempotency and retry reconciliation. **Accept:** duplicate request and payload-mismatch cases; no double allocation.
+- **BK-025:** Add verification workflow for transfer and other asynchronous settlement. **Accept:** actor/evidence/status history, pending is excluded from settled balances and UI wording.
+- **BK-026:** Add credit ledger and policy gates. **Accept:** zero default, debt calculation and check-in/new-credit block match D-013.
+- **BK-027:** Add explicit membership activation and entitlements. **Accept:** boundary dates, renewal overlap, duplicate activation and revocation/cancellation handled per D-005.
+- **BK-028:** Integrate checkout/payment/membership incrementally. **Accept:** UI distinguishes pending, confirmed, applied, activated and unknown outcomes; safe retry does not duplicate.
+- **BK-053:** Reception card selection dispatches an order to a physical Mercado Pago Point terminal. Require authenticated staff, open shift, branch/register mapping and server-owned amount/currency/order snapshot; verify account/store/POS/terminal linkage, supported device model/mode and API compatibility before enabling. Map provider Point statuses into internal conceptual states without renaming provider enums. Handle terminal busy/already-queued, duplicate clicks, disconnect, timeout, `action_required`, repeated/out-of-order events and unknown outcome by reconciliation, never blind create. Point card must not change cash drawer. **Accept:** adapter-level tests prove one local intent per command, correct terminal selection, amount/source binding, provider-response mapping, cancel rules by current status and no duplicated charge on retry. **Evidence:** official [Point API overview](https://www.mercadopago.com.mx/developers/en/reference/in-person-payments/point/overview), [create order](https://www.mercadopago.com.mx/developers/en/reference/in-person-payments/point/orders/create-order/post), [status](https://www.mercadopago.com.mx/developers/en/docs/mp-point/resources/status-order-transaction), and [cancellation behavior](https://www.mercadopago.com.mx/developers/en/docs/mp-point/payment-processing).
+- **BK-054:** Create one-time Checkout Pro Orders API hosted checkout for a server-derived membership renewal quote. Do not implement subscriptions/auto-debit or use a panel-created Payment Link as if its notifications were configured. **Accept:** quote, member, plan version, amount/currency and opaque local reference are server-resolved; one-time provider order is idempotent; returned `checkout_url` is delivered only to verified identity; no PII appears in URL/external reference; expiry and supersession follow D-024 and provider-supported behavior; quote changes require a new order rather than mutating client input. Do not issue any real provider request during development without separate authorization. **Evidence:** official [Checkout Pro Orders overview](https://www.mercadopago.com.mx/developers/en/reference/online-payments/checkout-pro-orders/overview), [create order](https://www.mercadopago.com.mx/developers/en/docs/checkout-pro-orders/create-order?scope=prod), and [order validity](https://www.mercadopago.com.mx/developers/en/docs/checkout-pro-orders/additional-settings/define-order-validity?scope=prod).
+- **BK-055:** Implement separate callback parsing/signature configuration for Point and Checkout Pro Orders, durable deduplicated inbox and asynchronous reconciliation worker. Public webhook endpoints are a deliberate exception to staff authentication; product signatures and account/order scope are mandatory. **Accept:** verify product-specific secret, event shape/topic, remote account/type/id, local reference, amount/currency and current provider status; `GET` current order as required; ack after durable capture; out-of-order/repeated callbacks cannot regress/duplicate effects; browser return never settles. The current online docs differ in event labels (`Order` notification setup vs `orders_v2` status guidance); resolve the selected event subscription/API version before wiring. Current selected-product docs both show `x-signature`/HMAC, but do not assume same event contract or validator implementation. **Evidence:** official [Point notifications](https://www.mercadopago.com.mx/developers/en/docs/mp-point/notifications), [Checkout Pro notifications](https://www.mercadopago.com.mx/developers/en/docs/checkout-pro-orders/notifications), and [Checkout Pro order status](https://www.mercadopago.com.mx/developers/en/docs/checkout-pro-orders/payment-management/status/order-status).
+- **BK-056:** Resolve and enforce one settlement per renewal period across Point and online. **Accept:** concurrent attempts for same member/renewal period serialize under D-023; UI/Gimi cannot open a second payable channel until the prior provider attempt is definitively reconciled or safely canceled; late approval, changed quote, partial/under/overpayment, provider outage, refund and chargeback outcomes are explicitly assigned; local settlement and entitlement activation remain exactly-once. Provider idempotency is not a substitute for the local cross-channel invariant.
+
+### P6 — Attendance and trials (BK-029–BK-031)
+
+- **BK-029:** Implement check-in against valid entitlement, debt policy, service and branch scope. **Accept:** expiry boundaries, duplicate check-in/session use and denied cases.
+- **BK-030:** Resolve D-019 and implement trial lifecycle distinct from membership, with repeat identity warning not treated as identity proof. Depends on attendance foundation BK-029 and trial policy only; it does not depend on unrelated BK-005 return/rental/refund decisions. **Accept:** trial records never create membership implicitly and approved repeat/scheduling rules are enforced.
+- **BK-031:** Integrate attendance/trial workflows with safe retries and staff actor attribution. **Accept:** offline/error behavior does not falsely record access.
+
+### P7 — POS and inventory (BK-032–BK-036)
+
+- **BK-032:** Implement products, receipts, counts, adjustments and stock event ledger. **Accept:** every quantity change has authorized source and unit/valuation; count separate from adjustment.
+- **BK-033:** Implement product order posting plus stock deduction transaction. **Accept:** insufficient stock, double-sale race and injected failure leave consistent order/payment/stock state.
+- **BK-034:** Implement supplement serving sale as distinct kind with approved conversion. **Accept:** no full-container deduction for scoop; servings and retail remain distinct.
+- **BK-035:** Implement cash movements, expenses and shift reconciliation from typed sources. **Accept:** non-cash does not inflate drawer; cash sources reconcile exactly.
+- **BK-036:** Integrate POS, inventory and shift screens per slice. **Accept:** retries and refresh cannot double-post local plus server effects.
+
+### P8 — Rentals and returns (BK-037–BK-039)
+
+- **BK-037:** Implement rental asset/rate/event lifecycle and availability. **Accept:** only explicit return/authorized exception releases asset; due date alone marks overdue.
+- **BK-038:** Implement item returns, partial quantities, dispositions and refunds/reversals. **Accept:** total return/refund bounds and independent stock/money states; unknown provider outcome reconciles safely.
+- **BK-039:** Integrate rental and refund workflows. **Accept:** actor, item condition, refund pending/complete, and inventory disposition shown separately.
+
+### P9 — Staff labor, finance and reports (BK-040–BK-043)
+
+- **BK-040:** Add staff labor attendance lifecycle. **Accept:** labor records are distinct from member visits, role-gated, auditable and safe under repeated clock events; device pairing is handled in BK-060.
+- **BK-041:** Add compensation, expenses, extras, budgets with restrictive permissions. **Accept:** salary history effective-dated; categories cannot silently mix cash/expense/stock semantics.
+- **BK-042:** Build reports only from proven source events and approved metric definitions. **Accept:** filters use branch timezone; totals reconcile to source transactions and access is checked.
+- **BK-043:** Integrate staff/admin views progressively; maintain table fallback for charts. **Accept:** metric label, date range, empty state and source provenance clear.
+
+### P10 — Gimi verified membership renewal and notifications (BK-044–BK-047, BK-057)
+
+- **BK-044:** Approve tool/action allowlist, user consent and data minimization. **Accept:** each action has actor, purpose, required confirmation, scope and sensitive-data rule.
+- **BK-045:** Implement Gimi domain-safe read/actions through application use cases. **Accept:** no direct DB access; authorization and audit identical to UI operation.
+- **BK-046:** Add notification outbox and delivery status/retry. **Accept:** enqueue is transactional with source event; retries idempotent and content redacted.
+- **BK-047:** Integrate Gimi and notifications UI. **Accept:** explicit action confirmation where required and no duplicate side effects on retry.
+- **BK-057:** Add the specific Gimi customer renewal flow on top of the independent online adapter. Verify customer-to-member control before revealing renewal details; resolve approved quote from catalog/membership state; create/reuse one active renewal attempt; deliver the hosted URL via an idempotent notification; report pending until authenticated provider reconciliation confirms payment; activate membership only under D-005. **Accept:** D-022 identity proof and D-023/D-024 collision/expiry policies are resolved; staff Admin login and arbitrary chat identity cannot substitute; link/PII disclosure is denied to unverified customers; retries and late callbacks produce at most one settlement/activation. This task depends on BK-054/BK-055, not on unrelated late Gimi capabilities in BK-045.
+
+### P11 — Migration, operations, backups and local-first release gate (BK-048–BK-052, BK-075–BK-076)
+
+- **BK-048:** Inventory stores from code/docs only; define synthetic mapping. **Accept:** do not inspect private notebooks/member records; identify each legacy source and owner.
+- **BK-049:** Build dry-run import with provenance, dedupe, validation, quarantine and reconciliation. **Accept:** repeatable output and no writes to target in dry-run.
+- **BK-050:** Complete production-readiness environment separation, secret handling, backups, restoration, alerting and rollback evidence. Start baseline CI/health/logging in P1 (BK-012); this later task closes deployment-specific controls. **Accept:** restore evidence in an explicitly authorized non-production environment.
+- **BK-051:** Rehearse only synthetic or expressly approved data. **Accept:** counts/totals reconcile and explicit authorization names destination, operation, credential/session.
+- **BK-052:** Release gate against migration, security, performance targets, backup/restore, support and rollback. **Accept:** both payment channels, cross-channel reconciliation, Gimi verified renewal, Admin recovery/enrollment/device management, local-first reconciliation and recovery gates are complete; release ledger is filled; unresolved risks accepted by owner and cutover/abort thresholds explicit.
+- **BK-075:** Define central database backup/restore and unsynced-device-loss procedures (D-029,D-030). **Accept:** owner sets retention/encryption/access, RPO/RTO and restore cadence; canonical domain state, sync receipts/dedupe, high-water cursor and outboxes restore consistently in an explicitly authorized non-production environment; docs plainly state pending device operations can be lost before upload.
+- **BK-076:** Gate staged local-first rollout on proof and operational readiness. **Accept:** queue age/depth, conflicts by severity, quota failures, supported client/schema and restore evidence meet owner-approved targets; early rollout is restricted and has stop/rollback conditions; no unsupported offline capabilities are enabled.
+
+## Minimal-migration policy
+
+Do not create the entire schema in advance. Each slice adds the smallest set of tables/constraints required by its accepted use case, with a compatible migration and proof. Do not build analytics before source events reconcile. Add indexes in response to query paths and evidence. A phase can be split if a decision or verification boundary warrants it, but task identities remain stable and the master row records the split.
