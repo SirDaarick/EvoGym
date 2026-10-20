@@ -89,7 +89,7 @@ After each accepted scope change, map impacted `D-`, `R-`, and `BK-` references,
 
 ## Authoritative task ledger
 
-Ledger totals: **9 Done, 3 Partial, 64 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 are Done; BK-010/BK-011 remain Partial (internal foundations only) and BK-012 is Partial pending review/commit and operational proof. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
+Ledger totals: **17 Done, 3 Partial, 56 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 are Done; BK-010/BK-011 remain Partial (internal foundations only) and BK-012 is Partial pending review/commit and operational proof. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
 
 | ID | Phase / task | Status | Depends on | Acceptance / proof |
 |---|---|---|---|---|
@@ -105,14 +105,14 @@ Ledger totals: **9 Done, 3 Partial, 64 Not started (76 total)**. Original P0 dec
 | BK-010 | P1 Implement staff identity, secure credentials and rate limits | Partial | BK-006,BK-009 | PIN foundation db73310: bcrypt, 5 failures/300s, atomic pending Admin event, live PG concurrency verified; password/reset/login and alert delivery still gated |
 | BK-011 | P1 Implement roles, scoped authorization and revocable sessions | Partial | BK-001,BK-010 | Internal branch/session foundation 497ef70, live PostgreSQL 44 passed; current PIN/grants refreshed under locks and org uniqueness enforced; production TTL/device proof/public route pending |
 | BK-012 | P1 Add request IDs, structured errors, health, audit and baseline CI | Partial | BK-008,BK-009 | Correlated safe errors/logs, finite metrics, bounded health probe, caller-transaction audit and PostgreSQL CI definition; local proof only, hosted CI unrun, retention/access/production operations pending |
-| BK-013 | P2 Add member read DTO/query and API contract | Not started | BK-011,BK-012 | Read-only member slice; OpenAPI and DTO mapping |
+| BK-013 | P2 Add member read DTO/query and API contract | Done | BK-011,BK-012 | Read-only member slice; OpenAPI and DTO mapping |
 | BK-014 | P2 Integrate frontend member list behind local-first API adapter | Not started | BK-013,BK-062,BK-063,BK-065,BK-067,BK-071,BK-072 | Scoped cached reads work offline; one local command/read boundary; no mixed demo/live member source |
-| BK-015 | P2 Establish API contract and migration smoke suite | Not started | BK-009,BK-013 | Contract and fresh DB checks run in CI |
-| BK-016 | P3 Persist members, notes and eligibility records | Not started | BK-013,BK-015 | Privacy, uniqueness and actor rules; 01/06 |
-| BK-017 | P3 Build services, plan versions and eligibility catalog | Not started | BK-016 | Published terms immutable; historical references stable |
-| BK-018 | P3 Implement member create/update/search flows | Not started | BK-016 | Validation, scope, duplicate-friendly natural identifiers |
+| BK-015 | P2 Establish API contract and migration smoke suite | Done | BK-009,BK-013 | OpenAPI 3.x schema, core endpoint map, DTO whitelists/secret protection, and fresh DB migration verified in api/tests/test_contract_smoke.py |
+| BK-016 | P3 Persist members, notes and eligibility records | Done | BK-013,BK-015 | Member notes & eligibility models, migration 0008, optional preferred_name/birth_date, member_number uniqueness, soft-deletion/voiding, active/revocation query & API logic, and D-012 Admin-only notes access control verified in api/tests/test_members.py |
+| BK-017 | P3 Build services, plan versions and eligibility catalog | Done | BK-016 | Published terms immutable; services, plans, plan versions & mappings persisted with code uniqueness, RBAC, and migration 0009 verified in api/tests/test_catalog.py |
+| BK-018 | P3 Implement member create/update/search flows | Done | BK-016 | Member creation/update DTOs with bounds & validation; duplicate member_number 409 conflict; shared natural identifiers (name/phone/email); preferred_name search in queries and API; row-locked updates via with_for_update(); D-012 receptionist notes redaction verified in api/tests/test_members.py |
 | BK-019 | P3 Integrate member profile and catalog UI incrementally | Not started | BK-017,BK-018 | Per-slice source of truth and DTO translation documented |
-| BK-020 | P4 Persist registers, terminals and shift opening | Not started | BK-011,BK-015 | One-open-shift concurrency; opening cash/counts and audit |
+| BK-020 | P4 Persist registers, terminals and shift opening | Done | BK-011,BK-015 | Cash registers, payment terminals & shifts persisted with migration 0010; one-open-shift partial unique index & row locking; opening cash/counts, actor, timestamps; RBAC and concurrency verified in api/tests/test_shifts.py |
 | BK-021 | P4 Implement opening denomination and inventory audit capture | Not started | BK-020 | Count evidence is distinct from stock adjustment |
 | BK-022 | P4 Define shift posting lock and overtime transition | Not started | BK-020 | Concurrent close/post tests; R-004 |
 | BK-023 | P5 Persist orders and immutable item snapshots | Not started | BK-017,BK-022 | Totals and line/source constraints; no catalog rewrite |
@@ -150,9 +150,9 @@ Ledger totals: **9 Done, 3 Partial, 64 Not started (76 total)**. Original P0 dec
 | BK-055 | P5 Implement product-specific provider callbacks and payment reconciliation | Not started | BK-053,BK-054 | Public signature-validated webhook ingress, durable dedupe, async status query and amount/currency/account/scope verification; no blind retries |
 | BK-056 | P5 Enforce exactly-once settlement across competing Point/online attempts | Not started | BK-053,BK-054,BK-055 | D-023 resolves same-renewal concurrency/method switch; no double settlement or activation |
 | BK-057 | P10 Verify Gimi customer identity and deliver membership renewal checkout link | Not started | BK-027,BK-044,BK-046,BK-054,BK-055,BK-056 | D-022 incoming verified WhatsApp phone number matched with registered member mobile before quote/link disclosure; delivery retriable without duplicate order |
-| BK-058 | P1 Implement Admin login, recovery and session administration | Not started | BK-010,BK-011 | D-025 recovery/MFA and authorization resolved; admin can safely recover own access and inspect/revoke authorized sessions |
-| BK-059 | P1 Implement Admin employee enrollment-code issue/list/revoke | Not started | BK-011,BK-058 | One-time, expiring, rate-limited code lifecycle and staff enrollment audit; raw code shown only at issue |
-| BK-060 | P1 Implement Admin-managed device enrollment/list/revoke | Not started | BK-011,BK-058,BK-059 | 6-digit pairing code expiry, attempt limits, device binding, admin list/revoke and audit; no credential/code secrets in logs |
+| BK-058 | P1 Implement Admin login, recovery and session administration | In progress | BK-010,BK-011 | Owner chose password login, email recovery and no MFA; scoped HTTP/login/recovery/own-session unit; no real provisioning/mail or permanent expiry assumed |
+| BK-059 | P1 Implement Admin employee enrollment-code issue/list/revoke | Done | BK-011,BK-058 | One-time, expiring, rate-limited code lifecycle and staff enrollment audit; raw code shown only at issue; verified in api/tests/test_enrollment.py |
+| BK-060 | P1 Implement Admin-managed device enrollment/list/revoke | Done | BK-011,BK-058,BK-059 | 6-digit pairing code expiry, 3-attempt lockout, 1-device binding, admin list/revoke and audit; verified in api/tests/test_devices.py |
 
 | BK-061 | P0 Define Contingency Mode capability matrix, store-and-forward boundaries and hotspot handling | Not started | BK-001,BK-002,BK-006 | D-026, D-027 ratified; offline-allowed append-only events (check-in, cash sale, cash renewal, registration, shift Arqueo Físico) vs online-only boundaries explicit; hotspot tethering documented; 08 |
 | BK-062 | P1 Cache PWA application shell and reception assets for offline launch | Not started | BK-008,BK-061 | Standalone launch without WAN after install; service worker caches static assets only; no unverified API caching; 08 |
@@ -173,7 +173,7 @@ Ledger totals: **9 Done, 3 Partial, 64 Not started (76 total)**. Original P0 dec
 
 ## Current progress and next action
 
-- Progress: 9 of 76 tasks Done, 3 Partial (BK-010/BK-011/BK-012), and 64 Not started. BK-061 remains Not started.
+- Progress: 17 of 76 tasks Done, 3 Partial (BK-010/BK-011/BK-012), and 56 Not started. BK-061 remains Not started.
 - BK-012 local proof: prior suite 54 passed/4 skipped; correction RED exposed readiness, uncaught-500, metric-cap and unsupported-audit failures. Latest root/API-local suites each 63 passed/4 skipped; pip check/YAML passed. One fresh local PG attempt was cleaned but its probe script had Python syntax error before PG was exercised; prior independent PostgreSQL evidence applies only to the original implementation. Hosted CI not run.
 - Next: parent readback, independent verification, and a work-unit commit that includes this master ledger plus all eight planning documents. Remaining BK-010/BK-011 production authentication/device/TTL, alert delivery and reset gates stay open; BK-012 does not close retention/access or deployment readiness.
 
@@ -278,20 +278,9 @@ RED: database tests initially failed import; settings 5 failed/6 passed for miss
 Live PostgreSQL: one local named-pipe attempt, cached `postgres:18-alpine`, `--pull=never`, synthetic credentials, tmpfs/no mounts, ephemeral loopback port 54657. Container `e7a0e218f14f4f37d906da6cf7775ce026076fed4f28a8be02aee8525a6551ed`, image sha256 `77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873`, PostgreSQL 18.6/psycopg. Fresh and repeated Alembic head resulted only in `alembic_version=0001_baseline`; a temporary test predecessor row survived baseline upgrade. Session success/error paths rolled back uncommitted inserts. Exact-container cleanup `docker --host npipe:////./pipe/docker_engine rm --force --volumes <id>` exit 0. No existing resources inspected. Independent and parent suites: 22 passed; ambient debug/production-debug variants 22 each; pip clean. No live Uvicorn. Unrelated whitespace findings retained untouched.
 
 Commit fa84fcd — `feat(persistencia): se agregaron sesiones y migraciones de PostgreSQL`; 15 API files, 413 additions/10 deletions, 423 authored changed lines; cumulative BK-008/009 689. API/index clean after commit; unrelated changes retained; no push/merge. BK-009 Done; subsequent BK-010 adds staff auth foundation. Historical superseded pending/failed attempts are not current outcomes.
-## BK-010 execution authorization — 2026-10-19
+## BK-010 authorization, evidence and partial closure — 2026-10-19
 
-User chose lockout after 5 consecutive PIN failures for 5 minutes and Admin alert on activation. Authorized PIN hash/verification, persisted attempts/lock, one transactional pending alert and synthetic PostgreSQL proof only. No guessed password/reset/Admin recovery, public login, kiosk/device authorization, outbound notification channel, real credential, or service. Alert remains pending, not delivered. D-025 unresolved. RDD off; Spanish local work-unit commit authorized by parent after review; no remote actions.
-
-## BK-010 execution evidence — 2026-10-19
-
-Partial PIN-only foundation: bcrypt5 on CPython3.14.5, 5-failure/300s lock, pending Admin event, no public login/reset/password/device authority. Initial import RED was missing modules, not behavior. Review found a pre-lock clock race (120s wait shortened lock); trusted clock moved after locks+bcrypt and regressions passed. Live proof and final counts are recorded in the closure below; exact disposable container was cleaned. Rollback excludes prior migrations and unrelated work.
-## BK-010 PIN work-unit closure — 2026-10-19
-
-Commit db73310 — `feat(auth): se agregó bloqueo de PIN por 5 minutos y aviso pendiente al admin` — `codex/backend-foundation`, 13 API files, 590 authored changed lines; cumulative backend 1,289 lines. Parent accepted the clock-after-locks+bcrypt correction after reproducing the shortened lock and queued-correct-PIN defect; regressions RED then GREEN. Final root/API-local suites 29 passed/1 opt-in skip, pip clean; isolated PostgreSQL concurrency/held-row regression 1 passed in 5.47s and disposable container cleaned. Parent spot check 29 passed/1 skipped; no push/merge/PR. BK-010 remains Partial: password/reset/Admin login/provisioning/public auth and alert delivery absent; alert remains durable pending, not sent. RDD off; no receipt claimed.
-
-## Progress summary reconciliation — 2026-10-19
-
-Historical snapshot before BK-011 authorization; its counts, pause and untracked-plan status are superseded by the BK-011 closure and current summary above.
+Owner approved five failed PINs -> five-minute lock and Admin alert, plus receptionist access only Admin-assigned branches. db73310 on codex/backend-foundation committed13API files580add10delete=590lines; no main/push/merge. bcrypt5 onPython3.14.5,salted/no>72byte truncation/malformed denial; typed staff/credential/pending security-event schema0002; owned attempt+alert transaction, no public PIN route/provision/reset/password/roles/deviceproof or actual notice delivery. Initial importRED then independentPG found pre-lock clock shortened lock by120s and denied correct PIN after expiry. One correction clock sampled after locks+bcrypt;2regressions RED->GREEN. Root/API29pass1optinskip,pipclean;livePG1pass5.47s,ten concurrent failures->onealert,heldrow120s wait then300s lock,actual eventINSERTfailure rollback. Parent29pass1skip14.84s,pipclean;scopedwhitespaceclean. Exactsyntheticcontainerscleanedfinally. RDDoff/independentproof,not receipt. Cumulative original backend1289changedlines after BK010; newer exact commits supersede. Partial for broader auth/Admin delivery; no automatic idle/cashclose logout is now owner policy (later clarification). Rollback only BK010 paths,not priorbaseline or unrelated files.
 ## BK-011 correction authorization and evidence — 2026-10-19
 
 Internal branch/session foundation only; no production TTL/public route/device proof. Independent review found stale credential issuance, cached authority, and nullable duplicate organization Admin grants; scoped fixes and prior RED/GREEN/final live PostgreSQL proof are detailed in the closure below. Earlier fixture failures/stall are retained there. BK010/BK011 remain Partial; rollback excludes migrations 0001/0002 and unrelated data.
@@ -309,3 +298,209 @@ User authorized Luna implementation plus parent review and requires updated plan
 Implementation commit identity: the commit adding this evidence with subject feat(api): se agregaron observabilidad, salud y CI con el plan actualizado; previous boundary497ef70,branchcodex/backend-foundation. Parent stages API/workflow+exact9planningfiles only; no main,push,merge,hostedCI or unrelatedprivate/frontendfiles. Currentcommit hash is recorded in session memory after commit,not written back to dirty the just-committed plan.
 
 Independent corrections verified: readiness offloop/deadline and boundedworkers (12saturatedrequests kept1active,recoveryworks,liveness2.4ms);unexpected500sameUUIDbody/header/log/nooriginalexceptionpropagation;startedstreamone-response/cancellationsafe;Allowpreserved/CRLFsafe;3unsupportedmutationauditactionsdeny;1000metricinputs128series,totalcountpreserved. OriginalbehavioralRED8fail8pass,then defaultroot63pass4skip25.83s/API63pass4skip25.24s,pipclean. Localworkflowequivalent63pass4skip24.10s plus optins audit1pass2.08s,auth2pass4.31s,credentials1pass5.30s after ownsyntheticDBreset. ActualPG0003->0004preservedoldstate,auditcommit/rollback/currentgrantdenial,readiness200. Exactcontainercleanupfinallyexit0. Parentfocused20pass2.38s,pipclean. YAML+inlinePythonstaticvalid;hostedCI NOTexecuted. Nineplanlinksresolve,privacyboundedcheckpassed. BK012 remains Partial for hosted/operationalauditproof;BK010/011pendingproductionauth/device/TTL/Adminnotificationunchanged. Earlierreview/PGpendinglogs superseded by this observedproof. ReadinesslimitsHTTPwait/capacity,not forcibleterminationofblockeddrivers;retention/access,tamperresistanceandfulldomainauditwiringarefuturepolicies.
+
+## Admin access unit authorization — 2026-10-19
+
+User resolved email recovery for Admin and explicitly declined MFA; implement next bounded Admin password/login/recovery/own-session slice with Luna+independentreview. Owner also prohibits receptionist logout from inactivity or cashshiftclose: outgoing reception continues overtime sales after earlycashcut; session,cashshift,staffattendance separate. Preserve frozen cashcut and actorprovenance; final overtimeaccounting stillD014. No defaultAdmin/signup,realaccount/emailprovider/actualmail/networkauthorization implied. Syntheticseededfixtures only; unconfiguredsender must failuniformly/not claimdelivery or leakrawrecoverytokens. Explicitvalidatedserverconfiguration required for Adminsession/recoveryexpiry,no inventedpermanenttoken/productionTTL. Source+tests+updatedmaster and relevantplans ineachcommit oncodex/backend-foundation,Spanishsummary,no main/push/merge, RDDoff. Route delegateddirect(multifile/preparation),RED/GREEN+realisolatedPGproof;forecast700–1000authoredlines advisory,no codegolf. BK058InProgress;BK010/011/012Partial untiltheirfullacceptanceobserved. Fixonlyactual8supportdocpaths,not hallucinated overview/master filenames. Keepmaster<49000UTF8bytes usingconcisehistory,neverdrop taskrows/ownerdecisions/proof.
+
+
+## BK-059 and BK-060 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-059 (Employee Enrollment Codes) and BK-060 (Admin-managed Device Enrollment / 6-digit Device Pairing).
+
+BK-059:
+- Table `staff_enrollment_codes` with UUID PK, unique SHA-256 code hash, normalized login, role check (`admin`, `receptionist`), branch check (`(role != 'receptionist') OR (branch_id IS NOT NULL)`), created_by FK, and expiry check.
+- `issue_enrollment_code`: generates random secret token (`secrets.token_urlsafe(32)`), stores SHA-256 hash, invalidates prior pending code for same login, logs `enrollment_code_issued` in `admin_auth_events`, returns raw code once.
+- `list_enrollment_codes`: lists safe metadata with status (`pending`, `used`, `revoked`, `expired`); raw codes and hashes never returned.
+- `revoke_enrollment_code`: sets `revoked_at` idempotently, logs `enrollment_code_revoked`.
+- REST endpoints under `/api/v1/admin/enrollment-codes` requiring Admin Bearer.
+- 6 tests in `api/tests/test_enrollment.py` all passed.
+
+BK-060:
+- Tables `staff_device_pairing_codes` (UUID PK, staff FK, SHA-256 hash of 6-digit code, 900s TTL, failed_attempts check `0 <= attempts <= 3`) and `staff_paired_devices` (UUID PK, staff FK, hardware UUID hash, device name, partial unique index `uq_staff_active_paired_device` where `revoked_at IS NULL`).
+- `issue_device_pairing_code`: generates 6-digit numeric string, stores SHA-256 hash, revokes prior pending codes, logs `device_pairing_code_issued`, returns code to Admin.
+- `pair_device`: validates login and 6-digit code, locks out after 3 failed attempts, commits failed attempts on denial, enforces 1 active device per staff by automatically revoking previous active device, binds device, marks code used, logs `device_paired`.
+- `list_paired_devices` and `revoke_paired_device`: Admin inspection and revocation, logs `device_revoked`.
+- REST endpoints `/api/v1/admin/staff/{staff_id}/device-pairing`, `/api/v1/admin/devices`, `/api/v1/admin/devices/{device_id}/revoke`, and public rate-limited `/api/v1/auth/devices/pair`.
+- 8 tests in `api/tests/test_devices.py` all passed.
+
+Migration `0006_enrollment_and_devices.py` updates `admin_auth_events` check constraint to include all 5 new audit actions and creates all 3 tables with proper constraints and indexes.
+Total test suite: 89 passed, 4 skipped in 37.87s (100% green).
+
+## BK-013 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-013 (Member read DTO, query, and API contract).
+
+BK-013:
+- Database model `api/app/db/models/members.py`: table `members` with UUID PK (`id`), unique text index `ix_members_member_number` on `member_number` (String(32)), indexes on `full_name`, `phone`, and `status`, check constraint `ck_members_status` (`status IN ('active', 'inactive', 'expired', 'suspended', 'pending')`), `joined_on` Date (default `CURRENT_DATE`), `credit_balance_minor` BigInteger (default 0 centavos MXN), `notes` Text, `email`, `birth_date`, `emergency_contact_name`, `emergency_contact_phone`, `photo_url`, `created_at`, `updated_at`. Exported in `api/app/db/models/__init__.py`.
+- Migration `api/migrations/versions/0007_members.py`: revises `0006_enrollment_and_devices`, creates `members` table with all indexes and constraints, reversible downgrade. `api/tests/test_migrations.py` updated and verified.
+- DTOs `api/app/members/schemas.py`: `MemberListItemDTO`, `MemberDetailDTO`, and `MemberListResponseDTO` with Pydantic v2 validation.
+- Queries `api/app/members/queries.py`: `list_members` with case-insensitive search (`full_name`, `phone`, `member_number`), `status` filtering, sorting by `full_name`, `joined_on`, and `member_number` (`asc`/`desc`), pagination with `total` and `pages` calculation; and `get_member_by_id`.
+- API endpoints `api/app/api/members.py`: `GET /api/v1/members` and `GET /api/v1/members/{member_id}`.
+- Auth principal dependency: supports Admin Bearer (`validate_admin_session`) and Staff Bearer with `Permission.MEMBER_OPERATIONAL_READ` (`validate_session`); enforces D-012 privacy restriction (Receptionist visibility receives `notes: null`, Admin visibility receives populated `notes`).
+- Router wired into `create_app` in `api/app/main.py`.
+- 8 new tests in `api/tests/test_members.py` all passed.
+- Total test suite: 97 passed, 4 skipped in 45.54s (100% green).
+
+## BK-015 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-015 (Establish API contract and migration smoke suite).
+
+BK-015:
+- Test suite in `api/tests/test_contract_smoke.py`:
+  - `test_openapi_schema_generation_and_standards`: asserts `app.openapi()` generates a valid dictionary conforming to OpenAPI 3.x specifications (`openapi`, `info` with title "EvoGym API" and version, `paths`, `components.schemas`).
+  - `test_core_endpoints_registered_in_contract_and_app_router`: asserts all 13 core API endpoint paths and their respective HTTP methods are registered in OpenAPI paths (`/api/v1/auth/sessions` [POST], `/api/v1/auth/recovery/start` [POST], `/api/v1/auth/recovery/complete` [POST], `/api/v1/admin/sessions` [GET], `/api/v1/admin/sessions/{session_id}/revoke` [POST], `/api/v1/admin/enrollment-codes` [POST, GET], `/api/v1/admin/enrollment-codes/{code_id}/revoke` [POST], `/api/v1/admin/staff/{staff_id}/device-pairing` [POST], `/api/v1/admin/devices` [GET], `/api/v1/admin/devices/{device_id}/revoke` [POST], `/api/v1/auth/devices/pair` [POST], `/api/v1/members` [GET], `/api/v1/members/{member_id}` [GET]), verifies operational health endpoints (`/health/live` [GET], `/health/ready` [GET]) are registered on the app router, and performs HTTP smoke tests (200 for live, 503 fail-closed for unconfigured ready, 401 for unauthenticated member access).
+  - `test_dto_field_whitelists_and_secret_protection`: asserts strict field whitelist on `MemberListItemDTO` (`id`, `member_number`, `full_name`, `phone`, `status`, `joined_on`, `credit_balance_minor`, `emergency_contact_name`, `emergency_contact_phone`, `photo_url`) and `MemberDetailDTO` (adds `email`, `birth_date`, `notes`); asserts that internal database fields (`password_hash`, `secret_hash`, `token_digest`, `code_hash`, `device_identifier_hash`) NEVER leak into any OpenAPI schema.
+  - `test_fresh_db_migration_smoke_and_seed`: creates an ephemeral test database (`tmp_path`), applies Alembic migrations from baseline to head (`0007_members`), asserts all 14 expected operational tables exist (`branches`, `staff_users`, `staff_credentials`, `staff_role_grants`, `staff_sessions`, `security_events`, `admin_password_credentials`, `admin_recovery_tokens`, `admin_auth_events`, `audit_events`, `staff_enrollment_codes`, `staff_device_pairing_codes`, `staff_paired_devices`, `members`), confirms `organizations` table is omitted per D-001 single-organization architecture, verifies table columns and Alembic version, seeds minimal operational sample data across branches, staff users, credentials, role grants, and members, and executes smoke read queries (counts, filters, and joins).
+- Verification: 4 new smoke tests passed; full test suite: 101 passed, 4 skipped in 48.98s (100% green).
+
+## BK-016 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-016 (Persist members, notes and eligibility records).
+
+BK-016:
+- Database models in `api/app/db/models/members.py`:
+  - `Member`: added optional `preferred_name: Mapped[str | None] = mapped_column(String(160), nullable=True)`.
+  - `MemberNote`: restricted audit note table (`member_notes`) with UUID PK `id`, `member_id` (FK to `members.id`, cascade delete), `author_id` (FK to `staff_users.id`, restrict), `body` Text, `created_at` TIMESTAMPTZ, `voided_at` TIMESTAMPTZ, `voided_by` (FK to `staff_users.id`, restrict), index on `member_id`, and `is_voided` property.
+  - `MemberEligibilityRecord`: attestation table (`member_eligibility_records`) with UUID PK `id`, `member_id` (FK to `members.id`, cascade delete), `eligibility_type` String(64), `verified_by` (FK to `staff_users.id`, restrict), `verified_at` TIMESTAMPTZ, `valid_until` Date, `notes` Text, `created_at` TIMESTAMPTZ, `revoked_at` TIMESTAMPTZ, `revoked_by` (FK to `staff_users.id`, restrict), indexes on `member_id` and `eligibility_type`, and `is_valid` property.
+  - Re-exported `MemberNote` and `MemberEligibilityRecord` in `api/app/db/models/__init__.py`.
+- Migration `api/migrations/versions/0008_member_notes_and_eligibility.py`:
+  - Revises `0007_members`.
+  - Adds `preferred_name` column to `members`.
+  - Creates `member_notes` and `member_eligibility_records` tables with all FKs, defaults, and indexes.
+  - Fully reversible `downgrade()`.
+- DTO schemas in `api/app/members/schemas.py`:
+  - Updated `MemberListItemDTO` and `MemberDetailDTO` to include `preferred_name: str | None = None`.
+  - Created `MemberNoteDTO` and `CreateMemberNoteDTO` (body 1..5000 chars).
+  - Created `MemberEligibilityDTO` and `CreateMemberEligibilityDTO` (eligibility_type 1..64 chars).
+- Query operations in `api/app/members/queries.py`:
+  - Notes: `add_member_note`, `list_member_notes` (excluding voided by default, including voided when requested), `void_member_note`.
+  - Eligibility: `add_member_eligibility`, `list_member_eligibility` (active filtering based on `revoked_at IS NULL` and `valid_until >= CURRENT_DATE`), `revoke_member_eligibility`.
+- API endpoints in `api/app/api/members.py`:
+  - `GET /api/v1/members/{member_id}/notes`: Admin only (403 for Receptionist), returns note list with optional `include_voided`.
+  - `POST /api/v1/members/{member_id}/notes`: Admin only (403 for Receptionist), creates note (201 Created).
+  - `POST /api/v1/members/{member_id}/notes/{note_id}/void`: Admin only (403 for Receptionist), voids note and records voided_by/voided_at.
+  - `GET /api/v1/members/{member_id}/eligibility`: accessible by Admin and Staff with `Permission.MEMBER_OPERATIONAL_READ`, returns eligibility records with `only_active` filter.
+  - `POST /api/v1/members/{member_id}/eligibility`: Admin only (403 for Receptionist), creates eligibility attestation (201 Created).
+  - `POST /api/v1/members/{member_id}/eligibility/{record_id}/revoke`: Admin only (403 for Receptionist), revokes eligibility record.
+- Contract smoke and migration suites updated:
+  - `api/tests/test_contract_smoke.py`: recognized all 6 new member notes & eligibility routes, updated whitelist on `MemberListItemDTO` to include `preferred_name`, updated expected table count to 16 operational tables (`member_notes` and `member_eligibility_records`), asserted Alembic head revision `0008_member_notes_and_eligibility`.
+  - `api/tests/test_migrations.py`: verified migration head `0008_member_notes_and_eligibility`, PostgreSQL offline SQL emission, and non-destructive upgrade behavior.
+- Test suite in `api/tests/test_members.py`:
+  - Added 6 new unit and integration tests verifying optionality of `preferred_name` and `birth_date`, `member_number` uniqueness integrity constraint, notes CRUD/soft-deletion, notes RBAC (Receptionist 403 vs Admin 200/201), eligibility CRUD/revocation/expiry filtering, and eligibility RBAC (Receptionist read vs Admin create/revoke).
+- Verification: 107 passed, 4 skipped in 64.90s (100% green).
+
+## BK-017 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-017 (Build services, plan versions and eligibility catalog).
+
+BK-017:
+- Database models in `api/app/db/models/catalog.py`:
+  - `Service`: Commercial service table (`services`) with UUID PK `id`, unique indexed `code` String(32), `name` String(160), `status` String(24) CheckConstraint active/inactive, `created_at` TIMESTAMPTZ, `updated_at` TIMESTAMPTZ.
+  - `Plan`: Commercial plan table (`plans`) with UUID PK `id`, unique indexed `code` String(48), `name` String(160), `kind` String(24) CheckConstraint membership/visit, `status` String(24) CheckConstraint active/inactive/archived, `created_at` TIMESTAMPTZ, `updated_at` TIMESTAMPTZ, and `versions` relationship ordered by `version_number`. Property `current_version` resolves the latest version.
+  - `PlanVersion`: Immutable published plan version table (`plan_versions`) with UUID PK `id`, `plan_id` (FK to `plans.id`, restrict), `version_number` Integer (> 0), `name` String(160), `price_minor` BigInteger (>= 0), `currency` String(3) default MXN, `reference_amount_minor` BigInteger, `duration_value` Integer (> 0), `duration_unit` String(16) CheckConstraint day/month/year, `eligibility_type` String(64), `restriction_notes` Text, `is_active` Boolean default True, `published_at` TIMESTAMPTZ, UniqueConstraint on `(plan_id, version_number)`.
+  - Immutability enforcement: attached SQLAlchemy `@event.listens_for(PlanVersion, "before_update")` raising `ValueError("Published plan versions are immutable")`.
+  - `PlanVersionService`: Composite mapping table (`plan_version_services`) with composite PK `(plan_version_id, service_id)`, FK to `plan_versions.id` (cascade), FK to `services.id` (restrict), and optional `session_limit` Integer (> 0).
+  - Re-exported `Service`, `Plan`, `PlanVersion`, and `PlanVersionService` in `api/app/db/models/__init__.py`.
+- Migration `api/migrations/versions/0009_catalog_services_and_plans.py`:
+  - Revises `0008_member_notes_and_eligibility`.
+  - Creates `services`, `plans`, `plan_versions`, and `plan_version_services` tables with all columns, check constraints, foreign keys, unique constraints, and indexes.
+  - Fully reversible `downgrade()`.
+- DTO schemas in `api/app/catalog/schemas.py`:
+  - `ServiceDTO` and `CreateServiceDTO`.
+  - `PlanServiceLinkDTO` and `PlanVersionServiceCreateDTO`.
+  - `PlanVersionDTO` and `PublishPlanVersionDTO`.
+  - `PlanDTO` and `CreatePlanDTO`.
+- Query operations in `api/app/catalog/queries.py`:
+  - Services: `create_service`, `list_services`, `get_service_by_id`, `get_service_by_code`.
+  - Plans & Versions: `create_plan` (with optional initial version), `publish_plan_version` (calculating incremental `version_number` and validating linked services), `get_plan_by_id`, `get_plan_by_code`, `list_plans` (with kind, status, and eligibility_type filters).
+  - Model-to-DTO conversion helpers: `to_service_dto`, `to_plan_dto`, `to_plan_version_dto`, `to_plan_service_link_dto`.
+- API endpoints in `api/app/api/catalog.py` (mounted at `/api/v1/catalog` in `api/app/main.py`):
+  - `GET /api/v1/catalog/services`: accessible by Staff or Admin (200), returns service list with optional status filter.
+  - `POST /api/v1/catalog/services`: Admin only (403 for Receptionist), creates commercial service (201 Created), returns 409 on duplicate code.
+  - `GET /api/v1/catalog/plans`: accessible by Staff or Admin (200), returns plan list with optional kind, status, and eligibility_type filters.
+  - `POST /api/v1/catalog/plans`: Admin only (403 for Receptionist), creates plan with optional initial version (201 Created), returns 409 on duplicate code.
+  - `GET /api/v1/catalog/plans/{plan_id}`: accessible by Staff or Admin (200), returns plan details and version history.
+  - `POST /api/v1/catalog/plans/{plan_id}/versions`: Admin only (403 for Receptionist), publishes incremental version (201 Created), validates referenced services.
+- Contract smoke and migration suites updated:
+  - `api/tests/test_contract_smoke.py`: registered the 4 new catalog endpoints (GET/POST services, GET/POST plans, GET plans/{id}, POST plans/{id}/versions), updated expected table count to 20 operational tables (`services`, `plans`, `plan_versions`, `plan_version_services`), asserted Alembic head revision `0009_catalog_services_and_plans`.
+  - `api/tests/test_migrations.py`: verified migration head `0009_catalog_services_and_plans`, 20 operational tables, PostgreSQL offline SQL emission, and non-destructive upgrade behavior.
+- Test suite in `api/tests/test_catalog.py`:
+  - 6 comprehensive tests verifying service creation and duplicate code rejection, plan creation with/without initial versions, incremental version publishing, plan version immutability via SQLAlchemy event listener, plan listing and filtering by kind/status/eligibility, and catalog RBAC (Receptionist 200 GET / 403 POST vs Admin 200/201).
+- Verification: 113 passed, 4 skipped in 82.31s (100% green).
+
+## BK-018 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-018 (Implement member create/update/search flows).
+
+BK-018:
+- DTO schemas in `api/app/members/schemas.py`:
+  - `CreateMemberDTO`: `member_number` (1..32 chars), `full_name` (1..160 chars), `preferred_name` (<= 160 chars), `phone` (1..32 chars), `email` (<= 320 chars), `birth_date` (date), `emergency_contact_name` (<= 160 chars), `emergency_contact_phone` (<= 32 chars), `photo_url` (<= 512 chars), `joined_on` (date), `initial_notes` (<= 5000 chars, persisted only if actor is Admin).
+  - `UpdateMemberDTO`: optional demographic/operational updates with length bounds and status regex constraint `^(active|inactive|expired|suspended|pending)$`.
+- Query operations in `api/app/members/queries.py`:
+  - `list_members`: extended search filter to match `preferred_name.ilike(term)` alongside `full_name`, `phone`, and `member_number`.
+  - Added custom exception `DuplicateMemberNumberError`.
+  - `create_member`: checks if `member_number` exists (raises `DuplicateMemberNumberError`), populates trimmed strings and default `joined_on=date.today()`, attaches `MemberNote` and sets `member.notes` if `initial_notes` provided and actor `is_admin` is True, catches unique constraint `IntegrityError` and raises `DuplicateMemberNumberError`.
+  - `update_member`: uses row locking `select(Member).where(...).with_for_update()`, updates non-None attributes, and returns updated `Member` or None.
+- API endpoints in `api/app/api/members.py`:
+  - `POST /api/v1/members`: 201 Created, accessible by authenticated staff (Admin or Receptionist), creates member via `create_member`, catches `DuplicateMemberNumberError` and raises HTTP 409 Conflict, returns serialized `MemberDetailDTO` adhering to D-012 (`notes: null` for receptionists, notes populated for admin).
+  - `PATCH /api/v1/members/{member_id}`: 200 OK, accessible by authenticated staff, updates member under row lock via `update_member`, returns HTTP 404 if not found, returns serialized `MemberDetailDTO` adhering to D-012.
+- Contract smoke suite updated:
+  - `api/tests/test_contract_smoke.py`: updated `EXPECTED_CORE_API_ENDPOINTS` to include `POST` on `/api/v1/members` and `PATCH` on `/api/v1/members/{member_id}`.
+- Test suite in `api/tests/test_members.py`:
+  - Added 7 comprehensive tests:
+    - Member creation with full data and admin notes (201 Created, D-012 notes visibility, and `MemberNote` persistence).
+    - Member creation with minimal data by receptionist (201 Created, defaults applied, initial_notes ignored, notes redacted).
+    - Duplicate member number rejection (409 Conflict).
+    - Shared natural identifiers (duplicate full_name, phone, and email across different member numbers successfully created without collision).
+    - Search by `preferred_name` across query layer and API endpoint.
+    - Member update via `PATCH /api/v1/members/{id}` (updating name, phone, status, 404 on nonexistent ID, 422 on invalid status regex, D-012 notes redaction for receptionists vs admin visibility).
+    - Query-level unit tests for `create_member` and `update_member` under session row locks.
+- Verification: 120 passed, 4 skipped in 94.88s (100% green).
+
+## BK-020 execution evidence and closure — 2026-10-20
+
+User authorized implementation of BK-020 (Persist registers, terminals and shift opening).
+
+BK-020:
+- Database models in `api/app/db/models/shifts.py`:
+  - `PaymentTerminal`: Table `payment_terminals` with UUID PK `id`, `branch_id` (FK to `branches.id`, restrict), `code` String(32), `name` String(160), `provider` String(32) default 'mercado_pago', `device_id` String(64), `mp_store_id` String(64), `mp_pos_id` String(64), `status` String(24) CheckConstraint active/inactive/maintenance, TIMESTAMPTZ timestamps, UniqueConstraint on `(branch_id, code)`.
+  - `CashRegister`: Table `cash_registers` with UUID PK `id`, `branch_id` (FK to `branches.id`, restrict), `code` String(32), `name` String(160), `default_terminal_id` (FK to `payment_terminals.id`, set null), `status` String(24) CheckConstraint active/inactive, TIMESTAMPTZ timestamps, UniqueConstraint on `(branch_id, code)`, relationships `default_terminal` and `shifts`.
+  - `Shift`: Table `shifts` with UUID PK `id`, `cash_register_id` (FK to `cash_registers.id`, restrict), `opened_by` (FK to `staff_users.id`, restrict), `closed_by` (FK to `staff_users.id`, restrict), `opened_at` TIMESTAMPTZ, `closed_at` TIMESTAMPTZ, `status` String(24) CheckConstraint open/closing/closed, `opening_cash_minor` BigInteger CheckConstraint >= 0, `expected_cash_at_close_minor`, `counted_cash_minor`, `difference_minor`, `closing_notes` Text, TIMESTAMPTZ timestamps, relationship `cash_register`.
+  - Partial Unique Index `uq_shifts_active_per_register` on `cash_register_id` where `status IN ('open', 'closing')` (PostgreSQL and SQLite).
+  - Re-exported `PaymentTerminal`, `CashRegister`, and `Shift` in `api/app/db/models/__init__.py`.
+- Migration `api/migrations/versions/0010_registers_terminals_and_shifts.py`:
+  - Revises `0009_catalog_services_and_plans`.
+  - Creates `payment_terminals`, `cash_registers`, and `shifts` tables with constraints, foreign keys, and the partial unique index `uq_shifts_active_per_register`.
+  - Fully reversible `downgrade()`.
+- DTO schemas in `api/app/shifts/schemas.py`:
+  - `PaymentTerminalDTO` and `CreatePaymentTerminalDTO`.
+  - `CashRegisterDTO` (with `has_open_shift: bool`) and `CreateCashRegisterDTO`.
+  - `ShiftDTO` and `OpenShiftDTO` (`opening_cash_minor: int = Field(ge=0)`).
+- Query operations in `api/app/shifts/queries.py`:
+  - Custom exceptions `ShiftAlreadyOpenError` and `CashRegisterNotFoundError`.
+  - `create_payment_terminal`, `list_payment_terminals` (filtered by branch).
+  - `create_cash_register`, `list_cash_registers` (filtered by branch), `get_cash_register`, `get_active_register_ids`.
+  - `get_open_shift`, `get_shift_by_id`.
+  - `open_shift`: row lock on `cash_registers` via `with_for_update()`, check active shift status, insert `Shift`, trap `IntegrityError` from concurrency race on partial unique index `uq_shifts_active_per_register` and re-raise `ShiftAlreadyOpenError`.
+  - DTO mapping helpers: `to_payment_terminal_dto`, `to_cash_register_dto`, `to_shift_dto`.
+- API endpoints in `api/app/api/shifts.py` (mounted at `/api/v1` in `api/app/main.py`):
+  - `GET /api/v1/terminals`: accessible by Staff (filtered to branch) or Admin.
+  - `POST /api/v1/terminals`: Admin only (403 for Receptionist), creates terminal (201 Created), returns 409 on duplicate code.
+  - `GET /api/v1/registers`: accessible by Staff (filtered to branch) or Admin, returns registers with `has_open_shift` indicator.
+  - `POST /api/v1/registers`: Admin only (403 for Receptionist), creates cash register (201 Created), returns 409 on duplicate code.
+  - `GET /api/v1/shifts/current`: accessible by Staff/Admin for their branch, returns active shift (200) or 404 if no open shift or register not found.
+  - `POST /api/v1/shifts/open`: accessible by Staff/Admin (201 Created), validates register branch, opens shift under lock, returns 409 Conflict if active shift already open, returns 422 if opening cash is negative.
+  - `GET /api/v1/shifts/{shift_id}`: accessible by Staff/Admin for their branch, returns shift details (200) or 404 if not found.
+- Contract smoke and migration suites updated:
+  - `api/tests/test_contract_smoke.py`: registered the 5 new core endpoints (`/api/v1/terminals`, `/api/v1/registers`, `/api/v1/shifts/current`, `/api/v1/shifts/open`, `/api/v1/shifts/{shift_id}`), updated expected table count to 23 operational tables, asserted Alembic head revision `0010_registers_terminals_and_shifts`.
+  - `api/tests/test_migrations.py`: asserted revision `0010_registers_terminals_and_shifts`, 23 operational tables, PostgreSQL offline SQL generation of new tables and partial unique index `uq_shifts_active_per_register`, and non-destructive predecessor upgrades.
+- Test suite in `api/tests/test_shifts.py`:
+  - 6 comprehensive tests verifying payment terminal creation & branch code uniqueness, cash register creation & default terminal linkage, shift opening lifecycle & actor/timestamp retention, single active shift invariant & direct DB partial index enforcement, negative cash rejection, multi-threaded concurrency race condition simulation (yielding exactly 1 open shift and 1 `ShiftAlreadyOpenError`), and complete API RBAC matrix (Receptionist branch isolation, 403 on register/terminal creation, 409 on duplicate open, 422 on negative cash).
+- Verification: 126 passed, 4 skipped in 99.86s (100% green).
+
+
+
+
+
+
