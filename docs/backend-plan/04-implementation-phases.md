@@ -73,7 +73,7 @@ For substantial implementation, use one bounded writer with exact edit surfaces 
 ### P4 — Shift opening prerequisites (BK-020–BK-022)
 
 - **BK-020:** Persist terminals, registers and shift opening. **Accept:** concurrent open attempts yield one open shift; opening cash and actor/time retained.
-- **BK-021:** Capture opening denomination counts and required inventory audit as observations. **Accept:** no count silently mutates stock; reconciliation evidence retrievable.
+- **BK-021:** Capture required opening bill/coin counts and separately retain the inventory-audit task. **Accept (cash unit):** every new shift has a nonempty validated count list, server-derived total matches opening cash, and evidence is retrievable on shift reads; zero cash uses explicit zero-quantity counts; count does not alter stock. Historical shifts remain without fabricated counts. Inventory count/audit capture is blocked by unresolved D-015 and is not closed by this cash unit.
 - **BK-022:** Implement posting lock, close transition and overtime flag semantics. **Accept:** concurrent sale/close test proves serialization and final expected cash snapshot is immutable.
 
 ### P5 — Sales, settlement, memberships and both Mercado Pago channels (BK-023–BK-028, BK-053–BK-056)

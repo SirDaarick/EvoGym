@@ -202,3 +202,30 @@ class Shift(Base):
         "CashRegister",
         back_populates="shifts",
     )
+    denomination_counts: Mapped[list["ShiftDenominationCount"]] = relationship(
+        "ShiftDenominationCount",
+        back_populates="shift",
+        cascade="all, delete-orphan",
+        order_by="ShiftDenominationCount.denomination_minor.desc()",
+        lazy="selectin",
+    )
+
+
+class ShiftDenominationCount(Base):
+    """Opening cash denomination observation for one shift."""
+
+    __tablename__ = "shift_denomination_counts"
+    __table_args__ = (
+        CheckConstraint("denomination_minor > 0", name="ck_shift_denomination_counts_denomination_positive"),
+        CheckConstraint("quantity >= 0", name="ck_shift_denomination_counts_quantity_nonnegative"),
+        UniqueConstraint("shift_id", "denomination_minor", name="uq_shift_denomination_counts_shift_denomination"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    shift_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="CASCADE"), nullable=False
+    )
+    denomination_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    shift: Mapped[Shift] = relationship("Shift", back_populates="denomination_counts")

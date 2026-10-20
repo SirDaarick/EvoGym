@@ -23,6 +23,8 @@
 | D-013 | Unresolved | Credit sale authorization beyond default 0, debt calculation cutoff and debt payment allocation policy. | BK-026,BK-029. |
 | D-014 | Unresolved | Shift opening cash/count requirements, discrepancy note, denominations, late sale/overtime semantics. | BK-020..BK-022,BK-035. |
 | D-015 | Unresolved | Stock receipt valuation, count variance posting, product deactivation, negative stock and concurrency policy. | BK-021,BK-032,BK-033. |
+
+**BK-021 cash-opening clarification (2026-10-20):** the owner requires bill/coin counts for every new shift opening. Persist denomination and quantity observations and reconcile their total to opening cash. This authorizes the cash portion of BK-021 only; inventory counts, adjustments and stock policy remain blocked by D-015. D-014 remains unresolved for other opening/closing/overtime rules. Do not infer an approved denomination catalog from frontend examples.
 | D-016 | Confirmed/documented | Gimi and notifications are in scope; Gimi permissions, writes and content disclosure remain unresolved. | BK-044..BK-047. |
 | D-017 | Unresolved | Provider account/scope binding, Point terminal/POS compatibility and mapping, per-channel credentials/webhook configuration, fees, failure/unknown outcomes and reconciliation. Both channels are required, but live setup/charges remain unauthorized. | BK-053..BK-055,BK-050. |
 | D-018 | Unresolved | Import sources, data classification, deduplication, provenance, cutover and retention; no personal data has been inspected. | BK-048..BK-051. |

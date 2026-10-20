@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -19,6 +20,7 @@ from app.db.models import (
     PaymentTerminal,
     RoleGrant,
     Shift,
+    ShiftDenominationCount,
     StaffCredential,
     StaffUser,
 )
@@ -35,7 +37,111 @@ from app.shifts.queries import (
     list_payment_terminals,
     open_shift,
 )
+from app.shifts.schemas import OpenShiftDTO
 from test_admin_auth import configured_settings, seed_admin
+
+
+def test_open_shift_requires_exact_denomination_counts_and_computes_total():
+    payload = OpenShiftDTO.model_validate(
+        {
+            "cash_register_id": str(uuid4()),
+            "denomination_counts": [
+                {"denomination_minor": 10000, "quantity": 2},
+                {"denomination_minor": 500, "quantity": 4},
+            ],
+        }
+    )
+
+    assert payload.opening_cash_minor == 22000
+    assert payload.model_dump()["denomination_counts"] == [
+        {"denomination_minor": 10000, "quantity": 2},
+        {"denomination_minor": 500, "quantity": 4},
+    ]
+
+
+@pytest.mark.parametrize(
+    "counts,total,message",
+    [
+        ([], None, "at least 1 item"),
+        ([{"denomination_minor": 100, "quantity": 1}] * 2, None, "duplicates"),
+        ([{"denomination_minor": 0, "quantity": 1}], None, "greater than 0"),
+        ([{"denomination_minor": 100, "quantity": -1}], None, "greater than or equal to 0"),
+        ([{"denomination_minor": 100, "quantity": True}], None, "valid integer"),
+        ([{"denomination_minor": 100, "quantity": 1.5}], None, "valid integer"),
+        ([{"denomination_minor": 100, "quantity": "1"}], None, "valid integer"),
+        ([{"denomination_minor": 2**63 - 1, "quantity": 2}], None, "signed 64-bit"),
+        ([{"denomination_minor": 100, "quantity": 1}], 101, "must match"),
+    ],
+)
+def test_open_shift_rejects_invalid_denomination_evidence(counts, total, message):
+    request = {"cash_register_id": str(uuid4()), "denomination_counts": counts}
+    if total is not None:
+        request["opening_cash_minor"] = total
+    with pytest.raises(ValidationError, match=message):
+        OpenShiftDTO.model_validate(request)
+
+
+def test_open_shift_allows_explicit_zero_cash_counts():
+    payload = OpenShiftDTO.model_validate(
+        {
+            "cash_register_id": str(uuid4()),
+            "denomination_counts": [{"denomination_minor": 100, "quantity": 0}],
+        }
+    )
+    assert payload.opening_cash_minor == 0
+
+
+def test_shift_denomination_constraints_reject_invalid_and_duplicate_rows(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id = _seed_staff_user(factory)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "denom", "Denomination Test")
+            shift = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 2}],
+            )
+            shift_id = shift.id
+
+        with factory() as session:
+            session.add(ShiftDenominationCount(shift_id=shift_id, denomination_minor=100, quantity=1))
+            with pytest.raises(IntegrityError):
+                session.commit()
+            session.rollback()
+            session.add(ShiftDenominationCount(shift_id=shift_id, denomination_minor=0, quantity=1))
+            with pytest.raises(IntegrityError):
+                session.commit()
+    finally:
+        engine.dispose()
+
+
+def test_shift_and_denomination_counts_rollback_together(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id = _seed_staff_user(factory)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "atomic", "Atomic Test")
+            register_id = register.id
+
+        with factory() as session:
+            shift = open_shift(
+                session,
+                register_id=register_id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 2}],
+            )
+            shift_id = shift.id
+            session.rollback()
+
+        with factory() as session:
+            assert get_shift_by_id(session, shift_id) is None
+            assert session.query(ShiftDenominationCount).filter_by(shift_id=shift_id).count() == 0
+    finally:
+        engine.dispose()
 
 
 def _setup_db(tmp_path):
@@ -210,12 +316,14 @@ def test_shift_open_lifecycle_and_single_active_invariant(tmp_path):
                 session,
                 register_id=reg1_id,
                 opened_by=staff1_id,
-                opening_cash_minor=50000,  # $500.00
+                opening_cash_minor=50000,
+                denomination_counts=[{"denomination_minor": 1, "quantity": 50000}],  # $500.00
             )
             session.commit()
             assert shift1.id is not None
             assert shift1.status == "open"
             assert shift1.opening_cash_minor == 50000
+            assert [(item.denomination_minor, item.quantity) for item in shift1.denomination_counts] == [(1, 50000)]
             assert shift1.opened_by == staff1_id
             assert shift1.opened_at is not None
             assert shift1.closed_at is None
@@ -229,6 +337,7 @@ def test_shift_open_lifecycle_and_single_active_invariant(tmp_path):
                     register_id=reg1_id,
                     opened_by=staff2_id,
                     opening_cash_minor=20000,
+                denomination_counts=[{"denomination_minor": 1, "quantity": 20000}],
                 )
 
         # 3. Direct DB insert violating partial unique index uq_shifts_active_per_register raises IntegrityError
@@ -250,6 +359,7 @@ def test_shift_open_lifecycle_and_single_active_invariant(tmp_path):
                 register_id=reg2_id,
                 opened_by=staff2_id,
                 opening_cash_minor=30000,
+                denomination_counts=[{"denomination_minor": 1, "quantity": 30000}],
             )
             session.commit()
             assert shift2.id is not None
@@ -284,6 +394,7 @@ def test_shift_open_lifecycle_and_single_active_invariant(tmp_path):
                 register_id=reg1_id,
                 opened_by=staff2_id,
                 opening_cash_minor=60000,
+                denomination_counts=[{"denomination_minor": 1, "quantity": 60000}],
             )
             session.commit()
             assert shift3.id is not None
@@ -307,7 +418,7 @@ def test_negative_opening_cash_rejected(tmp_path):
         # Python check
         with factory() as session:
             with pytest.raises(ValueError, match="Opening cash cannot be negative"):
-                open_shift(session, register_id=reg_id, opened_by=staff_id, opening_cash_minor=-100)
+                open_shift(session, register_id=reg_id, opened_by=staff_id, opening_cash_minor=-100, denomination_counts=[{"denomination_minor": 1, "quantity": 0}])
 
         # Database CheckConstraint
         with factory() as session:
@@ -348,6 +459,7 @@ def test_concurrent_open_shift_yields_exactly_one_success(tmp_path):
                         register_id=reg_id,
                         opened_by=staff_id,
                         opening_cash_minor=cash,
+                denomination_counts=[{"denomination_minor": 1, "quantity": cash}],
                     )
                     session.commit()
                     results.append(shift.id)
@@ -524,7 +636,8 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 headers=r1_headers,
                 json={
                     "cash_register_id": reg1_id,
-                    "opening_cash_minor": 150000,  # $1,500.00
+                    "opening_cash_minor": 150000,
+                    "denomination_counts": [{"denomination_minor": 1, "quantity": 150000}],  # $1,500.00
                 },
             )
             assert res_r1_open.status_code == 201
@@ -532,6 +645,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             assert shift1_data["cash_register_id"] == reg1_id
             assert shift1_data["status"] == "open"
             assert shift1_data["opening_cash_minor"] == 150000
+            assert shift1_data["denomination_counts"] == [{"denomination_minor": 1, "quantity": 150000}]
             shift1_id = shift1_data["id"]
 
             # Receptionist 1 trying to open SECOND shift on same register -> 409
@@ -541,6 +655,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 json={
                     "cash_register_id": reg1_id,
                     "opening_cash_minor": 50000,
+                    "denomination_counts": [{"denomination_minor": 1, "quantity": 50000}],
                 },
             )
             assert res_r1_open_dup.status_code == 409
@@ -552,6 +667,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 json={
                     "cash_register_id": reg1_id,
                     "opening_cash_minor": -10,
+                    "denomination_counts": [{"denomination_minor": 1, "quantity": -10}],
                 },
             )
             assert res_r1_open_neg.status_code == 422
@@ -563,6 +679,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 json={
                     "cash_register_id": reg2_id,
                     "opening_cash_minor": 10000,
+                    "denomination_counts": [{"denomination_minor": 1, "quantity": 10000}],
                 },
             )
             assert res_r1_open_b2.status_code == 403
@@ -571,11 +688,13 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             res_r1_curr = client.get(f"/api/v1/shifts/current?register_id={reg1_id}", headers=r1_headers)
             assert res_r1_curr.status_code == 200
             assert res_r1_curr.json()["id"] == shift1_id
+            assert res_r1_curr.json()["denomination_counts"] == [{"denomination_minor": 1, "quantity": 150000}]
 
             # Receptionist 1 queries shift by ID -> 200
             res_r1_shift_by_id = client.get(f"/api/v1/shifts/{shift1_id}", headers=r1_headers)
             assert res_r1_shift_by_id.status_code == 200
             assert res_r1_shift_by_id.json()["id"] == shift1_id
+            assert res_r1_shift_by_id.json()["denomination_counts"] == [{"denomination_minor": 1, "quantity": 150000}]
 
             # Registers list now reflects has_open_shift=True
             res_r1_regs_updated = client.get("/api/v1/registers", headers=r1_headers)

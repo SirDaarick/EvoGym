@@ -84,4 +84,18 @@ Migration 0003 downgrade drops `branches`, `staff_role_grants`, and `staff_sessi
 
 FastAPI error handlers use registered exception types and return generic output; request IDs are provided by pure-ASGI middleware: [error handling](https://fastapi.tiangolo.com/tutorial/handling-errors/), [middleware](https://fastapi.tiangolo.com/advanced/middleware/).
 
+### Opening a cash shift
+
+`POST /api/v1/shifts/open` requires `denomination_counts` for every new shift. Each item uses integer `denomination_minor` (centavos) and nonnegative integer `quantity`; duplicate denominations are rejected. The server derives `opening_cash_minor` from these counts. A supplied compatibility total must exactly match. A zero-cash opening is represented by a nonempty list whose quantities are all zero. The response and current/detail shift reads return the saved counts; older shifts can legitimately return an empty list because historical counts are not backfilled. These records are observations only and do not adjust inventory.
+
+```json
+{
+  "cash_register_id": "<register-uuid>",
+  "denomination_counts": [
+    { "denomination_minor": 10000, "quantity": 2 },
+    { "denomination_minor": 500, "quantity": 4 }
+  ]
+}
+```
+
 The repository workflow at .github/workflows/api.yml runs Python 3.14 tests, dependency checks, and fresh PostgreSQL migration smoke against an ephemeral synthetic service. It was locally reviewed only; hosted GitHub Actions were not executed.

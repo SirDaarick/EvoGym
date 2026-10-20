@@ -105,6 +105,7 @@ EXPECTED_DATABASE_TABLES = {
     "payment_terminals",
     "cash_registers",
     "shifts",
+    "shift_denomination_counts",
 }
 
 
@@ -250,9 +251,9 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
             # Per D-001 single-organization architecture, assert no separate organizations table was created
             assert "organizations" not in table_names
 
-            # 2. Assert Alembic revision reached 0010_registers_terminals_and_shifts
+            # 2. Assert Alembic revision reached the shift denomination count migration
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0010_registers_terminals_and_shifts"
+            assert head_version == "0011_shift_opening_counts"
 
             # 3. Assert member columns exist
             member_columns = {c["name"] for c in inspector.get_columns("members")}

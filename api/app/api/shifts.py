@@ -288,6 +288,7 @@ def open_shift_endpoint(
                 register_id=register_uuid,
                 opened_by=principal.staff_id,
                 opening_cash_minor=payload.opening_cash_minor,
+                denomination_counts=[item.model_dump() for item in payload.denomination_counts],
             )
             session.commit()
             return to_shift_dto(shift)

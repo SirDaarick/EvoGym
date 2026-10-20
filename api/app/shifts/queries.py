@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models.shifts import CashRegister, PaymentTerminal, Shift
+from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount
 from app.shifts.schemas import (
     CashRegisterDTO,
     PaymentTerminalDTO,
@@ -126,11 +126,40 @@ def open_shift(
     session: Session,
     register_id: UUID,
     opened_by: UUID,
-    opening_cash_minor: int,
+    denomination_counts: list[dict[str, int]],
+    opening_cash_minor: int | None = None,
 ) -> Shift:
     """Open a new shift for a cash register with pessimistic locking and uniqueness guard."""
-    if opening_cash_minor < 0:
+    maximum = 2**63 - 1
+    if not isinstance(denomination_counts, list) or not denomination_counts:
+        raise ValueError("At least one opening denomination count is required.")
+    total = 0
+    seen: set[int] = set()
+    validated_counts: list[tuple[int, int]] = []
+    for item in denomination_counts:
+        if not isinstance(item, dict):
+            raise ValueError("Opening denomination counts must be mappings.")
+        denomination = item.get("denomination_minor")
+        quantity = item.get("quantity")
+        if type(denomination) is not int or not 0 < denomination <= maximum:
+            raise ValueError("Denominations must be positive signed 64-bit integers.")
+        if type(quantity) is not int or not 0 <= quantity <= maximum:
+            raise ValueError("Quantities must be nonnegative signed 64-bit integers.")
+        if denomination in seen:
+            raise ValueError("Opening denomination counts cannot contain duplicates.")
+        seen.add(denomination)
+        value = denomination * quantity
+        if value > maximum or total > maximum - value:
+            raise ValueError("Opening denomination total exceeds signed 64-bit minor units.")
+        total += value
+        validated_counts.append((denomination, quantity))
+    if type(opening_cash_minor) is int and opening_cash_minor < 0:
         raise ValueError("Opening cash cannot be negative.")
+    if opening_cash_minor is not None and (
+        type(opening_cash_minor) is not int or opening_cash_minor != total
+    ):
+        raise ValueError("Opening cash total must match denomination counts.")
+    opening_cash_minor = total
 
     # 1. Lock the CashRegister row
     stmt = select(CashRegister).where(CashRegister.id == register_id).with_for_update()
@@ -160,6 +189,10 @@ def open_shift(
         opening_cash_minor=opening_cash_minor,
         status="open",
     )
+    shift.denomination_counts = [
+        ShiftDenominationCount(denomination_minor=denomination, quantity=quantity)
+        for denomination, quantity in validated_counts
+    ]
     session.add(shift)
     try:
         session.flush()

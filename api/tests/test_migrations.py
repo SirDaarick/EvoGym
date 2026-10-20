@@ -5,10 +5,18 @@ from uuid import uuid4
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 
 API_DIR = Path(__file__).resolve().parents[1]
+
+
+def test_new_head_migration_revision_fits_alembic_version_column():
+    config = Config(str(API_DIR / "alembic.ini"))
+    revision = ScriptDirectory.from_config(config).get_revision("head").revision
+
+    assert len(revision) <= 32
 
 
 def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
@@ -40,9 +48,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "staff_enrollment_codes", "staff_device_pairing_codes", "staff_paired_devices", "members",
                 "member_notes", "member_eligibility_records",
                 "services", "plans", "plan_versions", "plan_version_services",
-                "payment_terminals", "cash_registers", "shifts",
+                "payment_terminals", "cash_registers", "shifts", "shift_denomination_counts",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_registers_terminals_and_shifts"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
             assert connection.execute(text("select id from staff_credentials where id=:id"), {"id": credential_id}).scalar_one() == credential_id
             assert connection.execute(text("select id from security_events where id=:id"), {"id": event_id}).scalar_one() == event_id
@@ -97,6 +105,7 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "CREATE TABLE payment_terminals" in generated_sql
     assert "CREATE TABLE cash_registers" in generated_sql
     assert "CREATE TABLE shifts" in generated_sql
+    assert "CREATE TABLE shift_denomination_counts" in generated_sql
     assert "uq_staff_role_grants_org_admin" in generated_sql
     assert "uq_staff_active_paired_device" in generated_sql
     assert "uq_shifts_active_per_register" in generated_sql
@@ -133,6 +142,32 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_registers_terminals_and_shifts"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
+    finally:
+        engine.dispose()
+
+
+def test_shift_denomination_migration_preserves_historical_shifts_without_fabricating_counts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'historical-shift.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0010_registers_terminals_and_shifts")
+    engine = create_engine(database_url)
+    branch_id, staff_id, register_id, shift_id = (uuid4().hex for _ in range(4))
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("insert into branches (id, code, name) values (:id, 'old', 'Old Branch')"), {"id": branch_id})
+            connection.execute(text("insert into staff_users (id, login_identifier) values (:id, 'old@example.invalid')"), {"id": staff_id})
+            connection.execute(text("insert into cash_registers (id, branch_id, code, name) values (:id, :branch, 'old-register', 'Old Register')"), {"id": register_id, "branch": branch_id})
+            connection.execute(text("insert into shifts (id, cash_register_id, opened_by, opening_cash_minor) values (:id, :register, :staff, 25000)"), {"id": shift_id, "register": register_id, "staff": staff_id})
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
+            assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
     finally:
         engine.dispose()

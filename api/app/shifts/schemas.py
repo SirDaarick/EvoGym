@@ -1,6 +1,8 @@
 """DTOs and schemas for payment terminals, cash registers, and shifts."""
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+
+MAX_MINOR_UNITS = 2**63 - 1
 
 
 class PaymentTerminalDTO(BaseModel):
@@ -86,6 +88,7 @@ class ShiftDTO(BaseModel):
     closed_at: datetime | str | None = None
     status: str
     opening_cash_minor: int
+    denomination_counts: list["ShiftDenominationCountDTO"] = Field(default_factory=list)
     expected_cash_at_close_minor: int | None = None
     counted_cash_minor: int | None = None
     difference_minor: int | None = None
@@ -106,4 +109,39 @@ class OpenShiftDTO(BaseModel):
     """Payload to open a new operational shift."""
 
     cash_register_id: str = Field(..., description="UUID of the cash register to open.")
-    opening_cash_minor: int = Field(..., ge=0, description="Initial float cash in minor units.")
+    opening_cash_minor: StrictInt | None = Field(
+        None, ge=0, le=MAX_MINOR_UNITS, description="Optional compatibility total; must match denomination counts."
+    )
+    denomination_counts: list["ShiftDenominationCountDTO"] = Field(
+        ..., min_length=1, max_length=64, description="Required physical bill and coin counts at opening."
+    )
+
+    @model_validator(mode="after")
+    def _validate_opening_total(self) -> "OpenShiftDTO":
+        total = 0
+        seen: set[int] = set()
+        for item in self.denomination_counts:
+            if item.denomination_minor in seen:
+                raise ValueError("Opening denomination counts cannot contain duplicates.")
+            seen.add(item.denomination_minor)
+            value = item.denomination_minor * item.quantity
+            if value > MAX_MINOR_UNITS or total > MAX_MINOR_UNITS - value:
+                raise ValueError("Opening denomination total exceeds signed 64-bit minor units.")
+            total += value
+        if self.opening_cash_minor is not None and self.opening_cash_minor != total:
+            raise ValueError("Opening cash total must match denomination counts.")
+        self.opening_cash_minor = total
+        return self
+
+
+class ShiftDenominationCountDTO(BaseModel):
+    """One denomination and its counted quantity."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    denomination_minor: StrictInt = Field(..., gt=0, le=MAX_MINOR_UNITS)
+    quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+
+
+ShiftDTO.model_rebuild()
+OpenShiftDTO.model_rebuild()

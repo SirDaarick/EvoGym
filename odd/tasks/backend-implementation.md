@@ -1,6 +1,6 @@
 # EvoGym FastAPI Backend — Implementation Plan
 
-**Status: P1 in progress — BK-008/BK-009 Done; BK-010/BK-011 Partial; BK-012 Partial (local foundation independently verified; hosted/operational proof pending).** Starting with BK-012, the master ledger and eight linked backend-plan documents are versioned with implementation; every future backend commit must include the updated master plan. Earlier source commits did not include the then-local planning documents. Private notebook workspaces remain separate. BK-012 adds only safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
+**Status: P4 in progress — BK-008/BK-009, BK-013, BK-015–BK-018 Done; BK-010/BK-011/BK-012 and BK-021 Partial.** Starting with BK-012, the master ledger and eight linked backend-plan documents are versioned with implementation; every future backend commit must include the updated master plan. Earlier source commits did not include the then-local planning documents. Private notebook workspaces remain separate. BK-012 adds only safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
 
 ## Quick path and reading order
 
@@ -89,7 +89,7 @@ After each accepted scope change, map impacted `D-`, `R-`, and `BK-` references,
 
 ## Authoritative task ledger
 
-Ledger totals: **17 Done, 3 Partial, 56 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 are Done; BK-010/BK-011 remain Partial (internal foundations only) and BK-012 is Partial pending review/commit and operational proof. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
+Ledger totals: **17 Done, 4 Partial, 1 In progress, 54 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012 and BK-021 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
 
 | ID | Phase / task | Status | Depends on | Acceptance / proof |
 |---|---|---|---|---|
@@ -113,7 +113,7 @@ Ledger totals: **17 Done, 3 Partial, 56 Not started (76 total)**. Original P0 de
 | BK-018 | P3 Implement member create/update/search flows | Done | BK-016 | Member creation/update DTOs with bounds & validation; duplicate member_number 409 conflict; shared natural identifiers (name/phone/email); preferred_name search in queries and API; row-locked updates via with_for_update(); D-012 receptionist notes redaction verified in api/tests/test_members.py |
 | BK-019 | P3 Integrate member profile and catalog UI incrementally | Not started | BK-017,BK-018 | Per-slice source of truth and DTO translation documented |
 | BK-020 | P4 Persist registers, terminals and shift opening | Done | BK-011,BK-015 | Cash registers, payment terminals & shifts persisted with migration 0010; one-open-shift partial unique index & row locking; opening cash/counts, actor, timestamps; RBAC and concurrency verified in api/tests/test_shifts.py |
-| BK-021 | P4 Implement opening denomination and inventory audit capture | Not started | BK-020 | Count evidence is distinct from stock adjustment |
+| BK-021 | P4 Implement opening denomination and inventory audit capture | Partial | BK-020 | Cash-only opening count implementation verified; inventory count/audit capture remains blocked by unresolved D-015. No count silently mutates stock. |
 | BK-022 | P4 Define shift posting lock and overtime transition | Not started | BK-020 | Concurrent close/post tests; R-004 |
 | BK-023 | P5 Persist orders and immutable item snapshots | Not started | BK-017,BK-022 | Totals and line/source constraints; no catalog rewrite |
 | BK-024 | P5 Implement payments, allocations and idempotency | Not started | BK-004,BK-023 | Duplicate/retry/payload mismatch safe; 02/05 |
@@ -173,9 +173,9 @@ Ledger totals: **17 Done, 3 Partial, 56 Not started (76 total)**. Original P0 de
 
 ## Current progress and next action
 
-- Progress: 17 of 76 tasks Done, 3 Partial (BK-010/BK-011/BK-012), and 56 Not started. BK-061 remains Not started.
+- Progress: 17 of 76 tasks Done, 4 Partial (BK-010/BK-011/BK-012/BK-021), 1 In progress (BK-058), and 54 Not started. BK-061 remains Not started.
 - BK-012 local proof: prior suite 54 passed/4 skipped; correction RED exposed readiness, uncaught-500, metric-cap and unsupported-audit failures. Latest root/API-local suites each 63 passed/4 skipped; pip check/YAML passed. One fresh local PG attempt was cleaned but its probe script had Python syntax error before PG was exercised; prior independent PostgreSQL evidence applies only to the original implementation. Hosted CI not run.
-- Next: parent readback, independent verification, and a work-unit commit that includes this master ledger plus all eight planning documents. Remaining BK-010/BK-011 production authentication/device/TTL, alert delivery and reset gates stay open; BK-012 does not close retention/access or deployment readiness.
+- Next: resolve D-015 inventory audit policy to complete BK-021, then remaining D-014 closing/overtime rules for BK-022. Recovery email delivery is deferred until domain purchase; other BK-010/BK-011/BK-012 production gaps remain open.
 
 ### Evidence log
 
@@ -250,6 +250,26 @@ Coverage and authorization evidence: Domain glossary, entity relationship map, a
 Historical next action (superseded by the explicit 2026-10-19 P1 authorizations below): begin BK-008; no current pause remains for the authorized local BK-012 slice.
 Reviewer/receipt: Confirmed by user
 ```
+
+## BK-021 opening denomination counts authorization — 2026-10-20
+
+The user authorized Luna to implement mandatory bill/coin counts when opening every new shift. Scope is limited to cash-denomination evidence: count entries are submitted with opening, validated and persisted atomically with the shift, must reconcile to server-computed opening cash, and remain retrievable. Zero cash is valid only with an explicit nonempty list of zero-quantity denominations. Historical shifts retain honestly absent evidence; no backfill or inferred denominations. The illustrative frontend denomination catalog is not an approved whitelist. No count may mutate stock.
+
+Inventory count/audit capture remains blocked by unresolved D-015; D-014 remains unresolved for other shift policies (including overtime and close behavior), and BK-022 is out of scope. No frontend/offline work, closing flow, stock changes, remote/real-data access, credentials, deploy, or dependency install is authorized. The bounded writer must not stage or commit; parent work-unit commits follow ordinary repository policy. Preserve unrelated frontend and untracked files. RDD is off by clone-local preference and must remain off.
+
+Route: delegated direct, triggered by multi-file implementation and reading that prepares a write; one bounded cash-only BK-021 unit. RED/GREEN: the new shift-opening request/model regression failed before implementation and passed afterward; this follow-up also adds a targeted migration revision-width regression that failed at 38 characters and passed after shortening the new revision value. The new revision is `0011_shift_opening_counts` (<=32 characters); the pre-existing `0010_registers_terminals_and_shifts` identifier remains over-width and is intentionally untouched, so PostgreSQL migration compatibility is not claimed. Delivery strategy remains ask-on-risk; do not commit if actual change exceeds 400 lines before parent resolves chain strategy. BK-021 is Partial because inventory audit capture remains blocked by D-015.
+
+### Cash-opening evidence
+
+RED observed on the new schema regression: the denomination-count request was rejected because the existing DTO required a client total and did not accept counts. A second targeted RED asserted the new Alembic head identifier fit 32 characters and observed the current 38-character value fail; shortening its value produced GREEN. The migration filename remains `0011_shift_opening_denomination_counts.py`, while its revision value is `0011_shift_opening_counts`. The earlier independent verifier observed 140 passed/4 skipped and all 19 negative probes rejected. The cash unit is implemented but the overall BK-021 row remains Partial because inventory audit capture is blocked by D-015.
+
+- `$env:EVOGYM_TEST_POSTGRES_URL=''; .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_shifts.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` — 28 passed, 1 warning in 13.91 seconds after the correction.
+- `$env:EVOGYM_TEST_POSTGRES_URL=''; .\api\.venv\Scripts\python.exe -m pytest -q api/tests` — 141 passed, 4 skipped, 1 warning in 114.46 seconds after the correction; only local opt-in PostgreSQL tests were skipped, no live PostgreSQL concurrency claim.
+- `api\.venv\Scripts\python.exe -m pytest -q api/tests/test_migrations.py -k new_head_migration` — RED: 1 failed with observed length 38; GREEN after revision correction: 1 passed, 4 deselected.
+- `api\.venv\Scripts\python.exe -m pip check` — no broken requirements found.
+- `git diff --check -- api odd/tasks/backend-implementation.md docs/backend-plan` — passed; Git emitted only LF-to-CRLF informational warnings.
+
+Independent correction readback: 28 passed in 17.19 seconds; no candidate-caused blockers remain. Parent spot check: migration suite 5 passed in 6.39 seconds. Work-unit subject: `feat(shifts): require opening denomination counts`; commit identity is recorded in Engram after commit. Native assessment was unassessable/high because of unrelated untracked files; independent verification supplied ordinary evidence, with RDD disabled/unmanaged. The cash-opening subtask is implemented, while inventory audit remains blocked by D-015. The new Alembic revision now fits PostgreSQL's `alembic_version.version_num` width; the pre-existing 0010 identifier remains over-width and is deliberately unchanged, so no PostgreSQL migration compatibility is claimed. Only the scoped API and planning paths belong to this work unit; unrelated frontend changes are excluded. The full local plan currently exceeds its stated 49,000-byte mirror limit; Engram has a status note, not a full mirror, and the full mirror is pending rather than truncated. No live PostgreSQL proof or remote delivery action is claimed.
 
 ## Key Learnings
 
