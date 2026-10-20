@@ -1,6 +1,6 @@
 # EvoGym FastAPI Backend — Implementation Plan
 
-**Current status at `ee3d07b7`: P5 active; 18 Done, 10 Partial, 1 In progress, 47 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`, seven commits ahead of origin; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
+**Current status at `2ba14d6`: P5 active; 18 Done, 11 Partial, 1 In progress, 46 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`, seven commits ahead of origin; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
 
 ## Quick path and reading order
 
@@ -89,7 +89,7 @@ After each accepted scope change, map impacted `D-`, `R-`, and `BK-` references,
 
 ## Authoritative task ledger
 
-Ledger totals: **18 Done, 10 Partial, 1 In progress, 47 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 and BK-061 are Done; BK-061 closes the ratified Contingency Mode decision/documentation task only, not offline implementation. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012/BK-021/BK-022/BK-023/BK-024/BK-027/BK-032/BK-035 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
+Ledger totals: **18 Done, 11 Partial, 1 In progress, 46 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 and BK-061 are Done; BK-061 closes the ratified Contingency Mode decision/documentation task only, not offline implementation. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012/BK-021/BK-022/BK-023/BK-024/BK-025/BK-027/BK-032/BK-035 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
 
 | ID | Phase / task | Status | Depends on | Acceptance / proof |
 |---|---|---|---|---|
@@ -117,7 +117,7 @@ Ledger totals: **18 Done, 10 Partial, 1 In progress, 47 Not started (76 total)**
 | BK-022 | P4 Define shift posting lock and overtime transition | Partial | BK-020 | CASH-02 adds immutable denomination-based close evidence and membership cash overtime posting/linking. CASH-02 close/overtime/linking behavior and its independent PostgreSQL race proof are committed locally as `ee3d07b7ea29f26d914048cc293e6b403a54f4e6`; other sale kinds/general reporting and discrepancy attribution remain incomplete. |
 | BK-023 | P5 Persist orders and immutable item snapshots | Partial | BK-017,BK-022 | Totals and line/source constraints; no catalog rewrite |
 | BK-024 | P5 Implement payments, allocations and idempotency | Partial | BK-004,BK-023 | Duplicate/retry/payload mismatch safe; 02/05 |
-| BK-025 | P5 Implement transfer verification and settlement | Not started | BK-004,BK-024 | Pending is not settled; actor/evidence retained |
+| BK-025 | P5 Implement transfer verification and settlement | Partial | BK-004,BK-024 | TRANSFER-01 records an authenticated membership bank transfer as pending, idempotently, with no membership activation or cash attribution. Manual staff reconciliation/history and settlement (TRANSFER-02) remain not implemented. |
 | BK-026 | P5 Implement credit entries and debt gates | Not started | BK-016,BK-024 | Limit default 0; debt blocks new credit/check-in |
 | BK-027 | P5 Implement membership activation, entitlements and renewal | Partial | BK-003,BK-023,BK-024 | Activation explicit and date/overlap invariants tested |
 | BK-028 | P5 Integrate checkout and membership frontend adapter | Not started | BK-025..BK-027 | Payment state distinct from entitlement state |
@@ -704,3 +704,30 @@ Authorized documentation-only audit of the existing master task ledger and deliv
 ## Full recovery mirror protocol
 
 Engram topic `odd/backend-implementation/tasks` holds the recovery manifest; its ordered chunk observations contain the complete document without truncation. Compare the manifest SHA-256 and byte count with the current workspace file before recovery; a mismatch means the local document is newer and synchronization is pending. Reassemble chunk payloads in manifest order and verify the resulting hash before using them. A summary-only observation is not a full mirror. Earlier dated pending-mirror statements describe their historical checkpoints, not the status of a later matching manifest.
+
+## Active implementation slice — TRANSFER-01 pending membership transfer
+
+**Objective:** Add an authenticated, idempotent endpoint that creates a membership order with a server-priced immutable item snapshot and a pending bank-transfer payment, without settling cash, activating a membership, or changing inventory.
+
+**Problem / why:** D-006 requires bank transfers to remain pending until manual staff reconciliation. CASH-01 already supplies the membership order, branch/register/shift, locking, and idempotency foundation; the transfer path must preserve those guarantees without fabricating a membership period or financial cash effect.
+
+**Scope:** TRANSFER-01 only: pending membership transfer creation, persistence constraints/migration, API response that explicitly represents pending state with no membership period, exact retry replay and payload mismatch conflict. No transfer confirmation/settlement, provider integrations, frontend, credit, overdraft, or broader sales redesign. Preserve BK-023/BK-024/BK-027 as Partial and BK-025 as Partial.
+
+**Constraints:** Follow D-006, CASH-01 server-owned pricing/snapshots and authenticated branch scope. Pending is not settled funds and has no activation/stock/cash effect. Keep user-owned unrelated frontend changes and `backend/` data untouched. No remote activity or credentials. Do not commit; parent owns review and commit. RDD is off, so no review lifecycle.
+
+**Route:** Delegated-direct, required because this implementation spans non-trivial models, queries, schemas, route, migration, tests, and task/phase documentation. Parent authorization explicitly assigns one worker; parent performs final review. Forecast: approximately 300–400 authored changed lines (advisory; do not cut tests/docs to fit).
+
+**Acceptance criteria:**
+- [x] Regression proves transfer POST returns pending status and creates no MembershipPeriod or cash reconciliation effect.
+- [x] Pending payment schema admits transfer/pending while preserving cash/confirmed constraints for existing CASH-01 rows.
+- [x] Request uses authenticated actor, assigned branch, active register, open shift and server-published plan price/snapshot; inactive/unpublished versions fail before persistence.
+- [x] Identical idempotent retry returns the same order/payment; changed payload with same key returns conflict.
+- [x] Response distinguishes pending from confirmed and does not require/fabricate MembershipPeriod.
+- [x] Migration upgrade/downgrade safety and populated-row preservation are tested.
+- [x] Focused and full API suites plus pip check and diff check are run; PostgreSQL opt-in skips are reported accurately.
+
+**Applicable checks:** From `api/`, `.venv/Scripts/python.exe -m pytest tests/test_sales.py tests/test_sales_postgres.py tests/test_migrations.py tests/test_migrations_postgres.py`; `.venv/Scripts/python.exe -m pytest`; `.venv/Scripts/python.exe -m pip check`; repository-root `git diff --check` on authorized changed paths.
+
+**Progress:** Complete for the bounded TRANSFER-01 scope; BK-025 stays Partial because manual verification/history/settlement are TRANSFER-02. Initial RED before the route existed (404). Independent review found `source_shift_id` was silently ignored by the transfer endpoint; observed RED was 201 for a supplied source shift. The endpoint now rejects a non-null source shift with 422 before persistence, and the regression confirms the original idempotency key still replays the unchanged transfer afterward. Focused `tests/test_sales.py`: 10 passed. Full API suite after correction: 200 passed, 16 PostgreSQL opt-in skips. `pip check` clean; `git diff --check` clean. The migration test proves existing cash payment preservation and blocks downgrade while a pending transfer exists; deletion/reversal is safe after the pending record is resolved/removed.
+
+**Candidate evidence:** 10 authorized paths including migration 0017; within the advisory 300–400 authored-line forecast without omitted tests. RDD remains off; assessment was unassessable/high because of unrelated untracked files, so independent verification was required. Independent focused suite: 30 passed, 8 PostgreSQL skips; independent full suite before the bounded validation correction: 200 passed, 16 skips. Parent reviewed the final correction and repeated `api/tests/test_sales.py`: 10 passed in 17.85s. Work-unit identity: `feat(sales): record pending membership transfers`; parent owns the local commit, whose resulting hash is recorded in the recovery manifest. No push or PR. Full Engram mirror synchronization follows the hash-checked chunk protocol; historical pending notes remain historical once the manifest matches. `api/tests/test_contract_smoke.py` was authorized solely for the expected Alembic-head update. Next: TRANSFER-02 manual reconciliation and settlement; PostgreSQL transfer/concurrency proof remains pending.

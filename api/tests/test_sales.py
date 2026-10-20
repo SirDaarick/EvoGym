@@ -110,6 +110,105 @@ def test_cash_membership_sale_activates_once_on_an_authorized_open_shift(tmp_pat
         engine.dispose()
 
 
+def test_pending_membership_transfer_does_not_activate_or_count_as_cash(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "transfer-branch", "Transfer Branch")
+        other_branch_id = _seed_branch(factory, "transfer-other", "Transfer Other")
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        other_staff_id, other_token = _seed_receptionist(factory, other_branch_id, "transfer-other@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-XFER", full_name="Transfer Member", phone="5550199")
+            plan = Plan(code="transfer-month", name="Transfer Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Transfer Month",
+                                  price_minor=9000, currency="MXN", duration_value=1,
+                                  duration_unit="month", is_active=True)
+            inactive_version = PlanVersion(plan_id=plan.id, version_number=2, name="Inactive Transfer Month",
+                                            price_minor=9000, currency="MXN", duration_value=1,
+                                            duration_unit="month", is_active=False)
+            unpublished_plan = Plan(code="unpublished-transfer", name="Unpublished Transfer",
+                                    kind="membership", status="inactive")
+            session.add(unpublished_plan)
+            session.flush()
+            unpublished_version = PlanVersion(plan_id=unpublished_plan.id, version_number=1,
+                                               name="Unpublished Transfer Month", price_minor=9000,
+                                               currency="MXN", duration_value=1,
+                                               duration_unit="month", is_active=True)
+            session.add_all([version, inactive_version, unpublished_version])
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "transfer-register", "Transfer Register")
+            other_register = create_cash_register(session, other_branch_id, "transfer-other-register", "Other Register")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            open_shift(session, register_id=other_register.id, opened_by=other_staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, version_id, register_id = member.id, version.id, register.id
+            inactive_version_id, unpublished_version_id = inactive_version.id, unpublished_version.id
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "transfer-001"}
+            path = f"/api/v1/registers/{register_id}/membership-transfer-sales"
+            payload = {"member_id": str(member_id), "plan_version_id": str(version_id)}
+            assert client.post(path, headers={"Idempotency-Key": "transfer-unauth"}, json=payload).status_code == 401
+            denied = client.post(
+                path, headers={"Authorization": f"Bearer {other_token}", "Idempotency-Key": "transfer-scope"},
+                json=payload,
+            )
+            assert denied.status_code == 403
+            response = client.post(path, headers=headers, json=payload)
+            assert response.status_code == 201, response.text
+            first = response.json()
+            assert first["payment"]["method"] == "transfer"
+            assert first["payment"]["status"] == "pending"
+            assert first["payment"]["amount_minor"] == 9000
+            assert first["membership"] is None
+
+            replay = client.post(path, headers=headers, json=payload)
+            assert replay.status_code == 200
+            assert replay.json() == first
+            unsupported_source = client.post(
+                path, headers=headers, json={**payload, "source_shift_id": str(uuid4())},
+            )
+            assert unsupported_source.status_code == 422
+            assert client.post(path, headers=headers, json=payload).json() == first
+            mismatch = client.post(path, headers=headers, json={**payload, "member_id": str(uuid4())})
+            assert mismatch.status_code == 409
+
+            inactive = client.post(
+                path, headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "transfer-inactive"},
+                json={**payload, "plan_version_id": str(inactive_version_id)},
+            )
+            assert inactive.status_code == 404
+            unpublished = client.post(
+                path, headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "transfer-unpublished"},
+                json={**payload, "plan_version_id": str(unpublished_version_id)},
+            )
+            assert unpublished.status_code == 404
+            with factory.begin() as session:
+                session.scalar(select(Shift).where(Shift.cash_register_id == register_id)).status = "closed"
+            closed_shift = client.post(
+                path, headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "transfer-closed-shift"},
+                json=payload,
+            )
+            assert closed_shift.status_code == 409
+
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(Order)) == 1
+            assert session.scalar(select(func.count()).select_from(OrderItem)) == 1
+            assert session.scalar(select(func.count()).select_from(Payment)) == 1
+            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 0
+            payment = session.scalar(select(Payment))
+            assert (payment.method, payment.status, payment.amount_minor) == ("transfer", "pending", 9000)
+            order = session.scalar(select(Order))
+            assert order.financial_shift_id is None
+            assert order.cash_included_in_opening is False
+    finally:
+        engine.dispose()
+
+
 def test_overtime_sale_links_to_next_shift_without_double_counting_opening_cash(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:

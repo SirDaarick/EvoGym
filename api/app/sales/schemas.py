@@ -62,4 +62,4 @@ class CashMembershipSaleDTO(BaseModel):
     order: CashSaleOrderDTO
     item: CashSaleItemDTO
     payment: CashSalePaymentDTO
-    membership: MembershipPeriodDTO
+    membership: MembershipPeriodDTO | None

@@ -7,6 +7,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+import pytest
 
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -62,6 +63,13 @@ def test_overtime_closing_revision_fits_and_follows_membership_sales():
     assert revision.down_revision == "0015_membership_sales"
 
 
+def test_pending_transfer_revision_fits_and_follows_overtime_close():
+    config = Config(str(API_DIR / "alembic.ini"))
+    revision = ScriptDirectory.from_config(config).get_revision("0017_membership_transfer_pending")
+    assert len(revision.revision) <= 32
+    assert revision.down_revision == "0016_overtime_shift_close"
+
+
 def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'fresh.db').as_posix()}"
@@ -97,7 +105,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "shift_inventory_reviews", "shift_inventory_observations",
                 "orders", "order_items", "payments", "membership_periods", "shift_closing_denomination_counts",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 128
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
@@ -137,7 +145,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
     finally:
         engine.dispose()
 
@@ -221,7 +229,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
     finally:
         engine.dispose()
 
@@ -247,7 +255,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
     finally:
         engine.dispose()
 
@@ -331,7 +339,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -364,7 +372,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -388,7 +396,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
     config = Config(str(API_DIR / "alembic.ini"))
     command.upgrade(config, "0015_membership_sales")
     engine = create_engine(database_url)
-    branch_id, staff_id, register_id, shift_id, member_id, order_id = (uuid4().hex for _ in range(6))
+    branch_id, staff_id, register_id, shift_id, member_id, order_id, payment_id = (uuid4().hex for _ in range(7))
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -423,6 +431,10 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
                     "fingerprint": "a" * 64,
                 },
             )
+            connection.execute(
+                text("insert into payments (id, order_id, amount_minor, received_by) values (:id, :order, 125000, :staff)"),
+                {"id": payment_id, "order": order_id, "staff": staff_id},
+            )
 
         command.upgrade(config, "head")
         with engine.connect() as connection:
@@ -432,12 +444,38 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0017_membership_transfer_pending"
+            assert connection.execute(
+                text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
+            ).one() == ("cash", "confirmed", 125000)
+
+            pending_order_id = uuid4().hex
+            pending_payment_id = uuid4().hex
+            connection.close()
+        with engine.begin() as connection:
+            connection.execute(
+                text("insert into orders (id, branch_id, register_id, shift_id, member_id, seller_id, idempotency_key, request_fingerprint, total_minor) values (:id, :branch, :register, :shift, :member, :staff, 'pending-migration-key', :fingerprint, 125000)"),
+                {"id": pending_order_id, "branch": branch_id, "register": register_id, "shift": shift_id,
+                 "member": member_id, "staff": staff_id, "fingerprint": "b" * 64},
+            )
+            connection.execute(
+                text("insert into payments (id, order_id, method, status, amount_minor, received_by) values (:id, :order, 'transfer', 'pending', 125000, :staff)"),
+                {"id": pending_payment_id, "order": pending_order_id, "staff": staff_id},
+            )
+
+        with pytest.raises(RuntimeError, match="pending transfer payments exist"):
+            command.downgrade(config, "0016_overtime_shift_close")
+        with engine.begin() as connection:
+            connection.execute(text("delete from payments where id=:id"), {"id": pending_payment_id})
+            connection.execute(text("delete from orders where id=:id"), {"id": pending_order_id})
 
         command.downgrade(config, "0015_membership_sales")
         with engine.connect() as connection:
             assert "shift_closing_denomination_counts" not in inspect(connection).get_table_names()
             assert connection.execute(text("select count(*) from orders where id=:id"), {"id": order_id}).scalar_one() == 1
+            assert connection.execute(
+                text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
+            ).one() == ("cash", "confirmed", 125000)
 
         command.upgrade(config, "head")
         with engine.connect() as connection:

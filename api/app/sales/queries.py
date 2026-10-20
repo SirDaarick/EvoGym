@@ -35,7 +35,7 @@ class CashMembershipSaleResult:
     order: Order
     item: OrderItem
     payment: Payment
-    membership: MembershipPeriod
+    membership: MembershipPeriod | None
     replayed: bool
 
 
@@ -71,10 +71,13 @@ def _fingerprint(
     member_id: UUID,
     plan_version_id: UUID,
     source_shift_id: UUID | None = None,
+    payment_method: str = "cash",
 ) -> str:
     canonical = f"{register_id}\n{member_id}\n{plan_version_id}"
     if source_shift_id is not None:
         canonical += f"\n{source_shift_id}"
+    if payment_method != "cash":
+        canonical += f"\n{payment_method}"
     payload = canonical.encode("ascii")
     return sha256(payload).hexdigest()
 
@@ -85,8 +88,10 @@ def _load_result(session: Session, order: Order, replayed: bool) -> CashMembersh
         raise RuntimeError("Persisted membership cash sale is incomplete.")
     item = items[0]
     membership = session.scalar(select(MembershipPeriod).where(MembershipPeriod.order_item_id == item.id))
-    if membership is None:
+    if order.payment.method == "cash" and membership is None:
         raise RuntimeError("Persisted membership cash sale has no activation period.")
+    if order.payment.method == "transfer" and membership is not None:
+        raise RuntimeError("Pending membership transfer unexpectedly has an activation period.")
     return CashMembershipSaleResult(order, item, order.payment, membership, replayed)
 
 
@@ -101,12 +106,17 @@ def post_membership_cash_sale(
     idempotency_key: str,
     source_shift_id: UUID | None = None,
     now: datetime | None = None,
+    payment_method: str = "cash",
 ) -> CashMembershipSaleResult:
-    """Persist order, item, confirmed cash payment, and membership dates atomically.
+    """Persist a cash membership sale or an unsettled transfer atomically.
 
     The caller owns commit/rollback. Register and member row locks serialize same-drawer
     posting and concurrent renewals; the function never performs external payment I/O.
     """
+    if payment_method not in {"cash", "transfer"}:
+        raise ValueError("Unsupported membership payment method.")
+    if payment_method == "transfer" and source_shift_id is not None:
+        raise CashSaleConflictError("Pending transfers require the current open shift.")
     if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
         raise ValueError("Idempotency key must contain between 1 and 128 characters.")
 
@@ -119,7 +129,7 @@ def post_membership_cash_sale(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = _fingerprint(register_id, member_id, plan_version_id, source_shift_id)
+    fingerprint = _fingerprint(register_id, member_id, plan_version_id, source_shift_id, payment_method)
     existing = session.scalar(
         select(Order).where(
             Order.seller_id == actor_id,
@@ -143,7 +153,7 @@ def post_membership_cash_sale(
         if successor is None:
             raise CashSaleConflictError("An open shift is required for a cash sale.")
         source_shift = successor
-        financial_shift_id = successor.id
+        financial_shift_id = successor.id if payment_method == "cash" else None
         is_overtime = False
     else:
         source_shift = session.scalar(
@@ -198,27 +208,25 @@ def post_membership_cash_sale(
     )
     if branch is None:
         raise CashSaleNotFoundError("Branch not found.")
-    try:
-        branch_zone = ZoneInfo(branch.timezone)
-    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
-        raise InvalidBranchTimezoneError("Branch timezone is invalid; membership sale was not posted.") from exc
+    starts_on = ends_on = None
+    if payment_method == "cash":
+        try:
+            branch_zone = ZoneInfo(branch.timezone)
+        except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+            raise InvalidBranchTimezoneError("Branch timezone is invalid; membership sale was not posted.") from exc
 
-    effective_at = now or datetime.now(timezone.utc)
-    if effective_at.tzinfo is None or effective_at.utcoffset() is None:
-        raise ValueError("Sale timestamp must be timezone-aware.")
-    local_today = effective_at.astimezone(branch_zone).date()
-
-    latest_period = session.scalar(
-        select(MembershipPeriod)
-        .where(MembershipPeriod.member_id == member_id, MembershipPeriod.ends_on > local_today)
-        .order_by(MembershipPeriod.ends_on.desc(), MembershipPeriod.id.desc())
-        .limit(1).with_for_update()
-    )
-    starts_on = latest_period.ends_on if latest_period is not None else local_today
-    try:
+        effective_at = now or datetime.now(timezone.utc)
+        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
+            raise ValueError("Sale timestamp must be timezone-aware.")
+        local_today = effective_at.astimezone(branch_zone).date()
+        latest_period = session.scalar(
+            select(MembershipPeriod)
+            .where(MembershipPeriod.member_id == member_id, MembershipPeriod.ends_on > local_today)
+            .order_by(MembershipPeriod.ends_on.desc(), MembershipPeriod.id.desc())
+            .limit(1).with_for_update()
+        )
+        starts_on = latest_period.ends_on if latest_period is not None else local_today
         ends_on = _add_duration(starts_on, version.duration_value, version.duration_unit)
-    except ValueError:
-        raise
 
     order = Order(
         id=uuid4(), branch_id=register.branch_id, register_id=register.id, shift_id=source_shift.id,
@@ -233,17 +241,21 @@ def post_membership_cash_sale(
         line_total_minor=version.price_minor,
     )
     payment = Payment(
-        id=uuid4(), order_id=order.id, method="cash", status="confirmed",
+        id=uuid4(), order_id=order.id, method=payment_method,
+        status="confirmed" if payment_method == "cash" else "pending",
         amount_minor=version.price_minor, received_by=actor_id,
     )
-    membership = MembershipPeriod(
-        id=uuid4(), member_id=member.id, order_item_id=item.id, plan_version_id=version.id,
-        starts_on=starts_on, ends_on=ends_on, activated_by=actor_id,
-    )
+    membership = None
+    if payment_method == "cash":
+        membership = MembershipPeriod(
+            id=uuid4(), member_id=member.id, order_item_id=item.id, plan_version_id=version.id,
+            starts_on=starts_on, ends_on=ends_on, activated_by=actor_id,
+        )
     session.add(order)
     session.flush()
     session.add_all([item, payment])
     session.flush()
-    session.add(membership)
-    session.flush()
+    if membership is not None:
+        session.add(membership)
+        session.flush()
     return CashMembershipSaleResult(order, item, payment, membership, replayed=False)

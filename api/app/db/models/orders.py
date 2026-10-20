@@ -78,12 +78,15 @@ class OrderItem(Base):
 
 
 class Payment(Base):
-    """Confirmed cash tender linked to a canonical order."""
+    """Cash settlement or pending transfer linked to a canonical order."""
 
     __tablename__ = "payments"
     __table_args__ = (
-        CheckConstraint("method = 'cash'", name="ck_payments_cash_only"),
-        CheckConstraint("status = 'confirmed'", name="ck_payments_confirmed_only"),
+        CheckConstraint("method IN ('cash', 'transfer')", name="ck_payments_supported_method"),
+        CheckConstraint(
+            "(method = 'cash' AND status = 'confirmed') OR (method = 'transfer' AND status = 'pending')",
+            name="ck_payments_method_status",
+        ),
         CheckConstraint("amount_minor >= 0", name="ck_payments_amount_nonnegative"),
         UniqueConstraint("order_id", name="uq_payments_order"),
     )
