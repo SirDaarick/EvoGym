@@ -79,6 +79,8 @@ For substantial implementation, use one bounded writer with exact edit surfaces 
 
 ### P5 — Sales, settlement, memberships and both Mercado Pago channels (BK-023–BK-028, BK-053–BK-056)
 
+**CASH-01 first executable slice:** one published membership plan version, an existing member, MXN cash, an authorized live branch principal, and that register’s open shift. Persist the canonical order/item price snapshot, confirmed cash payment, and branch-neutral membership date period atomically; the item and payment totals are server-derived from the published final price. Request idempotency binds actor, branch, and normalized request. This slice implements D-005 activation dates only, not cross-branch entitlement/check-in access, financial-history reads, credit, non-cash tenders, or the separately tracked CASH-02 overtime/close behavior.
+
 - **BK-023:** Persist order/item snapshots and typed sale source references. **Accept:** calculated totals are server-derived, constrained, and historical values do not change with catalog edits.
 - **BK-024:** Add payments, allocations, idempotency and retry reconciliation. **Accept:** duplicate request and payload-mismatch cases; no double allocation.
 - **BK-025:** Add verification workflow for transfer and other asynchronous settlement. **Accept:** actor/evidence/status history, pending is excluded from settled balances and UI wording.

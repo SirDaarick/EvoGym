@@ -17,6 +17,8 @@ from app.db.models.inventory import (
     RegisterInventorySnapshotItem,
     StockInitialization,
 )
+from app.db.models.orders import Order, OrderItem, Payment
+from app.db.models.memberships import MembershipPeriod
 
 # Update AdminAuthEvent check constraint for enrollment and device actions
 _old_ck = [c for c in AdminAuthEvent.__table__.constraints if c.name == "ck_admin_auth_events_action"]
@@ -40,6 +42,10 @@ __all__ = [
     "Member",
     "MemberEligibilityRecord",
     "MemberNote",
+    "MembershipPeriod",
+    "Order",
+    "OrderItem",
+    "Payment",
     "PaymentTerminal",
     "Product",
     "RegisterInventorySnapshot",

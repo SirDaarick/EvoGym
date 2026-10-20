@@ -1,0 +1,1 @@
+"""Canonical sales posting operations."""

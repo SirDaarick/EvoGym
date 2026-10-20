@@ -1,0 +1,377 @@
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
+
+from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import event, func, select, text
+from sqlalchemy.exc import IntegrityError
+
+from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion
+from app.main import create_app
+from app.sales.queries import _add_duration, post_membership_cash_sale
+from test_admin_auth import configured_settings
+from test_shifts import _seed_receptionist, _setup_db, _seed_branch, open_shift
+
+
+def test_cash_membership_sale_activates_once_on_an_authorized_open_shift(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-1001", full_name="Synthetic Member", phone="5550100")
+            plan = Plan(code="gym-month", name="Gym Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            branch = session.get(Branch, branch_id)
+            branch.timezone = "America/Tijuana"
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id,
+                version_number=1,
+                name="Gym Month 2026",
+                price_minor=125000,
+                currency="MXN",
+                duration_value=1,
+                duration_unit="month",
+                is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            member_id, version_id = member.id, version.id
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "cash-01", "Front Desk")
+            register_id = register.id
+            open_shift(
+                session,
+                register_id=register_id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "cash-sale-001"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert response.status_code == 201, response.text
+            first = response.json()
+            assert first["payment"]["method"] == "cash"
+            assert first["payment"]["status"] == "confirmed"
+            assert first["payment"]["amount_minor"] == 125000
+            assert first["order"]["seller_id"] == str(staff_id)
+            assert first["membership"]["member_id"] == str(member_id)
+
+            replay = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "cash-sale-001"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert replay.status_code == 200, replay.text
+            assert replay.json() == first
+
+            conflicting_replay = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "cash-sale-001"},
+                json={"member_id": str(uuid4()), "plan_version_id": str(version_id)},
+            )
+            assert conflicting_replay.status_code == 409
+
+            client_total = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "cash-sale-002"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "total_minor": 1},
+            )
+            assert client_total.status_code == 422
+
+            second = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "cash-sale-003"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert second.status_code == 201, second.text
+            assert second.json()["membership"]["starts_on"] == first["membership"]["ends_on"]
+
+            local_today = datetime.now(timezone.utc).astimezone(ZoneInfo("America/Tijuana")).date()
+            assert first["membership"]["starts_on"] == local_today.isoformat()
+            assert first["membership"]["ends_on"] == _add_duration(local_today, 1, "month").isoformat()
+
+        with factory() as session:
+            periods = session.scalars(select(MembershipPeriod).order_by(MembershipPeriod.starts_on)).all()
+            assert len(periods) == 2
+            assert all(period.member_id == member_id for period in periods)
+            assert session.scalar(select(func.count()).select_from(Order)) == 2
+            assert session.scalar(select(func.count()).select_from(OrderItem)) == 2
+            assert session.scalar(select(func.count()).select_from(Payment)) == 2
+    finally:
+        engine.dispose()
+
+
+def test_membership_calendar_duration_clamps_month_end_and_leap_year():
+    from datetime import date
+
+    assert _add_duration(date(2024, 1, 31), 1, "month") == date(2024, 2, 29)
+    assert _add_duration(date(2025, 1, 31), 1, "month") == date(2025, 2, 28)
+    assert _add_duration(date(2024, 2, 29), 1, "year") == date(2025, 2, 28)
+
+
+def test_membership_period_uses_branch_local_date_at_utc_day_boundary(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "tijuana", "Tijuana")
+        staff_id, _token = _seed_receptionist(factory, branch_id, "tijuana@example.invalid")
+        with factory.begin() as session:
+            branch = session.get(Branch, branch_id)
+            branch.timezone = "America/Tijuana"
+            member = Member(member_number="SOC-TJ", full_name="Tijuana Member", phone="5550104")
+            plan = Plan(code="tijuana-month", name="Tijuana Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Tijuana Month", price_minor=8000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "tijuana-register", "Tijuana Register")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, version_id, register_id = member.id, version.id, register.id
+
+        session = factory()
+        try:
+            result = post_membership_cash_sale(
+                session, register_id=register_id, actor_id=staff_id, member_id=member_id,
+                plan_version_id=version_id, idempotency_key="tijuana-boundary",
+                authorized_branch_id=branch_id,
+                now=datetime(2026, 1, 1, 7, 30, tzinfo=timezone.utc),
+            )
+            assert result.membership.starts_on.isoformat() == "2025-12-31"
+            assert result.membership.ends_on.isoformat() == "2026-01-31"
+            session.rollback()
+        finally:
+            session.close()
+    finally:
+        engine.dispose()
+
+
+def test_cash_sale_query_rollback_leaves_no_financial_or_membership_rows(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, _token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-ROLLBACK", full_name="Rollback Member", phone="5550101")
+            plan = Plan(code="rollback-month", name="Rollback Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="One Month", price_minor=5000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "rollback", "Rollback")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            register_id, member_id, version_id = register.id, member.id, version.id
+
+        session = factory()
+        try:
+            post_membership_cash_sale(session, register_id=register_id, actor_id=staff_id,
+                                      authorized_branch_id=branch_id,
+                                      member_id=member_id, plan_version_id=version_id,
+                                      idempotency_key="rollback-sale")
+            session.rollback()
+        finally:
+            session.close()
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(Order)) == 0
+            assert session.scalar(select(func.count()).select_from(OrderItem)) == 0
+            assert session.scalar(select(func.count()).select_from(Payment)) == 0
+            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 0
+    finally:
+        engine.dispose()
+
+
+def test_cash_sale_flush_order_respects_foreign_keys_when_sqlite_enforces_them(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        engine.dispose()
+
+        @event.listens_for(engine, "connect")
+        def enable_foreign_keys(connection, _record):
+            connection.execute("PRAGMA foreign_keys=ON")
+
+        branch_id = _seed_branch(factory)
+        staff_id, _token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-FK", full_name="FK Member", phone="5550102")
+            plan = Plan(code="fk-month", name="FK Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id,
+                version_number=1,
+                name="FK Month",
+                price_minor=6000,
+                currency="MXN",
+                duration_value=1,
+                duration_unit="month",
+                is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+
+            register = create_cash_register(session, branch_id, "fk-register", "FK Register")
+            open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            register_id, member_id, version_id = register.id, member.id, version.id
+
+        with factory.begin() as session:
+            result = post_membership_cash_sale(
+                session,
+                register_id=register_id,
+                actor_id=staff_id,
+                authorized_branch_id=branch_id,
+                member_id=member_id,
+                plan_version_id=version_id,
+                idempotency_key="sqlite-fk-order",
+                now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+            assert result.membership.order_item_id == result.item.id
+    finally:
+        engine.dispose()
+
+
+def test_cash_membership_sale_requires_live_auth_open_shift_and_matching_branch(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "sale-branch", "Sale Branch")
+        other_branch_id = _seed_branch(factory, "other-sale-branch", "Other Sale Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "sale-reception@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-AUTH", full_name="Auth Member", phone="5550103")
+            plan = Plan(code="auth-month", name="Auth Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Auth Month", price_minor=7000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            own_register = create_cash_register(session, branch_id, "sale-own", "Own Register")
+            other_register = create_cash_register(session, other_branch_id, "sale-other", "Other Register")
+            open_shift(session, register_id=own_register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            open_shift(session, register_id=other_register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, version_id = member.id, version.id
+            own_register_id, other_register_id = own_register.id, other_register.id
+
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            path = f"/api/v1/registers/{other_register_id}/membership-sales"
+            body = {"member_id": str(member_id), "plan_version_id": str(version_id)}
+            assert client.post(path, json=body, headers={"Idempotency-Key": "sale-auth"}).status_code == 401
+            denied = client.post(path, json=body, headers={
+                "Authorization": f"Bearer {token}", "Idempotency-Key": "sale-auth"
+            })
+            assert denied.status_code == 403
+        with factory.begin() as session:
+            from app.db.models import Shift
+            shift = session.scalar(select(Shift).where(Shift.cash_register_id == own_register_id))
+            shift.status = "closed"
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/registers/{own_register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "sale-closed"},
+                json=body,
+            )
+            assert response.status_code == 409
+    finally:
+        engine.dispose()
+
+
+def test_membership_period_database_rejects_empty_or_nonpositive_interval(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, _token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-CHECK", full_name="Check Member", phone="5550102")
+            session.add(member)
+            session.flush()
+            member_id = member.id
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "check", "Check")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            from app.catalog.queries import create_plan
+            plan = create_plan(session, code="check-month", name="Check Month", kind="membership")
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="One Month", price_minor=5000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            order = Order(branch_id=branch_id, register_id=register.id, shift_id=shift.id, member_id=member_id,
+                          seller_id=staff_id, idempotency_key="invalid-period", request_fingerprint="0" * 64,
+                          currency="MXN", total_minor=5000)
+            session.add(order)
+            session.flush()
+            item = OrderItem(order_id=order.id, plan_version_id=version.id, description_snapshot="One Month",
+                             duration_value=1, duration_unit="month", quantity=1, unit_amount_minor=5000,
+                             line_total_minor=5000)
+            session.add(item)
+            session.flush()
+            invalid = MembershipPeriod(member_id=member_id, order_item_id=item.id, plan_version_id=version.id,
+                                       starts_on=datetime(2026, 1, 1).date(), ends_on=datetime(2026, 1, 1).date(),
+                                       activated_by=staff_id)
+            session.add(invalid)
+            with pytest.raises(IntegrityError):
+                session.flush()
+            session.rollback()
+    finally:
+        engine.dispose()
+
+
+def test_invalid_stored_branch_timezone_fails_closed_without_sale(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "bad-zone", "Bad Zone")
+        staff_id, token = _seed_receptionist(factory, branch_id, "bad-zone@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-BADZONE", full_name="Bad Zone Member", phone="5550105")
+            plan = Plan(code="bad-zone-month", name="Bad Zone Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Bad Zone Month", price_minor=9000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "bad-zone-register", "Bad Zone Register")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, version_id, register_id = member.id, version.id, register.id
+        with engine.begin() as connection:
+            connection.execute(text("update branches set timezone='Not/A_Real_Zone' where id=:id"), {"id": branch_id.hex})
+
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "invalid-timezone-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert response.status_code == 409
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(Order)) == 0
+            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 0
+    finally:
+        engine.dispose()

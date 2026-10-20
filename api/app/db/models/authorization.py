@@ -1,7 +1,9 @@
 from uuid import UUID, uuid4
 
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, String, UniqueConstraint, Uuid, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db.base import Base
 
@@ -18,6 +20,20 @@ class Branch(Base):
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="America/Mexico_City", server_default="America/Mexico_City"
+    )
+
+    @validates("timezone")
+    def validate_timezone(self, _key: str, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Branch timezone must be a valid IANA timezone.")
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Branch timezone must be a valid IANA timezone.") from exc
+        return normalized
 
 
 class RoleGrant(Base):
