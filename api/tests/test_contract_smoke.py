@@ -43,6 +43,8 @@ EXPECTED_CORE_API_ENDPOINTS = {
     "/api/v1/catalog/plans/{plan_id}/versions": {"POST"},
     "/api/v1/terminals": {"GET", "POST"},
     "/api/v1/registers": {"GET", "POST"},
+    "/api/v1/registers/{register_id}/inventory-snapshots": {"POST"},
+    "/api/v1/registers/{register_id}/inventory-snapshots/{snapshot_id}": {"GET"},
     "/api/v1/shifts/current": {"GET"},
     "/api/v1/shifts/open": {"POST"},
     "/api/v1/shifts/{shift_id}": {"GET"},
@@ -111,6 +113,8 @@ EXPECTED_DATABASE_TABLES = {
     "shift_denomination_counts",
     "products",
     "stock_initializations",
+    "register_inventory_snapshots",
+    "register_inventory_snapshot_items",
 }
 
 
@@ -258,7 +262,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0012_inventory_foundation"
+            assert head_version == "0013_inventory_snapshots"
 
             # 3. Assert member columns exist
             member_columns = {c["name"] for c in inspector.get_columns("members")}

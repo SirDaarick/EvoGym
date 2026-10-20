@@ -5,14 +5,14 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.main import create_app
 from test_admin_auth import configured_settings, seed_admin
-from app.db.models import Branch, Product, StockInitialization, StaffUser
+from app.db.models import Branch, CashRegister, Product, RegisterInventorySnapshot, RegisterInventorySnapshotItem, StockInitialization, StaffSession, StaffUser
 from app.db.models import RoleGrant, StaffCredential
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import pytest
-from app.inventory.queries import create_product, list_branch_stock, list_products
+from app.inventory.queries import capture_register_inventory_snapshot, create_product, list_branch_stock, list_products
 
 
 def test_admin_can_create_piece_product_without_creating_stock(tmp_path):
@@ -156,5 +156,214 @@ def test_receptionist_cannot_create_products(tmp_path):
         assert response.status_code == 403
         with factory() as session:
             assert session.query(Product).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_register_inventory_snapshot_capture_route_exists(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-snapshot-route.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    admin_id = seed_admin(factory)
+    with factory.begin() as session:
+        branch = Branch(code="central", name="Central")
+        session.add(branch)
+        session.flush()
+        register = CashRegister(branch_id=branch.id, code="front", name="Front desk")
+        session.add(register)
+        session.flush()
+        register_id, branch_id = register.id, branch.id
+    with factory() as session:
+        capture_register_inventory_snapshot(session, register_id=register_id, actor_id=admin_id)
+        session.rollback()
+    with factory() as session:
+        assert session.query(RegisterInventorySnapshot).count() == 0
+    app = create_app(configured_settings(url))
+    try:
+        with TestClient(app) as client:
+            token = client.post(
+                "/api/v1/auth/sessions",
+                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
+            ).json()["access_token"]
+            response = client.post(
+                f"/api/v1/registers/{register_id}/inventory-snapshots",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert response.status_code == 201
+    finally:
+        engine.dispose()
+
+
+def test_snapshot_captures_complete_catalog_and_keeps_historical_values(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-snapshot-complete.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    admin_id = seed_admin(factory)
+    with factory.begin() as session:
+        branch = Branch(code="central", name="Central")
+        session.add(branch)
+        session.flush()
+        register = CashRegister(branch_id=branch.id, code="front", name="Front desk")
+        products = [
+            Product(code=f"item-{index:03d}", name=f"Product {index:03d}", created_by=admin_id)
+            for index in range(121)
+        ]
+        session.add_all([register, *products])
+        session.flush()
+        session.add_all([
+            StockInitialization(branch_id=branch.id, product_id=products[0].id, quantity=0,
+                                initialized_by=admin_id),
+            StockInitialization(branch_id=branch.id, product_id=products[1].id, quantity=7,
+                                initialized_by=admin_id),
+        ])
+        register_id = register.id
+        first_product_id, second_product_id = products[0].id, products[1].id
+
+    app = create_app(configured_settings(url))
+    try:
+        with TestClient(app) as client:
+            token = client.post(
+                "/api/v1/auth/sessions",
+                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
+            ).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            captured = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
+            assert captured.status_code == 201
+            first = captured.json()
+            assert first["captured_by"] == str(admin_id)
+            assert first["item_count"] == 121
+            assert first["missing_count"] == 119
+            assert first["source_state"] == "missing_initializations"
+            assert len(first["items"]) == 121
+            assert [item["code"] for item in first["items"]] == sorted(item["code"] for item in first["items"])
+            assert first["items"][0]["initialized"] is True
+            assert first["items"][0]["expected_quantity"] == 0
+            assert first["items"][1]["initialized"] is True
+            assert first["items"][1]["expected_quantity"] == 7
+            assert first["items"][2]["initialized"] is False
+            assert first["items"][2]["expected_quantity"] is None
+            assert first["items"][1]["initialized_by"] == str(admin_id)
+            with factory() as session:
+                observed = {row.product_id: row.quantity for row in session.query(StockInitialization).all()}
+                assert observed == {first_product_id: 0, second_product_id: 7}
+
+            with factory.begin() as session:
+                product = session.get(Product, second_product_id)
+                product.name = "Renamed after capture"
+                stock = session.query(StockInitialization).filter_by(product_id=second_product_id).one()
+                stock.quantity = 9
+                session.add(Product(code="item-121", name="New later", created_by=admin_id))
+
+            later = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
+            assert later.status_code == 201
+            assert later.json()["item_count"] == 122
+            old_read = client.get(
+                f"/api/v1/registers/{register_id}/inventory-snapshots/{first['id']}", headers=headers
+            )
+            assert old_read.status_code == 200
+            old_item = next(item for item in old_read.json()["items"] if item["product_id"] == str(second_product_id))
+            assert old_item["name"] == "Product 001" and old_item["expected_quantity"] == 7
+        with factory() as session:
+            assert session.query(StockInitialization).filter_by(product_id=first_product_id).one().quantity == 0
+            assert session.query(RegisterInventorySnapshot).count() == 2
+            assert session.query(RegisterInventorySnapshotItem).count() == 243
+    finally:
+        engine.dispose()
+
+
+def test_snapshot_empty_catalog_is_classified_without_authorizing_review(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-snapshot-empty.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    admin_id = seed_admin(factory)
+    with factory.begin() as session:
+        branch = Branch(code="central", name="Central")
+        session.add(branch)
+        session.flush()
+        register = CashRegister(branch_id=branch.id, code="front", name="Front desk")
+        session.add(register)
+        session.flush()
+        register_id, branch_id = register.id, branch.id
+    app = create_app(configured_settings(url))
+    try:
+        with TestClient(app) as client:
+            token = client.post(
+                "/api/v1/auth/sessions",
+                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
+            ).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            response = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
+            assert response.status_code == 201
+            assert response.json()["source_state"] == "empty_catalog"
+            assert response.json()["item_count"] == response.json()["missing_count"] == 0
+            assert response.json()["items"] == []
+            empty_snapshot_id = response.json()["id"]
+            with factory.begin() as session:
+                product = Product(code="bands", name="Bands", created_by=admin_id)
+                session.add(product)
+                session.flush()
+                session.add(StockInitialization(branch_id=branch_id, product_id=product.id, quantity=0,
+                                                initialized_by=admin_id))
+            initialized = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
+            assert initialized.status_code == 201
+            assert initialized.json()["source_state"] == "all_initialized"
+            assert initialized.json()["items"][0]["initialized"] is True
+            assert initialized.json()["items"][0]["expected_quantity"] == 0
+            assert client.get(
+                f"/api/v1/registers/{register_id}/inventory-snapshots/{empty_snapshot_id}", headers=headers
+            ).json()["source_state"] == "empty_catalog"
+    finally:
+        engine.dispose()
+
+
+def test_snapshot_rechecks_receptionist_branch_scope_and_session(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-snapshot-scope.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    with factory.begin() as session:
+        central = Branch(code="central", name="Central")
+        north = Branch(code="north", name="North")
+        staff = StaffUser(login_identifier="snapshot-reception@example.invalid")
+        session.add_all([central, north, staff])
+        session.flush()
+        central_register = CashRegister(branch_id=central.id, code="front", name="Front")
+        north_register = CashRegister(branch_id=north.id, code="front", name="Front")
+        session.add_all([central_register, north_register])
+        session.flush()
+        session.add_all([
+            RoleGrant(staff_id=staff.id, role="receptionist", scope_kind="branch", branch_id=central.id),
+            StaffCredential(staff_id=staff.id, method="pin", secret_hash=hash_pin("1234")),
+        ])
+        staff_id, branch_id, central_id, north_id = staff.id, central.id, central_register.id, north_register.id
+    token = issue_session(
+        factory, "snapshot-reception@example.invalid", "1234", branch_id,
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    ).token
+    app = create_app(configured_settings(url))
+    try:
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            unauthenticated = client.post(f"/api/v1/registers/{central_id}/inventory-snapshots")
+            created = client.post(f"/api/v1/registers/{central_id}/inventory-snapshots", headers=headers)
+            assert unauthenticated.status_code == 401
+            assert created.status_code == 201
+            snapshot_id = created.json()["id"]
+            assert client.get(
+                f"/api/v1/registers/{central_id}/inventory-snapshots/{snapshot_id}", headers=headers
+            ).status_code == 200
+            assert client.post(f"/api/v1/registers/{north_id}/inventory-snapshots", headers=headers).status_code == 404
+            assert client.get(
+                f"/api/v1/registers/{north_id}/inventory-snapshots/{snapshot_id}", headers=headers
+            ).status_code == 404
+            with factory.begin() as session:
+                session.query(StaffSession).filter_by(staff_id=staff_id).one().revoked_at = datetime.now(timezone.utc)
+            revoked = client.get(
+                f"/api/v1/registers/{central_id}/inventory-snapshots/{snapshot_id}", headers=headers
+            )
+            assert revoked.status_code == 401
     finally:
         engine.dispose()

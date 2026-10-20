@@ -30,6 +30,14 @@ def test_inventory_revision_fits_alembic_version_column():
     assert revision.down_revision == "0011_shift_opening_counts"
 
 
+def test_snapshot_revision_fits_and_follows_inventory_foundation():
+    config = Config(str(API_DIR / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(config)
+    revision = scripts.get_revision("0013_inventory_snapshots")
+    assert len(revision.revision) <= 32
+    assert revision.down_revision == "0012_inventory_foundation"
+
+
 def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'fresh.db').as_posix()}"
@@ -61,8 +69,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "services", "plans", "plan_versions", "plan_version_services",
                 "payment_terminals", "cash_registers", "shifts", "shift_denomination_counts",
                 "products", "stock_initializations",
+                "register_inventory_snapshots", "register_inventory_snapshot_items",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0013_inventory_snapshots"
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 128
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
@@ -102,7 +111,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0013_inventory_snapshots"
     finally:
         engine.dispose()
 
@@ -185,7 +194,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0013_inventory_snapshots"
     finally:
         engine.dispose()
 
@@ -211,6 +220,56 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0013_inventory_snapshots"
+    finally:
+        engine.dispose()
+
+
+def test_snapshot_migration_preserves_existing_inventory_and_shift_data(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'snapshot-preservation.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0012_inventory_foundation")
+    engine = create_engine(database_url)
+    branch_id, staff_id, register_id, shift_id, product_id, initialization_id = (
+        uuid4().hex for _ in range(6)
+    )
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("insert into branches (id, code, name) values (:id, 'central', 'Central')"),
+                               {"id": branch_id})
+            connection.execute(text("insert into staff_users (id, login_identifier) values (:id, 'snapshot@example.invalid')"),
+                               {"id": staff_id})
+            connection.execute(text("insert into cash_registers (id, branch_id, code, name) values (:id, :branch, 'front', 'Front')"),
+                               {"id": register_id, "branch": branch_id})
+            connection.execute(text("insert into shifts (id, cash_register_id, opened_by, opening_cash_minor) values (:id, :register, :staff, 25000)"),
+                               {"id": shift_id, "register": register_id, "staff": staff_id})
+            connection.execute(text("insert into shift_denomination_counts (id, shift_id, denomination_minor, quantity) values (:id, :shift, 5000, 5)"),
+                               {"id": uuid4().hex, "shift": shift_id})
+            connection.execute(text("insert into products (id, code, name, created_by) values (:id, 'bands', 'Bands', :staff)"),
+                               {"id": product_id, "staff": staff_id})
+            connection.execute(text("insert into stock_initializations (id, branch_id, product_id, quantity, initialized_by) values (:id, :branch, :product, 12, :staff)"),
+                               {"id": initialization_id, "branch": branch_id, "product": product_id, "staff": staff_id})
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(text("select quantity from stock_initializations where id=:id"),
+                                      {"id": initialization_id}).scalar_one() == 12
+            assert connection.execute(text("select quantity from shift_denomination_counts where shift_id=:id"),
+                                      {"id": shift_id}).scalar_one() == 5
+            assert connection.execute(text("select count(*) from register_inventory_snapshots")).scalar_one() == 0
+
+        command.downgrade(config, "0012_inventory_foundation")
+        with engine.connect() as connection:
+            table_names = set(inspect(connection).get_table_names())
+            assert "register_inventory_snapshots" not in table_names
+            assert "register_inventory_snapshot_items" not in table_names
+            assert connection.execute(text("select quantity from stock_initializations where id=:id"),
+                                      {"id": initialization_id}).scalar_one() == 12
+            assert connection.execute(text("select quantity from shift_denomination_counts where shift_id=:id"),
+                                      {"id": shift_id}).scalar_one() == 5
     finally:
         engine.dispose()

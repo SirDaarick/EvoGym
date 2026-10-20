@@ -2,9 +2,16 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Branch, Product, StockInitialization
+from app.db.models import (
+    Branch,
+    Product,
+    RegisterInventorySnapshot,
+    RegisterInventorySnapshotItem,
+    StockInitialization,
+)
+from app.db.models.shifts import CashRegister
 from app.db.models.inventory import normalize_product_code, normalize_product_name
 
 MAX_BIGINT = 2**63 - 1
@@ -51,6 +58,73 @@ def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: 
             .outerjoin(StockInitialization, (StockInitialization.product_id == Product.id) & (StockInitialization.branch_id == branch_id))
             .order_by(Product.code, Product.id).offset(offset).limit(limit))
     return session.execute(stmt).all(), total
+
+
+def capture_register_inventory_snapshot(
+    session: Session, *, register_id: UUID, actor_id: UUID
+) -> RegisterInventorySnapshot:
+    """Persist one complete, ordered catalog observation for a register's branch."""
+    register = session.get(CashRegister, register_id)
+    if register is None:
+        raise LookupError("register")
+
+    rows = session.execute(
+        select(Product, StockInitialization)
+        .outerjoin(
+            StockInitialization,
+            (StockInitialization.product_id == Product.id)
+            & (StockInitialization.branch_id == register.branch_id),
+        )
+        .order_by(Product.code, Product.id)
+    ).all()
+
+    items = [
+        RegisterInventorySnapshotItem(
+            product_id=product.id,
+            code=product.code,
+            name=product.name,
+            unit=product.unit,
+            initialized=initialization is not None,
+            expected_quantity=initialization.quantity if initialization else None,
+            initialization_id=initialization.id if initialization else None,
+            initialized_by=initialization.initialized_by if initialization else None,
+            initialized_at=initialization.initialized_at if initialization else None,
+        )
+        for product, initialization in rows
+    ]
+    missing_count = sum(not item.initialized for item in items)
+    source_state = (
+        "empty_catalog" if not items
+        else "missing_initializations" if missing_count
+        else "all_initialized"
+    )
+    snapshot = RegisterInventorySnapshot(
+        register_id=register.id,
+        branch_id=register.branch_id,
+        captured_by=actor_id,
+        captured_at=datetime.now(timezone.utc),
+        item_count=len(items),
+        missing_count=missing_count,
+        source_state=source_state,
+        items=items,
+    )
+    session.add(snapshot)
+    session.flush()
+    return snapshot
+
+
+def get_register_inventory_snapshot(
+    session: Session, *, register_id: UUID, snapshot_id: UUID
+) -> RegisterInventorySnapshot | None:
+    statement = (
+        select(RegisterInventorySnapshot)
+        .where(
+            RegisterInventorySnapshot.id == snapshot_id,
+            RegisterInventorySnapshot.register_id == register_id,
+        )
+        .options(selectinload(RegisterInventorySnapshot.items))
+    )
+    return session.scalar(statement)
 
 
 def _validate_page(offset: int, limit: int) -> None:

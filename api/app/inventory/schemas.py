@@ -63,3 +63,30 @@ class StockInitializationDTO(BaseModel):
     quantity: int
     initialized_by: UUID
     initialized_at: datetime
+
+
+class InventorySnapshotItemDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    product_id: UUID
+    code: str
+    name: str
+    unit: str
+    initialized: bool
+    expected_quantity: int | None
+    initialization_id: UUID | None
+    initialized_by: UUID | None
+    initialized_at: datetime | None
+
+
+class RegisterInventorySnapshotDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    register_id: UUID
+    branch_id: UUID
+    captured_by: UUID
+    captured_at: datetime
+    item_count: int
+    missing_count: int
+    source_state: str
+    items: list[InventorySnapshotItemDTO]

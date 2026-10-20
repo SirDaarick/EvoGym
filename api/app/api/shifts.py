@@ -9,6 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied, Permission
 from app.auth.sessions import validate_session
+from app.inventory.queries import (
+    capture_register_inventory_snapshot,
+    get_register_inventory_snapshot,
+)
+from app.inventory.schemas import RegisterInventorySnapshotDTO
 from app.shifts.queries import (
     CashRegisterNotFoundError,
     ShiftAlreadyOpenError,
@@ -321,3 +326,62 @@ def get_shift_endpoint(
             raise HTTPException(403, "Access restricted to staff branch.")
 
         return to_shift_dto(shift)
+
+
+@router.post(
+    "/registers/{register_id}/inventory-snapshots",
+    response_model=RegisterInventorySnapshotDTO,
+    status_code=201,
+)
+def capture_register_inventory_snapshot_endpoint(
+    register_id: UUID,
+    request: Request,
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> RegisterInventorySnapshotDTO:
+    """Capture the full piece catalog currently presented for this register's branch."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+
+    with factory() as session:
+        register = get_cash_register(session, register_id)
+        if register is None:
+            raise HTTPException(404, "Cash register not found.")
+        if not principal.is_admin and register.branch_id != principal.branch_id:
+            raise HTTPException(404, "Cash register not found.")
+
+        snapshot = capture_register_inventory_snapshot(
+            session, register_id=register.id, actor_id=principal.staff_id
+        )
+        session.commit()
+        return RegisterInventorySnapshotDTO.model_validate(snapshot)
+
+
+@router.get(
+    "/registers/{register_id}/inventory-snapshots/{snapshot_id}",
+    response_model=RegisterInventorySnapshotDTO,
+)
+def get_register_inventory_snapshot_endpoint(
+    register_id: UUID,
+    snapshot_id: UUID,
+    request: Request,
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> RegisterInventorySnapshotDTO:
+    """Read a stored observation after rechecking live register authorization."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+
+    with factory() as session:
+        register = get_cash_register(session, register_id)
+        if register is None:
+            raise HTTPException(404, "Cash register not found.")
+        if not principal.is_admin and register.branch_id != principal.branch_id:
+            raise HTTPException(404, "Cash register not found.")
+
+        snapshot = get_register_inventory_snapshot(
+            session, register_id=register.id, snapshot_id=snapshot_id
+        )
+        if snapshot is None or snapshot.branch_id != register.branch_id:
+            raise HTTPException(404, "Inventory snapshot not found.")
+        return RegisterInventorySnapshotDTO.model_validate(snapshot)
