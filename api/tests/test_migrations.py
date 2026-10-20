@@ -14,16 +14,19 @@ API_DIR = Path(__file__).resolve().parents[1]
 
 def test_new_head_migration_revision_fits_alembic_version_column():
     config = Config(str(API_DIR / "alembic.ini"))
-    revision = ScriptDirectory.from_config(config).get_revision("head").revision
+    scripts = ScriptDirectory.from_config(config)
+    revisions = list(scripts.walk_revisions())
 
-    assert len(revision) <= 32
+    assert max(len(revision.revision) for revision in revisions) == 35
+    assert all(len(revision.revision) <= 128 for revision in revisions)
+    assert scripts.get_revision("0010_registers_terminals_and_shifts").revision == "0010_registers_terminals_and_shifts"
 
 
 def test_inventory_revision_fits_alembic_version_column():
     config = Config(str(API_DIR / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
     revision = scripts.get_revision("0012_inventory_foundation")
-    assert len(revision.revision) <= 32
+    assert len(revision.revision) <= 128
     assert revision.down_revision == "0011_shift_opening_counts"
 
 
@@ -60,6 +63,8 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "products", "stock_initializations",
             }
             assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
+            version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
+            assert version_column["type"].length == 128
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
             assert connection.execute(text("select id from staff_credentials where id=:id"), {"id": credential_id}).scalar_one() == credential_id
             assert connection.execute(text("select id from security_events where id=:id"), {"id": event_id}).scalar_one() == event_id
@@ -71,6 +76,33 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
             assert "ix_members_member_number" in member_indexes
             shift_indexes = {index["name"] for index in inspect(connection).get_indexes("shifts")}
             assert "uq_shifts_active_per_register" in shift_indexes
+    finally:
+        engine.dispose()
+
+
+def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'legacy-version-width.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+
+    command.upgrade(config, "0007_members")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("alter table alembic_version rename to alembic_version_wide"))
+            connection.execute(text("create table alembic_version (version_num varchar(32) not null primary key)"))
+            connection.execute(text("insert into alembic_version select version_num from alembic_version_wide"))
+            connection.execute(text("drop table alembic_version_wide"))
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
+            assert version_column["type"].length == 32
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
     finally:
         engine.dispose()
 
@@ -90,6 +122,8 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     captured = capsys.readouterr()
     generated_sql = captured.out
     assert "CREATE TABLE alembic_version" in generated_sql
+    assert "version_num VARCHAR(128)" in generated_sql
+    assert "ALTER TABLE IF EXISTS alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)" in generated_sql
     assert "0001_baseline" in generated_sql
     assert "CREATE TABLE staff_users" in generated_sql
     assert "CREATE TABLE staff_credentials" in generated_sql

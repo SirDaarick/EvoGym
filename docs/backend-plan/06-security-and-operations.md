@@ -66,7 +66,7 @@ Gimi is in planned scope, but no chatbot is an authority. It may call only appro
 
 | Area | Required future evidence |
 |---|---|
-| Migrations | Reviewed migration plan, fresh/upgrade proof, lock/downtime estimate, recovery path, backward compatibility. |
+| Migrations | Reviewed migration plan, fresh/upgrade proof, lock/downtime estimate, recovery path, backward compatibility, and PostgreSQL Alembic version-width compatibility for every published revision. |
 | Backups | Encrypted backup schedule, retention, access controls, restore rehearsal and measured recovery objectives. |
 | Health | Liveness vs readiness distinction, DB/provider dependency status without leaking internals. |
 | Logging/metrics | Request correlation, error and latency distributions, queue depth/age, per-device last sync, conflicts by severity, snapshot-required count, quota failures, settlement/stock reconciliation alerts; redact PII/payloads. |

@@ -7,6 +7,7 @@ from app.db.engine import create_engine_from_settings
 from app.db.base import Base
 from app.db import models as _models
 from app.settings import get_settings
+from migrations.versioning import prepare_version_table
 
 
 config = context.config
@@ -24,6 +25,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
+    prepare_version_table(context, offline=True)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -33,6 +35,7 @@ def run_migrations_online() -> None:
     try:
         with engine.connect() as connection:
             context.configure(connection=connection, target_metadata=target_metadata)
+            prepare_version_table(context, offline=False)
             with context.begin_transaction():
                 context.run_migrations()
     finally:

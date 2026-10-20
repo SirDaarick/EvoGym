@@ -77,6 +77,7 @@ For each API write route, require unit/domain tests, API authorization/contract 
 ## Migrations and data integrity
 
 - Build database from empty state and upgrade from the last supported baseline; schema version and indexes match expected state.
+- For Alembic, verify every current revision ID fits the explicit tracking-column width, fresh and offline table creation use that width, and PostgreSQL widens existing short version tables before updating revisions; exercise the actual PostgreSQL chain, not only SQLite or generated SQL.
 - Validate constraints against malformed/null/duplicate records and foreign-key cleanup behavior.
 - For data-sensitive migrations, test backup, dry-run, row-count reconciliation, restore, idempotent rerun and explicit abort threshold.
 - Destructive/down migrations are conditional on verified backup and compatibility; prefer forward repair where rollback would lose accepted data.
