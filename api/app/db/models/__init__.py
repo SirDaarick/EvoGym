@@ -11,6 +11,7 @@ from app.db.models.devices import StaffDevicePairingCode, StaffPairedDevice
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
 from app.db.models.catalog import Plan, PlanVersion, PlanVersionService, Service
 from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount
+from app.db.models.inventory import Product, StockInitialization
 
 # Update AdminAuthEvent check constraint for enrollment and device actions
 _old_ck = [c for c in AdminAuthEvent.__table__.constraints if c.name == "ck_admin_auth_events_action"]
@@ -35,6 +36,7 @@ __all__ = [
     "MemberEligibilityRecord",
     "MemberNote",
     "PaymentTerminal",
+    "Product",
     "Plan",
     "PlanVersion",
     "PlanVersionService",
@@ -43,6 +45,7 @@ __all__ = [
     "Service",
     "Shift",
     "ShiftDenominationCount",
+    "StockInitialization",
     "StaffCredential",
     "StaffDevicePairingCode",
     "StaffEnrollmentCode",

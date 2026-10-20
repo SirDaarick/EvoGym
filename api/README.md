@@ -99,3 +99,7 @@ FastAPI error handlers use registered exception types and return generic output;
 ```
 
 The repository workflow at .github/workflows/api.yml runs Python 3.14 tests, dependency checks, and fresh PostgreSQL migration smoke against an ephemeral synthetic service. It was locally reviewed only; hosted GitHub Actions were not executed.
+
+### Inventory starter
+
+The Admin-only /api/v1/inventory API registers piece-counted products and records one explicit immutable starting quantity per product and branch. Product catalog pages are shared across branches. Branch stock pages include every product: initialized=false and quantity=null means no starting count was entered, while initialized=true and quantity=0 is an explicit zero count. These values are initialization baselines, not live balances. This starter has no movement, sales, adjustment, fractional-unit, or full-snapshot acceptance API and does not seed products or quantities.

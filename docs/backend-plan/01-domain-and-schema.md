@@ -110,3 +110,7 @@ Before a module migration: identify relevant D/R/BK decisions; review table/fiel
 - `docs/database-map.md` — proposed logical model and explicit caveats.
 - `odd/tasks/frontend-v2.md` — workflows and unresolved UX/data policies.
 - `frontend/README.md` — frontend currently presents demo abstractions as backend-ready; verify each mapping rather than assuming normalized contracts.
+
+### Authorized inventory starter
+
+The first persistence slice adds shared products definitions and branch-specific stock_initializations, limited to indivisible pieces. Each product requires an explicit nonnegative integer baseline for a branch before its quantity is considered initialized. Reads preserve missing (`null`) versus explicit zero; no stock is seeded or inferred. This baseline is not an on-hand ledger, and non-piece precision/conversion remains unresolved.

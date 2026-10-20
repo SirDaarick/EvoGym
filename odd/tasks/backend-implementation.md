@@ -1,6 +1,6 @@
 # EvoGym FastAPI Backend — Implementation Plan
 
-**Status: P4 in progress — BK-008/BK-009, BK-013, BK-015–BK-018 Done; BK-010/BK-011/BK-012 and BK-021 Partial.** Starting with BK-012, the master ledger and eight linked backend-plan documents are versioned with implementation; every future backend commit must include the updated master plan. Earlier source commits did not include the then-local planning documents. Private notebook workspaces remain separate. BK-012 adds only safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
+**Status: P4 in progress — BK-008/BK-009, BK-013, BK-015–BK-018 Done; BK-010/BK-011/BK-012 and BK-021/BK-032 Partial.** Starting with BK-012, the master ledger and eight linked backend-plan documents are versioned with implementation; every future backend commit must include the updated master plan. Earlier source commits did not include the then-local planning documents. Private notebook workspaces remain separate. BK-012 adds only safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
 
 ## Quick path and reading order
 
@@ -89,7 +89,7 @@ After each accepted scope change, map impacted `D-`, `R-`, and `BK-` references,
 
 ## Authoritative task ledger
 
-Ledger totals: **17 Done, 4 Partial, 1 In progress, 54 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012 and BK-021 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
+Ledger totals: **17 Done, 5 Partial, 1 In progress, 53 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 are Done; additional P0 task BK-061 remains Not started pending its own acceptance evidence. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012 and BK-021 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
 
 | ID | Phase / task | Status | Depends on | Acceptance / proof |
 |---|---|---|---|---|
@@ -124,7 +124,7 @@ Ledger totals: **17 Done, 4 Partial, 1 In progress, 54 Not started (76 total)**.
 | BK-029 | P6 Implement member check-in against entitlements/debt | Not started | BK-026,BK-027 | Unauthorized, blocked and repeat-visit cases covered |
 | BK-030 | P6 Implement trial visit lifecycle | Not started | BK-029 | D-019 trial policy resolved; trial cannot accidentally create a membership |
 | BK-031 | P6 Integrate attendance/trial API flows | Not started | BK-029,BK-030 | Staff workflow resilient to retry and errors |
-| BK-032 | P7 Implement product catalog and stock movement ledger | Not started | BK-021,BK-022 | Count != adjustment; valuation and provenance retained |
+| BK-032 | P7 Implement product catalog and stock movement ledger | Partial | BK-011 (starter); BK-021,BK-022 (full ledger) | Piece-only product catalog and explicit immutable branch initializations are implemented; movement ledger and non-piece units remain out of scope. |
 | BK-033 | P7 Implement POS product sale and atomic stock deduction | Not started | BK-023,BK-024,BK-032 | Double-sale/rollback/insufficient-stock tests |
 | BK-034 | P7 Implement supplement serving sales/conversion | Not started | BK-005,BK-032,BK-033 | Approved conversion; separate line/history/report type |
 | BK-035 | P7 Implement cash movements, expenses and shift reconciliation | Not started | BK-022,BK-024 | Only cash affects drawer; immutable close snapshot |
@@ -173,7 +173,7 @@ Ledger totals: **17 Done, 4 Partial, 1 In progress, 54 Not started (76 total)**.
 
 ## Current progress and next action
 
-- Progress: 17 of 76 tasks Done, 4 Partial (BK-010/BK-011/BK-012/BK-021), 1 In progress (BK-058), and 54 Not started. BK-061 remains Not started.
+- Progress: 17 of 76 tasks Done, 5 Partial (BK-010/BK-011/BK-012/BK-021/BK-032), 1 In progress (BK-058), and 53 Not started. BK-061 remains Not started.
 - BK-012 local proof: prior suite 54 passed/4 skipped; correction RED exposed readiness, uncaught-500, metric-cap and unsupported-audit failures. Latest root/API-local suites each 63 passed/4 skipped; pip check/YAML passed. One fresh local PG attempt was cleaned but its probe script had Python syntax error before PG was exercised; prior independent PostgreSQL evidence applies only to the original implementation. Hosted CI not run.
 - Next: resolve D-015 inventory audit policy to complete BK-021, then remaining D-014 closing/overtime rules for BK-022. Recovery email delivery is deferred until domain purchase; other BK-010/BK-011/BK-012 production gaps remain open.
 
@@ -524,3 +524,17 @@ BK-020:
 
 
 
+
+
+## BK-032 piece-only product/existence starter authorization — 2026-10-20
+
+Authorization: user approved backend products and explicit branch stock initializations, but not fake/demo product loading. Scope is limited to piece-counted products with mandatory nonnegative signed-64-bit initial quantities, immutable per-branch initializations, Admin-only paginated APIs, server-owned actor/time provenance, and additive migration 0012_inventory_foundation down-revision 0011_shift_opening_counts. Product catalog is shared across branches; initializations are branch-isolated. Missing initialization is represented as initialized=false, quantity=null, distinct from explicit zero. No movement ledger, fractional/conversion units, sales, adjustment, deactivation, valuation, stock review/snapshot acceptance, or frontend/demo integration is authorized. Existing D-009 does not establish conversion ratios; fractional support remains unresolved. Migration history identifier 0010_registers_terminals_and_shifts remains a pre-existing 35-character gap and is not changed, so PostgreSQL migration compatibility is not claimed.
+
+Route: delegated direct (bounded Luna writer; multi-file behavior and preparation). Forecast: 500–700 authored changed lines; advisory only, no code-golf. RDD remains clone-local OFF; do not enable. Local regression must first observe absent product route then pass after implementation. Required commands: focused inventory; migration/contract; full API; pip check; scoped diff check. Local synthetic SQLite only; PostgreSQL opt-in explicitly disabled, and no live-PostgreSQL proof. Delivery strategy ask-on-risk; parent owns commit/chain decision.
+
+Progress: 17 Done, 5 Partial (BK-010/BK-011/BK-012/BK-021/BK-032), 1 In progress (BK-058), 53 Not started. BK-021 remains Partial pending inventory audit decision D-015; BK-032 remains Partial pending movement ledger and unresolved inventory policies. Full Engram mirror is pending because current master exceeds the mirror's safe size; preserve this complete local ledger rather than truncating it.
+
+
+Verification: RED observed: synthetic Admin product-creation request returned 404 before the router existed. GREEN: api/tests/test_inventory.py 3 passed; api/tests/test_migrations.py api/tests/test_contract_smoke.py 10 passed; complete api/tests 146 passed, 4 skipped in 120.30s, with one Starlette/httpx deprecation warning. PostgreSQL opt-in was set empty; SQLite synthetic tests only, no live-PostgreSQL concurrency proof. pip check reported no broken requirements. Trailing documentation whitespace was normalized before final checks; scoped diff check is clean. Opening behavior distinguishes absent initialization from explicit zero; product creation does not create stock. Negative, boolean, fractional, string, and signed-64-bit overflow quantities are rejected; missing branch/product and duplicate initialization paths are covered. RDD remained clone-local OFF; no commit/staging performed. Full Engram mirror pending because local master exceeds 50KB; preserve full file.
+
+Correction after independent verification: Shared product-code/name normalizers reject NUL, normalize whitespace, casefold product codes, and enforce final normalized lengths before persistence; both request DTOs and domain queries use them. Both paginated GET routes and domain query functions validate signed-64-bit offsets before SQL. Regression RED reproduced HTTP 500 for expanded `ß` code and overlarge pagination; NUL product code/name requests were accepted before correction. Correction GREEN: inventory tests 4 passed; migration and contract tests 10 passed; full API suite 146 passed, 4 skipped in 120.30s. `pip check` clean and final scoped `git diff --check` clean. Independent review originally counted 474 lines; after correction the independently measured total is 549 (488 new-file lines, 52 additions, 9 deletions), before this final documentation readback. Independent corrected checks: 14 focused tests passed in 14.56s; malformed-input probes returned 422 with no writes, and no candidate-caused blockers remained. Parent spot check: 4 inventory tests passed in 5.66s. The generated __pycache__ files are ignored by Git; no cleanup is needed. Owner selected one commit on the existing backend branch on 2026-10-20: delivery strategy exception-ok for this bounded inventory starter only, accepting the approximately 550-line coherent unit instead of a chain. Work-unit identity: the commit adding this evidence with subject feat(inventory): add piece-based catalog and branch initialization, parent 44d93a3; the resulting hash is recorded in Engram after commit. Only the 16 scoped implementation/test/documentation paths are staged; unrelated frontend changes are excluded. No remote push or PR creation is authorized by this local commit step.

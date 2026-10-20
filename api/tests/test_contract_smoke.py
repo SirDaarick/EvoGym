@@ -46,6 +46,9 @@ EXPECTED_CORE_API_ENDPOINTS = {
     "/api/v1/shifts/current": {"GET"},
     "/api/v1/shifts/open": {"POST"},
     "/api/v1/shifts/{shift_id}": {"GET"},
+    "/api/v1/inventory/products": {"GET", "POST"},
+    "/api/v1/inventory/branches/{branch_id}/initializations": {"POST"},
+    "/api/v1/inventory/branches/{branch_id}/stock": {"GET"},
 }
 
 EXPECTED_HEALTH_ENDPOINTS = {
@@ -106,6 +109,8 @@ EXPECTED_DATABASE_TABLES = {
     "cash_registers",
     "shifts",
     "shift_denomination_counts",
+    "products",
+    "stock_initializations",
 }
 
 
@@ -251,9 +256,9 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
             # Per D-001 single-organization architecture, assert no separate organizations table was created
             assert "organizations" not in table_names
 
-            # 2. Assert Alembic revision reached the shift denomination count migration
+            # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0011_shift_opening_counts"
+            assert head_version == "0012_inventory_foundation"
 
             # 3. Assert member columns exist
             member_columns = {c["name"] for c in inspector.get_columns("members")}

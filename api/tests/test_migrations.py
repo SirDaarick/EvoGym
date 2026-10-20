@@ -19,6 +19,14 @@ def test_new_head_migration_revision_fits_alembic_version_column():
     assert len(revision) <= 32
 
 
+def test_inventory_revision_fits_alembic_version_column():
+    config = Config(str(API_DIR / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(config)
+    revision = scripts.get_revision("0012_inventory_foundation")
+    assert len(revision.revision) <= 32
+    assert revision.down_revision == "0011_shift_opening_counts"
+
+
 def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'fresh.db').as_posix()}"
@@ -49,8 +57,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "member_notes", "member_eligibility_records",
                 "services", "plans", "plan_versions", "plan_version_services",
                 "payment_terminals", "cash_registers", "shifts", "shift_denomination_counts",
+                "products", "stock_initializations",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
             assert connection.execute(text("select id from staff_credentials where id=:id"), {"id": credential_id}).scalar_one() == credential_id
             assert connection.execute(text("select id from security_events where id=:id"), {"id": event_id}).scalar_one() == event_id
@@ -142,7 +151,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
     finally:
         engine.dispose()
 
@@ -168,6 +177,6 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0011_shift_opening_counts"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0012_inventory_foundation"
     finally:
         engine.dispose()

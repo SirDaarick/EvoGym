@@ -97,7 +97,7 @@ For substantial implementation, use one bounded writer with exact edit surfaces 
 
 ### P7 — POS and inventory (BK-032–BK-036)
 
-- **BK-032:** Implement products, receipts, counts, adjustments and stock event ledger. **Accept:** every quantity change has authorized source and unit/valuation; count separate from adjustment.
+- **BK-032:** Implement the authorized piece-only product catalog and explicit immutable branch stock initializations as a starter; movement ledger, non-piece units, receipts, and adjustments remain later work. **Accept:** no fake products or implicit stock; missing initialization remains distinct from explicit zero.
 - **BK-033:** Implement product order posting plus stock deduction transaction. **Accept:** insufficient stock, double-sale race and injected failure leave consistent order/payment/stock state.
 - **BK-034:** Implement supplement serving sale as distinct kind with approved conversion. **Accept:** no full-container deduction for scoop; servings and retail remain distinct.
 - **BK-035:** Implement cash movements, expenses and shift reconciliation from typed sources. **Accept:** non-cash does not inflate drawer; cash sources reconcile exactly.
