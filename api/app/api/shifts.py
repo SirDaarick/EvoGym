@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 
@@ -19,9 +19,12 @@ from app.inventory.queries import (
 from app.inventory.schemas import RegisterInventorySnapshotDTO
 from app.shifts.queries import (
     CashRegisterNotFoundError,
+    ShiftCloseConflictError,
+    ShiftNotFoundError,
     ShiftAlreadyOpenError,
     create_cash_register,
     create_payment_terminal,
+    close_shift,
     get_active_register_ids,
     get_cash_register,
     get_open_shift,
@@ -35,6 +38,7 @@ from app.shifts.queries import (
 )
 from app.shifts.schemas import (
     CashRegisterDTO,
+    CloseShiftDTO,
     CreateCashRegisterDTO,
     CreatePaymentTerminalDTO,
     OpenShiftDTO,
@@ -315,6 +319,48 @@ def open_shift_endpoint(
             raise HTTPException(409, str(exc))
         except ValueError as exc:
             raise HTTPException(422, str(exc))
+
+
+@router.post("/shifts/{shift_id}/close", response_model=ShiftDTO, status_code=201)
+def close_shift_endpoint(
+    shift_id: UUID,
+    payload: CloseShiftDTO,
+    request: Request,
+    response: Response,
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> ShiftDTO:
+    """Persist and freeze physical cash evidence for an open shift."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+
+    try:
+        with factory() as session:
+            observed = get_shift_by_id(session, shift_id)
+            if observed is None:
+                raise HTTPException(404, "Shift not found.")
+            if not principal.is_admin and observed.cash_register.branch_id != principal.branch_id:
+                raise HTTPException(404, "Shift not found.")
+            result = close_shift(
+                session,
+                shift_id=shift_id,
+                closed_by=principal.staff_id,
+                denomination_counts=[item.model_dump() for item in payload.denomination_counts],
+            )
+            session.commit()
+            if result.replayed:
+                response.status_code = 200
+            return to_shift_dto(result.shift)
+    except HTTPException:
+        raise
+    except ShiftNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except CashRegisterNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ShiftCloseConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftDTO)

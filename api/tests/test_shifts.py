@@ -20,6 +20,7 @@ from app.db.models import (
     PaymentTerminal,
     RoleGrant,
     Shift,
+    ShiftClosingDenominationCount,
     ShiftDenominationCount,
     StaffCredential,
     StaffUser,
@@ -29,6 +30,7 @@ from app.main import create_app
 from app.shifts.queries import (
     CashRegisterNotFoundError,
     ShiftAlreadyOpenError,
+    close_shift,
     create_cash_register,
     create_payment_terminal,
     get_cash_register,
@@ -38,7 +40,7 @@ from app.shifts.queries import (
     list_payment_terminals,
     open_shift as _open_shift,
 )
-from app.shifts.schemas import OpenShiftDTO
+from app.shifts.schemas import CloseShiftDTO, OpenShiftDTO
 from test_admin_auth import configured_settings, seed_admin
 
 
@@ -111,6 +113,64 @@ def test_open_shift_allows_explicit_zero_cash_counts():
     assert payload.opening_cash_minor == 0
 
 
+@pytest.mark.parametrize(
+    "counts,message",
+    [
+        ([], "at least 1 item"),
+        ([{"denomination_minor": 100, "quantity": 1}] * 2, "duplicates"),
+        ([{"denomination_minor": 0, "quantity": 1}], "greater than 0"),
+        ([{"denomination_minor": 100, "quantity": -1}], "greater than or equal to 0"),
+        ([{"denomination_minor": 100, "quantity": True}], "valid integer"),
+        ([{"denomination_minor": 100, "quantity": 1.5}], "valid integer"),
+        ([{"denomination_minor": 2**63 - 1, "quantity": 2}], "signed 64-bit"),
+    ],
+)
+def test_close_shift_rejects_invalid_denomination_evidence(counts, message):
+    with pytest.raises(ValidationError, match=message):
+        CloseShiftDTO.model_validate({"denomination_counts": counts})
+
+
+def test_close_shift_endpoint_persists_server_owned_cash_cut(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "close-route", "Close Route")
+        staff_id, token = _seed_receptionist(factory, branch_id, "close-route@example.invalid")
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "close", "Close Register")
+            shift = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 2}],
+            )
+            shift_id = shift.id
+
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {"denomination_counts": [{"denomination_minor": 500, "quantity": 2}]}
+        with TestClient(app) as client:
+            response = client.post(f"/api/v1/shifts/{shift_id}/close", json=body, headers=headers)
+            assert response.status_code == 201, response.text
+            closed = response.json()
+            assert closed["status"] == "closed"
+            assert closed["closed_by"] == str(staff_id)
+            assert closed["expected_cash_at_close_minor"] == 200
+            assert closed["counted_cash_minor"] == 1000
+            assert closed["difference_minor"] == 800
+
+            retry = client.post(f"/api/v1/shifts/{shift_id}/close", json=body, headers=headers)
+            assert retry.status_code == 200
+            assert retry.json() == closed
+            conflict = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                json={"denomination_counts": [{"denomination_minor": 1000, "quantity": 1}]},
+                headers=headers,
+            )
+            assert conflict.status_code == 409
+    finally:
+        engine.dispose()
+
+
 def test_shift_denomination_constraints_reject_invalid_and_duplicate_rows(tmp_path):
     _url, engine, factory = _setup_db(tmp_path)
     try:
@@ -132,6 +192,39 @@ def test_shift_denomination_constraints_reject_invalid_and_duplicate_rows(tmp_pa
                 session.commit()
             session.rollback()
             session.add(ShiftDenominationCount(shift_id=shift_id, denomination_minor=0, quantity=1))
+            with pytest.raises(IntegrityError):
+                session.commit()
+    finally:
+        engine.dispose()
+
+
+def test_shift_closing_denomination_constraints_reject_invalid_and_duplicate_rows(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "close-denom", "Close Denomination")
+        staff_id = _seed_staff_user(factory)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "close-denom", "Close Denomination")
+            shift = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            result = close_shift(
+                session,
+                shift_id=shift.id,
+                closed_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 1}],
+            )
+            shift_id = result.shift.id
+
+        with factory() as session:
+            session.add(ShiftClosingDenominationCount(shift_id=shift_id, denomination_minor=100, quantity=2))
+            with pytest.raises(IntegrityError):
+                session.commit()
+            session.rollback()
+            session.add(ShiftClosingDenominationCount(shift_id=shift_id, denomination_minor=0, quantity=1))
             with pytest.raises(IntegrityError):
                 session.commit()
     finally:

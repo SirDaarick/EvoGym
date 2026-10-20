@@ -31,6 +31,8 @@ def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: Membe
         order=CashSaleOrderDTO(
             id=order.id, branch_id=order.branch_id, register_id=order.register_id,
             shift_id=order.shift_id, member_id=order.member_id, seller_id=order.seller_id,
+            financial_shift_id=order.financial_shift_id, is_overtime=order.is_overtime,
+            cash_included_in_opening=order.cash_included_in_opening,
             currency=order.currency, total_minor=order.total_minor, created_at=order.created_at,
         ),
         item=CashSaleItemDTO(
@@ -83,6 +85,7 @@ def post_cash_membership_sale_endpoint(
                 member_id=payload.member_id,
                 plan_version_id=payload.plan_version_id,
                 idempotency_key=idempotency_key,
+                source_shift_id=payload.source_shift_id,
             )
             session.commit()
             if result.replayed:
@@ -116,7 +119,9 @@ def post_cash_membership_sale_endpoint(
                 raise
             from app.sales.queries import _fingerprint, _load_result
 
-            if existing.request_fingerprint != _fingerprint(register_id, payload.member_id, payload.plan_version_id):
+            if existing.request_fingerprint != _fingerprint(
+                register_id, payload.member_id, payload.plan_version_id, payload.source_shift_id
+            ):
                 raise HTTPException(409, "Idempotency key was already used for a different request.") from exc
             result = _load_result(session, existing, replayed=True)
             response.status_code = 200

@@ -66,8 +66,16 @@ def _add_duration(value: date, count: int, unit: str) -> date:
     raise ValueError("Published membership duration unit is unsupported.")
 
 
-def _fingerprint(register_id: UUID, member_id: UUID, plan_version_id: UUID) -> str:
-    payload = f"{register_id}\n{member_id}\n{plan_version_id}".encode("ascii")
+def _fingerprint(
+    register_id: UUID,
+    member_id: UUID,
+    plan_version_id: UUID,
+    source_shift_id: UUID | None = None,
+) -> str:
+    canonical = f"{register_id}\n{member_id}\n{plan_version_id}"
+    if source_shift_id is not None:
+        canonical += f"\n{source_shift_id}"
+    payload = canonical.encode("ascii")
     return sha256(payload).hexdigest()
 
 
@@ -91,6 +99,7 @@ def post_membership_cash_sale(
     member_id: UUID,
     plan_version_id: UUID,
     idempotency_key: str,
+    source_shift_id: UUID | None = None,
     now: datetime | None = None,
 ) -> CashMembershipSaleResult:
     """Persist order, item, confirmed cash payment, and membership dates atomically.
@@ -110,7 +119,7 @@ def post_membership_cash_sale(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = _fingerprint(register_id, member_id, plan_version_id)
+    fingerprint = _fingerprint(register_id, member_id, plan_version_id, source_shift_id)
     existing = session.scalar(
         select(Order).where(
             Order.seller_id == actor_id,
@@ -126,12 +135,39 @@ def post_membership_cash_sale(
     if register.status != "active":
         raise CashSaleConflictError("Cash register is not active.")
 
-    shift = session.scalar(
+    successor = session.scalar(
         select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open")
         .execution_options(populate_existing=True).with_for_update()
     )
-    if shift is None:
-        raise CashSaleConflictError("An open shift is required for a cash sale.")
+    if source_shift_id is None:
+        if successor is None:
+            raise CashSaleConflictError("An open shift is required for a cash sale.")
+        source_shift = successor
+        financial_shift_id = successor.id
+        is_overtime = False
+    else:
+        source_shift = session.scalar(
+            select(Shift).where(
+                Shift.id == source_shift_id,
+                Shift.cash_register_id == register_id,
+                Shift.status == "closed",
+                Shift.closed_at.is_not(None),
+            ).execution_options(populate_existing=True).with_for_update()
+        )
+        if source_shift is None:
+            raise CashSaleConflictError("Overtime source must be a closed shift on this register.")
+        predecessor_query = select(Shift.id).where(
+            Shift.cash_register_id == register_id,
+            Shift.status == "closed",
+            Shift.closed_at.is_not(None),
+        )
+        predecessor_id = session.scalar(
+            predecessor_query.order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1)
+        )
+        if predecessor_id != source_shift.id:
+            raise CashSaleConflictError("Overtime source must be the latest closed shift on this register.")
+        financial_shift_id = successor.id if successor is not None else None
+        is_overtime = True
 
     member = session.scalar(
         select(Member).where(Member.id == member_id)
@@ -185,7 +221,8 @@ def post_membership_cash_sale(
         raise
 
     order = Order(
-        id=uuid4(), branch_id=register.branch_id, register_id=register.id, shift_id=shift.id,
+        id=uuid4(), branch_id=register.branch_id, register_id=register.id, shift_id=source_shift.id,
+        financial_shift_id=financial_shift_id, is_overtime=is_overtime,
         member_id=member.id, seller_id=actor_id, idempotency_key=idempotency_key,
         request_fingerprint=fingerprint, currency="MXN", total_minor=version.price_minor,
     )

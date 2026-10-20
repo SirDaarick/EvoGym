@@ -46,12 +46,20 @@ def test_opening_inventory_review_revision_fits_and_follows_snapshots():
     assert revision.down_revision == "0013_inventory_snapshots"
 
 
-def test_membership_sales_revision_fits_and_follows_opening_reviews():
+def test_membership_sales_revision_fits_and_follows_inventory_snapshots():
     config = Config(str(API_DIR / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
     revision = scripts.get_revision("0015_membership_sales")
     assert len(revision.revision) <= 32
     assert revision.down_revision == "0014_opening_inventory_reviews"
+
+
+def test_overtime_closing_revision_fits_and_follows_membership_sales():
+    config = Config(str(API_DIR / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(config)
+    revision = scripts.get_revision("0016_overtime_shift_close")
+    assert len(revision.revision) <= 32
+    assert revision.down_revision == "0015_membership_sales"
 
 
 def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monkeypatch):
@@ -87,9 +95,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "products", "stock_initializations",
                 "register_inventory_snapshots", "register_inventory_snapshot_items",
                 "shift_inventory_reviews", "shift_inventory_observations",
-                "orders", "order_items", "payments", "membership_periods",
+                "orders", "order_items", "payments", "membership_periods", "shift_closing_denomination_counts",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 128
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
@@ -129,7 +137,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
     finally:
         engine.dispose()
 
@@ -176,6 +184,7 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "CREATE TABLE cash_registers" in generated_sql
     assert "CREATE TABLE shifts" in generated_sql
     assert "CREATE TABLE shift_denomination_counts" in generated_sql
+    assert "CREATE TABLE shift_closing_denomination_counts" in generated_sql
     assert "uq_staff_role_grants_org_admin" in generated_sql
     assert "uq_staff_active_paired_device" in generated_sql
     assert "uq_shifts_active_per_register" in generated_sql
@@ -212,7 +221,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
     finally:
         engine.dispose()
 
@@ -238,7 +247,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
     finally:
         engine.dispose()
 
@@ -322,7 +331,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -355,7 +364,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -366,5 +375,74 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert connection.execute(text("select timezone from branches where id=:id"), {"id": branch_id}).scalar_one() == "America/Mexico_City"
+    finally:
+        engine.dispose()
+
+
+def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'overtime-migration.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0015_membership_sales")
+    engine = create_engine(database_url)
+    branch_id, staff_id, register_id, shift_id, member_id, order_id = (uuid4().hex for _ in range(6))
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("insert into branches (id, code, name) values (:id, 'overtime', 'Overtime Branch')"),
+                {"id": branch_id},
+            )
+            connection.execute(
+                text("insert into staff_users (id, login_identifier) values (:id, 'overtime@example.invalid')"),
+                {"id": staff_id},
+            )
+            connection.execute(
+                text("insert into cash_registers (id, branch_id, code, name) values (:id, :branch, 'front', 'Front')"),
+                {"id": register_id, "branch": branch_id},
+            )
+            connection.execute(
+                text("insert into shifts (id, cash_register_id, opened_by, opening_cash_minor) values (:id, :register, :staff, 500)"),
+                {"id": shift_id, "register": register_id, "staff": staff_id},
+            )
+            connection.execute(
+                text("insert into members (id, member_number, full_name, phone) values (:id, 'M-OT', 'Overtime Member', '5550100')"),
+                {"id": member_id},
+            )
+            connection.execute(
+                text("insert into orders (id, branch_id, register_id, shift_id, member_id, seller_id, idempotency_key, request_fingerprint, total_minor) values (:id, :branch, :register, :shift, :member, :staff, 'migration-key', :fingerprint, 125000)"),
+                {
+                    "id": order_id,
+                    "branch": branch_id,
+                    "register": register_id,
+                    "shift": shift_id,
+                    "member": member_id,
+                    "staff": staff_id,
+                    "fingerprint": "a" * 64,
+                },
+            )
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("select shift_id, financial_shift_id, is_overtime, cash_included_in_opening from orders where id=:id"),
+                {"id": order_id},
+            ).one()
+            assert row == (shift_id, shift_id, 0, 0)
+            assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+
+        command.downgrade(config, "0015_membership_sales")
+        with engine.connect() as connection:
+            assert "shift_closing_denomination_counts" not in inspect(connection).get_table_names()
+            assert connection.execute(text("select count(*) from orders where id=:id"), {"id": order_id}).scalar_one() == 1
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("select financial_shift_id from orders where id=:id"), {"id": order_id}
+            ).scalar_one() == shift_id
     finally:
         engine.dispose()

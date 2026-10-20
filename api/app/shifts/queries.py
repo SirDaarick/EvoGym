@@ -1,11 +1,22 @@
 """Database queries and operations for terminals, cash registers, and shifts."""
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount, ShiftInventoryObservation, ShiftInventoryReview
+from app.db.models.orders import Order, Payment
+from app.db.models.shifts import (
+    CashRegister,
+    PaymentTerminal,
+    Shift,
+    ShiftClosingDenominationCount,
+    ShiftDenominationCount,
+    ShiftInventoryObservation,
+    ShiftInventoryReview,
+)
 from app.inventory.queries import validate_opening_inventory_snapshot
 from app.shifts.schemas import (
     CashRegisterDTO,
@@ -21,6 +32,20 @@ class ShiftAlreadyOpenError(Exception):
 
 class CashRegisterNotFoundError(Exception):
     """Raised when a specified cash register cannot be found."""
+
+
+class ShiftNotFoundError(Exception):
+    """Raised when a shift cannot be found."""
+
+
+class ShiftCloseConflictError(Exception):
+    """Raised when a shift cannot be closed or a frozen close is retried differently."""
+
+
+@dataclass(frozen=True)
+class ShiftCloseResult:
+    shift: Shift
+    replayed: bool
 
 
 def create_payment_terminal(
@@ -240,7 +265,114 @@ def open_shift(
             f"An open shift is already active on cash register {register_id}."
         ) from exc
 
+    # The mandatory opening count already includes pending overtime cash. Link it
+    # under the same register lock and mark it as part of the physical baseline.
+    session.execute(
+        update(Order)
+        .where(
+            Order.register_id == register_id,
+            Order.is_overtime.is_(True),
+            Order.financial_shift_id.is_(None),
+        )
+        .values(financial_shift_id=shift.id, cash_included_in_opening=True)
+    )
+    session.flush()
+
     return shift
+
+
+def close_shift(
+    session: Session,
+    *,
+    shift_id: UUID,
+    closed_by: UUID,
+    denomination_counts: list[dict[str, int]],
+    now: datetime | None = None,
+) -> ShiftCloseResult:
+    """Freeze a shift's physical cash cut while serializing against register posting/opening."""
+    maximum = 2**63 - 1
+    if not isinstance(denomination_counts, list) or not denomination_counts:
+        raise ValueError("At least one closing denomination count is required.")
+    total_counted = 0
+    seen: set[int] = set()
+    validated: list[tuple[int, int]] = []
+    for item in denomination_counts:
+        if not isinstance(item, dict):
+            raise ValueError("Closing denomination counts must be mappings.")
+        denomination = item.get("denomination_minor")
+        quantity = item.get("quantity")
+        if type(denomination) is not int or not 0 < denomination <= maximum:
+            raise ValueError("Denominations must be positive signed 64-bit integers.")
+        if type(quantity) is not int or not 0 <= quantity <= maximum:
+            raise ValueError("Quantities must be nonnegative signed 64-bit integers.")
+        if denomination in seen:
+            raise ValueError("Closing denomination counts cannot contain duplicates.")
+        seen.add(denomination)
+        value = denomination * quantity
+        if value > maximum or total_counted > maximum - value:
+            raise ValueError("Closing denomination total exceeds signed 64-bit minor units.")
+        total_counted += value
+        validated.append((denomination, quantity))
+
+    register_id = session.scalar(select(Shift.cash_register_id).where(Shift.id == shift_id))
+    if register_id is None:
+        raise ShiftNotFoundError("Shift not found.")
+    register = session.scalar(
+        select(CashRegister).where(CashRegister.id == register_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if register is None:
+        raise CashRegisterNotFoundError("Cash register not found.")
+    shift = session.scalar(
+        select(Shift).where(Shift.id == shift_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if shift is None:
+        raise ShiftNotFoundError("Shift not found.")
+
+    if shift.status == "closed":
+        stored = sorted(
+            (item.denomination_minor, item.quantity) for item in shift.closing_denomination_counts
+        )
+        if stored != sorted(validated):
+            raise ShiftCloseConflictError("A closed shift's cash cut cannot be changed.")
+        return ShiftCloseResult(shift, replayed=True)
+    if shift.status != "open":
+        raise ShiftCloseConflictError("Only an open shift can be closed.")
+
+    inflow = 0
+    amounts = session.scalars(
+        select(Payment.amount_minor)
+        .join(Order, Order.id == Payment.order_id)
+        .where(
+            Order.financial_shift_id == shift.id,
+            Order.cash_included_in_opening.is_(False),
+            Payment.method == "cash",
+            Payment.status == "confirmed",
+        )
+    )
+    for amount in amounts:
+        if type(amount) is not int or amount < 0 or inflow > maximum - amount:
+            raise ValueError("Cash inflow exceeds signed 64-bit minor units.")
+        inflow += amount
+    if type(shift.opening_cash_minor) is not int or shift.opening_cash_minor < 0:
+        raise ValueError("Opening cash is outside supported minor-unit bounds.")
+    if shift.opening_cash_minor > maximum - inflow:
+        raise ValueError("Expected closing cash exceeds signed 64-bit minor units.")
+    expected = shift.opening_cash_minor + inflow
+
+    shift.closed_by = closed_by
+    shift.closed_at = now or datetime.now(timezone.utc)
+    shift.expected_cash_at_close_minor = expected
+    shift.counted_cash_minor = total_counted
+    shift.difference_minor = total_counted - expected
+    shift.status = "closed"
+    shift.closing_denomination_counts = [
+        ShiftClosingDenominationCount(denomination_minor=denomination, quantity=quantity)
+        for denomination, quantity in validated
+    ]
+    session.flush()
+    return ShiftCloseResult(shift, replayed=False)
 
 
 def get_shift_by_id(
@@ -282,6 +414,7 @@ def to_shift_dto(shift: Shift) -> ShiftDTO:
         "status": shift.status,
         "opening_cash_minor": shift.opening_cash_minor,
         "denomination_counts": shift.denomination_counts,
+        "closing_denomination_counts": shift.closing_denomination_counts,
         "expected_cash_at_close_minor": shift.expected_cash_at_close_minor,
         "counted_cash_minor": shift.counted_cash_minor,
         "difference_minor": shift.difference_minor,

@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Uuid, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -17,14 +17,26 @@ class Order(Base):
         CheckConstraint("total_minor >= 0", name="ck_orders_total_nonnegative"),
         CheckConstraint("length(idempotency_key) BETWEEN 1 AND 128", name="ck_orders_idempotency_key_length"),
         CheckConstraint("length(request_fingerprint) = 64", name="ck_orders_fingerprint_length"),
+        CheckConstraint(
+            "cash_included_in_opening = false OR (is_overtime = true AND financial_shift_id IS NOT NULL)",
+            name="ck_orders_opening_cash_attribution",
+        ),
         UniqueConstraint("seller_id", "branch_id", "idempotency_key", name="uq_orders_seller_branch_idempotency"),
         Index("ix_orders_member_created", "member_id", "created_at"),
+        Index("ix_orders_financial_shift_id", "financial_shift_id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     branch_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False)
     register_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("cash_registers.id", ondelete="RESTRICT"), nullable=False)
     shift_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="RESTRICT"), nullable=False)
+    financial_shift_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="RESTRICT"), nullable=True
+    )
+    is_overtime: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    cash_included_in_opening: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("members.id", ondelete="RESTRICT"), nullable=False)
     seller_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)

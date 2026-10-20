@@ -90,6 +90,7 @@ class ShiftDTO(BaseModel):
     status: str
     opening_cash_minor: int
     denomination_counts: list["ShiftDenominationCountDTO"] = Field(default_factory=list)
+    closing_denomination_counts: list["ShiftClosingDenominationCountDTO"] = Field(default_factory=list)
     inventory_review: "ShiftInventoryReviewDTO | None" = None
     expected_cash_at_close_minor: int | None = None
     counted_cash_minor: int | None = None
@@ -150,6 +151,33 @@ class ShiftDenominationCountDTO(BaseModel):
 
     denomination_minor: StrictInt = Field(..., gt=0, le=MAX_MINOR_UNITS)
     quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+
+
+class ShiftClosingDenominationCountDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    denomination_minor: StrictInt = Field(..., gt=0, le=MAX_MINOR_UNITS)
+    quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+
+
+class CloseShiftDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    denomination_counts: list[ShiftClosingDenominationCountDTO] = Field(..., min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _validate_counts(self) -> "CloseShiftDTO":
+        seen: set[int] = set()
+        total = 0
+        for item in self.denomination_counts:
+            if item.denomination_minor in seen:
+                raise ValueError("Closing denomination counts cannot contain duplicates.")
+            seen.add(item.denomination_minor)
+            amount = item.denomination_minor * item.quantity
+            if amount > MAX_MINOR_UNITS or total > MAX_MINOR_UNITS - amount:
+                raise ValueError("Closing denomination total exceeds signed 64-bit minor units.")
+            total += amount
+        return self
 
 
 class ShiftInventoryObservationInputDTO(BaseModel):

@@ -7,9 +7,10 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion
+from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion, Shift
 from app.main import create_app
 from app.sales.queries import _add_duration, post_membership_cash_sale
+from app.shifts.queries import close_shift
 from test_admin_auth import configured_settings
 from test_shifts import _seed_receptionist, _setup_db, _seed_branch, open_shift
 
@@ -105,6 +106,191 @@ def test_cash_membership_sale_activates_once_on_an_authorized_open_shift(tmp_pat
             assert session.scalar(select(func.count()).select_from(Order)) == 2
             assert session.scalar(select(func.count()).select_from(OrderItem)) == 2
             assert session.scalar(select(func.count()).select_from(Payment)) == 2
+    finally:
+        engine.dispose()
+
+
+def test_overtime_sale_links_to_next_shift_without_double_counting_opening_cash(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "overtime", "Overtime Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "overtime@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-OT", full_name="Overtime Member", phone="5550111")
+            plan = Plan(code="overtime-month", name="Overtime Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id,
+                version_number=1,
+                name="Overtime Month",
+                price_minor=125000,
+                currency="MXN",
+                duration_value=1,
+                duration_unit="month",
+                is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+
+            register = create_cash_register(session, branch_id, "overtime", "Overtime Register")
+            source = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            register_id, source_id, member_id, version_id = register.id, source.id, member.id, version.id
+
+        with factory.begin() as session:
+            closed_source = close_shift(
+                session,
+                shift_id=source_id,
+                closed_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            assert closed_source.shift.expected_cash_at_close_minor == 0
+            source_cut_time = closed_source.shift.closed_at
+
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "overtime-pending"}
+        path = f"/api/v1/registers/{register_id}/membership-sales"
+        body = {
+            "member_id": str(member_id),
+            "plan_version_id": str(version_id),
+            "source_shift_id": str(source_id),
+        }
+        with TestClient(app) as client:
+            missing_source = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "overtime-no-source"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert missing_source.status_code == 409
+            forged_source = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "overtime-forged-source"},
+                json={**body, "source_shift_id": str(uuid4())},
+            )
+            assert forged_source.status_code == 409
+            pending = client.post(path, headers=headers, json=body)
+            assert pending.status_code == 201, pending.text
+            pending_sale = pending.json()
+            assert pending_sale["order"]["source_shift_id"] == str(source_id)
+            assert pending_sale["order"]["financial_shift_id"] is None
+            assert pending_sale["order"]["is_overtime"] is True
+            assert pending_sale["order"]["cash_included_in_opening"] is False
+            assert pending_sale["order"]["seller_id"] == str(staff_id)
+            assert client.post(path, headers=headers, json=body).status_code == 200
+            changed_source_replay = client.post(
+                path,
+                headers=headers,
+                json={**body, "source_shift_id": str(uuid4())},
+            )
+            assert changed_source_replay.status_code == 409
+
+        opening_counts = [{"denomination_minor": 5000, "quantity": 25}]
+        rolled_back = factory()
+        try:
+            rolled_back_shift = open_shift(
+                rolled_back,
+                register_id=register_id,
+                opened_by=staff_id,
+                denomination_counts=opening_counts,
+            )
+            rolled_back_id = rolled_back_shift.id
+            rolled_back.rollback()
+        finally:
+            rolled_back.close()
+        with factory() as session:
+            pending_order = session.scalar(select(Order).where(Order.id == UUID(pending_sale["order"]["id"])))
+            assert pending_order.financial_shift_id is None
+            assert pending_order.cash_included_in_opening is False
+            assert session.get(Shift, rolled_back_id) is None
+
+        with factory.begin() as session:
+            incoming = open_shift(
+                session,
+                register_id=register_id,
+                opened_by=staff_id,
+                denomination_counts=opening_counts,
+            )
+            incoming_id = incoming.id
+
+        with TestClient(app) as client:
+            replay_after_open = client.post(path, headers=headers, json=body)
+            assert replay_after_open.status_code == 200
+            linked = replay_after_open.json()["order"]
+            assert linked["financial_shift_id"] == str(incoming_id)
+            assert linked["cash_included_in_opening"] is True
+            assert replay_after_open.json()["payment"]["amount_minor"] == 125000
+
+        with factory.begin() as session:
+            incoming_cut = close_shift(
+                session,
+                shift_id=incoming_id,
+                closed_by=staff_id,
+                denomination_counts=opening_counts,
+            )
+            assert incoming_cut.shift.expected_cash_at_close_minor == 125000
+            assert incoming_cut.shift.counted_cash_minor == 125000
+            assert incoming_cut.shift.difference_minor == 0
+
+        with factory.begin() as session:
+            outgoing = open_shift(
+                session,
+                register_id=register_id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            outgoing_id = outgoing.id
+
+        with TestClient(app) as client:
+            current_overtime = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "overtime-open-successor"},
+                json={
+                    "member_id": str(member_id),
+                    "plan_version_id": str(version_id),
+                    "source_shift_id": str(incoming_id),
+                },
+            )
+            assert current_overtime.status_code == 201, current_overtime.text
+            current_order = current_overtime.json()["order"]
+            assert current_order["source_shift_id"] == str(incoming_id)
+            assert current_order["financial_shift_id"] == str(outgoing_id)
+            assert current_order["is_overtime"] is True
+            assert current_order["cash_included_in_opening"] is False
+            stale_source = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "overtime-stale-source"},
+                json={
+                    "member_id": str(member_id),
+                    "plan_version_id": str(version_id),
+                    "source_shift_id": str(source_id),
+                },
+            )
+            assert stale_source.status_code == 409
+
+        with factory.begin() as session:
+            outgoing_cut = close_shift(
+                session,
+                shift_id=outgoing_id,
+                closed_by=staff_id,
+                denomination_counts=[{"denomination_minor": 5000, "quantity": 25}],
+            )
+            assert outgoing_cut.shift.expected_cash_at_close_minor == 125000
+            assert outgoing_cut.shift.counted_cash_minor == 125000
+
+        with factory() as session:
+            frozen_source = session.get(Shift, source_id)
+            assert frozen_source.status == "closed"
+            assert frozen_source.closed_at == source_cut_time.replace(tzinfo=None)
+            assert frozen_source.expected_cash_at_close_minor == 0
+            assert session.scalar(select(func.count()).select_from(Order)) == 2
+            assert session.scalar(select(func.count()).select_from(Payment)) == 2
+            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 2
     finally:
         engine.dispose()
 

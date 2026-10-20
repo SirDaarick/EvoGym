@@ -85,7 +85,7 @@ def test_postgresql_fresh_full_upgrade_and_repeated_head_preserve_inventory_rows
         command.upgrade(config, "head")
         assert _version_width(engine, schema) == 128
         with engine.connect() as connection:
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
             assert connection.execute(
                 text("select quantity from stock_initializations where id=:id"), {"id": initialization_id}
             ).scalar_one() == 7
@@ -108,7 +108,7 @@ def test_postgresql_existing_varchar32_version_table_widens_before_revision_upda
 
         assert _version_width(engine, schema) == 128
         with engine.connect() as connection:
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
             assert "products" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
@@ -153,6 +153,62 @@ def test_postgresql_predecessor_upgrade_and_scoped_downgrade_keep_shift_counts(p
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25500
             assert connection.execute(text("select quantity from shift_denomination_counts where id=:id"), {"id": count_id}).scalar_one() == 3
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0015_membership_sales"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+    finally:
+        engine.dispose()
+
+
+def test_postgresql_cash_shift_migration_backfills_and_reverses_only_new_fields(postgres_migration_target):
+    url, schema = postgres_migration_target
+    config = _config()
+    command.upgrade(config, "0015_membership_sales")
+    engine = create_engine(url)
+    branch_id, staff_id, register_id, shift_id, member_id, order_id = (uuid4() for _ in range(6))
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("insert into branches (id, code, name) values (:id, 'cash-proof', 'Cash Proof')"),
+                {"id": branch_id},
+            )
+            connection.execute(
+                text("insert into staff_users (id, login_identifier) values (:id, 'cash-proof@example.invalid')"),
+                {"id": staff_id},
+            )
+            connection.execute(
+                text("insert into members (id, member_number, full_name, phone) values (:id, 'SOC-PG-PROOF', 'PG Proof', '5550101')"),
+                {"id": member_id},
+            )
+            connection.execute(
+                text("insert into cash_registers (id, branch_id, code, name) values (:id, :branch, 'cash-proof', 'Cash Proof')"),
+                {"id": register_id, "branch": branch_id},
+            )
+            connection.execute(
+                text("insert into shifts (id, cash_register_id, opened_by, opening_cash_minor) values (:id, :register, :staff, 1000)"),
+                {"id": shift_id, "register": register_id, "staff": staff_id},
+            )
+            connection.execute(
+                text("insert into orders (id, branch_id, register_id, shift_id, member_id, seller_id, idempotency_key, request_fingerprint, currency, total_minor) values (:id, :branch, :register, :shift, :member, :staff, 'cash-proof', :fingerprint, 'MXN', 9500)"),
+                {
+                    "id": order_id, "branch": branch_id, "register": register_id, "shift": shift_id,
+                    "member": member_id, "staff": staff_id, "fingerprint": "a" * 64,
+                },
+            )
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            migrated = connection.execute(
+                text("select financial_shift_id, is_overtime, cash_included_in_opening from orders where id=:id"),
+                {"id": order_id},
+            ).one()
+            assert migrated == (shift_id, False, False)
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0016_overtime_shift_close"
+
+        command.downgrade(config, "0015_membership_sales")
+        assert "financial_shift_id" not in {column["name"] for column in inspect(engine).get_columns("orders", schema=schema)}
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("select financial_shift_id from orders where id=:id"), {"id": order_id}
+            ).scalar_one() == shift_id
     finally:
         engine.dispose()

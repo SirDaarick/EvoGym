@@ -10,6 +10,7 @@ class CashMembershipSaleRequest(BaseModel):
 
     member_id: UUID
     plan_version_id: UUID
+    source_shift_id: UUID | None = None
 
 
 class CashSaleOrderDTO(BaseModel):
@@ -17,6 +18,9 @@ class CashSaleOrderDTO(BaseModel):
     branch_id: UUID
     register_id: UUID
     source_shift_id: UUID = Field(validation_alias="shift_id")
+    financial_shift_id: UUID | None
+    is_overtime: bool
+    cash_included_in_opening: bool
     member_id: UUID
     seller_id: UUID
     currency: str

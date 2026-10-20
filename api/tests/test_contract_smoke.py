@@ -48,6 +48,7 @@ EXPECTED_CORE_API_ENDPOINTS = {
     "/api/v1/registers/{register_id}/membership-sales": {"POST"},
     "/api/v1/shifts/current": {"GET"},
     "/api/v1/shifts/open": {"POST"},
+    "/api/v1/shifts/{shift_id}/close": {"POST"},
     "/api/v1/shifts/{shift_id}": {"GET"},
     "/api/v1/inventory/products": {"GET", "POST"},
     "/api/v1/inventory/branches/{branch_id}/initializations": {"POST"},
@@ -112,6 +113,7 @@ EXPECTED_DATABASE_TABLES = {
     "cash_registers",
     "shifts",
     "shift_denomination_counts",
+    "shift_closing_denomination_counts",
     "products",
     "stock_initializations",
     "register_inventory_snapshots",
@@ -269,7 +271,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0015_membership_sales"
+            assert head_version == "0016_overtime_shift_close"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

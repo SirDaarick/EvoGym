@@ -1,6 +1,6 @@
 # EvoGym API
 
-The API is a new service boundary under `api/`. It does not read or write the root `backend/` notebook workspace and has no domain routes, HTTP authentication, or frontend integration. It contains internal staff PIN/session authorization foundations, health endpoints, and a transaction-owned audit append primitive; no provisioning or Admin login workflow is exposed. Database/session helpers and explicit migrations are available.
+The API is a service boundary under `api/`. It does not read or write the root `backend/` notebook workspace and has no frontend integration. It contains staff PIN/session authorization, member and cash-membership workflows, piece-only inventory foundations, shift opening/review and cash-cut APIs, health endpoints, and a transaction-owned audit append primitive; no provisioning or Admin login workflow is exposed. Database/session helpers and explicit migrations are available.
 
 ## Local development
 
@@ -14,7 +14,14 @@ Set-Location api
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --no-access-log
 ```
 
-The server binds to loopback only. In development, visit `http://127.0.0.1:8000/docs`; `/health/live` is independent of the database and `/health/ready` returns a generic 503 when no configured database is available. No business endpoints are implemented yet. Stop it with `Ctrl+C`.
+The server binds to loopback only. In development, visit `http://127.0.0.1:8000/docs`; `/health/live` is independent of the database and `/health/ready` returns a generic 503 when no configured database is available. Stop it with `Ctrl+C`.
+
+### Cash shift lifecycle
+
+- `POST /api/v1/shifts/open` opens a shift with mandatory denomination counts and the authorized inventory snapshot/review. Opening links any pending post-cut overtime membership cash sales to the new financial shift; those proceeds are already part of the physical opening count.
+- `POST /api/v1/shifts/{shift_id}/close` freezes mandatory denomination counts, the server-derived expected cash, counted cash, difference, actor, and close time. An identical count retry returns the frozen close; changed counts conflict.
+- Cash membership sales use `POST /api/v1/registers/{register_id}/membership-sales`. After a cut, a sale may cite the latest closed `source_shift_id`; its seller and source shift remain historical attribution, while proceeds go to the successor open shift or remain pending until it opens. The register lock serializes posting, opening, and closing.
+- Example: if an opening count of 1,000 already includes 200 pending overtime cash, expected cash remains 1,000 with no later drawer movements, not 1,200. This API slice handles membership cash sales only; it is not a general financial-history/reporting or discrepancy-attribution system.
 
 Run the deterministic in-process suite from the repository root:
 
