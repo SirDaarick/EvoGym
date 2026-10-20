@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
+from collections import OrderedDict
+from threading import Lock, BoundedSemaphore
 
 from fastapi import FastAPI
 from sqlalchemy import text
@@ -12,6 +14,84 @@ from app.health import BoundedReadinessProbe, build_health_router
 from app.observability.metrics import RequestMetrics
 from app.observability.logging import install_safe_logging
 from app.observability.request_id import RequestIdMiddleware
+from app.db.session import create_session_factory
+from app.api.admin_auth import router as admin_auth_router
+from app.api.admin_sessions import router as admin_sessions_router
+from app.api.admin_enrollment import router as admin_enrollment_router
+from app.api.device_pairing import router as device_pairing_router
+from app.api.members import router as members_router
+from app.api.catalog import router as catalog_router
+from app.api.shifts import router as shifts_router
+
+
+class _AuthRateLimiter:
+    """Bounded process-local throttling; deployment must use a shared edge limit across workers."""
+    def __init__(self, capacity: int = 2048):
+        self._capacity = capacity
+        self._lock = Lock()
+        self._entries = OrderedDict()
+
+    def allow(self, key: str, maximum: int, window_seconds: int) -> bool:
+        now = __import__("time").monotonic()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or now - entry[0] >= window_seconds:
+                self._entries[key] = (now, 1)
+                allowed = True
+            else:
+                self._entries[key] = (entry[0], entry[1] + 1)
+                allowed = entry[1] < maximum
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._capacity:
+                self._entries.popitem(last=False)
+            return allowed
+
+
+class _AuthBodyLimitMiddleware:
+    """Buffer only bounded auth request bodies before JSON parsing or hashing."""
+    _paths = {
+        "/api/v1/auth/sessions",
+        "/api/v1/auth/recovery/start",
+        "/api/v1/auth/recovery/complete",
+        "/api/v1/auth/devices/pair",
+    }
+
+    def __init__(self, app, maximum: int):
+        self.app = app
+        self.maximum = maximum
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") not in self._paths:
+            await self.app(scope, receive, send)
+            return
+        chunks = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.maximum:
+                identifier = scope.get("state", {}).get("request_id", "")
+                payload = __import__("json").dumps({"error": {"code": "request_too_large", "message": "The request is too large.", "request_id": identifier}}, separators=(",", ":")).encode()
+                await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(payload)).encode())]})
+                await send({"type": "http.response.body", "body": payload, "more_body": False})
+                return
+            chunks.append(body)
+            if not message.get("more_body", False):
+                break
+        body = b"".join(chunks)
+        sent = False
+
+        async def replay():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        await self.app(scope, replay, send)
 
 
 def _readiness_probe(engine: Engine | None) -> bool:
@@ -25,7 +105,7 @@ def _readiness_probe(engine: Engine | None) -> bool:
         return False
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> FastAPI:
     configuration = settings or get_settings()
     docs_url = "/docs" if configuration.docs_enabled else None
     redoc_url = "/redoc" if configuration.docs_enabled else None
@@ -55,6 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 connect_args=connect_args,
             )
         application.state.database_engine = engine
+        application.state.session_factory = create_session_factory(engine) if engine is not None else None
         try:
             yield
         finally:
@@ -62,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if engine is not None:
                 engine.dispose()
             application.state.database_engine = None
+            application.state.session_factory = None
 
     application = FastAPI(
         title="EvoGym API",
@@ -74,10 +156,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.request_metrics = RequestMetrics()
+    application.state.settings = configuration
+    application.state.session_factory = None
+    application.state.recovery_delivery = recovery_delivery
+    application.state.auth_rate_limiter = _AuthRateLimiter()
+    application.state.password_hash_capacity = BoundedSemaphore(configuration.auth_max_concurrent_hashes or 2)
     install_safe_logging(logging.getLogger("evogym.api"))
     application.include_router(build_health_router(readiness_probe))
+    application.include_router(admin_auth_router)
+    application.include_router(admin_sessions_router)
+    application.include_router(admin_enrollment_router)
+    application.include_router(device_pairing_router)
+    application.include_router(members_router)
+    application.include_router(catalog_router)
+    application.include_router(shifts_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
+    application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)
     return application
 
 

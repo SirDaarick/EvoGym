@@ -133,10 +133,14 @@ def validate_session(
     if digest is None:
         raise AuthorizationDenied("Authorization denied")
     with session_factory.begin() as session:
-        row = session.scalar(select(StaffSession).where(StaffSession.token_digest == digest).with_for_update())
+        initial = session.scalar(select(StaffSession).where(StaffSession.token_digest == digest))
+        if initial is None:
+            raise AuthorizationDenied("Authorization denied")
+        staff, branch, grants = _lock_authority(session, initial.staff_id, initial.branch_id)
+        row = session.scalar(select(StaffSession).where(StaffSession.id == initial.id)
+                             .execution_options(populate_existing=True).with_for_update())
         if row is None:
             raise AuthorizationDenied("Authorization denied")
-        staff, branch, grants = _lock_authority(session, row.staff_id, row.branch_id)
         current = _aware_utc(clock())
         if row.revoked_at is not None or current >= _stored_utc(row.expires_at):
             raise AuthorizationDenied("Authorization denied")

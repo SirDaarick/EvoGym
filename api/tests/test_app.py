@@ -47,10 +47,11 @@ def test_production_app_disables_docs_and_openapi():
     assert request(app, "/openapi.json").status_code == 404
 
 
-def test_app_does_not_expose_configuration_values():
+def test_app_stores_typed_configuration():
     app = create_test_app(Settings(environment="development", debug=False, _env_file=None))
 
-    assert not hasattr(app.state, "settings")
+    assert isinstance(app.state.settings, Settings)
+    assert app.state.settings.environment == "development"
 
 
 def test_debug_setting_never_enables_exception_detail_pages():

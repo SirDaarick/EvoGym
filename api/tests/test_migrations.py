@@ -35,14 +35,25 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert set(inspect(connection).get_table_names()) == {
-                "alembic_version", "staff_users", "staff_credentials", "security_events", "branches", "staff_role_grants", "staff_sessions", "audit_events"
+                "alembic_version", "staff_users", "staff_credentials", "security_events", "branches", "staff_role_grants", "staff_sessions", "audit_events",
+                "admin_password_credentials", "admin_recovery_tokens", "admin_auth_events",
+                "staff_enrollment_codes", "staff_device_pairing_codes", "staff_paired_devices", "members",
+                "member_notes", "member_eligibility_records",
+                "services", "plans", "plan_versions", "plan_version_services",
+                "payment_terminals", "cash_registers", "shifts",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0004_audit_events"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_registers_terminals_and_shifts"
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
             assert connection.execute(text("select id from staff_credentials where id=:id"), {"id": credential_id}).scalar_one() == credential_id
             assert connection.execute(text("select id from security_events where id=:id"), {"id": event_id}).scalar_one() == event_id
             grant_indexes = {index["name"] for index in inspect(connection).get_indexes("staff_role_grants")}
             assert "uq_staff_role_grants_org_admin" in grant_indexes
+            paired_indexes = {index["name"] for index in inspect(connection).get_indexes("staff_paired_devices")}
+            assert "uq_staff_active_paired_device" in paired_indexes
+            member_indexes = {index["name"] for index in inspect(connection).get_indexes("members")}
+            assert "ix_members_member_number" in member_indexes
+            shift_indexes = {index["name"] for index in inspect(connection).get_indexes("shifts")}
+            assert "uq_shifts_active_per_register" in shift_indexes
     finally:
         engine.dispose()
 
@@ -70,7 +81,26 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "CREATE TABLE staff_role_grants" in generated_sql
     assert "CREATE TABLE staff_sessions" in generated_sql
     assert "CREATE TABLE audit_events" in generated_sql
+    assert "CREATE TABLE admin_password_credentials" in generated_sql
+    assert "CREATE TABLE admin_recovery_tokens" in generated_sql
+    assert "CREATE TABLE admin_auth_events" in generated_sql
+    assert "CREATE TABLE staff_enrollment_codes" in generated_sql
+    assert "CREATE TABLE staff_device_pairing_codes" in generated_sql
+    assert "CREATE TABLE staff_paired_devices" in generated_sql
+    assert "CREATE TABLE members" in generated_sql
+    assert "CREATE TABLE member_notes" in generated_sql
+    assert "CREATE TABLE member_eligibility_records" in generated_sql
+    assert "CREATE TABLE services" in generated_sql
+    assert "CREATE TABLE plans" in generated_sql
+    assert "CREATE TABLE plan_versions" in generated_sql
+    assert "CREATE TABLE plan_version_services" in generated_sql
+    assert "CREATE TABLE payment_terminals" in generated_sql
+    assert "CREATE TABLE cash_registers" in generated_sql
+    assert "CREATE TABLE shifts" in generated_sql
     assert "uq_staff_role_grants_org_admin" in generated_sql
+    assert "uq_staff_active_paired_device" in generated_sql
+    assert "uq_shifts_active_per_register" in generated_sql
+    assert "ix_members_member_number" in generated_sql
     assert "WHERE role = 'admin' AND scope_kind = 'organization'" in generated_sql
     assert "offline-only" not in captured.out + captured.err
 
@@ -103,6 +133,6 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0004_audit_events"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0010_registers_terminals_and_shifts"
     finally:
         engine.dispose()
