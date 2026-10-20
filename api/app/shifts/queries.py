@@ -3,13 +3,15 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount
+from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount, ShiftInventoryObservation, ShiftInventoryReview
+from app.inventory.queries import validate_opening_inventory_snapshot
 from app.shifts.schemas import (
     CashRegisterDTO,
     PaymentTerminalDTO,
     ShiftDTO,
+    ShiftInventoryReviewDTO,
 )
 
 
@@ -117,6 +119,10 @@ def get_open_shift(
             Shift.cash_register_id == register_id,
             Shift.status.in_(["open", "closing"]),
         )
+        .options(
+            selectinload(Shift.inventory_review).joinedload(ShiftInventoryReview.snapshot),
+            selectinload(Shift.inventory_review).selectinload(ShiftInventoryReview.observations),
+        )
         .order_by(Shift.opened_at.desc())
     )
     return session.scalar(stmt)
@@ -127,6 +133,8 @@ def open_shift(
     register_id: UUID,
     opened_by: UUID,
     denomination_counts: list[dict[str, int]],
+    inventory_snapshot_id: UUID,
+    inventory_observations: list[dict[str, object]] | None = None,
     opening_cash_minor: int | None = None,
 ) -> Shift:
     """Open a new shift for a cash register with pessimistic locking and uniqueness guard."""
@@ -182,6 +190,30 @@ def open_shift(
             f"An open shift is already active on cash register {register_id}."
         )
 
+    snapshot, snapshot_items = validate_opening_inventory_snapshot(
+        session, register_id=register_id, branch_id=register.branch_id, snapshot_id=inventory_snapshot_id
+    )
+    observations = [] if inventory_observations is None else inventory_observations
+    if not isinstance(observations, list):
+        raise ValueError("Inventory observations must be a list.")
+    seen_products: set[UUID] = set()
+    persisted_observations: list[ShiftInventoryObservation] = []
+    for item in observations:
+        if not isinstance(item, dict):
+            raise ValueError("Inventory observations must be mappings.")
+        product_id = item.get("product_id")
+        quantity = item.get("physical_quantity")
+        if not isinstance(product_id, UUID) or product_id not in snapshot_items:
+            raise ValueError("Inventory observation product is not present in the snapshot.")
+        if product_id in seen_products:
+            raise ValueError("Inventory observations cannot contain duplicate products.")
+        if type(quantity) is not int or not 0 <= quantity <= maximum:
+            raise ValueError("Physical quantities must be nonnegative signed 64-bit integers.")
+        seen_products.add(product_id)
+        persisted_observations.append(ShiftInventoryObservation(
+            snapshot_item=snapshot_items[product_id], physical_quantity=quantity
+        ))
+
     # 3. Create shift and flush to trigger DB constraints
     shift = Shift(
         cash_register_id=register_id,
@@ -193,6 +225,12 @@ def open_shift(
         ShiftDenominationCount(denomination_minor=denomination, quantity=quantity)
         for denomination, quantity in validated_counts
     ]
+    shift.inventory_review = ShiftInventoryReview(
+        snapshot_id=snapshot.id,
+        confirmed_by=opened_by,
+        mode="physical_counts_reported" if persisted_observations else "no_changes_declared",
+        observations=persisted_observations,
+    )
     session.add(shift)
     try:
         session.flush()
@@ -210,7 +248,10 @@ def get_shift_by_id(
     shift_id: UUID,
 ) -> Shift | None:
     """Retrieve a shift by ID."""
-    stmt = select(Shift).where(Shift.id == shift_id)
+    stmt = select(Shift).where(Shift.id == shift_id).options(
+        selectinload(Shift.inventory_review).joinedload(ShiftInventoryReview.snapshot),
+        selectinload(Shift.inventory_review).selectinload(ShiftInventoryReview.observations),
+    )
     return session.scalar(stmt)
 
 
@@ -231,4 +272,40 @@ def to_cash_register_dto(
 
 def to_shift_dto(shift: Shift) -> ShiftDTO:
     """Convert Shift model to ShiftDTO."""
-    return ShiftDTO.model_validate(shift)
+    dto = ShiftDTO.model_validate({
+        "id": shift.id,
+        "cash_register_id": shift.cash_register_id,
+        "opened_by": shift.opened_by,
+        "closed_by": shift.closed_by,
+        "opened_at": shift.opened_at,
+        "closed_at": shift.closed_at,
+        "status": shift.status,
+        "opening_cash_minor": shift.opening_cash_minor,
+        "denomination_counts": shift.denomination_counts,
+        "expected_cash_at_close_minor": shift.expected_cash_at_close_minor,
+        "counted_cash_minor": shift.counted_cash_minor,
+        "difference_minor": shift.difference_minor,
+        "closing_notes": shift.closing_notes,
+    })
+    review = shift.inventory_review
+    if review is not None:
+        dto.inventory_review = ShiftInventoryReviewDTO.model_validate({
+            "snapshot_id": review.snapshot_id,
+            "confirmed_by": review.confirmed_by,
+            "confirmed_at": review.confirmed_at,
+            "mode": review.mode,
+            "source_state": review.snapshot.source_state,
+            "item_count": review.snapshot.item_count,
+            "missing_count": review.snapshot.missing_count,
+            "observations": [
+                {
+                    "product_id": observation.snapshot_item.product_id,
+                    "code": observation.snapshot_item.code,
+                    "name": observation.snapshot_item.name,
+                    "unit": observation.snapshot_item.unit,
+                    "physical_quantity": observation.physical_quantity,
+                }
+                for observation in review.observations
+            ],
+        })
+    return dto

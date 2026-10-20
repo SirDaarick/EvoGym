@@ -1,17 +1,17 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     Branch,
     Product,
-    RegisterInventorySnapshot,
     RegisterInventorySnapshotItem,
+    RegisterInventorySnapshot,
     StockInitialization,
 )
-from app.db.models.shifts import CashRegister
+from app.db.models.shifts import CashRegister, ShiftInventoryReview
 from app.db.models.inventory import normalize_product_code, normalize_product_name
 
 MAX_BIGINT = 2**63 - 1
@@ -60,6 +60,29 @@ def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: 
     return session.execute(stmt).all(), total
 
 
+def _read_current_inventory_rows(session: Session, branch_id: UUID):
+    """Read source scalar values directly so cached ORM identities cannot mask changes."""
+    return session.execute(
+        select(
+            Product.id,
+            Product.code,
+            Product.name,
+            Product.unit,
+            StockInitialization.id,
+            StockInitialization.quantity,
+            StockInitialization.initialized_by,
+            StockInitialization.initialized_at,
+        )
+        .outerjoin(
+            StockInitialization,
+            (StockInitialization.product_id == Product.id)
+            & (StockInitialization.branch_id == branch_id),
+        )
+        .order_by(Product.code, Product.id)
+        .execution_options(populate_existing=True)
+    ).all()
+
+
 def capture_register_inventory_snapshot(
     session: Session, *, register_id: UUID, actor_id: UUID
 ) -> RegisterInventorySnapshot:
@@ -68,29 +91,21 @@ def capture_register_inventory_snapshot(
     if register is None:
         raise LookupError("register")
 
-    rows = session.execute(
-        select(Product, StockInitialization)
-        .outerjoin(
-            StockInitialization,
-            (StockInitialization.product_id == Product.id)
-            & (StockInitialization.branch_id == register.branch_id),
-        )
-        .order_by(Product.code, Product.id)
-    ).all()
+    rows = _read_current_inventory_rows(session, register.branch_id)
 
     items = [
         RegisterInventorySnapshotItem(
-            product_id=product.id,
-            code=product.code,
-            name=product.name,
-            unit=product.unit,
-            initialized=initialization is not None,
-            expected_quantity=initialization.quantity if initialization else None,
-            initialization_id=initialization.id if initialization else None,
-            initialized_by=initialization.initialized_by if initialization else None,
-            initialized_at=initialization.initialized_at if initialization else None,
+            product_id=product_id,
+            code=code,
+            name=name,
+            unit=unit,
+            initialized=initialization_id is not None,
+            expected_quantity=quantity,
+            initialization_id=initialization_id,
+            initialized_by=initialized_by,
+            initialized_at=initialized_at,
         )
-        for product, initialization in rows
+        for product_id, code, name, unit, initialization_id, quantity, initialized_by, initialized_at in rows
     ]
     missing_count = sum(not item.initialized for item in items)
     source_state = (
@@ -125,6 +140,59 @@ def get_register_inventory_snapshot(
         .options(selectinload(RegisterInventorySnapshot.items))
     )
     return session.scalar(statement)
+
+
+class InventorySnapshotUnavailableError(Exception):
+    """The requested snapshot is outside the register scope or unavailable."""
+
+
+class InventorySnapshotStaleError(Exception):
+    """The live catalog or branch baseline changed after snapshot capture."""
+
+
+class InventorySnapshotConsumedError(Exception):
+    """The opening snapshot has already been used by another shift."""
+
+
+def validate_opening_inventory_snapshot(
+    session: Session, *, register_id: UUID, branch_id: UUID, snapshot_id: UUID
+) -> tuple[RegisterInventorySnapshot, dict[UUID, RegisterInventorySnapshotItem]]:
+    """Validate the exact immutable presentation against one current full-catalog read."""
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        session.execute(text("LOCK TABLE products, stock_initializations IN SHARE MODE"))
+
+    snapshot = get_register_inventory_snapshot(session, register_id=register_id, snapshot_id=snapshot_id)
+    if snapshot is None or snapshot.branch_id != branch_id:
+        raise InventorySnapshotUnavailableError("Inventory snapshot was not found for this register.")
+
+    consumed = session.scalar(
+        select(ShiftInventoryReview.id).where(ShiftInventoryReview.snapshot_id == snapshot_id)
+    )
+    if consumed is not None:
+        raise InventorySnapshotConsumedError("Inventory snapshot has already been used; capture a fresh snapshot.")
+
+    current_rows = _read_current_inventory_rows(session, branch_id)
+    current = [
+        (
+            product_id, code, name, unit,
+            initialization_id is not None,
+            quantity,
+            initialization_id,
+            initialized_by,
+            initialized_at,
+        )
+        for product_id, code, name, unit, initialization_id, quantity, initialized_by, initialized_at in current_rows
+    ]
+    captured = [
+        (
+            item.product_id, item.code, item.name, item.unit, item.initialized,
+            item.expected_quantity, item.initialization_id, item.initialized_by, item.initialized_at,
+        )
+        for item in snapshot.items
+    ]
+    if current != captured:
+        raise InventorySnapshotStaleError("Inventory changed after presentation; capture and review it again.")
+    return snapshot, {item.product_id: item for item in snapshot.items}
 
 
 def _validate_page(offset: int, limit: int) -> None:

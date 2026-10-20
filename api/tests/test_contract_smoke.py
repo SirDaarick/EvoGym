@@ -115,6 +115,8 @@ EXPECTED_DATABASE_TABLES = {
     "stock_initializations",
     "register_inventory_snapshots",
     "register_inventory_snapshot_items",
+    "shift_inventory_reviews",
+    "shift_inventory_observations",
 }
 
 
@@ -262,7 +264,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0013_inventory_snapshots"
+            assert head_version == "0014_opening_inventory_reviews"
 
             # 3. Assert member columns exist
             member_columns = {c["name"] for c in inspector.get_columns("members")}

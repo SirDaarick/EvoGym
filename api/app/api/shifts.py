@@ -10,6 +10,9 @@ from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied, Permission
 from app.auth.sessions import validate_session
 from app.inventory.queries import (
+    InventorySnapshotConsumedError,
+    InventorySnapshotStaleError,
+    InventorySnapshotUnavailableError,
     capture_register_inventory_snapshot,
     get_register_inventory_snapshot,
 )
@@ -294,6 +297,8 @@ def open_shift_endpoint(
                 opened_by=principal.staff_id,
                 opening_cash_minor=payload.opening_cash_minor,
                 denomination_counts=[item.model_dump() for item in payload.denomination_counts],
+                inventory_snapshot_id=payload.inventory_snapshot_id,
+                inventory_observations=[item.model_dump() for item in payload.inventory_observations],
             )
             session.commit()
             return to_shift_dto(shift)
@@ -304,6 +309,12 @@ def open_shift_endpoint(
             )
         except CashRegisterNotFoundError:
             raise HTTPException(404, "Cash register not found.")
+        except InventorySnapshotUnavailableError as exc:
+            raise HTTPException(404, str(exc))
+        except (InventorySnapshotStaleError, InventorySnapshotConsumedError) as exc:
+            raise HTTPException(409, str(exc))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftDTO)

@@ -1,5 +1,6 @@
 """DTOs and schemas for payment terminals, cash registers, and shifts."""
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 MAX_MINOR_UNITS = 2**63 - 1
@@ -89,6 +90,7 @@ class ShiftDTO(BaseModel):
     status: str
     opening_cash_minor: int
     denomination_counts: list["ShiftDenominationCountDTO"] = Field(default_factory=list)
+    inventory_review: "ShiftInventoryReviewDTO | None" = None
     expected_cash_at_close_minor: int | None = None
     counted_cash_minor: int | None = None
     difference_minor: int | None = None
@@ -115,6 +117,8 @@ class OpenShiftDTO(BaseModel):
     denomination_counts: list["ShiftDenominationCountDTO"] = Field(
         ..., min_length=1, max_length=64, description="Required physical bill and coin counts at opening."
     )
+    inventory_snapshot_id: UUID
+    inventory_observations: list["ShiftInventoryObservationInputDTO"] = Field(default_factory=list, max_length=10000)
 
     @model_validator(mode="after")
     def _validate_opening_total(self) -> "OpenShiftDTO":
@@ -131,6 +135,11 @@ class OpenShiftDTO(BaseModel):
         if self.opening_cash_minor is not None and self.opening_cash_minor != total:
             raise ValueError("Opening cash total must match denomination counts.")
         self.opening_cash_minor = total
+        seen_products: set[UUID] = set()
+        for observation in self.inventory_observations:
+            if observation.product_id in seen_products:
+                raise ValueError("Inventory observations cannot contain duplicate products.")
+            seen_products.add(observation.product_id)
         return self
 
 
@@ -141,6 +150,33 @@ class ShiftDenominationCountDTO(BaseModel):
 
     denomination_minor: StrictInt = Field(..., gt=0, le=MAX_MINOR_UNITS)
     quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+
+
+class ShiftInventoryObservationInputDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_id: UUID
+    physical_quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+
+
+class ShiftInventoryObservationDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    product_id: UUID
+    code: str
+    name: str
+    unit: str
+    physical_quantity: int
+
+
+class ShiftInventoryReviewDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    snapshot_id: UUID
+    confirmed_by: UUID
+    confirmed_at: datetime
+    mode: str
+    source_state: str
+    item_count: int
+    missing_count: int
+    observations: list[ShiftInventoryObservationDTO] = Field(default_factory=list)
 
 
 ShiftDTO.model_rebuild()

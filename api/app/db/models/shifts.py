@@ -209,6 +209,9 @@ class Shift(Base):
         order_by="ShiftDenominationCount.denomination_minor.desc()",
         lazy="selectin",
     )
+    inventory_review: Mapped["ShiftInventoryReview | None"] = relationship(
+        "ShiftInventoryReview", back_populates="shift", cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
 
 
 class ShiftDenominationCount(Base):
@@ -229,3 +232,43 @@ class ShiftDenominationCount(Base):
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     shift: Mapped[Shift] = relationship("Shift", back_populates="denomination_counts")
+
+
+class ShiftInventoryReview(Base):
+    """Global opening inventory acceptance and optional physical observations."""
+
+    __tablename__ = "shift_inventory_reviews"
+    __table_args__ = (
+        CheckConstraint("mode IN ('no_changes_declared', 'physical_counts_reported')", name="ck_shift_inventory_reviews_mode"),
+        UniqueConstraint("shift_id", name="uq_shift_inventory_reviews_shift"),
+        UniqueConstraint("snapshot_id", name="uq_shift_inventory_reviews_snapshot"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    shift_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="CASCADE"), nullable=False)
+    snapshot_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("register_inventory_snapshots.id", ondelete="RESTRICT"), nullable=False)
+    confirmed_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    observations: Mapped[list["ShiftInventoryObservation"]] = relationship(
+        "ShiftInventoryObservation", back_populates="review", cascade="all, delete-orphan", lazy="selectin"
+    )
+    shift: Mapped[Shift] = relationship("Shift", back_populates="inventory_review")
+    snapshot: Mapped["RegisterInventorySnapshot"] = relationship("RegisterInventorySnapshot", lazy="selectin")
+
+
+class ShiftInventoryObservation(Base):
+    """Physical count reported for one item in the consumed opening snapshot."""
+
+    __tablename__ = "shift_inventory_observations"
+    __table_args__ = (
+        CheckConstraint("physical_quantity IS NOT NULL AND physical_quantity >= 0", name="ck_shift_inventory_observations_quantity_nonnegative"),
+        UniqueConstraint("review_id", "snapshot_item_id", name="uq_shift_inventory_observations_item"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    review_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("shift_inventory_reviews.id", ondelete="CASCADE"), nullable=False)
+    snapshot_item_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("register_inventory_snapshot_items.id", ondelete="RESTRICT"), nullable=False)
+    physical_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    review: Mapped[ShiftInventoryReview] = relationship("ShiftInventoryReview", back_populates="observations")
+    snapshot_item: Mapped["RegisterInventorySnapshotItem"] = relationship("RegisterInventorySnapshotItem", lazy="joined")

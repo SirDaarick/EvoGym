@@ -24,6 +24,7 @@ from app.db.models import (
     StaffCredential,
     StaffUser,
 )
+from app.inventory.queries import capture_register_inventory_snapshot
 from app.main import create_app
 from app.shifts.queries import (
     CashRegisterNotFoundError,
@@ -35,16 +36,34 @@ from app.shifts.queries import (
     get_shift_by_id,
     list_cash_registers,
     list_payment_terminals,
-    open_shift,
+    open_shift as _open_shift,
 )
 from app.shifts.schemas import OpenShiftDTO
 from test_admin_auth import configured_settings, seed_admin
+
+
+def open_shift(session, *, register_id, opened_by, denomination_counts, opening_cash_minor=None,
+               inventory_snapshot_id=None, inventory_observations=None):
+    """Provide an explicitly captured empty-catalog presentation for legacy domain tests."""
+    if inventory_snapshot_id is None:
+        snapshot = capture_register_inventory_snapshot(session, register_id=register_id, actor_id=opened_by)
+        inventory_snapshot_id = snapshot.id
+    return _open_shift(
+        session,
+        register_id=register_id,
+        opened_by=opened_by,
+        denomination_counts=denomination_counts,
+        opening_cash_minor=opening_cash_minor,
+        inventory_snapshot_id=inventory_snapshot_id,
+        inventory_observations=inventory_observations,
+    )
 
 
 def test_open_shift_requires_exact_denomination_counts_and_computes_total():
     payload = OpenShiftDTO.model_validate(
         {
             "cash_register_id": str(uuid4()),
+            "inventory_snapshot_id": str(uuid4()),
             "denomination_counts": [
                 {"denomination_minor": 10000, "quantity": 2},
                 {"denomination_minor": 500, "quantity": 4},
@@ -74,7 +93,7 @@ def test_open_shift_requires_exact_denomination_counts_and_computes_total():
     ],
 )
 def test_open_shift_rejects_invalid_denomination_evidence(counts, total, message):
-    request = {"cash_register_id": str(uuid4()), "denomination_counts": counts}
+    request = {"cash_register_id": str(uuid4()), "inventory_snapshot_id": str(uuid4()), "denomination_counts": counts}
     if total is not None:
         request["opening_cash_minor"] = total
     with pytest.raises(ValidationError, match=message):
@@ -85,6 +104,7 @@ def test_open_shift_allows_explicit_zero_cash_counts():
     payload = OpenShiftDTO.model_validate(
         {
             "cash_register_id": str(uuid4()),
+            "inventory_snapshot_id": str(uuid4()),
             "denomination_counts": [{"denomination_minor": 100, "quantity": 0}],
         }
     )
@@ -631,11 +651,18 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             assert res_r1_curr_none.status_code == 404
 
             # 7. Receptionist 1 opens shift on Branch 1 register (201)
+            with factory() as session:
+                opening_snapshot = capture_register_inventory_snapshot(
+                    session, register_id=UUID(reg1_id), actor_id=_staff1_id
+                )
+                opening_snapshot_id = str(opening_snapshot.id)
+                session.commit()
             res_r1_open = client.post(
                 "/api/v1/shifts/open",
                 headers=r1_headers,
                 json={
                     "cash_register_id": reg1_id,
+                    "inventory_snapshot_id": opening_snapshot_id,
                     "opening_cash_minor": 150000,
                     "denomination_counts": [{"denomination_minor": 1, "quantity": 150000}],  # $1,500.00
                 },
@@ -646,14 +673,23 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             assert shift1_data["status"] == "open"
             assert shift1_data["opening_cash_minor"] == 150000
             assert shift1_data["denomination_counts"] == [{"denomination_minor": 1, "quantity": 150000}]
+            assert shift1_data["inventory_review"]["mode"] == "no_changes_declared"
+            assert shift1_data["inventory_review"]["source_state"] == "empty_catalog"
             shift1_id = shift1_data["id"]
 
             # Receptionist 1 trying to open SECOND shift on same register -> 409
+            with factory() as session:
+                duplicate_snapshot = capture_register_inventory_snapshot(
+                    session, register_id=UUID(reg1_id), actor_id=_staff1_id
+                )
+                duplicate_snapshot_id = str(duplicate_snapshot.id)
+                session.commit()
             res_r1_open_dup = client.post(
                 "/api/v1/shifts/open",
                 headers=r1_headers,
                 json={
                     "cash_register_id": reg1_id,
+                    "inventory_snapshot_id": duplicate_snapshot_id,
                     "opening_cash_minor": 50000,
                     "denomination_counts": [{"denomination_minor": 1, "quantity": 50000}],
                 },
@@ -666,6 +702,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 headers=r1_headers,
                 json={
                     "cash_register_id": reg1_id,
+                    "inventory_snapshot_id": opening_snapshot_id,
                     "opening_cash_minor": -10,
                     "denomination_counts": [{"denomination_minor": 1, "quantity": -10}],
                 },
@@ -678,6 +715,7 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
                 headers=r1_headers,
                 json={
                     "cash_register_id": reg2_id,
+                    "inventory_snapshot_id": str(uuid4()),
                     "opening_cash_minor": 10000,
                     "denomination_counts": [{"denomination_minor": 1, "quantity": 10000}],
                 },
