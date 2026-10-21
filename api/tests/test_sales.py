@@ -7,7 +7,10 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Branch, CashRegister, Member, MembershipDebt, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion, Shift
+from app.db.models import (
+    Branch, CashRegister, Member, MembershipDebt, MembershipDebtPayment, MembershipPeriod,
+    Order, OrderItem, Payment, Plan, PlanVersion, Shift,
+)
 from app.memberships.eligibility import is_membership_period_eligible
 from app.main import create_app
 from app.sales.queries import _add_duration, post_membership_cash_sale
@@ -214,6 +217,149 @@ def test_partial_membership_cash_sale_records_received_cash_and_operational_warn
                 json={**payload, "cash_amount_minor": 5000},
             )
             assert transfer.status_code == 422
+    finally:
+        engine.dispose()
+
+
+def test_membership_debt_repayment_posts_cash_receipt_and_reduces_warning(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "repay-branch", "Repayment Branch")
+        other_branch_id = _seed_branch(factory, "repay-other", "Other Repayment Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "repay@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-REPAY", full_name="Repayment Member", phone="5550188")
+            plan = Plan(code="repay-month", name="Repay Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Repay Month v1", price_minor=10000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "repay-register", "Repayment Register")
+            other_register = create_cash_register(session, other_branch_id, "repay-other-register", "Other Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            open_shift(session, register_id=other_register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, version_id, register_id, other_register_id, shift_id = (
+                member.id, version.id, register.id, other_register.id, shift.id
+            )
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "repay-001"}
+            path = f"/api/v1/registers/{register_id}/membership-sales"
+            sale = client.post(path, headers=headers, json={
+                "member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 4000,
+            })
+            assert sale.status_code == 201, sale.text
+            order_id = sale.json()["order"]["id"]
+
+            second_sale = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "repay-sale-second"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 9000},
+            )
+            assert second_sale.status_code == 201, second_sale.text
+            second_order_id = second_sale.json()["order"]["id"]
+
+            repayment_path = f"/api/v1/registers/{register_id}/membership-debt-payments"
+            repayment_headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "debt-repay-001"}
+            payload = {"order_id": order_id, "amount_minor": 2500}
+            wrong_branch = client.post(
+                f"/api/v1/registers/{other_register_id}/membership-debt-payments",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "wrong-branch"},
+                json=payload,
+            )
+            assert wrong_branch.status_code == 403
+            repayment = client.post(repayment_path, headers=repayment_headers, json=payload)
+            assert repayment.status_code == 201, repayment.text
+            receipt = repayment.json()
+            assert receipt["order_id"] == order_id
+            assert receipt["member_id"] == str(member_id)
+            assert receipt["amount_minor"] == 2500
+            assert receipt["remaining_balance_minor"] == 3500
+            assert receipt["received_by"] == str(staff_id)
+            assert receipt["shift_id"] == str(shift_id)
+
+            unauthenticated = client.post(
+                repayment_path,
+                headers={"Idempotency-Key": "unauthenticated"},
+                json=payload,
+            )
+            assert unauthenticated.status_code == 401
+            for invalid_amount in (0, -1, True, None, 2**63):
+                invalid = client.post(repayment_path, headers={**repayment_headers, "Idempotency-Key": f"invalid-{invalid_amount}"},
+                                      json={"order_id": order_id, "amount_minor": invalid_amount})
+                assert invalid.status_code == 422
+            overpayment = client.post(
+                repayment_path,
+                headers={**repayment_headers, "Idempotency-Key": "repay-overpayment"},
+                json={"order_id": order_id, "amount_minor": 3501},
+            )
+            assert overpayment.status_code == 409
+
+            final_headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "debt-repay-final"}
+            second_debt_payment = client.post(
+                repayment_path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "debt-repay-second-order"},
+                json={"order_id": second_order_id, "amount_minor": 1000},
+            )
+            assert second_debt_payment.status_code == 201, second_debt_payment.text
+            assert second_debt_payment.json()["remaining_balance_minor"] == 0
+            member_after_selected_debt = client.get(
+                f"/api/v1/members/{member_id}", headers={"Authorization": f"Bearer {token}"}
+            )
+            assert member_after_selected_debt.json()["pending_balance_minor"] == 3500
+
+            final = client.post(repayment_path, headers=final_headers,
+                                json={"order_id": order_id, "amount_minor": 3500})
+            assert final.status_code == 201, final.text
+            assert final.json()["remaining_balance_minor"] == 0
+
+            replay = client.post(repayment_path, headers=repayment_headers, json=payload)
+            assert replay.status_code == 200
+            assert replay.json() == receipt
+            mismatch = client.post(repayment_path, headers=repayment_headers, json={**payload, "amount_minor": 2501})
+            assert mismatch.status_code == 409
+
+            member_detail = client.get(f"/api/v1/members/{member_id}", headers={"Authorization": f"Bearer {token}"})
+            assert member_detail.status_code == 200
+            assert member_detail.json()["pending_balance_minor"] == 0
+            assert member_detail.json()["has_pending_balance"] is False
+
+            with factory.begin() as session:
+                closed = close_shift(
+                    session, shift_id=shift_id, closed_by=staff_id,
+                    denomination_counts=[{"denomination_minor": 100, "quantity": 200}],
+                )
+                assert closed.shift.expected_cash_at_close_minor == 20000
+
+            replay_after_close = client.post(repayment_path, headers=repayment_headers, json=payload)
+            assert replay_after_close.status_code == 200
+            assert replay_after_close.json() == receipt
+            paid_again = client.post(repayment_path, headers={"Authorization": f"Bearer {token}",
+                                                              "Idempotency-Key": "repay-new-after-close"},
+                                     json={"order_id": order_id, "amount_minor": 1})
+            assert paid_again.status_code == 409
+
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(Order)) == 2
+            assert session.scalar(select(func.count()).select_from(Payment)) == 2
+            assert session.scalar(select(func.count()).select_from(MembershipDebt)) == 2
+            assert session.scalar(select(func.count()).select_from(MembershipDebtPayment)) == 3
+            receipt = session.scalar(select(MembershipDebtPayment).where(
+                MembershipDebtPayment.idempotency_key == "debt-repay-001"
+            ))
+            receipt.amount_minor = 2600
+            with pytest.raises(ValueError, match="receipts are immutable"):
+                session.flush()
+        with factory() as session:
+            receipt = session.scalar(select(MembershipDebtPayment).where(
+                MembershipDebtPayment.idempotency_key == "debt-repay-001"
+            ))
+            assert receipt.amount_minor == 2500
     finally:
         engine.dispose()
 

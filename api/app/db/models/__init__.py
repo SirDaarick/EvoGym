@@ -21,6 +21,7 @@ from app.db.models.orders import Order, OrderItem, Payment
 from app.db.models.memberships import MembershipPeriod
 from app.db.models.payment_review_events import PaymentReviewEvent
 from app.db.models.membership_debts import MembershipDebt
+from app.db.models.membership_debt_payments import MembershipDebtPayment
 
 # Update AdminAuthEvent check constraint for enrollment and device actions
 _old_ck = [c for c in AdminAuthEvent.__table__.constraints if c.name == "ck_admin_auth_events_action"]
@@ -46,6 +47,7 @@ __all__ = [
     "MemberNote",
     "MembershipPeriod",
     "MembershipDebt",
+    "MembershipDebtPayment",
     "PaymentReviewEvent",
     "Order",
     "OrderItem",

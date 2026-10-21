@@ -21,6 +21,27 @@ class TransferReviewRequest(BaseModel):
     status: Literal["confirmed", "pending"]
 
 
+class MembershipDebtPaymentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_id: UUID
+    amount_minor: StrictInt = Field(gt=0)
+
+
+class MembershipDebtPaymentDTO(BaseModel):
+    id: UUID
+    debt_id: UUID
+    order_id: UUID
+    member_id: UUID
+    branch_id: UUID
+    register_id: UUID
+    shift_id: UUID
+    amount_minor: int
+    remaining_balance_minor: int = Field(validation_alias="remaining_after_minor")
+    received_by: UUID
+    received_at: datetime = Field(validation_alias="created_at")
+
+
 class CashSaleOrderDTO(BaseModel):
     id: UUID
     branch_id: UUID

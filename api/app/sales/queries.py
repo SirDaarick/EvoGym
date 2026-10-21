@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment,
-    MembershipDebt, PaymentReviewEvent, Plan, PlanVersion, Shift,
+    MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
 )
 
 MAX_MINOR = 2**63 - 1
@@ -39,6 +39,12 @@ class CashMembershipSaleResult:
     item: OrderItem
     payment: Payment
     membership: MembershipPeriod | None
+    replayed: bool
+
+
+@dataclass(frozen=True)
+class MembershipDebtPaymentResult:
+    receipt: MembershipDebtPayment
     replayed: bool
 
 
@@ -382,3 +388,110 @@ def review_membership_transfer(
     payment.status = status
     session.flush()
     return TransferReviewResult(order, item, payment, membership, replayed=False)
+
+
+def _debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int) -> str:
+    canonical = f"{register_id}\n{order_id}\n{amount_minor}".encode("ascii")
+    return sha256(canonical).hexdigest()
+
+
+def post_membership_debt_payment(
+    session: Session,
+    *,
+    register_id: UUID,
+    actor_id: UUID,
+    authorized_branch_id: UUID | None,
+    order_id: UUID,
+    amount_minor: int,
+    idempotency_key: str,
+) -> MembershipDebtPaymentResult:
+    """Append one cash repayment to an explicit membership debt and open branch shift."""
+    if type(amount_minor) is not int or not 0 < amount_minor <= MAX_MINOR:
+        raise ValueError("Repayment amount must be a positive signed 64-bit integer.")
+    if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+        raise ValueError("Idempotency key must contain between 1 and 128 characters.")
+
+    register = session.scalar(
+        select(CashRegister).where(CashRegister.id == register_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
+        raise CashSaleAccessDenied("Access restricted to staff branch.")
+
+    fingerprint = _debt_payment_fingerprint(register_id, order_id, amount_minor)
+    existing = session.scalar(
+        select(MembershipDebtPayment).where(
+            MembershipDebtPayment.branch_id == register.branch_id,
+            MembershipDebtPayment.received_by == actor_id,
+            MembershipDebtPayment.idempotency_key == idempotency_key,
+        ).with_for_update()
+    )
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return MembershipDebtPaymentResult(existing, replayed=True)
+
+    if register.status != "active":
+        raise CashSaleConflictError("Cash register is not active.")
+    shift = session.scalar(
+        select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open")
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if shift is None:
+        raise CashSaleConflictError("An open shift is required for a debt repayment.")
+
+    order = session.scalar(select(Order).where(Order.id == order_id))
+    if order is None or order.branch_id != register.branch_id:
+        raise CashSaleNotFoundError("Membership debt not found.")
+    observed_debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == order_id))
+    if observed_debt is None or observed_debt.member_id != order.member_id:
+        raise CashSaleNotFoundError("Membership debt not found.")
+
+    member = session.scalar(
+        select(Member).where(Member.id == order.member_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if member is None:
+        raise CashSaleNotFoundError("Membership debt not found.")
+    debt = session.scalar(
+        select(MembershipDebt).where(MembershipDebt.id == observed_debt.id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if debt is None or debt.member_id != member.id or debt.order_id != order.id:
+        raise CashSaleNotFoundError("Membership debt not found.")
+
+    paid_total = 0
+    for prior_amount in session.scalars(
+        select(MembershipDebtPayment.amount_minor).where(MembershipDebtPayment.debt_id == debt.id)
+    ):
+        if type(prior_amount) is not int or not 0 < prior_amount <= MAX_MINOR or paid_total > MAX_MINOR - prior_amount:
+            raise ValueError("Recorded repayments exceed supported minor-unit bounds.")
+        paid_total += prior_amount
+    if type(debt.initial_outstanding_minor) is not int or not 0 < debt.initial_outstanding_minor <= MAX_MINOR:
+        raise ValueError("Initial membership debt is outside supported minor-unit bounds.")
+    if paid_total > debt.initial_outstanding_minor:
+        raise ValueError("Recorded repayments exceed the initial membership debt.")
+    remaining = debt.initial_outstanding_minor - paid_total
+    if remaining == 0:
+        raise CashSaleConflictError("Membership debt is already fully repaid.")
+    if amount_minor > remaining:
+        raise CashSaleConflictError("Repayment cannot exceed the remaining membership debt.")
+
+    receipt = MembershipDebtPayment(
+        debt_id=debt.id,
+        order_id=order.id,
+        member_id=member.id,
+        branch_id=register.branch_id,
+        register_id=register.id,
+        shift_id=shift.id,
+        amount_minor=amount_minor,
+        remaining_after_minor=remaining - amount_minor,
+        received_by=actor_id,
+        idempotency_key=idempotency_key,
+        request_fingerprint=fingerprint,
+    )
+    session.add(receipt)
+    session.flush()
+    return MembershipDebtPaymentResult(receipt, replayed=False)

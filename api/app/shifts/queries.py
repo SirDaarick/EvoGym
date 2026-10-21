@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db.models.orders import Order, Payment
+from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.shifts import (
     CashRegister,
     PaymentTerminal,
@@ -354,6 +355,13 @@ def close_shift(
     for amount in amounts:
         if type(amount) is not int or amount < 0 or inflow > maximum - amount:
             raise ValueError("Cash inflow exceeds signed 64-bit minor units.")
+        inflow += amount
+    repayment_amounts = session.scalars(
+        select(MembershipDebtPayment.amount_minor).where(MembershipDebtPayment.shift_id == shift.id)
+    )
+    for amount in repayment_amounts:
+        if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
+            raise ValueError("Cash repayment inflow exceeds signed 64-bit minor units.")
         inflow += amount
     if type(shift.opening_cash_minor) is not int or shift.opening_cash_minor < 0:
         raise ValueError("Opening cash is outside supported minor-unit bounds.")

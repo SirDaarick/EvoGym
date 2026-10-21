@@ -7,12 +7,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
-from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment
+from app.db.models import (
+    Branch, CashRegister, Member, MembershipDebtPayment, MembershipPeriod, Order, OrderItem, Payment,
+)
 from app.sales.queries import (
     CashSaleAccessDenied,
     CashSaleConflictError,
     CashSaleNotFoundError,
     InvalidBranchTimezoneError,
+    post_membership_debt_payment,
     post_membership_cash_sale,
     review_membership_transfer,
 )
@@ -22,6 +25,8 @@ from app.sales.schemas import (
     CashSaleItemDTO,
     CashSaleOrderDTO,
     CashSalePaymentDTO,
+    MembershipDebtPaymentDTO,
+    MembershipDebtPaymentRequest,
     MembershipPeriodDTO,
     TransferReviewRequest,
 )
@@ -52,6 +57,22 @@ def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: Membe
             starts_on=membership.starts_on, ends_on=membership.ends_on, activated_by=membership.activated_by,
             created_at=membership.created_at,
         ) if membership is not None else None,
+    )
+
+
+def _debt_payment_dto(receipt: MembershipDebtPayment) -> MembershipDebtPaymentDTO:
+    return MembershipDebtPaymentDTO(
+        id=receipt.id,
+        debt_id=receipt.debt_id,
+        order_id=receipt.order_id,
+        member_id=receipt.member_id,
+        branch_id=receipt.branch_id,
+        register_id=receipt.register_id,
+        shift_id=receipt.shift_id,
+        amount_minor=receipt.amount_minor,
+        remaining_after_minor=receipt.remaining_after_minor,
+        received_by=receipt.received_by,
+        created_at=receipt.created_at,
     )
 
 
@@ -99,6 +120,8 @@ def post_cash_membership_sale_endpoint(
             if result.replayed:
                 response.status_code = 200
             return _sale_dto(result.order, result.item, result.payment, result.membership)
+
+
     except HTTPException:
         raise
     except CashSaleNotFoundError as exc:
@@ -138,6 +161,67 @@ def post_cash_membership_sale_endpoint(
             return _sale_dto(result.order, result.item, result.payment, result.membership)
 
 
+@router.post("/{register_id}/membership-debt-payments", response_model=MembershipDebtPaymentDTO, status_code=201)
+def post_membership_debt_payment_endpoint(
+    register_id: UUID,
+    payload: MembershipDebtPaymentRequest,
+    request: Request,
+    response: Response,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> MembershipDebtPaymentDTO:
+    """Collect an explicit membership debt abono to the current open branch shift."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    try:
+        with factory() as session:
+            result = post_membership_debt_payment(
+                session,
+                register_id=register_id,
+                actor_id=principal.staff_id,
+                authorized_branch_id=principal.branch_id if not principal.is_admin else None,
+                order_id=payload.order_id,
+                amount_minor=payload.amount_minor,
+                idempotency_key=idempotency_key,
+            )
+            session.commit()
+            if result.replayed:
+                response.status_code = 200
+            return _debt_payment_dto(result.receipt)
+    except CashSaleNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except CashSaleAccessDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except CashSaleConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except IntegrityError as exc:
+        # A concurrent request may win the actor/branch idempotency key on another register.
+        with factory() as session:
+            register = session.scalar(select(CashRegister).where(CashRegister.id == register_id))
+            if register is None:
+                raise
+            if not principal.is_admin and register.branch_id != principal.branch_id:
+                raise HTTPException(403, "Access restricted to staff branch.") from exc
+            existing = session.scalar(select(MembershipDebtPayment).where(
+                MembershipDebtPayment.branch_id == register.branch_id,
+                MembershipDebtPayment.received_by == principal.staff_id,
+                MembershipDebtPayment.idempotency_key == idempotency_key,
+            ))
+            if existing is None:
+                raise
+            from app.sales.queries import _debt_payment_fingerprint
+            if existing.request_fingerprint != _debt_payment_fingerprint(
+                register_id, payload.order_id, payload.amount_minor,
+            ):
+                raise HTTPException(409, "Idempotency key was already used for a different request.") from exc
+            response.status_code = 200
+            return _debt_payment_dto(existing)
 @router.post("/{register_id}/membership-transfer-sales", response_model=CashMembershipSaleDTO, status_code=201)
 def post_membership_transfer_endpoint(
     register_id: UUID,

@@ -1,6 +1,6 @@
 """Opt-in PostgreSQL proofs for membership-sale idempotency and renewal serialization."""
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from threading import Barrier, Event
 import os
 import time
 from uuid import uuid4
@@ -12,9 +12,12 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, Plan, PlanVersion, Shift, StaffUser
+from app.db.models import (
+    Branch, CashRegister, Member, MembershipDebt, MembershipDebtPayment, MembershipPeriod,
+    Order, Plan, PlanVersion, Shift, StaffUser,
+)
 from app.inventory.queries import capture_register_inventory_snapshot
-from app.sales.queries import CashSaleConflictError, post_membership_cash_sale
+from app.sales.queries import CashSaleConflictError, post_membership_cash_sale, post_membership_debt_payment
 from app.shifts.queries import close_shift, open_shift
 
 API_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -256,3 +259,56 @@ def test_postgres_pending_overtime_sale_links_once_when_opening_waits(postgres_s
         assert replay.order.financial_shift_id == successor_id
         assert replay.order.cash_included_in_opening is True
         assert session.scalar(select(Order.id).where(Order.id == order_id)) == order_id
+
+
+def test_postgres_repayments_on_different_registers_serialize_by_member_debt(postgres_sales_target):
+    _engine, factory, (actor_id, member_id, version_id, first_register_id, second_register_id, branch_id) = postgres_sales_target
+    with factory() as session:
+        sale = post_membership_cash_sale(
+            session,
+            register_id=first_register_id,
+            actor_id=actor_id,
+            authorized_branch_id=branch_id,
+            member_id=member_id,
+            plan_version_id=version_id,
+            idempotency_key="pg-partial-debt-sale",
+            cash_amount_minor=4000,
+            cash_amount_provided=True,
+        )
+        order_id = sale.order.id
+        session.commit()
+
+    barrier = Barrier(2)
+
+    def collect(register_id, key):
+        with factory() as session:
+            barrier.wait(timeout=5)
+            try:
+                result = post_membership_debt_payment(
+                    session,
+                    register_id=register_id,
+                    actor_id=actor_id,
+                    authorized_branch_id=branch_id,
+                    order_id=order_id,
+                    amount_minor=3000,
+                    idempotency_key=key,
+                )
+                session.commit()
+                return "paid", result.receipt.id
+            except CashSaleConflictError:
+                session.rollback()
+                return "rejected", None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(
+            lambda args: collect(*args),
+            ((first_register_id, "pg-repay-a"), (second_register_id, "pg-repay-b")),
+        ))
+
+    assert sorted(status for status, _receipt_id in results) == ["paid", "rejected"]
+    with factory() as session:
+        debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == order_id))
+        receipts = list(session.scalars(select(MembershipDebtPayment).where(MembershipDebtPayment.debt_id == debt.id)))
+        assert len(receipts) == 1
+        assert receipts[0].amount_minor == 3000
+        assert receipts[0].remaining_after_minor == 2500

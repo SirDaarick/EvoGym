@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
 from app.db.models.membership_debts import MembershipDebt
+from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.members.schemas import CreateMemberDTO, UpdateMemberDTO
 
 
@@ -108,15 +109,37 @@ def get_member_by_id(session: Session, member_id: UUID | str) -> Member | None:
 
 
 def get_member_pending_balance_minor(session: Session, member_id: UUID) -> int:
-    """Return the recorded initial cash-sale remainder for an operational warning."""
-    total = 0
-    for amount in session.scalars(
-        select(MembershipDebt.initial_outstanding_minor).where(MembershipDebt.member_id == member_id)
+    """Return remaining partial-sale debt after explicit order-specific cash receipts."""
+    debts: dict[UUID, int] = {}
+    for debt_id, initial_amount in session.execute(
+        select(MembershipDebt.id, MembershipDebt.initial_outstanding_minor)
+        .where(MembershipDebt.member_id == member_id)
     ):
-        if type(amount) is not int or amount <= 0 or total > (2**63 - 1) - amount:
+        if type(initial_amount) is not int or initial_amount <= 0 or initial_amount > 2**63 - 1:
             raise ValueError("Member pending balance is outside signed 64-bit minor units.")
-        total += amount
-    return total
+        debts[debt_id] = initial_amount
+
+    paid_by_debt: dict[UUID, int] = {}
+    for debt_id, amount in session.execute(
+        select(MembershipDebtPayment.debt_id, MembershipDebtPayment.amount_minor)
+        .join(MembershipDebt, MembershipDebt.id == MembershipDebtPayment.debt_id)
+        .where(MembershipDebt.member_id == member_id)
+    ):
+        current = paid_by_debt.get(debt_id, 0)
+        if type(amount) is not int or amount <= 0 or current > (2**63 - 1) - amount:
+            raise ValueError("Member repayment total is outside signed 64-bit minor units.")
+        paid_by_debt[debt_id] = current + amount
+
+    remaining_total = 0
+    for debt_id, initial_amount in debts.items():
+        paid_amount = paid_by_debt.get(debt_id, 0)
+        if paid_amount > initial_amount:
+            raise ValueError("Recorded repayments exceed an initial membership debt.")
+        remaining = initial_amount - paid_amount
+        if remaining_total > (2**63 - 1) - remaining:
+            raise ValueError("Member pending balance is outside signed 64-bit minor units.")
+        remaining_total += remaining
+    return remaining_total
 
 
 class DuplicateMemberNumberError(Exception):
