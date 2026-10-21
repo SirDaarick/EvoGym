@@ -54,6 +54,51 @@ def test_app_stores_typed_configuration():
     assert app.state.settings.environment == "development"
 
 
+def test_cors_requires_narrow_explicit_origin_allowlist_and_never_enables_credentials():
+    allowed_origin = "https://reception.example"
+    settings = Settings(environment="test", debug=False, cors_allowed_origins=allowed_origin, _env_file=None)
+    app = create_test_app(settings)
+
+    async def cors_requests():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            allowed = await client.options("/api/v1/members", headers={
+                "Origin": allowed_origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            })
+            denied = await client.get("/health/live", headers={"Origin": "https://other.example"})
+        return allowed, denied
+
+    allowed, denied = asyncio.run(cors_requests())
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == allowed_origin
+    assert "authorization" in allowed.headers["access-control-allow-headers"].lower()
+    assert "content-type" in allowed.headers["access-control-allow-headers"].lower()
+    assert set(allowed.headers["access-control-allow-methods"].split(", ")) == {"GET", "POST"}
+    assert "access-control-allow-credentials" not in allowed.headers
+    assert "access-control-allow-origin" not in denied.headers
+
+
+def test_cors_configuration_fails_closed_for_unset_or_wildcard_allowlist():
+    app = create_test_app(Settings(environment="test", debug=False, _env_file=None))
+    no_cors = request_with_origin(app, "/health/live", "https://reception.example")
+    assert no_cors.status_code == 200
+    assert "access-control-allow-origin" not in no_cors.headers
+    with pytest.raises(ValueError):
+        Settings(environment="test", cors_allowed_origins="*", _env_file=None)
+    for invalid_origin in ("https://reception.example/path", "https://user:password@reception.example", "https://reception.example,https://reception.example"):
+        with pytest.raises(ValueError):
+            Settings(environment="test", cors_allowed_origins=invalid_origin, _env_file=None)
+
+
+def request_with_origin(app, path, origin):
+    async def get_response():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.get(path, headers={"Origin": origin})
+
+    return asyncio.run(get_response())
+
+
 def test_debug_setting_never_enables_exception_detail_pages():
     app = create_test_app(Settings(environment="test", debug=True, _env_file=None))
     assert app.debug is False

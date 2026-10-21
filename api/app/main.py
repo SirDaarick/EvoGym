@@ -4,6 +4,7 @@ from collections import OrderedDict
 from threading import Lock, BoundedSemaphore
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -178,6 +179,14 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)
+    if configuration.cors_origin_allowlist:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(configuration.cors_origin_allowlist),
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
     return application
 
 

@@ -119,3 +119,12 @@ npm run preview
 El frontend mantiene todas las operaciones de datos abstraídas a través de contratos tipados en `src/domain/models.ts` y operaciones puras en `src/demo/`. Para conectar una API REST o GraphQL:
 1. Reemplazar los métodos de `DemoProvider` por clientes HTTP (Axios / Fetch / TanStack Query).
 2. Los modelos de datos (`Member`, `Sale`, `Shift`, `Product`, `StockMovement`) ya están normalizados y listos para mapearse contra las entidades de la base de datos.
+# Live reception (operational mode)
+
+The existing application remains in its local demo mode. Live reception is a separate route at `/reception/live`; it never substitutes demo records or IDs for backend records.
+
+Set `VITE_API_BASE_URL` to the backend HTTP(S) origin and `VITE_BRANCH_ID` to the real branch UUID in the frontend environment. The route fails closed when either setting is absent or invalid. Sign in with a backend staff login and PIN; the opaque bearer token is kept only in tab-scoped `sessionStorage` and is cleared by signing out. Do not put credentials or tokens in this file or another Vite environment value.
+
+For browser requests to work, the backend operator must also configure `EVOGYM_CORS_ALLOWED_ORIGINS` with this frontend's exact origin (scheme, host, and optional port; no path). An unset allowlist deliberately disables cross-origin access. Never use a wildcard; backend CORS permits only `GET`/`POST` and the `Authorization`/`Content-Type` headers, without cookies.
+
+Search uses authenticated `GET /api/v1/members` and selecting a result fetches its detail from `GET /api/v1/members/{id}`. A positive `pending_balance_minor` is shown as an accessible warning and does not block entry. Use **Actualizar saldo** after a repayment; a zero balance clears the warning. This surface does not collect payments or implement transfer-review rules.

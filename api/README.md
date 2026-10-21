@@ -40,9 +40,12 @@ Or, from `api/`:
 
 `EVOGYM_ENV` and `EVOGYM_DEBUG` are validated settings. The environment is one of `development`, `test`, `staging`, or `production`; enabling the debug setting outside development/test is rejected. Framework debug pages remain disabled in every environment so exceptions cannot expose details. Interactive docs and the OpenAPI endpoint are disabled in staging/production. `.env` is local-only and ignored by git; `.env.example` contains non-sensitive values only.
 
+Browser clients are cross-origin only when `EVOGYM_CORS_ALLOWED_ORIGINS` is explicitly configured as a comma-separated allowlist of exact HTTP(S) origins (scheme and host/port only). Wildcards, credentials, paths, queries, fragments, and duplicate origins are rejected. When configured, CORS permits only `GET`/`POST` and `Authorization`/`Content-Type`, and never enables cookies or other credentialed browser requests. When unset, no cross-origin CORS headers are emitted. Include the live reception frontend origin exactly; configure development and production origins intentionally rather than using `*`.
+
 | Setting | Default | Effect |
 |---|---|---|
 | `EVOGYM_ENV` | `development` | Selects validated environment behavior |
+| `EVOGYM_CORS_ALLOWED_ORIGINS` | unset | Optional comma-separated exact HTTP(S) browser origins; unset disables CORS |
 | `EVOGYM_DEBUG` | `false` | Validated development/test flag; framework exception-detail pages remain disabled |
 | `EVOGYM_DATABASE_URL` | unset | Optional `SecretStr`; an engine is created only during app lifespan when configured, and connects only for readiness or explicit database work |
 | `EVOGYM_STAFF_SESSION_TTL_SECONDS` | unset | Required for staff PIN sessions; server-owned expiry bounded to 60–86400 seconds |

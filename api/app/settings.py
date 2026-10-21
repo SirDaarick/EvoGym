@@ -1,4 +1,5 @@
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     auth_max_concurrent_hashes: int | None = Field(default=None, ge=1, le=32)
     admin_recovery_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
     admin_recovery_base_url: str | None = None
+    cors_allowed_origins: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":
@@ -66,6 +68,34 @@ class Settings(BaseSettings):
             if self.environment == "production" and parts.scheme != "https":
                 raise ValueError("EVOGYM_ADMIN_RECOVERY_BASE_URL must use HTTPS in production")
         return self
+
+    @model_validator(mode="after")
+    def validate_cors_origins(self) -> "Settings":
+        if self.cors_allowed_origins is None:
+            return self
+        origins = [item.strip() for item in self.cors_allowed_origins.split(",")]
+        if not origins or any(not item or "*" in item for item in origins):
+            raise ValueError("EVOGYM_CORS_ALLOWED_ORIGINS must contain explicit HTTP(S) origins and cannot use a wildcard")
+        normalized = []
+        for origin in origins:
+            parts = urlsplit(origin)
+            if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password or parts.path not in {"", "/"} or parts.query or parts.fragment:
+                raise ValueError("EVOGYM_CORS_ALLOWED_ORIGINS entries must be HTTP(S) origins without credentials, paths, queries, or fragments")
+            try:
+                parts.port
+            except ValueError:
+                raise ValueError("EVOGYM_CORS_ALLOWED_ORIGINS contains an invalid port") from None
+            normalized.append(f"{parts.scheme.lower()}://{parts.netloc.lower()}")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("EVOGYM_CORS_ALLOWED_ORIGINS cannot contain duplicate origins")
+        self.cors_allowed_origins = ",".join(normalized)
+        return self
+
+    @property
+    def cors_origin_allowlist(self) -> tuple[str, ...]:
+        if self.cors_allowed_origins is None:
+            return ()
+        return tuple(self.cors_allowed_origins.split(","))
 
     def require_database_url(self) -> str:
         if self.database_url is None:

@@ -828,7 +828,7 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 - [x] Apply request-size limits, rate limiting, strict request validation, and no-store response behavior consistent with existing authentication protections.
 - [x] Add tests for valid issuance, invalid credentials, inactive/out-of-scope staff or branch, lockout/rate-limit, missing configuration, malformed input, and server-derived expiry.
 - [x] Update API authentication/configuration documentation and implementation-phase status.
-- [ ] Record the resulting commit identity in this ledger after the work-unit commit.
+- [x] Record the resulting commit identity: `280b2c6` (`feat(auth): habilitar sesiones de personal por PIN`).
 
 **Route and allowed scope:** Delegated-direct multi-file implementation; parent reviewed, staged, and commits. No frontend changes, secret values, deployment changes, live databases, or remote operations. Tests use isolated SQLite fixtures only.
 
@@ -838,12 +838,22 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 
 ### Task BK026-S3-B — consume live member balances in reception
 
-- [ ] Add a frontend API client and operational staff sign-in that stores only the returned bearer token in tab-scoped session state; never reuse demo credentials or tokens.
-- [ ] Bind the operational mode to a configured branch UUID and backend origin; missing/invalid configuration fails closed instead of falling back to demo data.
-- [ ] Search backend members by real member number/name/phone and consume the member-detail `pending_balance_minor` / `has_pending_balance` fields.
-- [ ] Show a visible, accessible reception warning for positive partial-payment balances; refreshing/reselecting reflects later repayments and clears the warning at zero.
-- [ ] Keep the DemoProvider and its test fixtures in a distinct demo mode; do not translate demo IDs to arbitrary backend IDs.
-- [ ] Add focused frontend tests for authentication, real member search, warning/clear/loading/error behavior, and demo/live source separation.
-- [ ] Update frontend/backend integration and operator configuration documentation, then record exact verification and commit.
+- [x] Add a frontend API client and operational staff sign-in that stores only the returned bearer token in tab-scoped session state; never reuse demo credentials or tokens.
+- [x] Bind the operational mode to a configured branch UUID and backend origin; missing/invalid configuration fails closed instead of falling back to demo data.
+- [x] Search backend members by real member number/name/phone and consume the member-detail `pending_balance_minor` / `has_pending_balance` fields.
+- [x] Show a visible, accessible reception warning for positive partial-payment balances; refreshing/reselection reflects later repayments and clears the warning at zero.
+- [x] Keep the DemoProvider and its test fixtures in a distinct demo mode; do not translate demo IDs to arbitrary backend IDs.
+- [x] Add focused frontend tests for API configuration and authentication, real member search, balance warning and refresh, and stale-response handling; verify demo/live source separation.
+- [x] Update frontend/backend integration and operator configuration documentation; verification below. Parent records this task commit.
 
 **Route and scope:** Delegated-direct multi-file frontend integration after BK026-S3-A is complete. Preserve all existing user-owned dirty/untracked frontend changes. No check-in enforcement or automatic payment collection is included.
+
+**Authorized follow-up checks and surfaces:** Guard async search/detail results against newer queries, selections, logout, and session replacement; add regression tests. Add backend CORS configuration with a required explicit origin allowlist, no wildcard/credentials, and only the Authorization/Content-Type headers and GET/POST methods required by this live workflow. Document the backend setting and frontend-origin coordination. Added exact edit surfaces for this follow-up: `api/app/main.py`, `api/app/settings.py`, `api/.env.example`, `api/README.md`, `api/tests/test_app.py` plus the frontend API/lookup and env/docs paths already listed above.
+
+- [x] Ignore stale search and member-detail completions after newer queries/selections, logout, and token changes.
+- [x] Configure strict opt-in CORS for exact frontend origins only, with required API methods/headers and no credentials.
+- [x] Document allowlist coordination and test both live frontend behavior and backend CORS policy.
+
+**Implementation and verification:** The live route `/reception/live` is a separate UI reachable from the reception sidebar; demo workflows remain unchanged. API origin and branch UUID are validated before requests; staff session token is stored only in `sessionStorage`. Backend member search returns actual UUIDs and detail reads current pending balance. The warning is visible and accessible, and is re-fetched on selection or refresh. `npm test -- --run src/api/receptionApi.test.ts src/features/auth/OperationalLogin.test.tsx src/features/reception/LiveMemberLookup.test.tsx`: 6 passed. `npm run typecheck`: passed. `npm run build`: passed with the existing >500 kB chunk warning. No database, deployment, or remote service was used. Direct-transfer business rules remain outside scope.
+
+**Follow-up verification:** RED was observed before fixes: the frontend stale-search regression failed, and backend CORS tests failed because preflight returned 405 and wildcard configuration was not rejected. GREEN: `cd frontend; npm test -- --run src/api/receptionApi.test.ts src/features/auth/OperationalLogin.test.tsx src/features/reception/LiveMemberLookup.test.tsx` — 9 passed; `npm run typecheck` passed; `npm run build` passed with the existing >500 kB chunk warning. Repo-root `api/.venv/Scripts/python.exe -m pytest -q api/tests/test_app.py api/tests/test_admin_auth.py api/tests/test_admin_sessions.py` — 14 passed, 1 existing Starlette/httpx deprecation warning. `git diff --check` on the exact S3-B edit surfaces passed. CORS allowlist accepts explicit exact origins only; no wildcard, credentials, paths, query, fragment, or duplicate entries. Unset allowlist emits no CORS access headers. Browser CORS methods are GET/POST and configured request headers are Authorization/Content-Type. Request-generation guards prevent stale responses after query changes, selection, logout, and token replacement. No live DB, deployment, or remote service was used.

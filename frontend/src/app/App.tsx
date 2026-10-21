@@ -24,6 +24,7 @@ const History = lazy(() => import('../features/owner/History').then(module => ({
 const PlanCatalog = lazy(() => import('../features/owner/PlanCatalog').then(module => ({ default: module.PlanCatalog })));
 const ReceptionHome = lazy(() => import('../features/reception/ReceptionHome').then(module => ({ default: module.ReceptionHome })));
 const StaffProfileSelection = lazy(() => import('../features/staff/StaffProfileSelection').then(module => ({ default: module.StaffProfileSelection })));
+const OperationalLogin = lazy(() => import('../features/reception/LiveMemberLookup').then(module => ({ default: module.LiveMemberLookup })));
 const StaffManagement = lazy(() => import('../features/owner/StaffManagement').then(module => ({ default: module.StaffManagement })));
 const GimiDashboard = lazy(() => import('../features/gimi/GimiDashboard').then(module => ({ default: module.GimiDashboard })));
 const Members = lazy(() => import('../features/members/Members').then(module => ({ default: module.Members })));
@@ -220,6 +221,7 @@ export function App() {
   }
 
   if (location.pathname === '/') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
+  if (location.pathname === '/reception/live') return <RouteBoundary key="operational-reception"><OperationalLogin /></RouteBoundary>;
 
   return <div className="app-shell" onTouchStart={event => {
     touchStart.current = null;
@@ -287,7 +289,7 @@ export function App() {
         <button ref={mobileNavClose} className="mobile-nav-close" type="button" tabIndex={mobileNavOpen ? 0 : -1} aria-label="Cerrar navegación" onClick={closeMobileNav}>×</button>
         <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
-      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}</nav>
+      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}{role === 'RECEPTION' && <NavLink to="/reception/live" aria-label="Recepción operativa" title="Recepción operativa"><NavIcon name="members" /><span className="sidebar-label" aria-hidden="true">Recepción operativa</span></NavLink>}</nav>
       <div className="sidebar-bottom"><Link to="/" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
     </aside>
     <div className="workspace" inert={mobileNavOpen}>
