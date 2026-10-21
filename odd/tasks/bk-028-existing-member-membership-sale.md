@@ -25,7 +25,7 @@ The standard frontend checkout reads and writes demo state, while the backend al
 - [x] Update the task ledger and phase card to record the API boundary as partial progress without claiming UI integration.
 - **Authorized surfaces:** `frontend/src/api/membershipCheckoutApi.ts`, `frontend/src/api/membershipCheckoutApi.test.ts`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
 - **Checks:** `npm test -- --run src/api/membershipCheckoutApi.test.ts` from `frontend`; `git diff --check`.
-- **Runtime harness:** Mocked `fetch` tests cover auth, lookups, distinct sale routes, exact idempotency header, server DTO passthrough, HTTP errors, and network uncertainty; no live backend credentials or network calls.
+- **Runtime harness:** Mocked `fetch` tests cover auth, lookups, distinct sale routes, exact idempotency header, server DTO passthrough including a nullable membership period, HTTP errors, and network uncertainty; no live backend credentials or network calls.
 - **Rollback:** revert only the API client, its focused tests, and T1 documentation.
 
 ### BK-028-T2 - Existing-member live checkout UI

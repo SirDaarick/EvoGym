@@ -51,6 +51,13 @@ describe('membership checkout API', () => {
     expect(fetchMock.mock.calls[2][1]?.body).toBe(JSON.stringify(request));
   });
 
+  it('passes through a cash sale DTO with no membership period', async () => {
+    const response = { order: { id: 'order-2' }, item: {}, payment: { status: 'pending' }, membership: null };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(response), { status: 201 }));
+    await expect(submitMembershipCashSale('register-1', { member_id: 'member-1', plan_version_id: 'version-1' }, 'key-3'))
+      .resolves.toEqual(response);
+  });
+
   it('exposes HTTP status/message separately from an unknown network outcome', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Shift is closed' }), { status: 409 }));
     await expect(getRegisters()).rejects.toMatchObject({ status: 409, message: 'Shift is closed' });

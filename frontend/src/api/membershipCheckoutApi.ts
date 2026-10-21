@@ -40,7 +40,7 @@ export interface MembershipSaleResponse {
   order: Record<string, unknown>;
   item: Record<string, unknown>;
   payment: Record<string, unknown>;
-  membership: Record<string, unknown>;
+  membership: Record<string, unknown> | null;
 }
 
 export class CheckoutApiHttpError extends Error {
