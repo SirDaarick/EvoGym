@@ -48,7 +48,7 @@ Future implementation must confirm target organization/branch scope, stack choic
 
 All BK tasks use **delegated direct** by default; this route declaration does not authorize implementation. Route categories cover every ledger ID: **decision/exploration** BK-001–BK-007; **verification** BK-015 and BK-052; **multi-file/preparation** BK-008–BK-014, BK-016–BK-051, and BK-053–BK-060; **decision/exploration** BK-061; **multi-file/preparation** BK-062–BK-076. These triggers reflect decision work, reading that prepares implementation, cross-file slices, or command-based verification. No inline implementation exception is justified at planning time. Reclassify only if later authorized scope proves atomic and already understood; tests/builds remain delegable verification actions.
 
-**BK-029 policy-readiness documentation work unit (2026-10-21):** delegated direct because reconciling the owner-confirmed rules required coordinated updates to three non-trivial planning documents. This records the 2+ document writer trigger, not permission to implement attendance source, migrations, or APIs. BK-029 remains Not started until implementation and its required evidence exist.
+**BK-029 policy-readiness documentation work unit (2026-10-21):** delegated direct because reconciling the owner-confirmed rules required coordinated updates to three non-trivial planning documents. This records the 2+ document writer trigger, not permission to implement attendance source, migrations, or APIs. Committed as `eac249e47406213baea028b10db166f096ec6ba8`; BK-029 remains Not started until implementation and its required evidence exist.
 
 ## Phases and delivery forecast
 
