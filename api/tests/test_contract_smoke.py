@@ -131,6 +131,7 @@ EXPECTED_DATABASE_TABLES = {
     "membership_debts",
     "membership_debt_payments",
     "member_access_decisions",
+    "member_check_ins",
     "staff_roster_profiles",
     "staff_attendance_records",
     "staff_attendance_checkouts",
@@ -279,9 +280,9 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
             # Per D-001 single-organization architecture, assert no separate organizations table was created
             assert "organizations" not in table_names
 
-            # 2. Assert Alembic revision reached inventory foundation
+            # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0025_member_access_order"
+            assert head_version == "0026_member_check_ins"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns
