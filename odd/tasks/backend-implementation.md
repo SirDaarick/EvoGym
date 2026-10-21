@@ -1,6 +1,6 @@
 # EvoGym FastAPI Backend — Implementation Plan
 
-**Current status before this documentation update (`fe0ef31`): P5 active; 18 Done, 13 Partial, 0 In progress, 45 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
+**Current status as reconciled on 2026-10-21: P5 active; 18 Done, 13 Partial, 0 In progress, 45 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
 
 ## Quick path and reading order
 
