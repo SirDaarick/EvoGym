@@ -48,3 +48,4 @@ BK-027, BK-031 y BK-041 requerían reglas de negocio consistentes antes de imple
 - Relectura estructural de las cuatro superficies: pasó.
 - Pruebas/builds: N/A por documentación pasiva.
 - Commit convencional: `docs(backend): definir acceso pendiente y asistencia offline`.
+- Identidad del commit de reglas: `33a8766e2680af4c664622865e9a1e883246df51`.
