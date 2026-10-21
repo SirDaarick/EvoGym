@@ -51,6 +51,17 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - Runtime harness: N/A; helper is pure and remains unintegrated.
 - Commit identity is reported in delivery evidence; the commit cannot embed its own hash in its tree.
 
+## BK-029-T3 - Reconcile canonical backend plan
+
+- [x] Reconcile the decision ledger, implementation board, and phase card with the approved five-minute offline clock rule and the isolated helper's actual scope.
+- [x] Keep BK-029 Partial; distinguish online exact request idempotency from unimplemented online five-minute visit dedupe, and keep BK-031/BK-064 offline integration and reconnect-time revalidation pending.
+- Acceptance: all four authorized documents state the same approved threshold/clock-origin semantics and do not imply queue, persistence, backend ingestion, or full integration.
+- Route: delegated direct, documentation-only bounded work unit.
+- Authorized scope: `odd/tasks/backend-implementation.md`, `docs/backend-plan/02-business-rules-and-decisions.md`, `docs/backend-plan/04-implementation-phases.md`, and this task record.
+- Checks: structural readback of all changed sections; `git diff --check`.
+- Runtime/tests: N/A; documentation only, no executable behavior changed.
+- Rollback boundary: revert only this documentation reconciliation commit.
+
 ## Route and verification
 
 - Route: delegated direct, one bounded S1 online work unit; one Luna writer, one commit.
@@ -79,3 +90,6 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - `api/app/api/members.py` - existing authenticated Admin/receptionist principal convention.
 - `api/app/api/staff_attendance.py` and `api/app/db/models/staff_attendance.py` - related append-only event patterns; not reused as member attendance.
 - `docs/backend-plan/08-local-first-and-sync.md` - future offline contract and unresolved distinction between request replay and close-time visit dedupe.
+
+- Verification: structural readback confirmed the four authorized documents align; `git diff --check` passed. Tests N/A because no executable behavior changed.
+- Outcome: BK-029 remains Partial; only documentation was reconciled.
