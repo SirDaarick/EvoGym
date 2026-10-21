@@ -885,4 +885,4 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 - **Whitespace check:** `git diff --check` returned exit 1 from pre-existing frontend-only trailing whitespace/new-EOF findings; the authorized API/docs/task paths passed a scoped `git diff --check`.
 - **Runtime harness:** N/A as a separate deployment/device harness; the FastAPI HTTP boundary and auth behavior were exercised through the TestClient in the focused tests. No external service or database was used.
 - **Rollback boundary:** revert the BK-042-S1 commit to remove only the pending-money router, its application registration, its test, and this task evidence; no schema/migration or persisted data change exists.
-- **Commit:** recorded after the implementation commit is created.
+- **Implementation commit:** `0441da9f4bdc2fd30c5bbea3ff5586f84e0c17dd` (`feat(finanzas): consultar dinero pendiente por evento`).

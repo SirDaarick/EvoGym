@@ -188,4 +188,4 @@ Task commit: `ea233cb feat(reception): conectar busqueda real y alertas de saldo
 - `git diff --check` globally reported pre-existing frontend-only whitespace/EOF issues; scoped authorized paths passed.
 - Runtime harness: N/A beyond the exercised HTTP/TestClient boundary; no deployment or external service was involved.
 - Rollback: remove only the pending-money API router, app registration, test and BK-042-S1 evidence. No schema or stored-data changes were made.
-- Commit: recorded in `odd/tasks/backend-implementation.md` after commit creation.
+- Implementation commit: `0441da9f4bdc2fd30c5bbea3ff5586f84e0c17dd` (`feat(finanzas): consultar dinero pendiente por evento`).
