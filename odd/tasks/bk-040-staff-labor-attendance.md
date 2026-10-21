@@ -19,10 +19,10 @@ The backend only models staff login accounts, so cleaning and other employees wi
 ## Tasks
 
 ### BK040-S1 — Establish branch staff roster
-- [ ] Add persistent branch-scoped staff profiles independent of authentication accounts, with safe active/inactive lifecycle.
-- [ ] Add Admin-authorized roster operations scoped by existing grants; do not let reception manage employee identities.
-- [ ] Add migration and focused tests for branch isolation, duplicate/invalid data, and inactive records.
-- [ ] Update the master backend plan and this document with evidence and the Spanish work-unit commit.
+- [x] Add persistent branch-scoped staff profiles independent of authentication accounts, with safe active/inactive lifecycle.
+- [x] Add Admin-authorized roster operations scoped by existing grants; do not let reception manage employee identities.
+- [x] Add migration and focused tests for branch isolation, duplicate/invalid data, and inactive records.
+- [x] Update the master backend plan and this document with evidence and the Spanish work-unit commit.
 
 ### BK040-S2 — Record and review labor attendance
 - [ ] Add attendance records for all rostered staff, attributed to the reception actor, branch, and occurrence time.
@@ -59,3 +59,16 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - `odd/tasks/backend-implementation.md` — canonical backend task board.
 - `api/app/db/models/` — existing staff and branch persistence.
 - `api/app/auth/authorization.py` — active Admin and Reception grant checks.
+
+
+## BK040-S1 implementation proof
+
+- **Implemented:** `StaffRosterProfile` persists a branch-owned identity separate from `StaffUser`, with normalized non-empty name/position, case-insensitive per-branch duplicate protection, active state, and timestamps. Admin create/update/deactivation and read operations honor active explicit branch/organization grants. Reception can read only its granted branch; identity writes are denied.
+- **Migration:** `0021_staff_roster` adds the roster table, branch FK, checks, and indexes. Downgrade refuses to discard any roster rows.
+- **Assumption retained:** Admin manages roster entries; reception reads its own roster but cannot modify identities. This is a conservative implementation assumption, not a user-confirmed policy. S2 still owns attendance capture and its authorization semantics.
+- **Test-first evidence:** initial `GET /api/v1/staff-roster` returned 404 before route implementation (RED).
+- **Focused verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` - **27 passed, 1 existing Starlette/httpx deprecation warning**.
+- **Full API verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` - **220 passed, 17 skipped, 1 existing Starlette/httpx deprecation warning**. Initial full run exposed two stale assertions in `api/tests/test_contract_smoke.py` (the expected table set omitted `staff_roster_profiles`, and the migration-head check expected revision 0020); parent explicitly authorized this one test file, both assertions now expect the 0021 roster migration, and reruns pass. No live PostgreSQL or external services were used.
+- **Runtime boundary:** N/A beyond exercised TestClient routes and SQLite migration tests; no deployment boundary.
+- **Rollback boundary:** revert the `0021_staff_roster`-backed model, authorization, route, registration, focused tests, and BK040-S1 evidence together; migration downgrade is intentionally blocked after roster data exists.
+- **Work-unit commit:** `feat(personal): agregar roster laboral por sucursal` (Spanish Conventional Commit; SHA reported in delivery).

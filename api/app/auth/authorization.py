@@ -15,6 +15,8 @@ class Permission(StrEnum):
     STAFF_COMPENSATION_READ = "staff_compensation_read"
     ADMIN_AUDIT_READ = "admin_audit_read"
     TRANSFER_REVIEW = "transfer_review"
+    STAFF_ROSTER_READ = "staff_roster_read"
+    STAFF_ROSTER_MANAGE = "staff_roster_manage"
 
 
 class AuthorizationDenied(Exception):
@@ -49,7 +51,7 @@ def _permits(staff, branch, grants, permission: Permission | str, branch_id: UUI
             grant.role == "receptionist"
             and grant.scope_kind == "branch"
             and grant.branch_id == branch_id
-            and requested is Permission.MEMBER_OPERATIONAL_READ
+            and requested in {Permission.MEMBER_OPERATIONAL_READ, Permission.STAFF_ROSTER_READ}
         ):
             return True
     return False

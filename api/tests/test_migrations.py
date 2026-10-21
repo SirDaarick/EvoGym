@@ -125,9 +125,10 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "register_inventory_snapshots", "register_inventory_snapshot_items",
                 "shift_inventory_reviews", "shift_inventory_observations",
                 "orders", "order_items", "payments", "payment_review_events", "membership_periods", "membership_debts", "membership_debt_payments",
+                "staff_roster_profiles",
                 "shift_closing_denomination_counts",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 128
             assert connection.execute(text("select id from staff_users where id=:id"), {"id": staff_id}).scalar_one() == staff_id
@@ -166,7 +167,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
     finally:
         engine.dispose()
 
@@ -250,7 +251,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
     finally:
         engine.dispose()
 
@@ -276,7 +277,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
     finally:
         engine.dispose()
 
@@ -360,7 +361,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -393,7 +394,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -465,7 +466,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -556,7 +557,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -640,7 +641,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0020_membership_debt_payments"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0021_staff_roster"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:
@@ -666,5 +667,35 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert "membership_debt_payments" not in inspect(connection).get_table_names()
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
+    finally:
+        engine.dispose()
+
+
+def test_staff_roster_migration_is_branch_scoped_and_blocks_data_loss(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'roster.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0020_membership_debt_payments")
+    engine = create_engine(database_url)
+    branch_id = uuid4().hex
+    profile_id = uuid4().hex
+    try:
+        command.upgrade(config, "head")
+        with engine.begin() as connection:
+            assert "staff_roster_profiles" in inspect(connection).get_table_names()
+            connection.execute(text("insert into branches (id, code, name) values (:id, 'roster-migration', 'Roster')"),
+                               {"id": branch_id})
+            connection.execute(text(
+                "insert into staff_roster_profiles (id, branch_id, full_name, position) "
+                "values (:id, :branch, 'Cleaning Staff', 'Cleaning')"
+            ), {"id": profile_id, "branch": branch_id})
+        with pytest.raises(RuntimeError, match="staff roster profiles exist"):
+            command.downgrade(config, "0020_membership_debt_payments")
+        with engine.connect() as connection:
+            assert connection.execute(text("select count(*) from staff_roster_profiles where id=:id"),
+                                      {"id": profile_id}).scalar_one() == 1
     finally:
         engine.dispose()
