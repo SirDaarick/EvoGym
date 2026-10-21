@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.db.models import StaffRosterProfile, StaffUser
 from app.main import create_app
@@ -129,6 +129,14 @@ def test_schedule_classification_timezone_and_append_only_checkout(tmp_path, mon
             checkout = client.post(f"/api/v1/staff-attendance/{item['id']}/checkout", headers=desk, json={})
             assert checkout.status_code == 201, checkout.text
             assert client.post(f"/api/v1/staff-attendance/{item['id']}/checkout", headers=desk, json={}).json() == checkout.json()
+            checkin_replay = client.post(
+                f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}", headers=desk, json={}
+            )
+            listed = client.get("/api/v1/staff-attendance", headers=desk).json()["items"]
+            listed_entry = next(row for row in listed if row["id"] == item["id"])
+            assert checkin_replay.status_code == 200
+            assert checkin_replay.json()["checkout_at"] == listed_entry["checkout_at"] == checkout.json()["occurred_at"]
+            assert checkin_replay.json()["checkout_recorded_by"] == listed_entry["checkout_recorded_by"]
             assert client.post(f"/api/v1/staff-attendance/{UUID(int=1)}/checkout", headers=desk, json={}).status_code == 404
             monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 16, tzinfo=timezone.utc))
             with factory.begin() as session:
@@ -138,6 +146,47 @@ def test_schedule_classification_timezone_and_append_only_checkout(tmp_path, mon
             late = client.post(f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{late_profile_id}", headers=desk, json={})
             assert late.status_code == 201 and late.json()["status"] == "late"
     finally:
+        engine.dispose()
+
+
+def test_attendance_list_batches_checkout_lookup(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _branch_b_id, desk_token, _admin_token = _setup(tmp_path)
+    with factory.begin() as session:
+        profiles = [
+            StaffRosterProfile(branch_id=branch_a_id, full_name=f"Batch Cleaner {index}", position="Cleaning")
+            for index in range(3)
+        ]
+        for profile in profiles:
+            profile.expected_entry_time = datetime.strptime("09:00", "%H:%M").time()
+            profile.grace_tolerance_minutes = 0
+        session.add_all(profiles)
+        session.flush()
+        profile_ids = [profile.id for profile in profiles]
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc))
+    checkout_selects = []
+
+    def record_checkout_select(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if "staff_attendance_checkouts" in statement.lower() and statement.lstrip().lower().startswith("select"):
+            checkout_selects.append(statement)
+
+    app = create_app(configured_settings(url))
+    observed_engine = None
+    try:
+        with TestClient(app) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            for profile_id in profile_ids:
+                entry = client.post(
+                    f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}", headers=desk, json={}
+                )
+                assert entry.status_code == 201, entry.text
+            observed_engine = app.state.database_engine
+            event.listen(observed_engine, "before_cursor_execute", record_checkout_select)
+            result = client.get("/api/v1/staff-attendance", headers=desk)
+            assert result.status_code == 200 and len(result.json()["items"]) == 3
+            assert len(checkout_selects) == 1
+    finally:
+        if observed_engine is not None:
+            event.remove(observed_engine, "before_cursor_execute", record_checkout_select)
         engine.dispose()
 
 

@@ -1,5 +1,7 @@
 from pathlib import Path
+import importlib.util
 import shutil
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -12,6 +14,32 @@ import pytest
 
 
 API_DIR = Path(__file__).resolve().parents[1]
+
+
+def test_staff_schedule_downgrade_refuses_to_drop_attendance_snapshots(tmp_path, monkeypatch):
+    migration_path = API_DIR / "migrations" / "versions" / "0023_staff_attendance_schedule_checkout.py"
+    spec = importlib.util.spec_from_file_location("staff_schedule_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_engine(f"sqlite+pysqlite:///{(tmp_path / 'staff-schedule-downgrade.db').as_posix()}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "create table staff_attendance_records "
+            "(id text primary key, status text, expected_entry_time text, grace_tolerance_minutes integer)"
+        ))
+        connection.execute(text("create table staff_attendance_checkouts (id text primary key)"))
+        connection.execute(text(
+            "insert into staff_attendance_records (id, status, expected_entry_time, grace_tolerance_minutes) "
+            "values ('attendance-1', 'late', '09:00:00', 15)"
+        ))
+    with engine.connect() as connection:
+        monkeypatch.setattr(migration, "op", SimpleNamespace(get_bind=lambda: connection))
+        with pytest.raises(RuntimeError, match="staff attendance records contain schedule snapshots"):
+            migration.downgrade()
+        assert {"status", "expected_entry_time", "grace_tolerance_minutes"}.issubset(
+            {column["name"] for column in inspect(connection).get_columns("staff_attendance_records")}
+        )
+    engine.dispose()
 
 
 def test_new_head_migration_revision_fits_alembic_version_column():

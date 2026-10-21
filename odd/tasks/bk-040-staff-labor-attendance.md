@@ -32,11 +32,12 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - [x] Add route, authorization, migration/invariant, and branch-scope tests; update docs and commit.
 
 ### BK040-S3 — Configure schedules and record entry/exit
-- [ ] Let Admin configure each roster profile's expected entry time and grace tolerance through the branch-scoped roster API.
-- [ ] Classify a recorded entry as present through the configured tolerance boundary and late after that boundary, using the branch timezone.
-- [ ] Record employee exit time with reception attribution and idempotent retry behavior without weakening the existing append-only audit contract.
-- [ ] Add migration-backed API/model tests for configuration permissions, cutoff behavior, branch-local time, checkout, and retries; update plan/docs and commit.
-- [ ] Do not implement or infer absence-finalization timing in this slice; preserve it as open until its operational trigger is defined.
+- [x] Let Admin configure each roster profile's expected entry time and grace tolerance through the branch-scoped roster API.
+- [x] Classify a recorded entry as present through the configured tolerance boundary and late after that boundary, using the branch timezone.
+- [x] Record employee exit time with reception attribution and idempotent retry behavior without weakening the existing append-only audit contract.
+- [x] Add migration-backed API/model tests for configuration permissions, cutoff behavior, branch-local time, checkout, and retries; update docs and commit.
+- [x] Do not implement or infer absence-finalization timing in this slice; preserve it as open until its operational trigger is defined.
+- [x] Close verification follow-ups: preserve attendance snapshots on migration downgrade, include checkout in check-in replay responses, and batch checkout reads to avoid N+1 queries.
 
 ## Acceptance criteria
 
@@ -67,7 +68,8 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - BK040-S1 and BK040-S2 are complete. The user has now authorized the new BK040-S3 scope for configurable schedules, punctuality classification, and exit capture.
 - The former conservative S2 rule (unmarked means unknown, not absent) remains historically true; it is not the final requested status model. S3 implements present/late from recorded entries only.
 - Open for a later task: how a reception roll-call records absence, which days an employee is expected, and when an absence is finalized. Do not invent a weekly calendar or payroll-absence consequence.
-- BK040-S3 is authorized and in progress: configure per-worker entry/tolerance, compute present/late on new check-ins, and append an idempotent exit event. Absence remains outside this slice until its operational trigger is resolved.
+- BK040-S3 is complete: schedules classify new attendance entries as present/late, checkouts are immutable and idempotent, and absence remains outside this slice until its operational trigger is resolved.
+- Independent verification follow-ups are corrected: S3 downgrade refuses when attendance schedule snapshots exist, check-in replay includes any checkout fields, and attendance-list checkout reads use a single bounded batch query.
 
 ## Relevant files
 
@@ -112,11 +114,13 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - **Migration:** `0023_staff_sched_checkout` adds nullable roster schedule and entry snapshots plus unique checkout event. Existing S2 rows stay unclassified (`status: null`), without backfill.
 - **Remaining boundary:** Absence creation/finalization and expected-day agenda are not implemented; do not infer an absence rule from lack of entry.
 - **Test-first:** new schedule classification and schedule precondition tests failed before implementation (missing classification and old behavior accepted incomplete schedule).
-- **Focused check:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` ? **33 passed**, 15 warnings (existing Starlette/httpx deprecation and SQLite expression-index reflection warnings).
+- **Focused check:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` — **35 passed, 15 warnings** (existing Starlette/httpx deprecation and SQLite expression-index reflection warnings).
 - **Full API check:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` ? **226 passed, 17 skipped**, 15 warnings of the same types.
-- **Diff check/line budget/commit:** scoped `git diff --check` passed. Authored diff: 364 additions+deletions (below the 400-line ask-on-risk threshold).
+- **Correction proof:** migration downgrade now refuses to discard attendance rows carrying S3 status/schedule snapshots, in addition to its existing checkout-history guard. Check-in retries now include a previously recorded checkout, matching GET output. Attendance listing loads checkout rows with one `IN` query for the page rather than one query per attendance row. New migration, replay-consistency, and bounded-query tests cover all three findings.
+- **Test-first correction:** the new downgrade and replay tests failed before their fixes. The first query-count assertion observed the setup engine instead of the app's engine and was too weak; it was corrected to observe the live app engine and require exactly one checkout SELECT for a three-row page, directly detecting the former N+1 behavior.
+- **Focused correction verification:** the required command completed with **35 passed, 15 warnings**, comprising the existing Starlette/httpx deprecation and SQLite expression-index reflection warnings. `git diff --check` passed after edits.
 
 - **Focused verification (final):** 33 passed, 15 warnings.
 - **Full API verification (final):** 226 passed, 17 skipped, 15 warnings.
 
-- **Work-unit commit:** `4e7ac1cb117d96644ff9bbea960911921fecec2c` ? `feat(personal): configurar horarios y registrar salidas`.
+- **Work-unit commit:** `61709bae2dee27f2a69adf9bf869b24324f6b240` — `feat(personal): configurar horarios y registrar salidas` (verified current S3 commit; supersedes the erroneous recorded hash `4e7ac1c`).

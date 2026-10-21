@@ -133,7 +133,14 @@ def list_staff_attendance(
             StaffAttendanceRecord.id,
         ).offset(offset).limit(limit)).all() if branch_ids else []
         total = session.scalar(count_query) if branch_ids else 0
-        return StaffAttendancePage(items=[_item(record, profile, session.scalar(select(StaffAttendanceCheckout).where(StaffAttendanceCheckout.attendance_id == record.id))) for record, profile in rows], total=total)
+        checkouts = session.scalars(select(StaffAttendanceCheckout).where(
+            StaffAttendanceCheckout.attendance_id.in_([record.id for record, _profile in rows])
+        )).all() if rows else []
+        checkouts_by_attendance_id = {checkout.attendance_id: checkout for checkout in checkouts}
+        return StaffAttendancePage(items=[
+            _item(record, profile, checkouts_by_attendance_id.get(record.id))
+            for record, profile in rows
+        ], total=total)
 
 
 @router.post("/branches/{branch_id}/profiles/{profile_id}", response_model=StaffAttendanceItem, status_code=201)
@@ -156,7 +163,10 @@ def record_staff_attendance(
             existing = _existing_record(session, branch.id, profile.id, business_date)
             if existing is not None:
                 response.status_code = 200
-                return _item(existing, profile)
+                checkout = session.scalar(select(StaffAttendanceCheckout).where(
+                    StaffAttendanceCheckout.attendance_id == existing.id
+                ))
+                return _item(existing, profile, checkout)
             if not profile.is_active:
                 raise HTTPException(409, "Inactive staff cannot be marked for attendance.")
             if profile.expected_entry_time is None or profile.grace_tolerance_minutes is None:
@@ -183,7 +193,10 @@ def record_staff_attendance(
                 if existing is None:
                     raise
                 response.status_code = 200
-                return _item(existing, profile)
+                checkout = session.scalar(select(StaffAttendanceCheckout).where(
+                    StaffAttendanceCheckout.attendance_id == existing.id
+                ))
+                return _item(existing, profile, checkout)
             return _item(record, profile)
     except IntegrityError as exc:
         if "uq_staff_attendance_branch_profile_date" not in str(exc.orig):

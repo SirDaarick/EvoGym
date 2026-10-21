@@ -52,6 +52,11 @@ def downgrade() -> None:
     connection = op.get_bind()
     if connection.execute(sa.text("SELECT count(*) FROM staff_attendance_checkouts")).scalar_one():
         raise RuntimeError("Cannot downgrade while staff attendance checkouts exist.")
+    if connection.execute(sa.text(
+        "SELECT count(*) FROM staff_attendance_records "
+        "WHERE status IS NOT NULL OR expected_entry_time IS NOT NULL OR grace_tolerance_minutes IS NOT NULL"
+    )).scalar_one():
+        raise RuntimeError("Cannot downgrade while staff attendance records contain schedule snapshots.")
     if connection.dialect.name == "sqlite":
         op.execute("DROP TRIGGER trg_staff_checkout_no_delete")
         op.execute("DROP TRIGGER trg_staff_checkout_no_update")
