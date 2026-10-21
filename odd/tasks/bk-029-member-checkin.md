@@ -25,7 +25,8 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - **Dependencies:** BK-031 integration, BK-064 client queue/idempotency, and the exact synchronization-time behavior when access/payment state changes while disconnected remain unresolved.
 - **Approved replay and visit-deduplication policy:** (a) an exact replay of the same event with the same idempotency key returns its original result and creates no second event; (b) a distinct event for the same member within five minutes of the first valid access counts as the same visit and points to that visit, while preserving its own auditable duplicate event. The fixed window starts with the first valid access and duplicate attempts do not extend it. This policy is documented but not implemented by the online S1 code.
 - **Approved offline time policy:** Preserve both the device-captured time and the server-received time when an offline event synchronizes. Use device-captured time for the five-minute visit window. If the device clock appears incorrect, retain the event and mark it for review rather than discarding it.
-- **Offline contracts still open:** BK-031/BK-064 integration, offline queue/sync, entitlement/payment revalidation when reconnecting, the trusted reference and comparison rule for the device clock, and criteria/mechanics for marking a clock anomaly remain unresolved. Do not invent a threshold, device-clock correction, source priority, or timestamp authority. BK-029 remains Partial.
+- **Approved offline clock rule:** Compare the raw device capture time against an estimate derived from a trusted server UTC anchor plus elapsed local monotonic time; classify absolute skew greater than five minutes for review. Preserve the original capture time and never silently correct it. A missing anchor/time origin or invalid monotonic reading is unverified/review, not an estimated timestamp.
+- **Offline contracts still open:** BK-031/BK-064 integration, offline queue/sync, and entitlement/payment revalidation when reconnecting remain unresolved. The isolated frontend classifier below is not integrated and does not implement queueing, persistence, or backend event acceptance. BK-029 remains Partial.
 - A successful online write records server acceptance only. It does not create an offline grant or imply acceptance of an unconnected client event.
 
 ## Acceptance criteria
@@ -35,7 +36,20 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - Retries with the same idempotency key and request return the same immutable check-in; conflicting reuse is rejected.
 - The event records actor, membership period, branch, and server timestamp and cannot be updated or deleted through normal database protections.
 - Exact idempotency-key replay and the approved five-minute same-member visit policy are distinct: the former returns the original event, while the latter links a new auditable duplicate event to the existing visit and never extends the window from the first valid access.
-- Offline queue/sync and reconnect-time entitlement revalidation remain pending. The approved timestamps to preserve and capture-time basis for deduplication do not settle how device clock accuracy is compared or how anomalies are detected; those details and overall BK-029 completion remain pending, and BK-029 remains Partial.
+- Offline queue/sync and reconnect-time entitlement revalidation remain pending. The isolated classifier applies the approved five-minute clock tolerance without changing timestamps, but does not integrate the offline flow; overall BK-029 completion remains pending, and BK-029 remains Partial.
+
+## BK-029-T2 - Offline clock anomaly classifier
+
+- [x] Implement and test a pure frontend classifier using the fixed server UTC anchor plus local monotonic elapsed time; preserve captured timestamps and flag >5-minute skew or unverifiable inputs for review.
+- [x] Document the approved threshold and algorithm while keeping offline integration and end-to-end BK-029 explicitly pending.
+- Route: delegated direct, one bounded worker; test-first RED then GREEN.
+- Authorized scope: `frontend/src/features/checkIns/offlineClock.ts`, `frontend/src/features/checkIns/offlineClock.test.ts`, `docs/backend-plan/08-local-first-and-sync.md`, and this task record.
+- Checks: `npm test -- --run src/features/checkIns/offlineClock.test.ts` from `frontend`; `git diff --check`.
+- Runtime harness: N/A; this is a pure helper with no runtime integration.
+- Rollback boundary: revert only the classifier, its focused test, and associated documentation/task progress; no queue, persistence, or API behavior is changed.
+- Verification: test-first RED (`npm test -- --run src/features/checkIns/offlineClock.test.ts`) failed because the not-yet-created classifier import could not resolve; GREEN with the same command -> 1 file, 7 tests passed. `git diff --check` passed (Git reported only existing LF-to-CRLF conversion warnings for the two edited Markdown files).
+- Runtime harness: N/A; helper is pure and remains unintegrated.
+- Commit identity is reported in delivery evidence; the commit cannot embed its own hash in its tree.
 
 ## Route and verification
 

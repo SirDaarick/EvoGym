@@ -112,7 +112,7 @@ Every event placed in the `local_event_queue` adheres to a lightweight, versione
 | `event_type` | Allowlisted domain event type: `attendance.check_in`, `pos.cash_sale`, `membership.cash_renewal`, `member.fast_registration`, `shift.open`, `shift.arqueo_close`. |
 | `payload` | Canonical JSON payload containing domain-specific event details (items, centavos, member reference, counted denominations). |
 | `payload_hash` | SHA-256 hash of canonical JSON payload. Mismatch with duplicate `event_id` causes security rejection. |
-| `client_recorded_at` | Device-captured ISO timestamp for when the real-world check-in occurred. Preserve it for chronology/audit and use it for the approved five-minute visit window. If the device clock appears incorrect, retain the event and mark it for review; the trusted reference, comparison rule, anomaly criteria, and any correction policy remain unresolved. |
+| `client_recorded_at` | Device-captured ISO timestamp for when the real-world check-in occurred. Preserve it for chronology/audit and use it for the approved five-minute visit window. Compare it with the server-anchor estimate below; if absolute skew exceeds five minutes or the estimate is unverifiable, retain the event and mark it for review. Never correct the captured time. |
 | `server_received_at` | Server-assigned timestamp upon successful ingestion. Persist alongside capture time to record when synchronization was received; it does not replace capture time for the five-minute check-in window. |
 | `sync_status` | Local state: `queued` → `sending` → `acknowledged` (or `flagged_audit`). |
 
@@ -144,9 +144,17 @@ Every event placed in the `local_event_queue` adheres to a lightweight, versione
 
 ## Conflict elimination and discrepancy auditing
 
+### Offline clock anomaly rule (approved; helper not integrated)
+
+When online, persist a trusted server UTC timestamp together with the local monotonic-clock reading from the same anchor. At offline capture, estimate server time as `anchor server UTC + (capture monotonic reading - anchor monotonic reading)`. Compare the raw device wall-clock capture timestamp with that estimate. Absolute skew **greater than five minutes** requires review; exactly five minutes remains within tolerance. Preserve the original device timestamp in every case and never silently rewrite it.
+
+If the anchor or its monotonic time origin is unavailable, either reading is invalid, or elapsed monotonic time is negative, classify the clock as unverified and require review without fabricating an estimate. Reusing an anchor for retries keeps the baseline fixed; a retry does not refresh the trusted baseline.
+
+The frontend `offlineClock` helper is a pure classifier only. It is not wired to check-in capture, an offline queue, persistence, synchronization, server event acceptance, or reconnect-time entitlement revalidation. BK-031/BK-064 integration and end-to-end BK-029 remain pending; BK-029 remains Partial.
+
 By replacing multi-master distributed state replication with an append-only event stream, classic distributed database merge conflicts are eliminated by design:
 
-1. **Check-in replay and duplicates:** An exact replay using the same event/idempotency key returns the original result and creates no new event. A distinct same-member event within five minutes of the first valid access counts as the same visit and links to that visit, but the second event remains separately auditable. The fixed window is anchored to the first valid access; retries do not extend it. Offline events preserve both device-captured and server-received times; the five-minute window uses capture time. If the device clock appears incorrect, keep the event and flag it for review, not rejection. The trusted clock reference, comparison rule, anomaly criteria, offline ingestion, and entitlement revalidation on reconnect remain unresolved; no threshold or clock correction is implied.
+1. **Check-in replay and duplicates:** An exact replay using the same event/idempotency key returns the original result and creates no new event. A distinct same-member event within five minutes of the first valid access counts as the same visit and links to that visit, but the second event remains separately auditable. The fixed window is anchored to the first valid access; retries do not extend it. Offline events preserve both device-captured and server-received times; the five-minute window uses capture time. A clock anomaly is retained and flagged, not rejected. Offline ingestion and entitlement revalidation on reconnect remain unresolved.
 2. **POS cash sales:** A counter cash sale represents physical currency received by staff. It cannot be invalidated by a server conflict. The server appends the sale and decrements the stock ledger. If local stock drops below zero centrally, the server records an inventory variance flag for staff count reconciliation, never an aborted sale.
 3. **Cash membership renewal:** Cash was collected physically. The server creates the canonical payment and extends the entitlement period from the date of the sale.
 4. **Shift Arqueo Físico:** Discrepancies between physical cash counted and expected sales are recorded as operational audit records for gym management review.
