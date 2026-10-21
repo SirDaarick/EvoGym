@@ -71,6 +71,9 @@ def post_cash_membership_sale_endpoint(
     factory = request.app.state.session_factory
     if factory is None:
         raise HTTPException(500, "Database session factory not configured.")
+    cash_amount_provided = "cash_amount_minor" in payload.model_fields_set
+    if cash_amount_provided and payload.cash_amount_minor is None:
+        raise HTTPException(422, "cash_amount_minor must be a positive integer when supplied.")
 
     try:
         with factory() as session:
@@ -89,6 +92,8 @@ def post_cash_membership_sale_endpoint(
                 plan_version_id=payload.plan_version_id,
                 idempotency_key=idempotency_key,
                 source_shift_id=payload.source_shift_id,
+                cash_amount_minor=payload.cash_amount_minor,
+                cash_amount_provided=cash_amount_provided,
             )
             session.commit()
             if result.replayed:
@@ -123,7 +128,9 @@ def post_cash_membership_sale_endpoint(
             from app.sales.queries import _fingerprint, _load_result
 
             if existing.request_fingerprint != _fingerprint(
-                register_id, payload.member_id, payload.plan_version_id, payload.source_shift_id
+                register_id, payload.member_id, payload.plan_version_id, payload.source_shift_id,
+                cash_amount_minor=payload.cash_amount_minor,
+                cash_amount_provided=cash_amount_provided,
             ):
                 raise HTTPException(409, "Idempotency key was already used for a different request.") from exc
             result = _load_result(session, existing, replayed=True)
@@ -144,6 +151,8 @@ def post_membership_transfer_endpoint(
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
 ) -> CashMembershipSaleDTO:
     """Record a bank transfer as pending without settlement or activation."""
+    if "cash_amount_minor" in payload.model_fields_set:
+        raise HTTPException(422, "Bank transfers do not accept a partial cash amount.")
     if payload.source_shift_id is not None:
         raise HTTPException(422, "Pending transfers do not accept a source shift.")
     factory = request.app.state.session_factory

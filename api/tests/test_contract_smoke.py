@@ -78,6 +78,8 @@ EXPECTED_MEMBER_DETAIL_FIELDS = EXPECTED_MEMBER_LIST_FIELDS | {
     "email",
     "birth_date",
     "notes",
+    "pending_balance_minor",
+    "has_pending_balance",
 }
 
 FORBIDDEN_SECRET_FIELDS = {
@@ -125,6 +127,7 @@ EXPECTED_DATABASE_TABLES = {
     "payments",
     "payment_review_events",
     "membership_periods",
+    "membership_debts",
 }
 
 
@@ -272,7 +275,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0018_transfer_review_activation"
+            assert head_version == "0019_membership_debt_records"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

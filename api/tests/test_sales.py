@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion, Shift
+from app.db.models import Branch, CashRegister, Member, MembershipDebt, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion, Shift
+from app.memberships.eligibility import is_membership_period_eligible
 from app.main import create_app
 from app.sales.queries import _add_duration, post_membership_cash_sale
 from app.shifts.queries import close_shift
@@ -106,6 +107,113 @@ def test_cash_membership_sale_activates_once_on_an_authorized_open_shift(tmp_pat
             assert session.scalar(select(func.count()).select_from(Order)) == 2
             assert session.scalar(select(func.count()).select_from(OrderItem)) == 2
             assert session.scalar(select(func.count()).select_from(Payment)) == 2
+            assert session.scalar(select(func.count()).select_from(MembershipDebt)) == 0
+    finally:
+        engine.dispose()
+
+
+def test_partial_membership_cash_sale_records_received_cash_and_operational_warning(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "partial-branch", "Partial Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-PARTIAL", full_name="Partial Member", phone="5550177")
+            other_member = Member(member_number="SOC-PARTIAL-OTHER", full_name="Other Member", phone="5550178")
+            plan = Plan(code="partial-month", name="Partial Month", kind="membership", status="active")
+            free_plan = Plan(code="free-month", name="Free Month", kind="membership", status="active")
+            session.add_all([member, other_member, plan, free_plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Partial Month v1", price_minor=12500,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            free_version = PlanVersion(plan_id=free_plan.id, version_number=1, name="Free Month v1", price_minor=0,
+                                       currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(free_version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "partial-register", "Partial Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, other_member_id, version_id, free_version_id, register_id, shift_id = (
+                member.id, other_member.id, version.id, free_version.id, register.id, shift.id
+            )
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "partial-cash-001"}
+            path = f"/api/v1/registers/{register_id}/membership-sales"
+            payload = {"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 5000}
+            response = client.post(path, headers=headers, json=payload)
+            assert response.status_code == 201, response.text
+            sale = response.json()
+            assert sale["order"]["total_minor"] == 12500
+            assert sale["item"]["unit_amount_minor"] == sale["item"]["line_total_minor"] == 12500
+            assert sale["payment"]["amount_minor"] == 5000
+            assert sale["membership"] is not None
+
+            replay = client.post(path, headers=headers, json=payload)
+            assert replay.status_code == 200
+            assert replay.json() == sale
+            mismatch = client.post(path, headers=headers, json={**payload, "cash_amount_minor": 6000})
+            assert mismatch.status_code == 409
+
+            detail = client.get(f"/api/v1/members/{member_id}", headers={"Authorization": f"Bearer {token}"})
+            assert detail.status_code == 200, detail.text
+            assert detail.json()["pending_balance_minor"] == 7500
+            assert detail.json()["has_pending_balance"] is True
+            assert "orders" not in detail.json() and "payments" not in detail.json()
+            other_detail = client.get(
+                f"/api/v1/members/{other_member_id}", headers={"Authorization": f"Bearer {token}"}
+            )
+            assert other_detail.status_code == 200
+            assert other_detail.json()["pending_balance_minor"] == 0
+            assert other_detail.json()["has_pending_balance"] is False
+            for invalid_amount in (None, 0, -1, True, 12501):
+                invalid = client.post(
+                    path,
+                    headers={"Authorization": f"Bearer {token}", "Idempotency-Key": f"invalid-{invalid_amount}"},
+                    json={"member_id": str(member_id), "plan_version_id": str(version_id),
+                          "cash_amount_minor": invalid_amount},
+                )
+                assert invalid.status_code == 422
+
+            free_sale = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "partial-test-free-plan"},
+                json={"member_id": str(other_member_id), "plan_version_id": str(free_version_id)},
+            )
+            assert free_sale.status_code == 201, free_sale.text
+            assert free_sale.json()["payment"]["amount_minor"] == 0
+            assert free_sale.json()["order"]["total_minor"] == 0
+            assert free_sale.json()["membership"] is not None
+
+            from app.shifts.queries import close_shift
+            with factory.begin() as session:
+                closed = close_shift(
+                    session, shift_id=shift_id, closed_by=staff_id,
+                    denomination_counts=[{"denomination_minor": 100, "quantity": 50}],
+                )
+                assert closed.shift.expected_cash_at_close_minor == 5000
+            with factory() as session:
+                assert is_membership_period_eligible(
+                    session, UUID(sale["membership"]["id"]),
+                    datetime.fromisoformat(sale["order"]["created_at"]).date(),
+                )
+                assert session.scalar(select(func.count()).select_from(Order)) == 2
+                assert session.scalar(select(func.count()).select_from(Payment)) == 2
+                assert session.scalar(select(func.count()).select_from(MembershipDebt)) == 1
+                assert session.get(Member, member_id).status == "active"
+                debt = session.scalar(select(MembershipDebt))
+                with pytest.raises(ValueError, match="immutable"):
+                    debt.initial_outstanding_minor = 1
+                    session.flush()
+            transfer = client.post(
+                f"/api/v1/registers/{register_id}/membership-transfer-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "no-transfer-partial"},
+                json={**payload, "cash_amount_minor": 5000},
+            )
+            assert transfer.status_code == 422
     finally:
         engine.dispose()
 
@@ -173,6 +281,12 @@ def test_pending_membership_transfer_does_not_activate_or_count_as_cash(tmp_path
                 path, headers=headers, json={**payload, "source_shift_id": str(uuid4())},
             )
             assert unsupported_source.status_code == 422
+            partial_transfer = client.post(
+                path,
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "no-transfer-partial"},
+                json={**payload, "cash_amount_minor": 5000},
+            )
+            assert partial_transfer.status_code == 422
             assert client.post(path, headers=headers, json=payload).json() == first
             mismatch = client.post(path, headers=headers, json={**payload, "member_id": str(uuid4())})
             assert mismatch.status_code == 409

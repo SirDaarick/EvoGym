@@ -32,6 +32,8 @@ class MemberDetailDTO(MemberListItemDTO):
     email: str | None = None
     birth_date: date | str | None = None
     notes: str | None = None
+    pending_balance_minor: int = 0
+    has_pending_balance: bool = False
 
 
 class MemberListResponseDTO(BaseModel):

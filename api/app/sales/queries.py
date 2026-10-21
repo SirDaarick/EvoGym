@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment,
-    PaymentReviewEvent, Plan, PlanVersion, Shift,
+    MembershipDebt, PaymentReviewEvent, Plan, PlanVersion, Shift,
 )
 
 MAX_MINOR = 2**63 - 1
@@ -75,12 +75,16 @@ def _fingerprint(
     plan_version_id: UUID,
     source_shift_id: UUID | None = None,
     payment_method: str = "cash",
+    cash_amount_minor: int | None = None,
+    cash_amount_provided: bool = False,
 ) -> str:
     canonical = f"{register_id}\n{member_id}\n{plan_version_id}"
     if source_shift_id is not None:
         canonical += f"\n{source_shift_id}"
     if payment_method != "cash":
         canonical += f"\n{payment_method}"
+    if cash_amount_provided:
+        canonical += f"\ncash_amount_minor:{cash_amount_minor}"
     payload = canonical.encode("ascii")
     return sha256(payload).hexdigest()
 
@@ -110,6 +114,8 @@ def post_membership_cash_sale(
     source_shift_id: UUID | None = None,
     now: datetime | None = None,
     payment_method: str = "cash",
+    cash_amount_minor: int | None = None,
+    cash_amount_provided: bool = False,
 ) -> CashMembershipSaleResult:
     """Persist a cash membership sale or an unsettled transfer atomically.
 
@@ -118,6 +124,12 @@ def post_membership_cash_sale(
     """
     if payment_method not in {"cash", "transfer"}:
         raise ValueError("Unsupported membership payment method.")
+    if payment_method == "transfer" and cash_amount_provided:
+        raise CashSaleConflictError("Partial cash amount is not supported for transfers.")
+    if cash_amount_provided and (type(cash_amount_minor) is not int or cash_amount_minor <= 0):
+        raise ValueError("Cash amount must be a positive integer number of minor units.")
+    if not cash_amount_provided and cash_amount_minor is not None:
+        raise ValueError("Cash amount must be explicitly marked as provided.")
     if payment_method == "transfer" and source_shift_id is not None:
         raise CashSaleConflictError("Pending transfers require the current open shift.")
     if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
@@ -132,7 +144,10 @@ def post_membership_cash_sale(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = _fingerprint(register_id, member_id, plan_version_id, source_shift_id, payment_method)
+    fingerprint = _fingerprint(
+        register_id, member_id, plan_version_id, source_shift_id, payment_method,
+        cash_amount_minor, cash_amount_provided,
+    )
     existing = session.scalar(
         select(Order).where(
             Order.seller_id == actor_id,
@@ -204,6 +219,9 @@ def post_membership_cash_sale(
         raise CashSaleConflictError("Only MXN membership plans can be sold for cash.")
     if type(version.price_minor) is not int or not 0 <= version.price_minor <= MAX_MINOR:
         raise ValueError("Published membership price is outside signed 64-bit minor units.")
+    received_minor = version.price_minor if not cash_amount_provided else cash_amount_minor
+    if type(received_minor) is not int or received_minor < 0 or received_minor > version.price_minor:
+        raise ValueError("Cash amount must not exceed the published membership price.")
 
     branch = session.scalar(
         select(Branch).where(Branch.id == register.branch_id)
@@ -246,7 +264,7 @@ def post_membership_cash_sale(
     payment = Payment(
         id=uuid4(), order_id=order.id, method=payment_method,
         status="confirmed" if payment_method == "cash" else "under_review",
-        amount_minor=version.price_minor, received_by=actor_id,
+        amount_minor=received_minor, received_by=actor_id,
     )
     membership = None
     if payment_method in {"cash", "transfer"}:
@@ -266,6 +284,12 @@ def post_membership_cash_sale(
         session.add(PaymentReviewEvent(
             payment_id=payment.id, actor_id=actor_id, from_status=None, to_status="under_review",
             idempotency_key=None, request_fingerprint=review_fingerprint, created_at=datetime.now(timezone.utc),
+        ))
+        session.flush()
+    elif payment_method == "cash" and received_minor < version.price_minor:
+        session.add(MembershipDebt(
+            id=uuid4(), order_id=order.id, member_id=member.id,
+            initial_outstanding_minor=version.price_minor - received_minor,
         ))
         session.flush()
     return CashMembershipSaleResult(order, item, payment, membership, replayed=False)

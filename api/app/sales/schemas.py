@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 class CashMembershipSaleRequest(BaseModel):
@@ -12,6 +12,7 @@ class CashMembershipSaleRequest(BaseModel):
     member_id: UUID
     plan_version_id: UUID
     source_shift_id: UUID | None = None
+    cash_amount_minor: StrictInt | None = Field(default=None, gt=0)
 
 
 class TransferReviewRequest(BaseModel):

@@ -15,6 +15,7 @@ from app.members.queries import (
     add_member_note,
     create_member,
     get_member_by_id,
+    get_member_pending_balance_minor,
     list_member_eligibility,
     list_member_notes,
     list_members,
@@ -111,7 +112,7 @@ def _to_eligibility_dto(record: MemberEligibilityRecord) -> MemberEligibilityDTO
     )
 
 
-def _to_member_detail_dto(member, is_admin: bool) -> MemberDetailDTO:
+def _to_member_detail_dto(member, is_admin: bool, pending_balance_minor: int = 0) -> MemberDetailDTO:
     notes = member.notes if is_admin else None
     return MemberDetailDTO(
         id=str(member.id),
@@ -128,6 +129,8 @@ def _to_member_detail_dto(member, is_admin: bool) -> MemberDetailDTO:
         joined_on=member.joined_on,
         credit_balance_minor=member.credit_balance_minor,
         photo_url=member.photo_url,
+        pending_balance_minor=pending_balance_minor,
+        has_pending_balance=pending_balance_minor > 0,
     )
 
 
@@ -224,7 +227,8 @@ def get_member_endpoint(
         member = get_member_by_id(session, member_id)
         if member is None:
             raise HTTPException(404, "The requested resource was not found.")
-        return _to_member_detail_dto(member, principal.is_admin)
+        pending_balance_minor = get_member_pending_balance_minor(session, member.id)
+        return _to_member_detail_dto(member, principal.is_admin, pending_balance_minor)
 
 
 @router.patch("/{member_id}", response_model=MemberDetailDTO)
@@ -247,7 +251,8 @@ def update_member_endpoint(
         if member is None:
             raise HTTPException(404, "The requested resource was not found.")
         session.commit()
-        return _to_member_detail_dto(member, principal.is_admin)
+        pending_balance_minor = get_member_pending_balance_minor(session, member.id)
+        return _to_member_detail_dto(member, principal.is_admin, pending_balance_minor)
 
 
 

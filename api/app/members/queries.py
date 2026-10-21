@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
+from app.db.models.membership_debts import MembershipDebt
 from app.members.schemas import CreateMemberDTO, UpdateMemberDTO
 
 
@@ -104,6 +105,18 @@ def get_member_by_id(session: Session, member_id: UUID | str) -> Member | None:
         except ValueError:
             return None
     return session.get(Member, member_id)
+
+
+def get_member_pending_balance_minor(session: Session, member_id: UUID) -> int:
+    """Return the recorded initial cash-sale remainder for an operational warning."""
+    total = 0
+    for amount in session.scalars(
+        select(MembershipDebt.initial_outstanding_minor).where(MembershipDebt.member_id == member_id)
+    ):
+        if type(amount) is not int or amount <= 0 or total > (2**63 - 1) - amount:
+            raise ValueError("Member pending balance is outside signed 64-bit minor units.")
+        total += amount
+    return total
 
 
 class DuplicateMemberNumberError(Exception):
