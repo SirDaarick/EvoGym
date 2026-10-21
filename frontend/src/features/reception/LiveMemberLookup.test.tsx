@@ -6,6 +6,11 @@ const search = vi.fn();
 const detail = vi.fn();
 const tokenRead = vi.fn();
 const clear = vi.fn();
+const checkoutApi = vi.hoisted(() => ({ plans: vi.fn(), registers: vi.fn(), shift: vi.fn(), cash: vi.fn(), transfer: vi.fn() }));
+vi.mock('../../api/membershipCheckoutApi', () => ({
+  getActiveMembershipPlans: checkoutApi.plans, getRegisters: checkoutApi.registers, getCurrentRegisterShift: checkoutApi.shift,
+  submitMembershipCashSale: checkoutApi.cash, submitMembershipTransferSale: checkoutApi.transfer,
+}));
 vi.mock('../../api/receptionApi', () => ({
   getReceptionConfig: () => ({ apiOrigin: 'https://gym.example', branchId: '00000000-0000-4000-8000-000000000001' }),
   readOperationalToken: () => tokenRead(), clearOperationalToken: () => clear(),
@@ -14,7 +19,7 @@ vi.mock('../../api/receptionApi', () => ({
 }));
 
 const member = { id: 'a7f91bba-5722-4ed7-8bed-10d7f3f6c351', member_number: 'M-10', full_name: 'Socio Real', preferred_name: null, phone: '5551234567', status: 'active' };
-beforeEach(() => { vi.clearAllMocks(); tokenRead.mockReturnValue('live-token'); search.mockResolvedValue([member]); detail.mockResolvedValue({ ...member, pending_balance_minor: 3250, has_pending_balance: true }); });
+beforeEach(() => { vi.clearAllMocks(); tokenRead.mockReturnValue('live-token'); search.mockResolvedValue([member]); detail.mockResolvedValue({ ...member, pending_balance_minor: 3250, has_pending_balance: true }); checkoutApi.plans.mockResolvedValue([]); checkoutApi.registers.mockResolvedValue([]); });
 
 describe('LiveMemberLookup', () => {
   it('uses only live API results and displays then clears positive balance warning after refresh', async () => {
@@ -75,6 +80,16 @@ describe('LiveMemberLookup', () => {
     finishDetail({ ...member, pending_balance_minor: 3250, has_pending_balance: true });
     expect(await screen.findByRole('heading', { name: 'Recepción operativa' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('opens checkout for the selected authenticated live member', async () => {
+    render(<LiveMemberLookup />);
+    fireEvent.change(screen.getByLabelText(/Buscar por número/), { target: { value: 'M-10' } });
+    fireEvent.click(await screen.findByRole('button', { name: /M-10/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Vender o renovar membresía' }));
+    expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
+    expect(checkoutApi.plans).toHaveBeenCalledTimes(1);
+    expect(checkoutApi.registers).toHaveBeenCalledTimes(1);
   });
 
 });

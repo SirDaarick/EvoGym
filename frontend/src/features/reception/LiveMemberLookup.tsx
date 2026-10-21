@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { clearOperationalToken, getReceptionMember, getReceptionConfig, readOperationalToken, searchReceptionMembers, type OperationalMember, type OperationalMemberDetail } from '../../api/receptionApi';
 import { OperationalLogin } from '../auth/OperationalLogin';
+import { LiveMembershipCheckout } from './LiveMembershipCheckout';
 
 function money(minor: number) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(minor / 100); }
 
@@ -9,6 +10,7 @@ export function LiveMemberLookup() {
   const [query, setQuery] = useState('');
   const [members, setMembers] = useState<OperationalMember[]>([]);
   const [selected, setSelected] = useState<OperationalMemberDetail | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const searchGeneration = useRef(0);
@@ -22,7 +24,7 @@ export function LiveMemberLookup() {
     previousToken.current = token;
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    setMembers([]); setSelected(null); setError(''); setLoading(false);
+    setMembers([]); setSelected(null); setCheckoutOpen(false); setError(''); setLoading(false);
   }, [token]);
 
   useEffect(() => {
@@ -62,20 +64,20 @@ export function LiveMemberLookup() {
   function changeQuery(value: string) {
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    setQuery(value); setSelected(null); setMembers([]); setError(''); setLoading(false);
+    setQuery(value); setSelected(null); setCheckoutOpen(false); setMembers([]); setError(''); setLoading(false);
   }
   function logout() {
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    clearOperationalToken(); setToken(null); setSelected(null); setMembers([]); setQuery(''); setError(''); setLoading(false);
+    clearOperationalToken(); setToken(null); setSelected(null); setCheckoutOpen(false); setMembers([]); setQuery(''); setError(''); setLoading(false);
   }
 
   if (configError) return <main className="panel" role="alert" style={{ margin: '2rem', padding: '2rem' }}><h1>Recepción operativa no disponible</h1><p>{configError}</p><p>El modo de demostración sigue separado en su acceso habitual.</p></main>;
   if (!token) return <OperationalLogin onAuthenticated={() => setToken(readOperationalToken())} />;
   return <main className="panel" style={{ maxWidth: 760, margin: '2rem auto', padding: '2rem' }}>
-    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}><div><h1>Recepción operativa</h1><p>Socios y saldos actuales del backend.</p></div><button type="button" onClick={logout}>Cerrar sesión</button></header>
+    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}><div><h1>Recepción operativa</h1><p>Socios y saldos actuales del backend.</p></div><button type="button" onClick={logout} disabled={checkoutOpen}>Cerrar sesión</button></header>
     <label htmlFor="live-member-search">Buscar por número, nombre o teléfono</label>
-    <input id="live-member-search" value={query} onChange={event => changeQuery(event.target.value)} />
+    <input id="live-member-search" value={query} onChange={event => changeQuery(event.target.value)} disabled={checkoutOpen} />
     {loading && <p role="status">Consultando backend…</p>}
     {error && <p role="alert">{error}</p>}
     <ul aria-label="Resultados de socios">
@@ -86,6 +88,12 @@ export function LiveMemberLookup() {
         ? <div role="alert" style={{ border: '2px solid #b45309', padding: '1rem', fontWeight: 700 }}>Saldo pendiente de pago parcial: {money(selected.pending_balance_minor)}. Aviso informativo; no bloquea el acceso.</div>
         : <p>Sin saldo pendiente de pagos parciales.</p>}
       <button type="button" onClick={() => void refresh()}>Actualizar saldo</button>
+      <button type="button" onClick={() => setCheckoutOpen(true)}>Vender o renovar membresía</button>
     </section>}
+    {selected && checkoutOpen && <LiveMembershipCheckout
+      member={{ id: selected.id, name: selected.preferred_name || selected.full_name }}
+      onClose={() => setCheckoutOpen(false)}
+      onCompleted={() => void refresh()}
+    />}
   </main>;
 }

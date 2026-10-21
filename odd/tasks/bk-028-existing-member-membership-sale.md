@@ -30,14 +30,15 @@ The standard frontend checkout reads and writes demo state, while the backend al
 
 ### BK-028-T2 - Existing-member live checkout UI
 
-- [ ] Add a visible purchase/renewal action and checkout experience to the authenticated live reception member flow, using only backend member/plan/register/shift identifiers.
-- [ ] Show distinct pending-transfer, confirmed payment, membership activation, and unknown network outcome states; exact retry must reuse its idempotency key.
-- [ ] Verify cash and transfer route selection, partial-cash warning behavior supported by the API, validation/error states, and that no DemoProvider operation runs for this flow.
-- [ ] Update the task ledger and phase card; state explicitly that new-member registration and Mercado Pago are separate follow-up work.
+- [x] Add a visible purchase/renewal action and checkout experience to the authenticated live reception member flow, using only backend member/plan/register/shift identifiers.
+- [x] Show distinct pending-transfer, confirmed payment, membership activation, and unknown network outcome states; exact retry must reuse its idempotency key. A null period is explicitly not presented as activated.
+- [x] Verify cash and transfer route selection, partial-cash warning behavior supported by the API, validation/error states, and that no DemoProvider operation runs for this flow.
+- [x] Update the task ledger and phase card; state explicitly that new-member registration and Mercado Pago are separate follow-up work.
 - **Authorized surfaces:** `frontend/src/features/reception/LiveMemberLookup.tsx`, `frontend/src/features/reception/LiveMemberLookup.test.tsx`, `frontend/src/features/reception/LiveMembershipCheckout.tsx`, `frontend/src/features/reception/LiveMembershipCheckout.test.tsx`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
 - **Checks:** focused checkout/API tests and `git diff --check`.
 - **Runtime harness:** component tests with mocked API calls; no live backend/payment request.
 - **Rollback:** revert only the live checkout UI and T2 documentation; T1 API client may remain independently useful.
+- **Route:** Delegated direct. Trigger evidence: reading that prepared a 4-file UI/test change across multiple non-trivial components, plus focused command verification. Implementation was confined to the listed T2 paths; no excluded demo/new-member screen was edited.
 
 ## Acceptance criteria
 
@@ -51,11 +52,14 @@ The standard frontend checkout reads and writes demo state, while the backend al
 
 - Read-only mapping confirmed the backend routes and live authentication path; the normal demo checkout is not an API client. The existing-member scope was explicitly approved by the user.
 - The live path already supports authenticated member search. Frontend checkout still needs backend plan-version and open register/shift reads plus sale API calls.
-- BK-028 is Partial after T1: the authenticated API boundary is implemented and tested, but no checkout UI is integrated; BK-028-T2 remains open.
+- BK-028 is Partial after T2: the existing-member authenticated checkout UI is integrated and acceptance-tested; new-member registration and Mercado Pago remain deferred.
 - T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); GREEN is `npm test -- --run src/api/membershipCheckoutApi.test.ts` (4 tests passed). `git diff --cached --check` passed for the staged T1 files. The whole-worktree `git diff --check` reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. `npm run typecheck` is blocked by an unrelated existing `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`. No live backend/payment request was made.
 - T1 work-unit commit: `183a79b` (`feat(frontend): agregar cliente de API para ventas de membresía`).
+- T2 RED/GREEN proof: RED `npm test -- --run src/features/reception/LiveMembershipCheckout.test.tsx` failed because the component did not yet exist. GREEN `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMembershipCheckout.test.tsx` (3 files, 13 tests passed). Tests use mocked API calls; no live backend/payment request was made. `git diff --check` is scoped to the staged T2 paths. Full build/typecheck were not run by instruction.
+- T2 outcome: existing-member live checkout acceptance is complete. BK-028 remains Partial overall; new-member signup and Mercado Pago are explicitly deferred. No demo operation is wired into this flow.
+- T2 work-unit commit: pending until commit.
 - New-member registration, DemoProvider-backed screens, and Mercado Pago remain explicitly deferred.
 
 ## Next step
 
-Implement BK-028-T2: integrate the live reception checkout UI and its tests without changing the deferred demo/new-member/Mercado Pago flows.
+Next follow-up: new-member registration and Mercado Pago are separate deferred scopes; no work on them is authorized by this T2 slice.
