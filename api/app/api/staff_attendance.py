@@ -1,0 +1,157 @@
+"""Branch-scoped, append-only affirmative staff-attendance records."""
+from datetime import date, datetime, timezone
+from uuid import UUID
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+
+from app.api.staff_roster import RosterPrincipal, _allowed_branches, _principal
+from app.auth.authorization import AuthorizationDenied, Permission, authorize
+from app.db.models import Branch, StaffAttendanceRecord, StaffRosterProfile
+
+router = APIRouter(prefix="/api/v1/staff-attendance", tags=["staff-attendance"])
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class StaffAttendanceItem(BaseModel):
+    id: UUID
+    profile_id: UUID
+    branch_id: UUID
+    full_name: str
+    position: str
+    recorded_by: UUID
+    occurred_at: datetime
+    business_date: date
+
+
+class StaffAttendancePage(BaseModel):
+    items: list[StaffAttendanceItem]
+    total: int
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise HTTPException(500, "Server clock must return a timezone-aware timestamp.")
+    return value.astimezone(timezone.utc)
+
+
+def _item(record: StaffAttendanceRecord, profile: StaffRosterProfile) -> StaffAttendanceItem:
+    occurred_at = record.occurred_at
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    return StaffAttendanceItem(
+        id=record.id,
+        profile_id=record.profile_id,
+        branch_id=record.branch_id,
+        full_name=profile.full_name,
+        position=profile.position,
+        recorded_by=record.recorded_by,
+        occurred_at=occurred_at.astimezone(timezone.utc),
+        business_date=record.business_date,
+    )
+
+
+def _recorder_branch(session, principal: RosterPrincipal, branch_id: UUID) -> Branch:
+    if principal.branch_id is not None and principal.branch_id != branch_id:
+        raise HTTPException(404, "Branch not found.")
+    try:
+        authorize(session, principal.staff_id, Permission.STAFF_ATTENDANCE_RECORD, branch_id)
+    except AuthorizationDenied:
+        raise HTTPException(403, "Attendance recording is restricted to reception staff.") from None
+    branch = session.get(Branch, branch_id)
+    if branch is None or not branch.is_active:
+        raise HTTPException(404, "Branch not found.")
+    return branch
+
+
+def _existing_record(session, branch_id: UUID, profile_id: UUID, business_date: date):
+    return session.scalar(select(StaffAttendanceRecord).where(
+        StaffAttendanceRecord.branch_id == branch_id,
+        StaffAttendanceRecord.profile_id == profile_id,
+        StaffAttendanceRecord.business_date == business_date,
+    ))
+
+
+@router.get("", response_model=StaffAttendancePage)
+def list_staff_attendance(
+    request: Request,
+    branch_id: UUID | None = Query(default=None),
+    business_date: date | None = Query(default=None),
+    offset: int = Query(default=0, ge=0, le=2**63 - 1),
+    limit: int = Query(default=50, ge=1, le=100),
+    principal: RosterPrincipal = Depends(_principal),
+):
+    factory = request.app.state.session_factory
+    with factory() as session:
+        branches = _allowed_branches(session, principal, branch_id)
+        branch_ids = [branch.id for branch in branches]
+        query = (
+            select(StaffAttendanceRecord, StaffRosterProfile)
+            .join(StaffRosterProfile, StaffRosterProfile.id == StaffAttendanceRecord.profile_id)
+            .where(StaffAttendanceRecord.branch_id.in_(branch_ids))
+        )
+        count_query = select(func.count()).select_from(StaffAttendanceRecord).where(
+            StaffAttendanceRecord.branch_id.in_(branch_ids)
+        )
+        if business_date is not None:
+            query = query.where(StaffAttendanceRecord.business_date == business_date)
+            count_query = count_query.where(StaffAttendanceRecord.business_date == business_date)
+        rows = session.execute(query.order_by(
+            StaffAttendanceRecord.business_date.desc(), StaffAttendanceRecord.occurred_at.desc(),
+            StaffAttendanceRecord.id,
+        ).offset(offset).limit(limit)).all() if branch_ids else []
+        total = session.scalar(count_query) if branch_ids else 0
+        return StaffAttendancePage(items=[_item(record, profile) for record, profile in rows], total=total)
+
+
+@router.post("/branches/{branch_id}/profiles/{profile_id}", response_model=StaffAttendanceItem, status_code=201)
+def record_staff_attendance(
+    branch_id: UUID,
+    profile_id: UUID,
+    request: Request,
+    response: Response,
+    principal: RosterPrincipal = Depends(_principal),
+):
+    factory = request.app.state.session_factory
+    try:
+        with factory.begin() as session:
+            branch = _recorder_branch(session, principal, branch_id)
+            profile = session.get(StaffRosterProfile, profile_id)
+            if profile is None or profile.branch_id != branch.id:
+                raise HTTPException(404, "Staff profile not found.")
+            observed_at = _utc(utc_now())
+            business_date = observed_at.astimezone(ZoneInfo(branch.timezone)).date()
+            existing = _existing_record(session, branch.id, profile.id, business_date)
+            if existing is not None:
+                response.status_code = 200
+                return _item(existing, profile)
+            if not profile.is_active:
+                raise HTTPException(409, "Inactive staff cannot be marked for attendance.")
+            record = StaffAttendanceRecord(
+                branch_id=branch.id,
+                profile_id=profile.id,
+                recorded_by=principal.staff_id,
+                occurred_at=observed_at,
+                business_date=business_date,
+            )
+            try:
+                with session.begin_nested():
+                    session.add(record)
+                    session.flush()
+            except IntegrityError:
+                existing = _existing_record(session, branch.id, profile.id, business_date)
+                if existing is None:
+                    raise
+                response.status_code = 200
+                return _item(existing, profile)
+            return _item(record, profile)
+    except IntegrityError as exc:
+        if "uq_staff_attendance_branch_profile_date" not in str(exc.orig):
+            raise
+        raise HTTPException(409, "Attendance already exists for this employee and branch date.") from None

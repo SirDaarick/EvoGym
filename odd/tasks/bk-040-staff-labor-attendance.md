@@ -25,11 +25,11 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - [x] Update the master backend plan and this document with evidence and the Spanish work-unit commit.
 
 ### BK040-S2 — Record and review labor attendance
-- [ ] Add attendance records for all rostered staff, attributed to the reception actor, branch, and occurrence time.
-- [ ] Allow reception to read the roster and record only for its branch; Admin can read within active grant scope.
-- [ ] Treat each branch-local date as one positive attendance roll call per rostered employee; a retry returns the original record, and unmarked staff are not automatically labeled absent.
-- [ ] Keep records append-only, with server-derived UTC occurrence time, branch-local business date, and receptionist attribution.
-- [ ] Add route, authorization, migration/invariant, and branch-scope tests; update docs and commit.
+- [x] Add attendance records for all rostered staff, attributed to the reception actor, branch, and occurrence time.
+- [x] Allow reception to read the roster and record only for its branch; Admin can read within active grant scope.
+- [x] Treat each branch-local date as one positive attendance roll call per rostered employee; a retry returns the original record, and unmarked staff are not automatically labeled absent.
+- [x] Keep records append-only, with server-derived UTC occurrence time, branch-local business date, and receptionist attribution.
+- [x] Add route, authorization, migration/invariant, and branch-scope tests; update docs and commit.
 
 ## Acceptance criteria
 
@@ -52,8 +52,8 @@ The backend only models staff login accounts, so cleaning and other employees wi
 
 - Owner decision recorded: all personnel, including cleaning staff without application access, must be included.
 - Remaining design assumption: Admin manages roster; document and flag if code evidence or existing policy contradicts it.
-- S2 working assumption to avoid false attendance claims: record only explicitly observed presence; no check-in implies no status, not an absence. One employee may be marked once per branch-local date; retries return the existing immutable event.
-- Current next step: implement BK040-S2.
+- S2 conservative assumptions (not user-confirmed business rules): record only explicitly observed presence; an unmarked person has unspecified status, never inferred absence. Each roster profile may have one mark per branch-local date; retries on that date return the immutable original mark. The API derives the UTC timestamp and branch-local business date server-side.
+- BK040-S2 complete; BK-040 is done, with no additional attendance slice in scope.
 
 ## Relevant files
 
@@ -74,3 +74,18 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - **Runtime boundary:** N/A beyond exercised TestClient routes and SQLite migration tests; no deployment boundary.
 - **Rollback boundary:** revert the `0021_staff_roster`-backed model, authorization, route, registration, focused tests, and BK040-S1 evidence together; migration downgrade is intentionally blocked after roster data exists.
 - **Work-unit commit:** `feat(personal): agregar roster laboral por sucursal` (Spanish Conventional Commit; SHA reported in delivery).
+
+
+## BK040-S2 implementation proof
+
+- **API:** `GET /api/v1/staff-attendance` lists recorded presence events, optionally filtered by authorized `branch_id` and `business_date`, with bounded pagination. Reception reads its branch; Admin reads only branches permitted by active explicit grants. `POST /api/v1/staff-attendance/branches/{branch_id}/profiles/{profile_id}` records presence only for a receptionist's own branch. No update/delete route exists.
+- **Event contract:** each row references the branch roster profile and reception actor, stores server-derived UTC `occurred_at` and the branch-local `business_date`, and includes the profile name/position in reads. A branch/profile/date unique constraint returns the original event on same-day retry; ORM guards and database triggers prevent update/delete. A composite profile/branch FK blocks cross-branch association.
+- **Unknown is not absent:** the API returns only positive marks. An unmarked profile has no attendance row and no inferred status. Deactivated staff cannot receive a new mark, but earlier events remain queryable; a retry for an existing event returns that immutable row.
+- **Assumption retained (not user-confirmed):** attendance is an explicit observation of presence, one mark is allowed for a roster profile per branch-local calendar date, and same-date retries return the first stored event. Server clock and branch timezone derive occurrence time/date. This conservative contract does not claim that unmarked personnel are absent.
+- **Migration:** `0022_staff_attendance` adds `staff_attendance_records`, a composite branch/profile FK, one-per-profile/date uniqueness, lookup index, and SQLite/PostgreSQL update/delete triggers. Downgrade refuses to discard attendance rows. `api/tests/test_contract_smoke.py` was maintained to expect the new table and head revision 0022.
+- **Test-first evidence:** initial `GET /api/v1/staff-attendance` returned 404 before route implementation (RED).
+- **Focused verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` - **29 passed, 1 existing Starlette/httpx deprecation warning**.
+- **Full API verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` - **223 passed, 17 skipped, 1 existing Starlette/httpx deprecation warning**. All database-backed tests used disposable SQLite; no live PostgreSQL or external services were used.
+- **Runtime boundary:** N/A beyond TestClient/SQLite; no deployment or remote service.
+- **Rollback boundary:** revert the `0022_staff_attendance` migration, model, permission, router registration, focused tests, smoke expectations, and BK040-S2 documentation together. Migration downgrade is blocked while attendance rows exist.
+- **Work-unit commit:** `feat(personal): registrar asistencia laboral por sucursal` (Spanish Conventional Commit; SHA reported in delivery).
