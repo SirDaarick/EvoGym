@@ -84,7 +84,8 @@ class Payment(Base):
     __table_args__ = (
         CheckConstraint("method IN ('cash', 'transfer')", name="ck_payments_supported_method"),
         CheckConstraint(
-            "(method = 'cash' AND status = 'confirmed') OR (method = 'transfer' AND status = 'pending')",
+            "(method = 'cash' AND status = 'confirmed') OR "
+            "(method = 'transfer' AND status IN ('pending', 'under_review', 'confirmed'))",
             name="ck_payments_method_status",
         ),
         CheckConstraint("amount_minor >= 0", name="ck_payments_amount_nonnegative"),

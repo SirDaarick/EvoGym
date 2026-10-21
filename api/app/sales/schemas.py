@@ -1,5 +1,6 @@
 """Request and response schemas for the first cash membership sale slice."""
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +12,12 @@ class CashMembershipSaleRequest(BaseModel):
     member_id: UUID
     plan_version_id: UUID
     source_shift_id: UUID | None = None
+
+
+class TransferReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["confirmed", "pending"]
 
 
 class CashSaleOrderDTO(BaseModel):

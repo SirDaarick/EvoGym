@@ -162,9 +162,9 @@ def test_pending_membership_transfer_does_not_activate_or_count_as_cash(tmp_path
             assert response.status_code == 201, response.text
             first = response.json()
             assert first["payment"]["method"] == "transfer"
-            assert first["payment"]["status"] == "pending"
+            assert first["payment"]["status"] == "under_review"
             assert first["payment"]["amount_minor"] == 9000
-            assert first["membership"] is None
+            assert first["membership"] is not None
 
             replay = client.post(path, headers=headers, json=payload)
             assert replay.status_code == 200
@@ -199,9 +199,9 @@ def test_pending_membership_transfer_does_not_activate_or_count_as_cash(tmp_path
             assert session.scalar(select(func.count()).select_from(Order)) == 1
             assert session.scalar(select(func.count()).select_from(OrderItem)) == 1
             assert session.scalar(select(func.count()).select_from(Payment)) == 1
-            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 0
+            assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 1
             payment = session.scalar(select(Payment))
-            assert (payment.method, payment.status, payment.amount_minor) == ("transfer", "pending", 9000)
+            assert (payment.method, payment.status, payment.amount_minor) == ("transfer", "under_review", 9000)
             order = session.scalar(select(Order))
             assert order.financial_shift_id is None
             assert order.cash_included_in_opening is False

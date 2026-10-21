@@ -9,7 +9,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment, Plan, PlanVersion, Shift
+from app.db.models import (
+    Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment,
+    PaymentReviewEvent, Plan, PlanVersion, Shift,
+)
 
 MAX_MINOR = 2**63 - 1
 
@@ -90,8 +93,8 @@ def _load_result(session: Session, order: Order, replayed: bool) -> CashMembersh
     membership = session.scalar(select(MembershipPeriod).where(MembershipPeriod.order_item_id == item.id))
     if order.payment.method == "cash" and membership is None:
         raise RuntimeError("Persisted membership cash sale has no activation period.")
-    if order.payment.method == "transfer" and membership is not None:
-        raise RuntimeError("Pending membership transfer unexpectedly has an activation period.")
+    if order.payment.method == "transfer" and order.payment.status in {"under_review", "confirmed"} and membership is None:
+        raise RuntimeError("Voucher-backed membership transfer has no membership period.")
     return CashMembershipSaleResult(order, item, order.payment, membership, replayed)
 
 
@@ -209,7 +212,7 @@ def post_membership_cash_sale(
     if branch is None:
         raise CashSaleNotFoundError("Branch not found.")
     starts_on = ends_on = None
-    if payment_method == "cash":
+    if payment_method in {"cash", "transfer"}:
         try:
             branch_zone = ZoneInfo(branch.timezone)
         except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
@@ -242,11 +245,11 @@ def post_membership_cash_sale(
     )
     payment = Payment(
         id=uuid4(), order_id=order.id, method=payment_method,
-        status="confirmed" if payment_method == "cash" else "pending",
+        status="confirmed" if payment_method == "cash" else "under_review",
         amount_minor=version.price_minor, received_by=actor_id,
     )
     membership = None
-    if payment_method == "cash":
+    if payment_method in {"cash", "transfer"}:
         membership = MembershipPeriod(
             id=uuid4(), member_id=member.id, order_item_id=item.id, plan_version_id=version.id,
             starts_on=starts_on, ends_on=ends_on, activated_by=actor_id,
@@ -258,4 +261,100 @@ def post_membership_cash_sale(
     if membership is not None:
         session.add(membership)
         session.flush()
+    if payment_method == "transfer":
+        review_fingerprint = sha256(f"{payment.id}\nunder_review\n{actor_id}".encode("ascii")).hexdigest()
+        session.add(PaymentReviewEvent(
+            payment_id=payment.id, actor_id=actor_id, from_status=None, to_status="under_review",
+            idempotency_key=None, request_fingerprint=review_fingerprint, created_at=datetime.now(timezone.utc),
+        ))
+        session.flush()
     return CashMembershipSaleResult(order, item, payment, membership, replayed=False)
+
+
+@dataclass(frozen=True)
+class TransferReviewResult:
+    order: Order
+    item: OrderItem
+    payment: Payment
+    membership: MembershipPeriod
+    replayed: bool
+
+
+def review_membership_transfer(
+    session: Session,
+    *,
+    payment_id: UUID,
+    actor_id: UUID,
+    status: str,
+    idempotency_key: str,
+) -> TransferReviewResult:
+    """Append an authorized voucher review decision without changing sold period dates."""
+    if status not in {"confirmed", "pending"}:
+        raise ValueError("Transfer review status must be confirmed or pending.")
+    if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+        raise ValueError("Idempotency key must contain between 1 and 128 characters.")
+
+    observed_payment = session.scalar(select(Payment).where(Payment.id == payment_id))
+    if observed_payment is None:
+        raise CashSaleNotFoundError("Transfer payment not found.")
+    observed_order = session.get(Order, observed_payment.order_id)
+    if observed_order is None or observed_payment.method != "transfer":
+        raise CashSaleNotFoundError("Transfer payment not found.")
+
+    register = session.scalar(
+        select(CashRegister).where(CashRegister.id == observed_order.register_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    member = session.scalar(
+        select(Member).where(Member.id == observed_order.member_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if member is None:
+        raise CashSaleNotFoundError("Member not found.")
+    order = session.scalar(
+        select(Order).where(Order.id == observed_order.id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    payment = session.scalar(
+        select(Payment).where(Payment.id == payment_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    items = list(order.items)
+    if len(items) != 1:
+        raise CashSaleConflictError("Transfer order has no unambiguous membership item.")
+    item = items[0]
+    membership = session.scalar(
+        select(MembershipPeriod).where(MembershipPeriod.order_item_id == item.id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if membership is None:
+        raise CashSaleConflictError("Legacy transfer has no voucher-backed membership period.")
+    initial_event = session.scalar(select(PaymentReviewEvent).where(
+        PaymentReviewEvent.payment_id == payment.id,
+        PaymentReviewEvent.from_status.is_(None),
+        PaymentReviewEvent.to_status == "under_review",
+    ))
+    if initial_event is None:
+        raise CashSaleConflictError("Transfer has no voucher review history.")
+
+    fingerprint = sha256(f"{payment.id}\n{status}\n{actor_id}".encode("ascii")).hexdigest()
+    prior = session.scalar(select(PaymentReviewEvent).where(
+        PaymentReviewEvent.payment_id == payment.id,
+        PaymentReviewEvent.idempotency_key == idempotency_key,
+    ).with_for_update())
+    if prior is not None:
+        if prior.request_fingerprint != fingerprint:
+            raise CashSaleConflictError("Review idempotency key was already used for a different decision.")
+        return TransferReviewResult(order, item, payment, membership, replayed=True)
+
+    if payment.status not in {"under_review", "pending", "confirmed"}:
+        raise CashSaleConflictError("Transfer payment cannot be reviewed from its current state.")
+    session.add(PaymentReviewEvent(
+        payment_id=payment.id, actor_id=actor_id, from_status=payment.status, to_status=status,
+        idempotency_key=idempotency_key, request_fingerprint=fingerprint, created_at=datetime.now(timezone.utc),
+    ))
+    payment.status = status
+    session.flush()
+    return TransferReviewResult(order, item, payment, membership, replayed=False)

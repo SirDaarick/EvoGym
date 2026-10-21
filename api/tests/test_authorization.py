@@ -44,12 +44,16 @@ def test_receptionist_is_branch_scoped_and_admin_finance_is_explicit(authorizati
         for branch_id in (ids["b"], None):
             with pytest.raises(AuthorizationDenied):
                 authorize(session, ids["receptionist"], Permission.MEMBER_OPERATIONAL_READ, branch_id)
-        for restricted in (Permission.FINANCE_READ, Permission.STAFF_COMPENSATION_READ, Permission.ADMIN_AUDIT_READ):
+        for restricted in (
+            Permission.FINANCE_READ, Permission.STAFF_COMPENSATION_READ,
+            Permission.ADMIN_AUDIT_READ, Permission.TRANSFER_REVIEW,
+        ):
             with pytest.raises(AuthorizationDenied):
                 authorize(session, ids["receptionist"], restricted, ids["a"])
         with pytest.raises(AuthorizationDenied):
             authorize(session, ids["receptionist"], "unknown_permission", ids["a"])
         authorize(session, ids["admin"], Permission.FINANCE_READ, ids["b"])
+        authorize(session, ids["admin"], Permission.TRANSFER_REVIEW, ids["b"])
         with pytest.raises(AuthorizationDenied):
             authorize(session, ids["inactive"], Permission.MEMBER_OPERATIONAL_READ, ids["a"])
 

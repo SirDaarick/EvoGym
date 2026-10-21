@@ -14,6 +14,7 @@ class Permission(StrEnum):
     FINANCE_READ = "finance_read"
     STAFF_COMPENSATION_READ = "staff_compensation_read"
     ADMIN_AUDIT_READ = "admin_audit_read"
+    TRANSFER_REVIEW = "transfer_review"
 
 
 class AuthorizationDenied(Exception):
