@@ -173,6 +173,13 @@ Ledger totals: **18 Done, 12 Partial, 1 In progress, 45 Not started (76 total)**
 
 ## Current progress and next action
 
+### Backend readiness review — 2026-10-21
+
+- No next multi-file backend task is currently ready without an unresolved business rule. BK-026-S1/S2/S3 have completed their authorized slices; the opt-in PostgreSQL repayment-concurrency test exists, but serialization proof remains pending because no approved disposable local PostgreSQL target is configured. Do not connect to an external or live database to close this gap.
+- BK-029 remains blocked on the authoritative entitlement/access contract from BK-027. Before implementing check-in, define entitlement source and service/branch scope, revocation/cancellation behavior, repeat-visit/session and retry semantics, and how online check-in relates to the D-027 offline append-only event stream. D-013 only establishes warning-only access for the specific partial-cash membership balance; it does not authorize a general debt gate.
+- Broader BK-025 provider settlement remains gated by D-023/D-024; broader BK-035 cash movements/expenses and discrepancy reconciliation remain gated by D-014. BK-021/BK-032 also retain separately scoped inventory gaps. These are not treated as authorization to infer or implement policy.
+- **Next action:** continue with a bounded backend slice only after its rules are ratified or after the existing task ledger identifies an independent ready slice. Until then, preserve these questions and the PostgreSQL proof gap rather than manufacturing behavior or accessing an unapproved database. No source code changed in this readiness review.
+
 ### Current authority and delivered-work index (2026-10-20)
 The ledger and current evidence above are authoritative over older dated checkpoint notes below. Implementation status is scoped, not universal: cash membership purchase/order/payment/period work does not mean all BK-023/BK-024/BK-027 workflows exist; cash close does not mean general BK-035 expenses/movements exist. “Ratified” records a decision; “implemented” describes source behavior; “verified” records observed checks; “delivered locally” means a Git commit on this branch. None of these means pushed or published.
 
