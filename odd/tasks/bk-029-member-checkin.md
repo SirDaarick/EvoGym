@@ -53,14 +53,15 @@ Implement one bounded online API slice for membership check-in. This is partial 
 
 ## BK-029-T3 - Reconcile canonical backend plan
 
-- [x] Reconcile the decision ledger, implementation board, and phase card with the approved five-minute offline clock rule and the isolated helper's actual scope.
+- [x] Reconcile the decision ledger, implementation board, and P6 BK-029 phase card with the approved five-minute offline clock rule and the isolated helper's actual scope.
 - [x] Keep BK-029 Partial; distinguish online exact request idempotency from unimplemented online five-minute visit dedupe, and keep BK-031/BK-064 offline integration and reconnect-time revalidation pending.
-- Acceptance: all four authorized documents state the same approved threshold/clock-origin semantics and do not imply queue, persistence, backend ingestion, or full integration.
+- Acceptance: all four authorized documents, including the P6 BK-029 card, state the approved threshold/clock-origin semantics and do not imply queue, persistence, backend ingestion, or full integration.
 - Route: delegated direct, documentation-only bounded work unit.
 - Authorized scope: `odd/tasks/backend-implementation.md`, `docs/backend-plan/02-business-rules-and-decisions.md`, `docs/backend-plan/04-implementation-phases.md`, and this task record.
 - Checks: structural readback of all changed sections; `git diff --check`.
 - Runtime/tests: N/A; documentation only, no executable behavior changed.
 - Rollback boundary: revert only this documentation reconciliation commit.
+- Follow-up outcome: parent review found the P6 card still lacked a current-status note; the card now records >5-minute review, shared-origin requirement, unknown-origin review, isolated helper scope, and pending offline queue/sync plus reconnect revalidation. Structural readback and `git diff --check` passed; tests N/A. Follow-up commit hash is reported outside this task file to avoid self-reference.
 
 ## Route and verification
 
