@@ -57,6 +57,10 @@ def test_roster_is_branch_scoped_admin_managed_and_supports_inactive_profiles(tm
                                   json={"full_name": "  Ana PÃ©rez ", "position": "Limpieza"})
             assert created.status_code == 201, created.text
             profile = created.json()
+            configured = client.patch(f"/api/v1/staff-roster/{profile['id']}", headers=admin,
+                                      json={"expected_entry_time": "09:00", "grace_tolerance_minutes": 10})
+            assert configured.status_code == 200
+            assert configured.json()["expected_entry_time"] == "09:00:00"
             assert profile["full_name"] == "Ana PÃ©rez" and profile["is_active"] is True
             assert client.get(f"/api/v1/staff-roster?branch_id={branch_b_id}", headers=admin).json()["items"] == []
 

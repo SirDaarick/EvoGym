@@ -209,3 +209,12 @@ Task commit: `ea233cb feat(reception): conectar busqueda real y alertas de saldo
 - These attendance rules are conservative assumptions, not confirmed business policy: explicitly observed presence only; one mark per branch-local date; same-day retries return the first event; server clock and branch timezone determine stored time/date.
 - Focused: `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` - 29 passed, 1 deprecation warning. Full API suite: 223 passed, 17 skipped, 1 warning. No live PostgreSQL or external service used.
 - Work-unit commit: `feat(personal): registrar asistencia laboral por sucursal`.
+
+
+#### BK040-S3 - configurable attendance and checkout (implemented; verification pending)
+
+- Migration `0023_staff_sched_checkout` adds optional roster entry time/grace, nullable present/late snapshots on new entries, and a separate unique append-only checkout event. Historical S2 marks remain nullable/unclassified; no backfill is invented.
+- Admin roster PATCH configures schedule only with active existing management grants; receptionist writes remain forbidden. New entry requires a complete schedule, uses server UTC converted through the branch IANA timezone, classifies the inclusive tolerance cutoff as present and later arrivals as late, and snapshots applied values.
+- Reception records checkout only for its own authorized branch; checkout carries server UTC and actor, is idempotent, and cannot precede entry. Entry rows remain immutable. SQLite/PostgreSQL triggers guard checkout events; ORM guards protect both records.
+- Absence automation/manual finalization and expected-day agenda are NOT implemented; only present/late entries and entry/exit data are implemented. Their operational trigger remains unresolved under D-032.
+- Focused verification: 33 passed; full API: 226 passed, 17 skipped. One Starlette/httpx deprecation warning and 14 SQLite expression-index reflection warnings remain. Commit identity is recorded in the BK040 task document.

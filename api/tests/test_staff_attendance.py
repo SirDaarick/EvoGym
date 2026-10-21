@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -15,6 +16,10 @@ def _create_profiles(factory, branch_a_id, branch_b_id):
         unmarked = StaffRosterProfile(branch_id=branch_a_id, full_name="Unmarked Reception", position="Reception")
         other_branch = StaffRosterProfile(branch_id=branch_b_id, full_name="North Cleaner", position="Cleaning")
         inactive = StaffRosterProfile(branch_id=branch_a_id, full_name="Inactive Cleaner", position="Cleaning", is_active=False)
+        from datetime import time
+        for profile in (active, unmarked, other_branch, inactive):
+            profile.expected_entry_time = time(9, 0)
+            profile.grace_tolerance_minutes = 0
         session.add_all([active, unmarked, other_branch, inactive])
         session.flush()
         return active.id, unmarked.id, other_branch.id, inactive.id
@@ -59,7 +64,7 @@ def test_receptionist_marks_present_once_with_server_time_and_local_date(tmp_pat
             )
             assert page.status_code == 200 and page.json()["total"] == 1
             assert [item["profile_id"] for item in page.json()["items"]] == [str(profile_id)]
-            assert "status" not in page.json()["items"][0]
+            assert page.json()["items"][0]["status"] == "late"
             assert client.get(f"/api/v1/staff-attendance?branch_id={branch_b_id}", headers=desk).status_code == 404
             assert client.post(
                 f"/api/v1/staff-attendance/branches/{branch_b_id}/profiles/{other_profile_id}", headers=desk, json={},
@@ -101,5 +106,53 @@ def test_attendance_authority_and_inactive_roster_protection(tmp_path):
             assert all_records.status_code == 200 and all_records.json()["total"] == 1
             assert all_records.json()["items"][0]["branch_id"] == str(branch_a_id)
             assert client.get("/api/v1/staff-attendance").status_code == 401
+    finally:
+        engine.dispose()
+
+
+def test_schedule_classification_timezone_and_append_only_checkout(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _branch_b_id, desk_token, _admin_token = _setup(tmp_path)
+    profile_id, late_profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    with factory.begin() as session:
+        profile = session.get(StaffRosterProfile, profile_id)
+        profile.expected_entry_time = datetime.strptime("21:00", "%H:%M").time()
+        profile.grace_tolerance_minutes = 15
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 15, tzinfo=timezone.utc))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            entry = client.post(f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}", headers=desk, json={})
+            assert entry.status_code == 201
+            item = entry.json()
+            assert item["status"] == "present"
+            assert item["expected_entry_time"] == "21:00:00" and item["grace_tolerance_minutes"] == 15
+            checkout = client.post(f"/api/v1/staff-attendance/{item['id']}/checkout", headers=desk, json={})
+            assert checkout.status_code == 201, checkout.text
+            assert client.post(f"/api/v1/staff-attendance/{item['id']}/checkout", headers=desk, json={}).json() == checkout.json()
+            assert client.post(f"/api/v1/staff-attendance/{UUID(int=1)}/checkout", headers=desk, json={}).status_code == 404
+            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 16, tzinfo=timezone.utc))
+            with factory.begin() as session:
+                late_profile = session.get(StaffRosterProfile, late_profile_id)
+                late_profile.expected_entry_time = datetime.strptime("21:00", "%H:%M").time()
+                late_profile.grace_tolerance_minutes = 15
+            late = client.post(f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{late_profile_id}", headers=desk, json={})
+            assert late.status_code == 201 and late.json()["status"] == "late"
+    finally:
+        engine.dispose()
+
+
+def test_attendance_requires_complete_schedule(tmp_path):
+    url, engine, factory, branch_a_id, _branch_b_id, desk_token, _admin_token = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    with factory.begin() as session:
+        profile = session.get(StaffRosterProfile, profile_id)
+        profile.expected_entry_time = None
+        profile.grace_tolerance_minutes = None
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            result = client.post(f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}",
+                                 headers={"Authorization": f"Bearer {desk_token}"}, json={})
+            assert result.status_code == 409
+            assert result.status_code == 409
     finally:
         engine.dispose()

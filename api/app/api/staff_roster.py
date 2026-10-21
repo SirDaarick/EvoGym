@@ -1,6 +1,6 @@
 """Branch-scoped employee roster, separate from staff authentication accounts."""
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -36,6 +36,8 @@ class StaffRosterUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=160)
     position: str | None = Field(default=None, min_length=1, max_length=80)
     is_active: bool | None = None
+    expected_entry_time: time | None = None
+    grace_tolerance_minutes: int | None = Field(default=None, ge=0, le=1440)
 
 
 class StaffRosterItem(BaseModel):
@@ -48,6 +50,8 @@ class StaffRosterItem(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    expected_entry_time: time | None = None
+    grace_tolerance_minutes: int | None = None
 
 
 class StaffRosterPage(BaseModel):
@@ -168,6 +172,8 @@ def update_staff_profile(
                 if value is None:
                     raise HTTPException(422, "Roster fields cannot be null.")
                 setattr(profile, key, value)
+            if (profile.expected_entry_time is None) != (profile.grace_tolerance_minutes is None):
+                raise HTTPException(422, "Expected entry time and grace tolerance must be configured together.")
             session.flush()
             return StaffRosterItem.model_validate(profile)
     except (TypeError, ValueError) as exc:

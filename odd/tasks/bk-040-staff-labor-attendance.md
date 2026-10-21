@@ -31,6 +31,13 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - [x] Keep records append-only, with server-derived UTC occurrence time, branch-local business date, and receptionist attribution.
 - [x] Add route, authorization, migration/invariant, and branch-scope tests; update docs and commit.
 
+### BK040-S3 — Configure schedules and record entry/exit
+- [ ] Let Admin configure each roster profile's expected entry time and grace tolerance through the branch-scoped roster API.
+- [ ] Classify a recorded entry as present through the configured tolerance boundary and late after that boundary, using the branch timezone.
+- [ ] Record employee exit time with reception attribution and idempotent retry behavior without weakening the existing append-only audit contract.
+- [ ] Add migration-backed API/model tests for configuration permissions, cutoff behavior, branch-local time, checkout, and retries; update plan/docs and commit.
+- [ ] Do not implement or infer absence-finalization timing in this slice; preserve it as open until its operational trigger is defined.
+
 ## Acceptance criteria
 
 - Employees without login accounts can be rostered and receive labor attendance records.
@@ -38,6 +45,10 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - Organization Admin can review all branches; branch Admin can review only its branch; reception records only its own branch.
 - Inactive roster entries cannot receive new attendance; prior attendance remains readable.
 - Actor identity is server-derived, and attendance is not conflated with member check-in.
+- Admin can set an expected entry time and tolerance for each employee; entry at the grace boundary is present and entry after it is late.
+- Entry and exit are retained with server time and receptionist attribution; same-day retries do not create duplicate events.
+- Historical S2 marks without configured schedules remain unclassified rather than retrospectively guessing present/late.
+- An employee with no mark is not automatically assigned absence by this slice; absence timing/scheduling remain explicitly unresolved.
 - Schema changes are migration-backed; targeted checks and full applicable API tests are recorded.
 
 ## Route and verification
@@ -45,15 +56,18 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - Route: delegated direct. Trigger evidence: new schema, authorization, API, tests, and documentation require coordinated multi-file implementation and verification.
 - Writer profile: `gpt-6-luna`; one writer at a time. Parent reviews the diff and independently spot-checks focused tests.
 - RDD remains off; do not toggle it. No live PostgreSQL or external services unless a test requires only opt-in disposable infrastructure.
-- Focused checks to be selected by the writer after mapping the existing API patterns; then run the relevant API suite.
-- Delivery strategy: ask-on-risk. Forecast: approximately 350–500 authored lines across both implementation tasks; do not trim tests/docs to meet a size heuristic.
+- BK040-S3 focused checks: `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py`; then full `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests`.
+- Delivery strategy: ask-on-risk. Forecast for S3: approximately 250–380 authored lines; re-evaluate if actual task scope grows before commit.
 
 ## Progress
 
 - Owner decision recorded: all personnel, including cleaning staff without application access, must be included.
 - Remaining design assumption: Admin manages roster; document and flag if code evidence or existing policy contradicts it.
 - S2 conservative assumptions (not user-confirmed business rules): record only explicitly observed presence; an unmarked person has unspecified status, never inferred absence. Each roster profile may have one mark per branch-local date; retries on that date return the immutable original mark. The API derives the UTC timestamp and branch-local business date server-side.
-- BK040-S2 complete; BK-040 is done, with no additional attendance slice in scope.
+- BK040-S1 and BK040-S2 are complete. The user has now authorized the new BK040-S3 scope for configurable schedules, punctuality classification, and exit capture.
+- The former conservative S2 rule (unmarked means unknown, not absent) remains historically true; it is not the final requested status model. S3 implements present/late from recorded entries only.
+- Open for a later task: how a reception roll-call records absence, which days an employee is expected, and when an absence is finalized. Do not invent a weekly calendar or payroll-absence consequence.
+- BK040-S3 is authorized and in progress: configure per-worker entry/tolerance, compute present/late on new check-ins, and append an idempotent exit event. Absence remains outside this slice until its operational trigger is resolved.
 
 ## Relevant files
 
@@ -89,3 +103,20 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - **Runtime boundary:** N/A beyond TestClient/SQLite; no deployment or remote service.
 - **Rollback boundary:** revert the `0022_staff_attendance` migration, model, permission, router registration, focused tests, smoke expectations, and BK040-S2 documentation together. Migration downgrade is blocked while attendance rows exist.
 - **Work-unit commit:** `8780821821867269934247ff1c96af8c12ccfdb4` — `feat(personal): registrar asistencia laboral por sucursal`.
+
+
+## BK040-S3 implementation proof
+
+- **Implemented:** Admin configures `expected_entry_time` plus `grace_tolerance_minutes` through the existing grant-scoped roster PATCH. Reception cannot configure it. Check-in uses server UTC and branch IANA timezone, rejects incomplete schedules, classifies through the inclusive cutoff as `present` and afterward as `late`, and snapshots the applied values.
+- **Checkout:** Reception appends a separate checkout event tied to an entry; actor/time are server-derived, retry returns the existing event, checkout before entry and checkout without entry are rejected. Entry records remain append-only.
+- **Migration:** `0023_staff_sched_checkout` adds nullable roster schedule and entry snapshots plus unique checkout event. Existing S2 rows stay unclassified (`status: null`), without backfill.
+- **Remaining boundary:** Absence creation/finalization and expected-day agenda are not implemented; do not infer an absence rule from lack of entry.
+- **Test-first:** new schedule classification and schedule precondition tests failed before implementation (missing classification and old behavior accepted incomplete schedule).
+- **Focused check:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` ? **33 passed**, 15 warnings (existing Starlette/httpx deprecation and SQLite expression-index reflection warnings).
+- **Full API check:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` ? **226 passed, 17 skipped**, 15 warnings of the same types.
+- **Diff check/line budget/commit:** scoped `git diff --check` passed. Authored diff: 364 additions+deletions (below the 400-line ask-on-risk threshold).
+
+- **Focused verification (final):** 33 passed, 15 warnings.
+- **Full API verification (final):** 226 passed, 17 skipped, 15 warnings.
+
+- **Work-unit commit:** `4e7ac1cb117d96644ff9bbea960911921fecec2c` ? `feat(personal): configurar horarios y registrar salidas`.

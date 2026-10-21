@@ -1,5 +1,5 @@
 """Branch-scoped, append-only affirmative staff-attendance records."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.staff_roster import RosterPrincipal, _allowed_branches, _principal
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
-from app.db.models import Branch, StaffAttendanceRecord, StaffRosterProfile
+from app.db.models import Branch, StaffAttendanceCheckout, StaffAttendanceRecord, StaffRosterProfile
 
 router = APIRouter(prefix="/api/v1/staff-attendance", tags=["staff-attendance"])
 
@@ -28,6 +28,27 @@ class StaffAttendanceItem(BaseModel):
     recorded_by: UUID
     occurred_at: datetime
     business_date: date
+    status: str | None = None
+    expected_entry_time: time | None = None
+    grace_tolerance_minutes: int | None = None
+    checkout_at: datetime | None = None
+    checkout_recorded_by: UUID | None = None
+
+
+class StaffAttendanceCheckoutItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    attendance_id: UUID
+    recorded_by: UUID
+    occurred_at: datetime
+
+
+def _checkout_item(checkout: StaffAttendanceCheckout) -> StaffAttendanceCheckoutItem:
+    occurred_at = checkout.occurred_at
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    return StaffAttendanceCheckoutItem(id=checkout.id, attendance_id=checkout.attendance_id,
+                                       recorded_by=checkout.recorded_by, occurred_at=occurred_at.astimezone(timezone.utc))
 
 
 class StaffAttendancePage(BaseModel):
@@ -41,7 +62,7 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _item(record: StaffAttendanceRecord, profile: StaffRosterProfile) -> StaffAttendanceItem:
+def _item(record: StaffAttendanceRecord, profile: StaffRosterProfile, checkout: StaffAttendanceCheckout | None = None) -> StaffAttendanceItem:
     occurred_at = record.occurred_at
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
@@ -54,6 +75,11 @@ def _item(record: StaffAttendanceRecord, profile: StaffRosterProfile) -> StaffAt
         recorded_by=record.recorded_by,
         occurred_at=occurred_at.astimezone(timezone.utc),
         business_date=record.business_date,
+        status=record.status,
+        expected_entry_time=record.expected_entry_time,
+        grace_tolerance_minutes=record.grace_tolerance_minutes,
+        checkout_at=(checkout.occurred_at.replace(tzinfo=timezone.utc) if checkout and checkout.occurred_at.tzinfo is None else checkout.occurred_at.astimezone(timezone.utc) if checkout else None),
+        checkout_recorded_by=checkout.recorded_by if checkout else None,
     )
 
 
@@ -107,7 +133,7 @@ def list_staff_attendance(
             StaffAttendanceRecord.id,
         ).offset(offset).limit(limit)).all() if branch_ids else []
         total = session.scalar(count_query) if branch_ids else 0
-        return StaffAttendancePage(items=[_item(record, profile) for record, profile in rows], total=total)
+        return StaffAttendancePage(items=[_item(record, profile, session.scalar(select(StaffAttendanceCheckout).where(StaffAttendanceCheckout.attendance_id == record.id))) for record, profile in rows], total=total)
 
 
 @router.post("/branches/{branch_id}/profiles/{profile_id}", response_model=StaffAttendanceItem, status_code=201)
@@ -133,12 +159,20 @@ def record_staff_attendance(
                 return _item(existing, profile)
             if not profile.is_active:
                 raise HTTPException(409, "Inactive staff cannot be marked for attendance.")
+            if profile.expected_entry_time is None or profile.grace_tolerance_minutes is None:
+                raise HTTPException(409, "A complete staff entry schedule is required before attendance can be recorded.")
+            local_time = observed_at.astimezone(ZoneInfo(branch.timezone))
+            cutoff = datetime.combine(local_time.date(), profile.expected_entry_time) + timedelta(minutes=profile.grace_tolerance_minutes)
+            status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
             record = StaffAttendanceRecord(
                 branch_id=branch.id,
                 profile_id=profile.id,
                 recorded_by=principal.staff_id,
                 occurred_at=observed_at,
                 business_date=business_date,
+                status=status,
+                expected_entry_time=profile.expected_entry_time,
+                grace_tolerance_minutes=profile.grace_tolerance_minutes,
             )
             try:
                 with session.begin_nested():
@@ -155,3 +189,39 @@ def record_staff_attendance(
         if "uq_staff_attendance_branch_profile_date" not in str(exc.orig):
             raise
         raise HTTPException(409, "Attendance already exists for this employee and branch date.") from None
+
+
+@router.post("/{attendance_id}/checkout", response_model=StaffAttendanceCheckoutItem, status_code=201)
+def record_staff_checkout(attendance_id: UUID, request: Request, response: Response,
+                          principal: RosterPrincipal = Depends(_principal)):
+    factory = request.app.state.session_factory
+    try:
+        with factory.begin() as session:
+            record = session.get(StaffAttendanceRecord, attendance_id)
+            if record is None:
+                raise HTTPException(404, "Attendance entry not found.")
+            _recorder_branch(session, principal, record.branch_id)
+            existing = session.scalar(select(StaffAttendanceCheckout).where(StaffAttendanceCheckout.attendance_id == record.id))
+            if existing is not None:
+                response.status_code = 200
+                return _checkout_item(existing)
+            occurred_at = _utc(utc_now())
+            entry_at = record.occurred_at
+            if entry_at.tzinfo is None:
+                entry_at = entry_at.replace(tzinfo=timezone.utc)
+            if occurred_at < entry_at:
+                raise HTTPException(422, "Checkout cannot occur before its attendance entry.")
+            checkout = StaffAttendanceCheckout(attendance_id=record.id, recorded_by=principal.staff_id, occurred_at=occurred_at)
+            try:
+                with session.begin_nested():
+                    session.add(checkout)
+                    session.flush()
+            except IntegrityError:
+                existing = session.scalar(select(StaffAttendanceCheckout).where(StaffAttendanceCheckout.attendance_id == record.id))
+                if existing is None:
+                    raise
+                response.status_code = 200
+                return _checkout_item(existing)
+            return _checkout_item(checkout)
+    except IntegrityError:
+        raise HTTPException(409, "Checkout could not be recorded.") from None

@@ -913,3 +913,11 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 - **Assumption (not user-confirmed):** only explicitly observed presence is recorded; no mark is never treated as absence. Same-date retries return the first event.
 - **Verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_attendance.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` - 29 passed, 1 existing warning. Full API suite - 223 passed, 17 skipped, 1 existing warning. No PostgreSQL or external services used. The smoke test table/head expectations were updated for the migration.
 - **Commit:** `feat(personal): registrar asistencia laboral por sucursal`.
+
+
+#### BK040-S3 implementation proof
+
+- **Scope:** per-profile Admin schedule/tolerance, server-time present/late entry snapshots, branch-scoped Reception checkout event, and unchanged append-only entry rows.
+- **Migration:** `0023_staff_sched_checkout`; old S2 marks retain null classification and no fabricated schedule. SQLite/PostgreSQL checkout triggers plus ORM immutability guards.
+- **Boundary:** present/late and entry/exit are implemented; absence and calendar/agenda are not. Absence finalization remains unresolved, not inferred.
+- **Checks:** RED observed in new schedule classification and missing-schedule API tests before implementation. Required focused/full commands and commit SHA pending final verification.
