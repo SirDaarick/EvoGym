@@ -120,7 +120,7 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - **Test-first correction:** the new downgrade and replay tests failed before their fixes. The first query-count assertion observed the setup engine instead of the app's engine and was too weak; it was corrected to observe the live app engine and require exactly one checkout SELECT for a three-row page, directly detecting the former N+1 behavior.
 - **Focused correction verification:** the required command completed with **35 passed, 15 warnings**, comprising the existing Starlette/httpx deprecation and SQLite expression-index reflection warnings. `git diff --check` passed after edits.
 
-- **Focused verification (final):** 33 passed, 15 warnings.
+- **Focused verification (S3 implementation):** 33 passed, 15 warnings before the verification corrections below.
 - **Full API verification (final):** 226 passed, 17 skipped, 15 warnings.
 
 - **Work-unit commit:** `61709bae2dee27f2a69adf9bf869b24324f6b240` — `feat(personal): configurar horarios y registrar salidas` (verified current S3 commit; supersedes the erroneous recorded hash `4e7ac1c`).
