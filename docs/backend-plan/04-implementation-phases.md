@@ -158,3 +158,7 @@ Do not create the entire schema in advance. Each slice adds the smallest set of 
 ### BK026-S3-A implementation verification
 
 RED was observed in the new staff-auth tests before implementation (6 failures, including the missing route and TTL validation). Writer-focused auth/session/app/config verification passed 52 tests; the full API suite passed 215 tests with 17 opt-in PostgreSQL skips before the final inactive-branch test was added. The final staff-auth file passed 7 tests, the independent focused auth/session/app/config command passed 43 tests, and the parent spot check passed 7 staff-auth tests. pip check and scoped whitespace checks passed. No PostgreSQL or external database was used. Assessment remained unassessable/high because unrelated untracked user files are present; RDD is off, so the candidate received independent verification.
+
+### BK026-S3-B implementation closure
+
+Task commit: `ea233cb feat(reception): conectar busqueda real y alertas de saldo`. Parent spot checks passed: frontend focused tests (9), TypeScript typecheck, backend app/staff-auth tests (15). Independent checks passed: backend app/admin-auth/admin-session tests (14) and browser CORS preflight probes for allowed/disallowed origins, methods, headers, and safe authentication errors. Production build passed with the existing bundle-size warning. No database, deployment, or remote service was used.

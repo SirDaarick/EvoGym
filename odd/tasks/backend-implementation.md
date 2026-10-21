@@ -844,7 +844,7 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 - [x] Show a visible, accessible reception warning for positive partial-payment balances; refreshing/reselection reflects later repayments and clears the warning at zero.
 - [x] Keep the DemoProvider and its test fixtures in a distinct demo mode; do not translate demo IDs to arbitrary backend IDs.
 - [x] Add focused frontend tests for API configuration and authentication, real member search, balance warning and refresh, and stale-response handling; verify demo/live source separation.
-- [x] Update frontend/backend integration and operator configuration documentation; verification below. Parent records this task commit.
+- [x] Update frontend/backend integration and operator configuration documentation; verification below. Task commit: `ea233cb feat(reception): conectar busqueda real y alertas de saldo`.
 
 **Route and scope:** Delegated-direct multi-file frontend integration after BK026-S3-A is complete. Preserve all existing user-owned dirty/untracked frontend changes. No check-in enforcement or automatic payment collection is included.
 
