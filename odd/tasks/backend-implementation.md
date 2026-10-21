@@ -811,3 +811,39 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 **BK026-S3 UI dependency (pending, not this task):** No frontend code was touched. Before safe integration, resolve the authenticated API client/data source for operational member IDs, UUID identity mapping from demo state, explicit receipt/order selection UX, and ownership/review of already-dirty frontend changes. Do not build against demo-only IDs or claim live attendance/check-in enforcement.
 
 **Candidate size and handoff:** 739 authored changed lines across 16 authorized paths (623 tracked add/delete lines plus 116 lines across two new files), above the advisory 350-500 forecast. No tests or documentation were trimmed. Independent verification passed 65 focused tests in 52.48s and disposable cross-shift probes: original shift closes at 4,000 received, collecting shift at 6,000, final warning is zero, original sale and closed/inactive-register retries remain stable, and unauthenticated requests return 401. Parent repeated the repayment regression: 1 passed in 3.61s. Functional source fingerprint over sorted non-document candidate paths (path, NUL, raw bytes, NUL): `cc8a6652ea4699982d09a730220e6d48fef391dd5d39c6cbcc52a5a278224228`. The writer's full suite remains 208 passed, 17 PostgreSQL skips; independent verification did not rerun the full suite. Review caught UTF-8/Windows-1252 mojibake and omitted historical sections; the three docs were repaired with explicit UTF-8, all original headings remain, and the complete HEAD TRANSFER-02/BK026-S1 tail is preserved verbatim before this new section. No functional source changed during that repair. Assessment was unassessable/high due to unrelated untracked inventory, requiring this independent verification; RDD stays off. The owner explicitly approved this 739-line candidate as one local work-unit commit; candidate-specific delivery strategy: exception-ok. Work-unit identity: `feat(ventas): registrar abonos de membresías y actualizar saldos`. Rollback boundary is migration 0020: downgrade refuses while repayment receipts exist. No push or PR is authorized; the resulting commit hash is recorded in the delivery record and separately synchronized hash-checked recovery manifest. BK026-S3 visible reception integration remains pending, not completed by this backend unit.
+
+
+## Active implementation slice — BK026-S3 reception balance warning
+
+**Objective:** Show live membership pending balances to reception using authenticated backend member identities while keeping the local DemoProvider flow explicitly separate.
+
+**Owner-authorized scope:** Connect reception to the real backend, including staff PIN authentication and real UUID member search. Preserve demo mode as a separate experience; never mix local demo IDs or balances with backend records. The alert is warning-only for cash partial-payment debt; it does not block access. Disputed voucher transfers remain governed by the separate period-specific restriction.
+
+**Task route:** Delegated-direct, one Luna writer per sequential work unit, parent reviews and owns staging/commit. Update this master plan and the implementation-phase documentation after each task. Forecast: two tasks, approximately 650–1,000 authored lines total; delivery strategy ask-on-risk, with no test or documentation trimming for size.
+
+### Task BK026-S3-A — expose staff PIN session authentication
+
+- [x] Add an authenticated staff PIN session HTTP endpoint using the existing server-side `issue_session` service and explicit branch scope.
+- [x] Add a server-owned, bounded `EVOGYM_STAFF_SESSION_TTL_SECONDS` configuration (60..86400); the endpoint fails closed when missing and never accepts a client-selected expiry.
+- [x] Apply request-size limits, rate limiting, strict request validation, and no-store response behavior consistent with existing authentication protections.
+- [x] Add tests for valid issuance, invalid credentials, inactive/out-of-scope staff or branch, lockout/rate-limit, missing configuration, malformed input, and server-derived expiry.
+- [x] Update API authentication/configuration documentation and implementation-phase status.
+- [ ] Record the resulting commit identity in this ledger after the work-unit commit.
+
+**Route and allowed scope:** Delegated-direct multi-file implementation; parent reviewed, staged, and commits. No frontend changes, secret values, deployment changes, live databases, or remote operations. Tests use isolated SQLite fixtures only.
+
+**Applicable checks and evidence:** RED was observed: the initial new auth test file produced 6 failures, including missing route (404) and absent TTL bound. Focused writer auth/session/app/config checks: 52 passed. Writer full API suite: 215 passed, 17 opt-in PostgreSQL skips, before the final inactive-branch test was added. The final auth test file passed 7 tests; independent focused auth/session/app/config tests passed 43 tests; parent spot check passed 7 auth tests. `pip check`, scoped `git diff --check`, new-file whitespace check, and independent disposable probes (missing configuration, hash-capacity exhaustion, digest-only persistence, branch-grant revocation, and credential-free errors) passed. No PostgreSQL or external database was used. Candidate fingerprint over seven exact source/test/document paths: `453c094f14ac4638ed2345dd3bf8d84628148b8b0e8de9a0e8d924e2ba98b7b0`. Assessment was unassessable/high because unrelated user untracked files exist; RDD is off, and independent verification was completed.
+
+**Rollback boundary:** The staff session endpoint, its bounded setting, route tests, and related documentation; existing administrative authentication and internal PIN issuance service remain intact.
+
+### Task BK026-S3-B — consume live member balances in reception
+
+- [ ] Add a frontend API client and operational staff sign-in that stores only the returned bearer token in tab-scoped session state; never reuse demo credentials or tokens.
+- [ ] Bind the operational mode to a configured branch UUID and backend origin; missing/invalid configuration fails closed instead of falling back to demo data.
+- [ ] Search backend members by real member number/name/phone and consume the member-detail `pending_balance_minor` / `has_pending_balance` fields.
+- [ ] Show a visible, accessible reception warning for positive partial-payment balances; refreshing/reselecting reflects later repayments and clears the warning at zero.
+- [ ] Keep the DemoProvider and its test fixtures in a distinct demo mode; do not translate demo IDs to arbitrary backend IDs.
+- [ ] Add focused frontend tests for authentication, real member search, warning/clear/loading/error behavior, and demo/live source separation.
+- [ ] Update frontend/backend integration and operator configuration documentation, then record exact verification and commit.
+
+**Route and scope:** Delegated-direct multi-file frontend integration after BK026-S3-A is complete. Preserve all existing user-owned dirty/untracked frontend changes. No check-in enforcement or automatic payment collection is included.

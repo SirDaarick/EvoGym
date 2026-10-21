@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: SecretStr | None = None
     admin_session_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
+    staff_session_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
     admin_lockout_attempts: int | None = Field(default=None, ge=1, le=5)
     admin_lockout_seconds: int | None = Field(default=None, ge=60, le=86400)
     auth_rate_limit_window_seconds: int | None = Field(default=None, ge=1, le=3600)

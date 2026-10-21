@@ -53,6 +53,7 @@ class _AuthBodyLimitMiddleware:
     """Buffer only bounded auth request bodies before JSON parsing or hashing."""
     _paths = {
         "/api/v1/auth/sessions",
+        "/api/v1/auth/staff/sessions",
         "/api/v1/auth/recovery/start",
         "/api/v1/auth/recovery/complete",
         "/api/v1/auth/devices/pair",

@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from threading import BoundedSemaphore
 from urllib.parse import urlsplit
 import hashlib
@@ -6,11 +6,13 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.admin import authenticate_admin
 from app.auth.authorization import AuthorizationDenied
 from app.auth.recovery import complete_recovery, start_recovery
+from app.auth.sessions import issue_session
 from app.observability.logging import request_id
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -33,6 +35,13 @@ class RecoveryCompleteBody(BaseModel):
     new_password: str = Field(min_length=1, max_length=4096)
 
 
+class StaffSessionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    login_identifier: str = Field(min_length=1, max_length=320)
+    pin: str = Field(min_length=1, max_length=72)
+    branch_id: UUID
+
+
 def _configured(request: Request):
     settings = request.app.state.settings
     if not settings.admin_auth_configured or request.app.state.session_factory is None:
@@ -42,6 +51,22 @@ def _configured(request: Request):
 
 def _rate_limit(request: Request):
     settings, factory = _configured(request)
+    key = hashlib.sha256((request.client.host if request.client else "unknown").encode("utf-8")).hexdigest()
+    if not request.app.state.auth_rate_limiter.allow(key, settings.auth_rate_limit_requests, settings.auth_rate_limit_window_seconds):
+        raise HTTPException(429, "Authentication is temporarily unavailable.")
+    return settings, factory
+
+
+def _staff_rate_limit(request: Request):
+    settings = request.app.state.settings
+    factory = request.app.state.session_factory
+    required = (
+        settings.staff_session_ttl_seconds, settings.auth_rate_limit_requests,
+        settings.auth_rate_limit_window_seconds, settings.auth_request_max_bytes,
+        settings.auth_max_concurrent_hashes,
+    )
+    if settings.database_url is None or any(value is None for value in required) or factory is None:
+        raise HTTPException(503, "Authentication is temporarily unavailable.")
     key = hashlib.sha256((request.client.host if request.client else "unknown").encode("utf-8")).hexdigest()
     if not request.app.state.auth_rate_limiter.allow(key, settings.auth_rate_limit_requests, settings.auth_rate_limit_window_seconds):
         raise HTTPException(429, "Authentication is temporarily unavailable.")
@@ -62,6 +87,25 @@ def login(body: LoginBody, request: Request, response: Response, configured=Depe
         semaphore.release()
     if result is None:
         raise HTTPException(401, "Authentication failed.")
+    response.headers["Cache-Control"] = "no-store"
+    return {"access_token": result.token, "token_type": "bearer", "expires_at": result.expires_at.astimezone(timezone.utc).isoformat()}
+
+
+@router.post("/staff/sessions", status_code=201)
+def staff_login(body: StaffSessionBody, request: Request, response: Response, configured=Depends(_staff_rate_limit)):
+    settings, factory = configured
+    semaphore: BoundedSemaphore = request.app.state.password_hash_capacity
+    if not semaphore.acquire(blocking=False):
+        raise HTTPException(503, "Authentication is temporarily unavailable.")
+    try:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.staff_session_ttl_seconds)
+        result = issue_session(
+            factory, body.login_identifier.strip().casefold(), body.pin, body.branch_id, expires_at,
+        )
+    except AuthorizationDenied:
+        raise HTTPException(401, "Authentication failed.") from None
+    finally:
+        semaphore.release()
     response.headers["Cache-Control"] = "no-store"
     return {"access_token": result.token, "token_type": "bearer", "expires_at": result.expires_at.astimezone(timezone.utc).isoformat()}
 

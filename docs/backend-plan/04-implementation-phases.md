@@ -8,6 +8,10 @@ Deliver one coherent vertical slice at a time. Start with a relevant determinist
 
 For substantial implementation, use one bounded writer with exact edit surfaces and checks. BK-012 is authorized locally; its parent owns the work-unit commit, and the master ledger plus all eight plan documents must accompany every backend commit. Before that commit, normalize and verify; RDD remains user-owned and currently off. No hosted CI, remote service, deployment, or frontend auth changes are authorized by this slice.
 
+### Authorized slice: BK026-S3-A — staff PIN session API
+
+Expose `POST /api/v1/auth/staff/sessions` as a transport adapter over the existing server-enforced `issue_session` service. Expiry comes only from bounded `EVOGYM_STAFF_SESSION_TTL_SECONDS` (60–86400); missing TTL or required auth/session-factory configuration fails closed. Reuse auth rate limiting, bounded hash concurrency, safe generic errors, strict body validation, and body-size protection; send `Cache-Control: no-store`. Keep the existing Admin password session flow and internal service unchanged. No frontend work, provisioning, secrets, deployment, live database, or changes to the master task ledger are included. Verify with isolated SQLite fixtures, focused/full API tests, dependency check, and scoped whitespace checks; PostgreSQL remains opt-in.
+
 ## Phase gates
 
 | Gate | Required exit evidence | Stop when |
@@ -144,3 +148,7 @@ For substantial implementation, use one bounded writer with exact edit surfaces 
 ## Minimal-migration policy
 
 Do not create the entire schema in advance. Each slice adds the smallest set of tables/constraints required by its accepted use case, with a compatible migration and proof. Do not build analytics before source events reconcile. Add indexes in response to query paths and evidence. A phase can be split if a decision or verification boundary warrants it, but task identities remain stable and the master row records the split.
+
+### BK026-S3-A implementation verification
+
+RED was observed in the new staff-auth tests before implementation (6 failures, including the missing route and TTL validation). Writer-focused auth/session/app/config verification passed 52 tests; the full API suite passed 215 tests with 17 opt-in PostgreSQL skips before the final inactive-branch test was added. The final staff-auth file passed 7 tests, the independent focused auth/session/app/config command passed 43 tests, and the parent spot check passed 7 staff-auth tests. pip check and scoped whitespace checks passed. No PostgreSQL or external database was used. Assessment remained unassessable/high because unrelated untracked user files are present; RDD is off, so the candidate received independent verification.
