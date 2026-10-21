@@ -52,7 +52,7 @@ The standard frontend checkout reads and writes demo state, while the backend al
 - Read-only mapping confirmed the backend routes and live authentication path; the normal demo checkout is not an API client. The existing-member scope was explicitly approved by the user.
 - The live path already supports authenticated member search. Frontend checkout still needs backend plan-version and open register/shift reads plus sale API calls.
 - BK-028 is Partial after T1: the authenticated API boundary is implemented and tested, but no checkout UI is integrated; BK-028-T2 remains open.
-- T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); GREEN is `npm test -- --run src/api/membershipCheckoutApi.test.ts` (4 tests passed). `git diff --check` passed. No live backend/payment request was made.
+- T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); GREEN is `npm test -- --run src/api/membershipCheckoutApi.test.ts` (4 tests passed). `git diff --cached --check` passed for the staged T1 files. The whole-worktree `git diff --check` reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. `npm run typecheck` is blocked by an unrelated existing `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`. No live backend/payment request was made.
 - T1 work-unit commit: `183a79b` (`feat(frontend): agregar cliente de API para ventas de membresía`).
 - New-member registration, DemoProvider-backed screens, and Mercado Pago remain explicitly deferred.
 
