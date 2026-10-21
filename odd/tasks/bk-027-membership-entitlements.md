@@ -37,6 +37,12 @@ The current eligibility helper combines dates and payment status into a boolean.
 - [x] Run focused tests, migration checks, full API tests, and `git diff --check`; record failures/skips honestly.
 - [x] Commit each coherent work unit with Spanish Conventional Commit messages; do not push.
 
+### BK027-S4 — Bind restores to the active restriction and order decisions
+- [x] A manual restore references and lifts only an active payment/access restriction; reject restore requests when no such restriction exists.
+- [x] A later Admin-confirmed missing-funds review invalidates any earlier restore, without allowing it to override the newer restriction.
+- [x] Use deterministic per-period decision ordering independent of timestamp precision or random UUID ordering.
+- [x] Add regression tests for pre-emptive restore, restore followed by renewed missing-funds review, and opposite decisions created within the same timestamp precision; update docs and commit the fix.
+
 ## Acceptance criteria
 
 - Callers can distinguish allowed access from warning, explicit block, wrong branch, and expiry without re-deriving payment rules.
@@ -68,6 +74,10 @@ The current eligibility helper combines dates and payment status into a boolean.
 - Focused verification: 57 passed, 15 warnings. Full `api/tests`: 233 passed, 17 skipped, 15 warnings. Skips are existing opt-in/external tests; no live PostgreSQL or services used.
 - `git diff --check`: passed for the scoped BK-027 paths; only Git's expected Windows LF-to-CRLF notices appeared.
 - Commit: `feat(membresias): aplicar reglas de acceso por pago y sucursal` on `codex/backend-foundation`; no push. The resulting Git object ID is reported in the task handoff because including it in the same commit would change that ID.
+- Independent review found restore decisions were not bound to the restriction they lifted and same-second decision ordering depended on random UUIDs; the correction is pending before BK-027 is complete.
+- BK027-S4 correction adds source IDs/review-event-count binding, rejects pre-emptive restoration, and orders decisions by a per-period sequence allocated under the locked membership-period row. A later review-event count invalidates a review-bound restore; date and branch gates remain earlier absolute checks.
+- Migration backfill orders historical rows by the former `(created_at, id)` tie-break to preserve prior deterministic outcomes; it cannot infer real chronology among contradictory equal-time legacy rows, so it documents/preserves that limitation rather than inventing order.
+- Correction verification: required entitlement/access/migration suite 30 passed, 14 warnings; transfer-review regressions 5 passed, 1 warning; contract smoke 4 passed, 2 warnings; scoped `git diff --check` passed. Full API suite was not rerun for this correction.
 
 ## Relevant files
 

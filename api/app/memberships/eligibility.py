@@ -63,7 +63,7 @@ def evaluate_membership_access(
 
     latest = session.scalar(select(MemberAccessDecision).where(
         MemberAccessDecision.period_id == period.id,
-    ).order_by(MemberAccessDecision.created_at.desc(), MemberAccessDecision.id.desc()).limit(1))
+    ).order_by(MemberAccessDecision.decision_order.desc()).limit(1))
     warnings = ("outstanding_balance",) if outstanding else ()
     if payment.method == "transfer":
         voucher = session.scalar(select(PaymentReviewEvent.id).where(
@@ -80,13 +80,35 @@ def evaluate_membership_access(
     if payment_blocked and outstanding == 0 and debt is not None:
         payment_blocked = False
     if payment_blocked and latest is not None and latest.action == "restore":
-        payment_blocked = False
+        if latest.lifted_payment_review_id is not None:
+            current_review_count = session.scalar(select(func.count()).select_from(PaymentReviewEvent).where(
+                PaymentReviewEvent.payment_id == payment.id,
+            )) or 0
+            payment_blocked = not (
+                latest.lifted_payment_review_id is not None
+                and latest.lifted_review_event_count == current_review_count
+                and session.scalar(select(PaymentReviewEvent.id).where(
+                    PaymentReviewEvent.id == latest.lifted_payment_review_id,
+                    PaymentReviewEvent.to_status == "pending",
+                )) is not None
+            )
+        else:
+            payment_blocked = True
     if payment_blocked:
         return MembershipAccessDecision(False, MembershipAccessStatus.BLOCKED_MISSING_FUNDS, "transfer_missing_funds", warnings, outstanding)
     if latest is not None and latest.action == "restrict" and (
         outstanding > 0 or (payment.method == "transfer" and payment.status != "confirmed")
     ):
         return MembershipAccessDecision(False, MembershipAccessStatus.BLOCKED_MISSING_FUNDS, "admin_payment_restriction", warnings, outstanding)
+    if latest is not None and latest.action == "restore" and latest.lifted_access_decision_id is not None:
+        # A restore only lifts the exact restriction it observed at write time.
+        if latest.lifted_access_decision_id != session.scalar(select(MemberAccessDecision.id).where(
+            MemberAccessDecision.id == latest.lifted_access_decision_id,
+            MemberAccessDecision.period_id == period.id,
+            MemberAccessDecision.decision_order < latest.decision_order,
+            MemberAccessDecision.action == "restrict",
+        )):
+            return MembershipAccessDecision(False, MembershipAccessStatus.BLOCKED_MISSING_FUNDS, "admin_payment_restriction", warnings, outstanding)
     if outstanding:
         return MembershipAccessDecision(True, MembershipAccessStatus.ALLOWED, "valid_with_outstanding_balance", warnings, outstanding)
     if payment.status == "under_review":
