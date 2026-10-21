@@ -4,6 +4,7 @@ import { classifyOfflineCaptureTime } from './offlineClock';
 const anchor = {
   serverUtcAtAnchorMs: 1_800_000_000_000,
   localMonotonicAtAnchorMs: 10_000,
+  sameMonotonicOrigin: true,
 };
 
 describe('classifyOfflineCaptureTime', () => {
@@ -42,6 +43,21 @@ describe('classifyOfflineCaptureTime', () => {
     });
 
     expect(result.deviceCapturedAtMs).toBe(1_800_000_123_000);
+    expect(result.estimatedServerAtCaptureMs).toBeNull();
+    expect(result.skewMs).toBeNull();
+    expect(result.reviewRequired).toBe(true);
+    expect(result.reason).toBe('unverified_clock');
+  });
+
+  it('requires review when anchor and capture do not share a monotonic origin', () => {
+    const result = classifyOfflineCaptureTime({
+      ...anchor,
+      sameMonotonicOrigin: false,
+      localMonotonicAtCaptureMs: 70_000,
+      deviceCapturedAtMs: anchor.serverUtcAtAnchorMs + 60_000,
+    });
+
+    expect(result.deviceCapturedAtMs).toBe(anchor.serverUtcAtAnchorMs + 60_000);
     expect(result.estimatedServerAtCaptureMs).toBeNull();
     expect(result.skewMs).toBeNull();
     expect(result.reviewRequired).toBe(true);

@@ -3,6 +3,7 @@ export const OFFLINE_CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
 export type OfflineClockInput = {
   deviceCapturedAtMs: number;
   localMonotonicAtCaptureMs: number;
+  sameMonotonicOrigin: boolean;
   serverUtcAtAnchorMs?: number;
   localMonotonicAtAnchorMs?: number;
 };
@@ -25,9 +26,11 @@ export function classifyOfflineCaptureTime(input: OfflineClockInput): OfflineClo
     serverUtcAtAnchorMs,
     localMonotonicAtAnchorMs,
     localMonotonicAtCaptureMs,
+    sameMonotonicOrigin,
   } = input;
 
-  if (typeof serverUtcAtAnchorMs !== 'number'
+  if (!sameMonotonicOrigin
+    || typeof serverUtcAtAnchorMs !== 'number'
     || !Number.isFinite(serverUtcAtAnchorMs)
     || typeof localMonotonicAtAnchorMs !== 'number'
     || !Number.isFinite(localMonotonicAtAnchorMs)

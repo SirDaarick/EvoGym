@@ -146,9 +146,9 @@ Every event placed in the `local_event_queue` adheres to a lightweight, versione
 
 ### Offline clock anomaly rule (approved; helper not integrated)
 
-When online, persist a trusted server UTC timestamp together with the local monotonic-clock reading from the same anchor. At offline capture, estimate server time as `anchor server UTC + (capture monotonic reading - anchor monotonic reading)`. Compare the raw device wall-clock capture timestamp with that estimate. Absolute skew **greater than five minutes** requires review; exactly five minutes remains within tolerance. Preserve the original device timestamp in every case and never silently rewrite it.
+When online, persist a trusted server UTC timestamp together with the local monotonic-clock reading from the same anchor. At offline capture, estimate server time as `anchor server UTC + (capture monotonic reading - anchor monotonic reading)`. Capture/sync must pass the anchor as valid only when it knows the anchor and capture readings share the same monotonic time origin (for example, no page/process restart reset that origin). Compare the raw device wall-clock capture timestamp with that estimate. Absolute skew **greater than five minutes** requires review; exactly five minutes remains within tolerance. Preserve the original device timestamp in every case and never silently rewrite it.
 
-If the anchor or its monotonic time origin is unavailable, either reading is invalid, or elapsed monotonic time is negative, classify the clock as unverified and require review without fabricating an estimate. Reusing an anchor for retries keeps the baseline fixed; a retry does not refresh the trusted baseline.
+If the anchor or its monotonic time origin is unavailable/unknown, either reading is invalid, or elapsed monotonic time is negative, classify the clock as unverified and require review without fabricating an estimate. Reusing an anchor for retries keeps the baseline fixed; a retry does not refresh the trusted baseline.
 
 The frontend `offlineClock` helper is a pure classifier only. It is not wired to check-in capture, an offline queue, persistence, synchronization, server event acceptance, or reconnect-time entitlement revalidation. BK-031/BK-064 integration and end-to-end BK-029 remain pending; BK-029 remains Partial.
 
