@@ -132,9 +132,11 @@ The explicit `/reception/live` route consumes real backend records independently
 - **BK-041:** Add compensation, expenses, extras, budgets with restrictive permissions. **Accept:** salary history effective-dated; categories cannot silently mix cash/expense/stock semantics.
 - **BK-042:** Build reports only from proven source events and approved metric definitions. **Accept:** filters use branch timezone; totals reconcile to source transactions and access is checked.
 
-#### BK-042-S1 - itemized pending-money read API (Not started)
+#### BK-042-S1 - itemized pending-money read API (Done - 2026-10-21)
 
 A bounded backend-only slice that can ship before broader BK-042 reporting. Return itemized existing source events for pending money; do not calculate or label it as income/revenue. Broader financial reporting remains pending.
+
+**Implemented contract:** `GET /api/v1/admin/pending-money` accepts optional `branch_id` and returns `{items, total_items, total_pending_minor}`. Each item carries `item_type`, branch id/name, member id/number/name, order id, amount/currency, source event id/time, and current status with its latest status-event id/time. Transfer items use Payment as the source and include only `under_review`/`pending`; debt items use the immutable MembershipDebt record as source and calculate `initial_outstanding_minor - sum(append-only receipts)`, omitting fully paid debts. This endpoint is an itemized pending-money view only, never income/revenue. An organization Admin is authorized for each returned branch; a branch-scoped Admin session is constrained to its bound branch, and any requested scope is checked with `FINANCE_READ`.
 
 - **Authorization:** Require authenticated Admin access using the existing Admin financial authorization. If that authorization is absent or ambiguous, stop and record the blocker; do not invent a permission, role, or policy.
 - **Pending transfers:** Include transfer payments whose current status is `under_review` or `pending`; exclude `confirmed` transfers from this pending view. They are not income until confirmed.
@@ -177,3 +179,13 @@ RED was observed in the new staff-auth tests before implementation (6 failures, 
 ### BK026-S3-B implementation closure
 
 Task commit: `ea233cb feat(reception): conectar busqueda real y alertas de saldo`. Parent spot checks passed: frontend focused tests (9), TypeScript typecheck, backend app/staff-auth tests (15). Independent checks passed: backend app/admin-auth/admin-session tests (14) and browser CORS preflight probes for allowed/disallowed origins, methods, headers, and safe authentication errors. Production build passed with the existing bundle-size warning. No database, deployment, or remote service was used.
+
+
+#### BK-042-S1 implementation proof
+
+- RED: before implementation, the new endpoint test received 404 for an unauthenticated request instead of the expected 401.
+- GREEN: `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_pending_money.py api/tests/test_transfer_reviews.py api/tests/test_sales.py` ? **14 passed, 1 warning**. TestClient coverage verifies unauthenticated and receptionist denial, organization Admin access, transfer states, debt less append-only repayments, provenance, and no event-count changes from reads.
+- `git diff --check` globally reported pre-existing frontend-only whitespace/EOF issues; scoped authorized paths passed.
+- Runtime harness: N/A beyond the exercised HTTP/TestClient boundary; no deployment or external service was involved.
+- Rollback: remove only the pending-money API router, app registration, test and BK-042-S1 evidence. No schema or stored-data changes were made.
+- Commit: recorded in `odd/tasks/backend-implementation.md` after commit creation.

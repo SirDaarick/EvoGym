@@ -1,6 +1,6 @@
 # EvoGym FastAPI Backend — Implementation Plan
 
-**Current status as reconciled on 2026-10-21: P5 active; 18 Done, 13 Partial, 0 In progress, 45 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
+**Current status as reconciled on 2026-10-21: P5 active; 19 Done, 13 Partial, 0 In progress, 44 Not started (76 tasks).** The current-status reconciliation below supersedes earlier dated checkpoint statements where they conflict; those entries remain as historical evidence. Recent backend work is committed locally on `codex/backend-foundation`; none has been pushed. “Delivered” below means committed locally, not published. Private notebook workspaces remain separate. BK-012 adds safe observability, health, audit, metrics and an early CI definition; hosted CI is not executed.
 
 ## Quick path and reading order
 
@@ -91,7 +91,7 @@ After each accepted scope change, map impacted `D-`, `R-`, and `BK-` references,
 
 ## Authoritative task ledger
 
-Ledger totals: **18 Done, 13 Partial, 0 In progress, 45 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 and BK-061 are Done; BK-061 closes the ratified Contingency Mode decision/documentation task only, not offline implementation. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012/BK-021/BK-022/BK-023/BK-024/BK-025/BK-026/BK-027/BK-032/BK-035/BK-058 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
+Ledger totals: **19 Done, 13 Partial, 0 In progress, 44 Not started (76 total)**. Original P0 decision tasks BK-001–BK-007 and BK-061 are Done; BK-061 closes the ratified Contingency Mode decision/documentation task only, not offline implementation. BK-008/BK-009 and BK-013/BK-015–BK-018 are Done; BK-010/BK-011/BK-012/BK-021/BK-022/BK-023/BK-024/BK-025/BK-026/BK-027/BK-032/BK-035/BK-058 remain Partial. Dependencies use BK IDs. Detailed execution cards and acceptance criteria are in [phase cards](../../docs/backend-plan/04-implementation-phases.md#phase-cards). Local-first protocol and unresolved policy are specified in [08-local-first-and-sync](../../docs/backend-plan/08-local-first-and-sync.md).
 
 | ID | Phase / task | Status | Depends on | Acceptance / proof |
 |---|---|---|---|---|
@@ -137,7 +137,7 @@ Ledger totals: **18 Done, 13 Partial, 0 In progress, 45 Not started (76 total)**
 | BK-040 | P9 Implement staff labor attendance | Not started | BK-006,BK-010,BK-011 | Labor attendance remains separate from member visits |
 | BK-041 | P9 Implement compensation, expenses, extras and budgets | Not started | BK-006,BK-022,BK-035 | Restricted compensation and distinct movement classes |
 | BK-042 | P9 Implement operational/financial reports from event sources | Not started | BK-027,BK-033,BK-035,BK-038,BK-041 | Reconciled source definitions and access rules |
-| BK-042-S1 | P9 Backend-only itemized pending-money read API | Not started | BK-025,BK-026,BK-011,BK-058 | Authenticated Admin-only, source-provenanced pending transfers and outstanding partial-cash debt; acceptance and focused proof in 04 |
+| BK-042-S1 | P9 Backend-only itemized pending-money read API | Done | BK-025,BK-026,BK-011,BK-058 | Admin finance-read API returns scoped pending transfer/debt source events; proof below and in 04 |
 | BK-043 | P9 Integrate admin/staff reporting incrementally | Not started | BK-040..BK-042 | Metrics match source records and selected period |
 | BK-044 | P10 Define Gimi read/write permissions and disclosure rules | Not started | BK-006,BK-016 | Tool allowlist and purpose/access matrix approved |
 | BK-045 | P10 Implement Gimi domain-safe queries/actions and audit | Not started | BK-044,BK-011 | No direct persistence bypass; all actions authorized |
@@ -876,3 +876,13 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 **Implementation and verification:** The live route `/reception/live` is a separate UI reachable from the reception sidebar; demo workflows remain unchanged. API origin and branch UUID are validated before requests; staff session token is stored only in `sessionStorage`. Backend member search returns actual UUIDs and detail reads current pending balance. The warning is visible and accessible, and is re-fetched on selection or refresh. `npm test -- --run src/api/receptionApi.test.ts src/features/auth/OperationalLogin.test.tsx src/features/reception/LiveMemberLookup.test.tsx`: 6 passed. `npm run typecheck`: passed. `npm run build`: passed with the existing >500 kB chunk warning. No database, deployment, or remote service was used. Direct-transfer business rules remain outside scope.
 
 **Follow-up verification:** RED was observed before fixes: the frontend stale-search regression failed, and backend CORS tests failed because preflight returned 405 and wildcard configuration was not rejected. GREEN: `cd frontend; npm test -- --run src/api/receptionApi.test.ts src/features/auth/OperationalLogin.test.tsx src/features/reception/LiveMemberLookup.test.tsx` — 9 passed; `npm run typecheck` passed; `npm run build` passed with the existing >500 kB chunk warning. Repo-root `api/.venv/Scripts/python.exe -m pytest -q api/tests/test_app.py api/tests/test_admin_auth.py api/tests/test_admin_sessions.py` — 14 passed, 1 existing Starlette/httpx deprecation warning. `git diff --check` on the exact S3-B edit surfaces passed. CORS allowlist accepts explicit exact origins only; no wildcard, credentials, paths, query, fragment, or duplicate entries. Unset allowlist emits no CORS access headers. Browser CORS methods are GET/POST and configured request headers are Authorization/Content-Type. Request-generation guards prevent stale responses after query changes, selection, logout, and token replacement. No live DB, deployment, or remote service was used.
+
+
+### BK-042-S1 implementation closure
+
+- **Outcome:** Done. `GET /api/v1/admin/pending-money` returns itemized `pending_transfer` and `membership_debt` records, provenance, and a total of the pending amounts (not income/revenue). Optional `branch_id` narrows the result; without it, branch-scoped Admin sessions see only their bound branch and organization Admin sessions are authorized against each returned branch.
+- **Proof:** RED observed before implementation: `api/tests/test_pending_money.py` failed because the endpoint was unmatched (404 instead of required 401). GREEN command `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_pending_money.py api/tests/test_transfer_reviews.py api/tests/test_sales.py` passed: **14 passed, 1 warning**.
+- **Whitespace check:** `git diff --check` returned exit 1 from pre-existing frontend-only trailing whitespace/new-EOF findings; the authorized API/docs/task paths passed a scoped `git diff --check`.
+- **Runtime harness:** N/A as a separate deployment/device harness; the FastAPI HTTP boundary and auth behavior were exercised through the TestClient in the focused tests. No external service or database was used.
+- **Rollback boundary:** revert the BK-042-S1 commit to remove only the pending-money router, its application registration, its test, and this task evidence; no schema/migration or persisted data change exists.
+- **Commit:** recorded after the implementation commit is created.

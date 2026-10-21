@@ -25,6 +25,7 @@ from app.api.catalog import router as catalog_router
 from app.api.shifts import router as shifts_router
 from app.api.inventory import router as inventory_router
 from app.api.sales import router as sales_router
+from app.api.pending_money import router as pending_money_router
 
 
 class _AuthRateLimiter:
@@ -176,6 +177,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(shifts_router)
     application.include_router(inventory_router)
     application.include_router(sales_router)
+    application.include_router(pending_money_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)
