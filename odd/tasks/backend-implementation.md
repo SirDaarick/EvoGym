@@ -137,6 +137,7 @@ Ledger totals: **18 Done, 13 Partial, 0 In progress, 45 Not started (76 total)**
 | BK-040 | P9 Implement staff labor attendance | Not started | BK-006,BK-010,BK-011 | Labor attendance remains separate from member visits |
 | BK-041 | P9 Implement compensation, expenses, extras and budgets | Not started | BK-006,BK-022,BK-035 | Restricted compensation and distinct movement classes |
 | BK-042 | P9 Implement operational/financial reports from event sources | Not started | BK-027,BK-033,BK-035,BK-038,BK-041 | Reconciled source definitions and access rules |
+| BK-042-S1 | P9 Backend-only itemized pending-money read API | Not started | BK-025,BK-026,BK-011,BK-058 | Authenticated Admin-only, source-provenanced pending transfers and outstanding partial-cash debt; acceptance and focused proof in 04 |
 | BK-043 | P9 Integrate admin/staff reporting incrementally | Not started | BK-040..BK-042 | Metrics match source records and selected period |
 | BK-044 | P10 Define Gimi read/write permissions and disclosure rules | Not started | BK-006,BK-016 | Tool allowlist and purpose/access matrix approved |
 | BK-045 | P10 Implement Gimi domain-safe queries/actions and audit | Not started | BK-044,BK-011 | No direct persistence bypass; all actions authorized |

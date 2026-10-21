@@ -131,6 +131,21 @@ The explicit `/reception/live` route consumes real backend records independently
 - **BK-040:** Add staff labor attendance lifecycle. **Accept:** labor records are distinct from member visits, role-gated, auditable and safe under repeated clock events; device pairing is handled in BK-060.
 - **BK-041:** Add compensation, expenses, extras, budgets with restrictive permissions. **Accept:** salary history effective-dated; categories cannot silently mix cash/expense/stock semantics.
 - **BK-042:** Build reports only from proven source events and approved metric definitions. **Accept:** filters use branch timezone; totals reconcile to source transactions and access is checked.
+
+#### BK-042-S1 - itemized pending-money read API (Not started)
+
+A bounded backend-only slice that can ship before broader BK-042 reporting. Return itemized existing source events for pending money; do not calculate or label it as income/revenue. Broader financial reporting remains pending.
+
+- **Authorization:** Require authenticated Admin access using the existing Admin financial authorization. If that authorization is absent or ambiguous, stop and record the blocker; do not invent a permission, role, or policy.
+- **Pending transfers:** Include transfer payments whose current status is `under_review` or `pending`; exclude `confirmed` transfers from this pending view. They are not income until confirmed.
+- **Partial-cash membership debt:** Show outstanding balance as immutable initial balance minus append-only repayments. Do not sum initial balance and repayments as separate outstanding amounts or otherwise double-count.
+- **Item provenance:** Each item identifies branch, member, and order, and includes source-event and current-status provenance. Keep transfer and debt item types distinguishable.
+- **Boundaries:** Read-only API over existing events; no reporting/revenue event writes, no provider calls, no migration unless the implementation demonstrates existing persisted sources cannot support the read (then stop for scope review), and no dashboard/UI work. Do not inspect or write user-owned `backend/` contents.
+- **Authorized future edit surfaces:** `api/app/**`; `api/tests/test_pending_money.py`. Do not write outside these paths without renewed authorization; no migration or generated artifacts are currently authorized.
+- **Route:** Delegated direct. Trigger evidence: implementation requires reading that prepares the write, a new API boundary plus authorization and event-query/test changes across multiple non-trivial files, and command-based verification. Use one bounded writer; delegate focused test execution. RDD is currently off; do not start or toggle review.
+- **Focused verification command:** `.\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_pending_money.py api/tests/test_transfer_reviews.py api/tests/test_sales.py` (run from repository root; the new test module is part of the task scope).
+- **Acceptance:** Admin can read only the authorized scoped itemized view; non-Admin/unauthenticated access is denied; `under_review` and `pending` transfers appear while `confirmed` transfers are absent; partial-cash debt equals initial balance less append-only repayments exactly once; every item carries branch/member/order and source/status provenance; requests perform no writes and create no reporting/revenue events; no real provider calls or dashboard UI are introduced.
+- **Intended work-unit commit:** `feat(finanzas): consultar dinero pendiente por evento`.
 - **BK-043:** Integrate staff/admin views progressively; maintain table fallback for charts. **Accept:** metric label, date range, empty state and source provenance clear.
 
 ### P10 — Gimi verified membership renewal and notifications (BK-044–BK-047, BK-057)
