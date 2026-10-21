@@ -128,7 +128,7 @@ The explicit `/reception/live` route consumes real backend records independently
 
 ### P9 — Staff labor, finance and reports (BK-040–BK-043)
 
-- **BK-040:** Add staff labor attendance lifecycle. **Accept:** labor records are distinct from member visits, role-gated, auditable and safe under repeated clock events; device pairing is handled in BK-060.
+- **BK-040:** Add staff labor attendance lifecycle. **Accept:** labor records are distinct from member visits, role-gated, auditable and safe under repeated clock events; device pairing is handled in BK-060. **Blocked pending owner decision:** specify who may create and read staff labor-attendance records, and whether access is branch-scoped or organization-wide. D-012 concerns member-data visibility and R-014 establishes separation from member attendance plus pairing-code expiry/revocation; neither defines this permission or its scope. Do not infer from member-attendance rules or `STAFF_COMPENSATION_READ`. Next: await the owner's role/scope answer.
 - **BK-041:** Add compensation, expenses, extras, budgets with restrictive permissions. **Accept:** salary history effective-dated; categories cannot silently mix cash/expense/stock semantics.
 - **BK-042:** Build reports only from proven source events and approved metric definitions. **Accept:** filters use branch timezone; totals reconcile to source transactions and access is checked.
 
