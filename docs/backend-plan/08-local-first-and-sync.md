@@ -112,8 +112,8 @@ Every event placed in the `local_event_queue` adheres to a lightweight, versione
 | `event_type` | Allowlisted domain event type: `attendance.check_in`, `pos.cash_sale`, `membership.cash_renewal`, `member.fast_registration`, `shift.open`, `shift.arqueo_close`. |
 | `payload` | Canonical JSON payload containing domain-specific event details (items, centavos, member reference, counted denominations). |
 | `payload_hash` | SHA-256 hash of canonical JSON payload. Mismatch with duplicate `event_id` causes security rejection. |
-| `client_recorded_at` | Untrusted local ISO timestamp when the real-world action occurred. Preserved for operational chronology and audit. Its trust and comparison contract for five-minute offline visit deduplication is unresolved; do not infer device-clock correction or authority. |
-| `server_received_at` | Server-assigned timestamp upon successful ingestion. Establishes canonical ordering. |
+| `client_recorded_at` | Device-captured ISO timestamp for when the real-world check-in occurred. Preserve it for chronology/audit and use it for the approved five-minute visit window. If the device clock appears incorrect, retain the event and mark it for review; the trusted reference, comparison rule, anomaly criteria, and any correction policy remain unresolved. |
+| `server_received_at` | Server-assigned timestamp upon successful ingestion. Persist alongside capture time to record when synchronization was received; it does not replace capture time for the five-minute check-in window. |
 | `sync_status` | Local state: `queued` → `sending` → `acknowledged` (or `flagged_audit`). |
 
 ### Event Lifecycle:
@@ -146,7 +146,7 @@ Every event placed in the `local_event_queue` adheres to a lightweight, versione
 
 By replacing multi-master distributed state replication with an append-only event stream, classic distributed database merge conflicts are eliminated by design:
 
-1. **Check-in replay and duplicates:** An exact replay using the same event/idempotency key returns the original result and creates no new event. A distinct same-member event within five minutes of the first valid access counts as the same visit and links to that visit, but the second event remains separately auditable. The fixed window is anchored to the first valid access; retries do not extend it. Offline ingestion, entitlement revalidation on reconnect, and the trust/comparison contract for client timestamps remain unresolved in BK-029; no device-clock policy is implied here.
+1. **Check-in replay and duplicates:** An exact replay using the same event/idempotency key returns the original result and creates no new event. A distinct same-member event within five minutes of the first valid access counts as the same visit and links to that visit, but the second event remains separately auditable. The fixed window is anchored to the first valid access; retries do not extend it. Offline events preserve both device-captured and server-received times; the five-minute window uses capture time. If the device clock appears incorrect, keep the event and flag it for review, not rejection. The trusted clock reference, comparison rule, anomaly criteria, offline ingestion, and entitlement revalidation on reconnect remain unresolved; no threshold or clock correction is implied.
 2. **POS cash sales:** A counter cash sale represents physical currency received by staff. It cannot be invalidated by a server conflict. The server appends the sale and decrements the stock ledger. If local stock drops below zero centrally, the server records an inventory variance flag for staff count reconciliation, never an aborted sale.
 3. **Cash membership renewal:** Cash was collected physically. The server creates the canonical payment and extends the entitlement period from the date of the sale.
 4. **Shift Arqueo Físico:** Discrepancies between physical cash counted and expected sales are recorded as operational audit records for gym management review.

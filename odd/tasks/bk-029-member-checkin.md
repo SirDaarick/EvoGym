@@ -24,7 +24,8 @@ Implement one bounded online API slice for membership check-in. This is partial 
 
 - **Dependencies:** BK-031 integration, BK-064 client queue/idempotency, and the exact synchronization-time behavior when access/payment state changes while disconnected remain unresolved.
 - **Approved replay and visit-deduplication policy:** (a) an exact replay of the same event with the same idempotency key returns its original result and creates no second event; (b) a distinct event for the same member within five minutes of the first valid access counts as the same visit and points to that visit, while preserving its own auditable duplicate event. The fixed window starts with the first valid access and duplicate attempts do not extend it. This policy is documented but not implemented by the online S1 code.
-- **Offline contracts still open:** BK-031/BK-064 integration, offline queue/sync, entitlement/payment revalidation when reconnecting, and the technical contract for trusting/comparing offline event timestamps remain unresolved. Do not invent device-clock correction, source priority, or timestamp authority. BK-029 remains Partial.
+- **Approved offline time policy:** Preserve both the device-captured time and the server-received time when an offline event synchronizes. Use device-captured time for the five-minute visit window. If the device clock appears incorrect, retain the event and mark it for review rather than discarding it.
+- **Offline contracts still open:** BK-031/BK-064 integration, offline queue/sync, entitlement/payment revalidation when reconnecting, the trusted reference and comparison rule for the device clock, and criteria/mechanics for marking a clock anomaly remain unresolved. Do not invent a threshold, device-clock correction, source priority, or timestamp authority. BK-029 remains Partial.
 - A successful online write records server acceptance only. It does not create an offline grant or imply acceptance of an unconnected client event.
 
 ## Acceptance criteria
@@ -34,7 +35,7 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - Retries with the same idempotency key and request return the same immutable check-in; conflicting reuse is rejected.
 - The event records actor, membership period, branch, and server timestamp and cannot be updated or deleted through normal database protections.
 - Exact idempotency-key replay and the approved five-minute same-member visit policy are distinct: the former returns the original event, while the latter links a new auditable duplicate event to the existing visit and never extends the window from the first valid access.
-- Offline queue/sync, reconnect-time entitlement revalidation, offline timestamp trust/comparison, and overall BK-029 completion remain explicitly pending; BK-029 remains Partial.
+- Offline queue/sync and reconnect-time entitlement revalidation remain pending. The approved timestamps to preserve and capture-time basis for deduplication do not settle how device clock accuracy is compared or how anomalies are detected; those details and overall BK-029 completion remain pending, and BK-029 remains Partial.
 
 ## Route and verification
 
@@ -55,7 +56,7 @@ Implement one bounded online API slice for membership check-in. This is partial 
 - The first full planned run exposed 10 stale migration-schema/head expectations; after updating the current head/table expectations, `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_member_check_ins.py api/tests/test_membership_entitlements.py api/tests/test_membership_access.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` -> 37 passed, 16 warnings.
 - Migration coverage now includes the new table, Alembic head, and SQLite append-only trigger registration; smoke coverage also includes the table and head revision.
 - Canonical phase-plan and backend-board entries record online-only S1 as Partial. User subsequently approved the five-minute visit policy: exact replay returns the original event; a distinct same-member event inside five minutes of first valid access links to the existing visit and is preserved as its own audit event, without extending the window.
-- No offline queue/sync behavior or five-minute visit dedupe was implemented. BK-031/BK-064 integration, reconnect-time entitlement revalidation, and offline timestamp trust/comparison remain open contracts; do not infer device-clock policy.
+- No offline queue/sync behavior or five-minute visit dedupe was implemented. The user approved preserving device-captured and server-received times, using capture time for the five-minute window, and retaining/flagging (not discarding) events with apparently incorrect device clocks. BK-031/BK-064 integration, reconnect-time entitlement revalidation, trusted clock comparison, and anomaly criteria remain open; do not invent thresholds or clock correction.
 - Commit identity: report the final work-unit hash in delivery and Engram close evidence; a commit cannot embed its own hash in its tree without changing that hash.
 
 ## Relevant files
