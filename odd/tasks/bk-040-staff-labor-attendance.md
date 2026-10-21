@@ -27,7 +27,8 @@ The backend only models staff login accounts, so cleaning and other employees wi
 ### BK040-S2 — Record and review labor attendance
 - [ ] Add attendance records for all rostered staff, attributed to the reception actor, branch, and occurrence time.
 - [ ] Allow reception to read the roster and record only for its branch; Admin can read within active grant scope.
-- [ ] Enforce idempotent/safe repeated attendance requests and append-only auditability.
+- [ ] Treat each branch-local date as one positive attendance roll call per rostered employee; a retry returns the original record, and unmarked staff are not automatically labeled absent.
+- [ ] Keep records append-only, with server-derived UTC occurrence time, branch-local business date, and receptionist attribution.
 - [ ] Add route, authorization, migration/invariant, and branch-scope tests; update docs and commit.
 
 ## Acceptance criteria
@@ -51,7 +52,8 @@ The backend only models staff login accounts, so cleaning and other employees wi
 
 - Owner decision recorded: all personnel, including cleaning staff without application access, must be included.
 - Remaining design assumption: Admin manages roster; document and flag if code evidence or existing policy contradicts it.
-- Current next step: implement BK040-S1.
+- S2 working assumption to avoid false attendance claims: record only explicitly observed presence; no check-in implies no status, not an absence. One employee may be marked once per branch-local date; retries return the existing immutable event.
+- Current next step: implement BK040-S2.
 
 ## Relevant files
 
