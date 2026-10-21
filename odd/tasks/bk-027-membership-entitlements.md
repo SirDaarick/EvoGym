@@ -43,6 +43,11 @@ The current eligibility helper combines dates and payment status into a boolean.
 - [x] Use deterministic per-period decision ordering independent of timestamp precision or random UUID ordering.
 - [x] Add regression tests for pre-emptive restore, restore followed by renewed missing-funds review, and opposite decisions created within the same timestamp precision; update docs and commit the fix.
 
+### BK027-S5 — Make populated decision migration compatible with append-only guards
+- [x] Suspend and restore SQLite and PostgreSQL append-only enforcement around migration backfill, preserving guards after upgrade.
+- [x] Add a regression that upgrades populated 0024 decision rows to 0025, including ordering/binding field values.
+- [x] Verify focused migration checks and document any PostgreSQL boundary not executable under deterministic SQLite-only verification.
+
 ## Acceptance criteria
 
 - Callers can distinguish allowed access from warning, explicit block, wrong branch, and expiry without re-deriving payment rules.
@@ -78,6 +83,10 @@ The current eligibility helper combines dates and payment status into a boolean.
 - BK027-S4 correction adds source IDs/review-event-count binding, rejects pre-emptive restoration, and orders decisions by a per-period sequence allocated under the locked membership-period row. A later review-event count invalidates a review-bound restore; date and branch gates remain earlier absolute checks.
 - Migration backfill orders historical rows by the former `(created_at, id)` tie-break to preserve prior deterministic outcomes; it cannot infer real chronology among contradictory equal-time legacy rows, so it documents/preserves that limitation rather than inventing order.
 - Correction verification: required entitlement/access/migration suite 30 passed, 14 warnings; transfer-review regressions 5 passed, 1 warning; contract smoke 4 passed, 2 warnings; scoped `git diff --check` passed. Full API suite was not rerun for this correction.
+- BK027-S5 migration fix disables both append-only triggers before row updates/backfill: SQLite drops and recreates the triggers around the batch rebuild, while PostgreSQL uses `ALTER TABLE ... DISABLE/ENABLE TRIGGER` in a `finally` path. Enforcement is active after migration completion.
+- Populated-0024 migration regression first failed with SQLite `IntegrityError: member_access_decisions are append-only`; after the fix it passes, confirms deterministic `[1, 2]` sequence/backfill fields, and confirms post-upgrade UPDATE/DELETE still fail. PostgreSQL live execution was intentionally not run; offline SQL asserts both disable and enable statements. Migration suite: 27 passed, 14 warnings; scoped `git diff --check` passed.
+- Follow-up: payment-review event tie resolution still uses `(created_at, id)` when selecting the current event; this correction intentionally did not expand event ordering schema beyond the authorized decision-order migration.
+- S5 delivery: `corrige(membresias): habilitar backfill con auditoría inmutable` on `codex/backend-foundation`, no push; the resulting object ID is included in the task handoff because embedding a commit's own ID changes that ID.
 
 ## Relevant files
 

@@ -52,6 +52,52 @@ def test_new_head_migration_revision_fits_alembic_version_column():
     assert scripts.get_revision("0010_registers_terminals_and_shifts").revision == "0010_registers_terminals_and_shifts"
 
 
+def test_access_decision_order_migration_backfills_populated_append_only_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'populated-access-decisions.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0024_member_access_decisions")
+    engine = create_engine(database_url)
+    period_id, actor_id = uuid4().hex, uuid4().hex
+    decision_ids = ["00000000000000000000000000000001", "00000000000000000000000000000002"]
+    try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
+            with connection.begin():
+                for decision_id, action in zip(decision_ids, ("restrict", "restore")):
+                    connection.execute(text(
+                        "INSERT INTO member_access_decisions "
+                        "(id, period_id, actor_id, action, reason, idempotency_key, request_fingerprint, created_at) "
+                        "VALUES (:id, :period, :actor, :action, 'legacy', :key, :fingerprint, :created)"
+                    ), {"id": decision_id, "period": period_id, "actor": actor_id, "action": action,
+                        "key": decision_id, "fingerprint": "a" * 64, "created": "2026-10-21 12:00:00"})
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT id, action, decision_order, lifted_access_decision_id, lifted_payment_review_id "
+                "FROM member_access_decisions ORDER BY decision_order"
+            )).mappings().all()
+            assert [row["id"] for row in rows] == decision_ids
+            assert [row["decision_order"] for row in rows] == [1, 2]
+            assert [row["action"] for row in rows] == ["restrict", "restore"]
+            assert rows[0]["lifted_access_decision_id"] is None
+            assert rows[1]["lifted_access_decision_id"] is None
+            assert all(row["lifted_payment_review_id"] is None for row in rows)
+        with engine.begin() as connection:
+            with pytest.raises(IntegrityError):
+                connection.execute(text("UPDATE member_access_decisions SET reason='tampered' WHERE id=:id"),
+                                   {"id": decision_ids[0]})
+            with pytest.raises(IntegrityError):
+                connection.execute(text("DELETE FROM member_access_decisions WHERE id=:id"),
+                                   {"id": decision_ids[0]})
+    finally:
+        engine.dispose()
+
+
 def test_inventory_revision_fits_alembic_version_column():
     config = Config(str(API_DIR / "alembic.ini"))
     scripts = ScriptDirectory.from_config(config)
@@ -228,6 +274,8 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "0001_baseline" in generated_sql
     assert "CREATE TABLE staff_users" in generated_sql
     assert "CREATE TABLE staff_credentials" in generated_sql
+    assert "ALTER TABLE member_access_decisions DISABLE TRIGGER trg_member_access_decisions_no_update_delete" in generated_sql
+    assert "ALTER TABLE member_access_decisions ENABLE TRIGGER trg_member_access_decisions_no_update_delete" in generated_sql
     assert "CREATE TABLE security_events" in generated_sql
     assert "CREATE TABLE branches" in generated_sql
     assert "CREATE TABLE staff_role_grants" in generated_sql
