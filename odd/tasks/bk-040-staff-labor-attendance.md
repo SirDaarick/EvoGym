@@ -67,13 +67,13 @@ The backend only models staff login accounts, so cleaning and other employees wi
 
 - **Implemented:** `StaffRosterProfile` persists a branch-owned identity separate from `StaffUser`, with normalized non-empty name/position, case-insensitive per-branch duplicate protection, active state, and timestamps. Admin create/update/deactivation and read operations honor active explicit branch/organization grants. Reception can read only its granted branch; identity writes are denied.
 - **Migration:** `0021_staff_roster` adds the roster table, branch FK, checks, and indexes. Downgrade refuses to discard any roster rows.
-- **Assumption retained:** Admin manages roster entries; reception reads its own roster but cannot modify identities. This is a conservative implementation assumption, not a user-confirmed policy. S2 still owns attendance capture and its authorization semantics.
+- **Assumption retained:** Admin manages roster entries; reception reads its own roster but cannot modify identities. This is a conservative implementation assumption, not a user-confirmed policy. BK040-S2 below implements the attendance capture and authorization contract.
 - **Test-first evidence:** initial `GET /api/v1/staff-roster` returned 404 before route implementation (RED).
 - **Focused verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_staff_roster.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` - **27 passed, 1 existing Starlette/httpx deprecation warning**.
 - **Full API verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` - **220 passed, 17 skipped, 1 existing Starlette/httpx deprecation warning**. Initial full run exposed two stale assertions in `api/tests/test_contract_smoke.py` (the expected table set omitted `staff_roster_profiles`, and the migration-head check expected revision 0020); parent explicitly authorized this one test file, both assertions now expect the 0021 roster migration, and reruns pass. No live PostgreSQL or external services were used.
 - **Runtime boundary:** N/A beyond exercised TestClient routes and SQLite migration tests; no deployment boundary.
 - **Rollback boundary:** revert the `0021_staff_roster`-backed model, authorization, route, registration, focused tests, and BK040-S1 evidence together; migration downgrade is intentionally blocked after roster data exists.
-- **Work-unit commit:** `feat(personal): agregar roster laboral por sucursal` (Spanish Conventional Commit; SHA reported in delivery).
+- **Work-unit commit:** `7e7b3cb42f65c951f0044ed8948bc08608e42a18` — `feat(personal): agregar roster laboral por sucursal`.
 
 
 ## BK040-S2 implementation proof
@@ -88,4 +88,4 @@ The backend only models staff login accounts, so cleaning and other employees wi
 - **Full API verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` - **223 passed, 17 skipped, 1 existing Starlette/httpx deprecation warning**. All database-backed tests used disposable SQLite; no live PostgreSQL or external services were used.
 - **Runtime boundary:** N/A beyond TestClient/SQLite; no deployment or remote service.
 - **Rollback boundary:** revert the `0022_staff_attendance` migration, model, permission, router registration, focused tests, smoke expectations, and BK040-S2 documentation together. Migration downgrade is blocked while attendance rows exist.
-- **Work-unit commit:** `feat(personal): registrar asistencia laboral por sucursal` (Spanish Conventional Commit; SHA reported in delivery).
+- **Work-unit commit:** `8780821821867269934247ff1c96af8c12ccfdb4` — `feat(personal): registrar asistencia laboral por sucursal`.
