@@ -18,6 +18,7 @@ class Permission(StrEnum):
     STAFF_ROSTER_READ = "staff_roster_read"
     STAFF_ROSTER_MANAGE = "staff_roster_manage"
     STAFF_ATTENDANCE_RECORD = "staff_attendance_record"
+    MEMBERSHIP_ACCESS_MANAGE = "membership_access_manage"
 
 
 class AuthorizationDenied(Exception):

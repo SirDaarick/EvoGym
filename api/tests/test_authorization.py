@@ -41,6 +41,14 @@ def test_receptionist_is_branch_scoped_and_admin_finance_is_explicit(authorizati
     factory, ids = authorization_store
     with factory() as session:
         authorize(session, ids["receptionist"], Permission.MEMBER_OPERATIONAL_READ, ids["a"])
+
+
+def test_membership_access_management_is_admin_only_and_branch_scoped(authorization_store):
+    factory, ids = authorization_store
+    with factory() as session:
+        authorize(session, ids["admin"], Permission.MEMBERSHIP_ACCESS_MANAGE, ids["a"])
+        with pytest.raises(AuthorizationDenied):
+            authorize(session, ids["receptionist"], Permission.MEMBERSHIP_ACCESS_MANAGE, ids["a"])
         for branch_id in (ids["b"], None):
             with pytest.raises(AuthorizationDenied):
                 authorize(session, ids["receptionist"], Permission.MEMBER_OPERATIONAL_READ, branch_id)

@@ -130,6 +130,7 @@ EXPECTED_DATABASE_TABLES = {
     "membership_periods",
     "membership_debts",
     "membership_debt_payments",
+    "member_access_decisions",
     "staff_roster_profiles",
     "staff_attendance_records",
     "staff_attendance_checkouts",
@@ -280,7 +281,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached inventory foundation
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0023_staff_sched_checkout"
+            assert head_version == "0024_member_access_decisions"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

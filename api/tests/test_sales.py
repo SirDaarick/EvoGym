@@ -8,10 +8,10 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import (
-    Branch, CashRegister, Member, MembershipDebt, MembershipDebtPayment, MembershipPeriod,
+    Branch, CashRegister, Member, MemberAccessDecision, MembershipDebt, MembershipDebtPayment, MembershipPeriod,
     Order, OrderItem, Payment, Plan, PlanVersion, Shift,
 )
-from app.memberships.eligibility import is_membership_period_eligible
+from app.memberships.eligibility import evaluate_membership_access, is_membership_period_eligible
 from app.main import create_app
 from app.sales.queries import _add_duration, post_membership_cash_sale
 from app.shifts.queries import close_shift
@@ -203,6 +203,21 @@ def test_partial_membership_cash_sale_records_received_cash_and_operational_warn
                     session, UUID(sale["membership"]["id"]),
                     datetime.fromisoformat(sale["order"]["created_at"]).date(),
                 )
+                entitlement = evaluate_membership_access(
+                    session, UUID(sale["membership"]["id"]),
+                    datetime.fromisoformat(sale["order"]["created_at"]).date(), branch_id,
+                )
+                assert entitlement.allowed and entitlement.outstanding_minor == 7500
+                assert "outstanding_balance" in entitlement.warnings
+                period_id = UUID(sale["membership"]["id"])
+                session.add(MemberAccessDecision(
+                    period_id=period_id, actor_id=staff_id, action="restrict", reason="Admin review",
+                    idempotency_key="partial-admin-restrict", request_fingerprint="a" * 64,
+                ))
+                session.commit()
+                restricted = evaluate_membership_access(session, period_id,
+                    datetime.fromisoformat(sale["order"]["created_at"]).date(), branch_id)
+                assert not restricted.allowed and restricted.reason == "admin_payment_restriction"
                 assert session.scalar(select(func.count()).select_from(Order)) == 2
                 assert session.scalar(select(func.count()).select_from(Payment)) == 2
                 assert session.scalar(select(func.count()).select_from(MembershipDebt)) == 1
@@ -317,6 +332,13 @@ def test_membership_debt_repayment_posts_cash_receipt_and_reduces_warning(tmp_pa
                                 json={"order_id": order_id, "amount_minor": 3500})
             assert final.status_code == 201, final.text
             assert final.json()["remaining_balance_minor"] == 0
+            with factory() as session:
+                entitlement = evaluate_membership_access(
+                    session, UUID(sale.json()["membership"]["id"]),
+                    datetime.fromisoformat(sale.json()["membership"]["starts_on"]).date(), branch_id,
+                )
+                assert entitlement.allowed and entitlement.outstanding_minor == 0
+                assert "outstanding_balance" not in entitlement.warnings
 
             replay = client.post(repayment_path, headers=repayment_headers, json=payload)
             assert replay.status_code == 200

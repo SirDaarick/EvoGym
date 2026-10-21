@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import func, select
 
 from app.db.models import (
-    Member, MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, Plan, PlanVersion,
+    Member, MemberAccessDecision, MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, Plan, PlanVersion,
 )
-from app.memberships.eligibility import is_membership_period_eligible
+from app.memberships.eligibility import MembershipAccessStatus, evaluate_membership_access, is_membership_period_eligible
 from app.main import create_app
 from test_admin_auth import configured_settings, seed_admin
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
@@ -91,6 +91,11 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
 
             with factory() as session:
                 assert is_membership_period_eligible(session, UUID(membership_id), date.fromisoformat(starts_on))
+                decision = evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(starts_on), branch_id)
+                assert decision.allowed and decision.reason == "valid"
+                assert "transfer_under_review" in decision.warnings
+                assert evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(starts_on), UUID(int=0)).status is MembershipAccessStatus.WRONG_BRANCH
+                assert evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(ends_on), branch_id).status is MembershipAccessStatus.EXPIRED
                 assert is_membership_period_eligible(
                     session, UUID(membership_id), date.fromisoformat(starts_on) + timedelta(days=1)
                 )
@@ -123,9 +128,37 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
             assert pending.json()["payment"]["status"] == "pending"
             with factory() as session:
                 assert not is_membership_period_eligible(session, UUID(membership_id), date.fromisoformat(starts_on))
+                decision = evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(starts_on), branch_id)
+                assert not decision.allowed and decision.status is MembershipAccessStatus.BLOCKED_MISSING_FUNDS
                 assert is_membership_period_eligible(
                     session, UUID(cash_period_id), date.fromisoformat(cash.json()["membership"]["starts_on"])
                 )
+
+            access_path = f"/api/v1/membership-access/periods/{membership_id}/decisions"
+            receptionist_denied = client.post(access_path,
+                headers={"Authorization": f"Bearer {receptionist_token}", "Idempotency-Key": "receptionist-restore"},
+                json={"action": "restore", "reason": "Not authorized"})
+            assert receptionist_denied.status_code == 403
+            restore = client.post(access_path,
+                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-missing-transfer"},
+                json={"action": "restore", "reason": "Admin verified the member payment evidence"})
+            assert restore.status_code == 201, restore.text
+            replay = client.post(access_path,
+                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-missing-transfer"},
+                json={"action": "restore", "reason": "Admin verified the member payment evidence"})
+            assert replay.status_code == 200 and replay.json()["replayed"] is True
+            with factory() as session:
+                restored = evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(starts_on), branch_id)
+                assert restored.allowed and restored.reason == "valid"
+                assert evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(ends_on), branch_id).status is MembershipAccessStatus.EXPIRED
+                assert evaluate_membership_access(session, UUID(membership_id), date.fromisoformat(starts_on), UUID(int=0)).status is MembershipAccessStatus.WRONG_BRANCH
+                audit = session.scalar(select(MemberAccessDecision).where(
+                    MemberAccessDecision.period_id == UUID(membership_id),
+                ))
+                assert audit is not None and audit.action == "restore"
+                with pytest.raises(ValueError, match="append-only"):
+                    audit.action = "restrict"
+                    session.flush()
 
             reconfirm = client.post(
                 review_path,
