@@ -102,4 +102,18 @@ describe('LiveMemberLookup', () => {
     expect(screen.getByLabelText('Correo electrónico (opcional)')).not.toBeRequired();
   });
 
+  it('blocks leaving live registration while create reconciliation is unresolved', async () => {
+    checkoutApi.createMember.mockRejectedValue(Object.assign(new Error('unknown create outcome'), { kind: 'network' }));
+    checkoutApi.createMemberNumber.mockReturnValue('M' + 'a'.repeat(31));
+    render(<LiveMemberLookup />);
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio nuevo' }));
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    await screen.findByRole('button', { name: 'Reintentar registro seguro' });
+    expect(screen.getByLabelText(/Buscar por número/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Registrar socio nuevo' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeDisabled();
+  });
+
 });

@@ -44,7 +44,7 @@ The standard frontend registration and checkout read and write demo state, while
 ### BK-028-T3 - Authenticated member creation and generated identifier
 
 - [x] Extend the authenticated frontend API boundary to create a member using the backend `POST /api/v1/members` contract.
-- [x] Generate a stable unique member number for each registration intent; the caller retains it and the exact request body across uncertain retries. On 409, search by that exact number and reconcile only when member number, full name, and phone match.
+- [x] Generate a stable unique member number for each registration intent; the caller retains it and the exact request body across uncertain retries. On 409, search by that exact number: an exact number/name/phone match reconciles success, a verified number with different name/phone is a definite collision, and absent/incomplete/failed lookup remains unknown.
 - [x] Preserve backend field validation, duplicate-number response, and permission behavior; phone is not treated as unique.
 - [x] Update backend plan/task documentation with the actual generated-number and retry contract.
 - **Authorized surfaces:** `frontend/src/api/membershipCheckoutApi.ts`, `frontend/src/api/membershipCheckoutApi.test.ts`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
@@ -102,6 +102,14 @@ The standard frontend registration and checkout read and write demo state, while
 - **Exclusions:** No demo registration/provider, normal members pages, or Mercado Pago code changed. Mercado Pago remains the final integration step.
 - **Work-unit commit:** `30518dc2b341d078d158e4afc8445fc90d35c2d3` (`feat(frontend): registrar socios en recepcion operativa`).
 
+### BK-028-T3/T4 retry-safety correction
+
+- **Finding:** A POST 409 followed by an absent, incomplete, or failed search cannot prove that the earlier create failed; clearing the UI intent could allow a second member number while the first profile already exists.
+- **Correction:** Only an exact-number/name/phone match resolves success; only a verified same-number/different-identity row is a definite collision. All other reconciliation outcomes remain unknown, keep the original payload/number locked, and retry that same request. A new number is offered only after the UI receives the definite collision result and the operator explicitly selects recovery.
+- **RED/GREEN:** RED was observed in three new API regressions (wrong prior 409 contract, empty search, and failed search). Final focused command `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMemberRegistration.test.tsx` — 23 passed, including incomplete search response, parent flow lock, exact retry, and explicit collision recovery.
+- **Scoped `git diff --check`:** pending.
+- **Correction work-unit commit:** pending.
+
 ## Next step
 
-Next: implement BK-028-T4 live registration UI using the T3 API boundary. Only after T4 is complete, plan the Mercado Pago integration as the final sequence step.
+Next: plan Mercado Pago as the final integration step; T3/T4 registration and checkout remain mocked-test verified and make no live provider calls.

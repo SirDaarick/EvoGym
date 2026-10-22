@@ -11,6 +11,7 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
   const [member, setMember] = useState<CreatedMember | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [intent, setIntent] = useState<CreateMemberRequest | null>(null);
+  const [numberConflict, setNumberConflict] = useState(false);
   const submittingRef = useRef(false);
 
   async function register(request: CreateMemberRequest) {
@@ -22,15 +23,23 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
       const created = await createMember(request);
       setMember(created);
       setIntent(null);
+      setNumberConflict(false);
       onUnresolvedChange(false);
       setCheckoutOpen(true);
     } catch (reason) {
-      if (reason instanceof Error && 'kind' in reason && reason.kind === 'network') {
+      if (reason instanceof Error && 'kind' in reason && reason.kind === 'conflict') {
+        setIntent(null);
+        setNumberConflict(true);
+        onUnresolvedChange(false);
+        setError('El número generado ya está asociado a otro socio. Podés generar otro número y reintentar con los mismos datos.');
+      } else if (reason instanceof Error && 'kind' in reason && reason.kind === 'network') {
         setIntent(request);
+        setNumberConflict(false);
         onUnresolvedChange(true);
         setError('No se pudo confirmar el registro. El socio quizá ya fue creado; conservamos los mismos datos y número. Reintentá para reconciliar sin generar otro número.');
       } else {
         setIntent(null);
+        setNumberConflict(false);
         onUnresolvedChange(false);
         setError(reason instanceof Error ? reason.message : 'No se pudo registrar el socio.');
       }
@@ -53,6 +62,18 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     void register(request);
   }
 
+  function retryWithNewNumber() {
+    const request: CreateMemberRequest = {
+      member_number: createMemberNumber(),
+      full_name: fullName.trim(),
+      phone: phone.trim(),
+      ...(email.trim() ? { email: email.trim() } : {}),
+    };
+    setNumberConflict(false);
+    setIntent(request);
+    void register(request);
+  }
+
   return <section aria-labelledby="live-registration-title" style={{ marginTop: '1.5rem', borderTop: '1px solid #cbd5e1', paddingTop: '1rem' }}>
     <h2 id="live-registration-title">Registrar socio nuevo</h2>
     {member ? <>
@@ -71,7 +92,9 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
       {error && <p role="alert">{error}</p>}
       {intent
         ? <button type="button" onClick={() => void register(intent)} disabled={submitting}>Reintentar registro seguro</button>
-        : <button type="submit" disabled={!fullName.trim() || !phone.trim() || submitting}>{submitting ? 'Registrando…' : 'Registrar socio'}</button>}
+        : numberConflict
+          ? <button type="button" onClick={retryWithNewNumber} disabled={submitting}>Generar otro número y reintentar</button>
+          : <button type="submit" disabled={!fullName.trim() || !phone.trim() || submitting}>{submitting ? 'Registrando…' : 'Registrar socio'}</button>}
     </form>}
   </section>;
 }

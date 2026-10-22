@@ -36,12 +36,36 @@ describe('membership checkout API', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('https://gym.example/api/v1/members?page=1&limit=100&search=M123&sort_by=member_number&sort_dir=asc');
   });
 
-  it('preserves 409 when duplicate lookup does not verify the submitted identity', async () => {
+  it('treats a verified number collision with a different identity as a recoverable conflict', async () => {
     const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: 'member-1', member_number: 'M123', full_name: 'Someone Else', phone: '555' }] }), { status: 200 }));
-    await expect(createMember(request)).rejects.toMatchObject({ status: 409, message: 'Member number already exists.' });
+    await expect(createMember(request)).rejects.toMatchObject({ kind: 'conflict', status: 409, memberNumber: 'M123' });
+  });
+
+  it('keeps 409 reconciliation unknown when the search has no exact number', async () => {
+    const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    await expect(createMember(request)).rejects.toMatchObject({ kind: 'network' });
+  });
+
+  it('keeps 409 reconciliation unknown when the search request fails', async () => {
+    const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
+      .mockRejectedValueOnce(new TypeError('search unavailable'));
+    await expect(createMember(request)).rejects.toMatchObject({ kind: 'network' });
+  });
+
+  it('keeps 409 reconciliation unknown when the search response is incomplete', async () => {
+    const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total: 0 }), { status: 200 }));
+    await expect(createMember(request)).rejects.toMatchObject({ kind: 'network' });
   });
 
   it('loads active membership plans and registers with the operational bearer token', async () => {

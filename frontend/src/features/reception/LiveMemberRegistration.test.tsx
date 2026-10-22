@@ -32,6 +32,23 @@ describe('LiveMemberRegistration', () => {
     expect(api.number).toHaveBeenCalledTimes(1);
     expect(api.create.mock.calls[0][0]).toEqual(api.create.mock.calls[1][0]);
   });
+  it('only generates a replacement number after a proven member-number collision', async () => {
+    api.number.mockReturnValueOnce('M' + 'a'.repeat(31)).mockReturnValueOnce('M' + 'b'.repeat(31));
+    api.create.mockRejectedValueOnce(Object.assign(new Error('collision'), { kind: 'conflict' })).mockResolvedValueOnce({ id: 'new-backend-uuid', member_number: 'M' + 'b'.repeat(31), full_name: 'Ana', phone: '5551234567' });
+    const onUnresolvedChange = vi.fn();
+    render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={onUnresolvedChange} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    expect(await screen.findByRole('button', { name: 'Generar otro número y reintentar' })).toBeInTheDocument();
+    expect(api.number).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Generar otro número y reintentar' }));
+    await screen.findByRole('heading', { name: /Venta de membresía/ });
+    expect(api.number).toHaveBeenCalledTimes(2);
+    expect(api.create.mock.calls.map(([request]) => request.member_number)).toEqual(['M' + 'a'.repeat(31), 'M' + 'b'.repeat(31)]);
+    expect(api.create.mock.calls[1][0]).toMatchObject({ full_name: 'Ana', phone: '5551234567' });
+    expect(onUnresolvedChange).not.toHaveBeenCalledWith(true);
+  });
   it('keeps the member after checkout closes and offers lookup later', async () => {
     const findLater = vi.fn();
     api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });

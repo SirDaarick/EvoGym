@@ -77,6 +77,15 @@ export class CheckoutApiNetworkError extends Error {
   }
 }
 
+export class MemberNumberConflictError extends Error {
+  readonly kind = 'conflict';
+
+  constructor(readonly status: 409, readonly memberNumber: string) {
+    super('Este número de socio ya pertenece a otra identidad.');
+    this.name = 'MemberNumberConflictError';
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const config = getReceptionConfig();
   const token = readOperationalToken();
@@ -128,25 +137,28 @@ export async function createMember(requestBody: CreateMemberRequest): Promise<Cr
   } catch (error) {
     if (!(error instanceof CheckoutApiHttpError) || error.status !== 409) throw error;
 
+    const query = new URLSearchParams({
+      page: '1',
+      limit: '100',
+      search: requestBody.member_number,
+      sort_by: 'member_number',
+      sort_dir: 'asc',
+    });
+    let items: CreatedMember[];
     try {
-      const query = new URLSearchParams({
-        page: '1',
-        limit: '100',
-        search: requestBody.member_number,
-        sort_by: 'member_number',
-        sort_dir: 'asc',
-      });
-      const { items } = await request<MemberSearchResponse>(`/api/v1/members?${query}`);
-      const match = items.find(member =>
-        member.member_number === requestBody.member_number
-        && member.full_name === requestBody.full_name
-        && member.phone === requestBody.phone,
-      );
-      if (match) return match;
+      ({ items } = await request<MemberSearchResponse>(`/api/v1/members?${query}`));
+      if (!Array.isArray(items)) throw new Error('Member search did not return an items list.');
     } catch {
-      // A failed reconciliation cannot establish that the original request created this member.
+      // Failed or incomplete reconciliation cannot establish whether this create succeeded.
+      throw new CheckoutApiNetworkError('No se pudo verificar el resultado del registro. Reintentá con el mismo número y los mismos datos.');
     }
-    throw error;
+    const sameNumber = items.filter(member =>
+      typeof member === 'object' && member !== null && member.member_number === requestBody.member_number,
+    );
+    const match = sameNumber.find(member => member.full_name === requestBody.full_name && member.phone === requestBody.phone);
+    if (match) return match;
+    if (sameNumber.length > 0) throw new MemberNumberConflictError(409, requestBody.member_number);
+    throw new CheckoutApiNetworkError('La búsqueda no confirmó si el número de socio ya fue registrado. Reintentá con el mismo número y los mismos datos.');
   }
 }
 
