@@ -119,11 +119,12 @@ Implement the already-approved five-minute visit rule for the online check-in en
 
 ### Progress
 
-- [ ] Record commit hash and parent review notes after implementation.
+- [x] Record commit hash after implementation; parent review notes remain pending.
 - [ ] Update and read back the complete Engram mirror at `odd/bk-029-member-checkin/tasks` after the task closes.
 - **Implementation:** Added durable `member_check_in_visits` roots; each event stores and returns `visit_id`. Migration 0027 gives every historical event its own root. For valid new requests, the member row is locked, then the latest visit is reused only when elapsed time is strictly less than 300 seconds. Denied access exits before root creation. Both event and visit records remain append-only.
 - **Test-first RED:** The first pre-implementation run of `pytest -q api/tests/test_member_check_ins.py -k fixed_five_minute` failed before exercising visit-link assertions because the fixture's January timestamp denied access against the current entitlement date; the fixture was corrected to server-current UTC before focused GREEN. The initial failure is recorded accurately, not presented as proof of the desired behavior.
 - **Focused GREEN:** `pytest -q api/tests/test_member_check_ins.py -k 'fixed_five_minute or denies_expired'` -> 2 passed, 1 deselected, 1 existing Starlette/httpx deprecation warning.
 - **Full planned verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_member_check_ins.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` -> 34 passed, 16 warnings (15 existing expression-index reflection warnings and one Starlette/httpx deprecation warning) in 58.83s. Scoped `git diff --check` passed.
+- **Work-unit commit:** `05497d9`: `feat(check-in): vincular accesos duplicados a visitas`.
 - **Offline queue/sync and reconnect-time entitlement revalidation remain pending; BK-029 remains Partial.**
-- **Next step:** Finish full planned verification, commit this work unit, then synchronize the full Engram task mirror.
+- **Next step:** Synchronize the full Engram task mirror; PostgreSQL row-lock concurrency remains unverified without its opt-in database.
