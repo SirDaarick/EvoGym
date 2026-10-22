@@ -159,6 +159,9 @@ describe('PlanCatalog owner screen', () => {
 
     expect(screen.getByRole('heading', { name: 'Nuevo plan' })).toBeVisible();
 
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByText('Descripción y condiciones (opcional)'));
     const nameInput = screen.getByLabelText('Nombre del plan');
     const priceInput = screen.getByLabelText('Precio MXN');
     const applicabilityInput = screen.getByLabelText('Descripción de aplicabilidad');
@@ -168,8 +171,11 @@ describe('PlanCatalog owner screen', () => {
     await user.click(submitBtn);
 
     // Fill valid data
+    await user.clear(nameInput);
     await user.type(nameInput, 'Plan Box Pro');
-    await user.type(priceInput, '650');
+    await user.type(screen.getByLabelText('Precio de referencia (100%)'), '650');
+    expect(priceInput).toHaveValue('650.00');
+    await user.clear(applicabilityInput);
     await user.type(applicabilityInput, 'Box avanzado con acceso a ring y sparring.');
     await user.click(submitBtn);
 
@@ -180,7 +186,7 @@ describe('PlanCatalog owner screen', () => {
 
     const plansRegion = screen.getByRole('region', { name: 'Planes y visitas' });
     expect(within(plansRegion).getByText('Plan Box Pro')).toBeVisible();
-    expect(within(plansRegion).getByText('$650.00 MXN')).toBeVisible();
+    expect(within(within(plansRegion).getByText('Plan Box Pro').closest('tr')!).getByText('$650.00 MXN')).toBeVisible();
   }, 15000);
 
   it('opens edit modal and updates plan price and applicability', async () => {
@@ -195,6 +201,9 @@ describe('PlanCatalog owner screen', () => {
     await user.click(editBtn);
 
     expect(screen.getByRole('heading', { name: 'Editar plan' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByText('Descripción y condiciones (opcional)'));
 
     const priceInput = screen.getByLabelText('Precio MXN');
     const appInput = screen.getByLabelText('Descripción de aplicabilidad');
@@ -213,7 +222,7 @@ describe('PlanCatalog owner screen', () => {
     const plansRegion = screen.getByRole('region', { name: 'Planes y visitas' });
     expect(within(plansRegion).getByText('$550.00 MXN')).toBeVisible();
     expect(within(plansRegion).getByText('Acceso ilimitado a Gym actualizado.')).toBeVisible();
-  });
+  }, 15000);
 
   it('opens confirmation modal and deactivates a plan', async () => {
     const user = userEvent.setup();

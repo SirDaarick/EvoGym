@@ -15,16 +15,18 @@ import {
 } from '@hugeicons/core-free-icons';
 
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
+import { formatMoney } from '../../demo/adapter';
 import {
   savePlan,
   togglePlanActive,
   updatePlan,
+  getPlanStorageIssue,
   usePlans,
   type Plan,
 } from '../../demo/plans';
 import { Badge, Button, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './PlanCatalog.css';
+import { PlanEditor } from './PlanEditor';
 
 type FilterPillOption = 'all' | 'active' | 'membership' | 'visit' | 'inactive';
 
@@ -38,22 +40,9 @@ export function PlanCatalog() {
     { id: 'name', desc: false },
   ]);
 
-  // Modals state
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newKind, setNewKind] = useState<'membership' | 'visit'>('membership');
-  const [newPrice, setNewPrice] = useState('');
-  const [newApplicability, setNewApplicability] = useState('');
-  const [newRestriction, setNewRestriction] = useState('');
-  const [newError, setNewError] = useState('');
-
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editKind, setEditKind] = useState<'membership' | 'visit'>('membership');
-  const [editPrice, setEditPrice] = useState('');
-  const [editApplicability, setEditApplicability] = useState('');
-  const [editRestriction, setEditRestriction] = useState('');
-  const [editError, setEditError] = useState('');
+  const [toggleError, setToggleError] = useState('');
 
   const [confirmTogglePlan, setConfirmTogglePlan] = useState<Plan | null>(null);
 
@@ -134,6 +123,7 @@ export function PlanCatalog() {
         cell: ({ row }) => (
           <div>
             <div className="plan-table-name">{row.original.name}</div>
+            {row.original.legacy ? <small className="muted">Oferta previa · fuera del catálogo fuente</small> : null}
           </div>
         ),
       },
@@ -228,97 +218,16 @@ export function PlanCatalog() {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  // Modal handlers
-  function handleOpenNewModal() {
-    setNewName('');
-    setNewKind('membership');
-    setNewPrice('');
-    setNewApplicability('');
-    setNewRestriction('');
-    setNewError('');
-    setIsNewModalOpen(true);
-  }
-
-  function handleSaveNewPlan(e: React.FormEvent) {
-    e.preventDefault();
-    setNewError('');
-
-    if (!newName.trim()) {
-      setNewError('El nombre del plan es obligatorio.');
-      return;
-    }
-
-    const priceMinor = parseMoney(newPrice);
-    if (priceMinor === null || priceMinor <= 0) {
-      setNewError('Ingresa un precio válido mayor a 0 MXN.');
-      return;
-    }
-
-    if (!newApplicability.trim()) {
-      setNewError('La descripción de aplicabilidad es obligatoria.');
-      return;
-    }
-
-    savePlan({
-      name: newName.trim(),
-      kind: newKind,
-      amountMinor: priceMinor,
-      applicability: newApplicability.trim(),
-      restriction: newRestriction.trim() || undefined,
-      active: true,
-    });
-
-    setIsNewModalOpen(false);
-  }
-
-  function handleOpenEditModal(plan: Plan) {
-    setEditingPlan(plan);
-    setEditName(plan.name);
-    setEditKind(plan.kind);
-    setEditPrice((plan.amountMinor / 100).toFixed(2));
-    setEditApplicability(plan.applicability);
-    setEditRestriction(plan.restriction || '');
-    setEditError('');
-  }
-
-  function handleSaveEditPlan(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editingPlan) return;
-    setEditError('');
-
-    if (!editName.trim()) {
-      setEditError('El nombre del plan es obligatorio.');
-      return;
-    }
-
-    const priceMinor = parseMoney(editPrice);
-    if (priceMinor === null || priceMinor <= 0) {
-      setEditError('Ingresa un precio válido mayor a 0 MXN.');
-      return;
-    }
-
-    if (!editApplicability.trim()) {
-      setEditError('La descripción de aplicabilidad es obligatoria.');
-      return;
-    }
-
-    updatePlan(editingPlan.id, {
-      name: editName.trim(),
-      kind: editKind,
-      amountMinor: priceMinor,
-      applicability: editApplicability.trim(),
-      restriction: editRestriction.trim() || undefined,
-    });
-
-    setEditingPlan(null);
-  }
-
+  function handleOpenNewModal() { setIsNewModalOpen(true); }
+  function handleOpenEditModal(plan: Plan) { setEditingPlan(plan); }
   function handleConfirmToggle() {
     if (!confirmTogglePlan) return;
-    togglePlanActive(confirmTogglePlan.id);
-    setConfirmTogglePlan(null);
+    try {
+      togglePlanActive(confirmTogglePlan.id);
+      setConfirmTogglePlan(null);
+      setToggleError('');
+    } catch (error) { setToggleError(error instanceof Error ? error.message : 'No se pudo guardar.'); }
   }
-
   return (
     <div className="plan-catalog-root">
       <PageHeader
@@ -327,6 +236,8 @@ export function PlanCatalog() {
         description="Gestión integral de membresías y pases de visita. Define precios, vigencias operativas y disponibilidad para recepción."
       />
 
+      {getPlanStorageIssue() ? <Notice tone="warning">{getPlanStorageIssue()}</Notice> : null}
+      {toggleError ? <p role="alert">{toggleError}</p> : null}
       {/* Bento Summary KPIs (4 cards) */}
       <div className="plan-bento-grid">
         <div className="plan-kpi-card">
@@ -520,216 +431,8 @@ export function PlanCatalog() {
         </TableRegion>
       </Panel>
 
-      {/* Modal: Nuevo Plan */}
-      {isNewModalOpen && (
-        <div
-          className="plan-modal-backdrop"
-          role="presentation"
-          onClick={() => setIsNewModalOpen(false)}
-        >
-          <div
-            className="plan-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="new-plan-modal-title"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="plan-modal-header">
-              <h2 id="new-plan-modal-title" className="plan-modal-title">
-                Nuevo plan
-              </h2>
-              <button
-                type="button"
-                className="plan-modal-close-btn"
-                onClick={() => setIsNewModalOpen(false)}
-                aria-label="Cerrar modal"
-              >
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveNewPlan} className="plan-form-grid">
-              {newError && <Notice tone="error">{newError}</Notice>}
-
-              <div className="field">
-                <label htmlFor="new-plan-name">Nombre del plan</label>
-                <input
-                  id="new-plan-name"
-                  type="text"
-                  required
-                  placeholder="ej. Box Anual Premium"
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="new-plan-kind">Tipo de acceso</label>
-                <select
-                  id="new-plan-kind"
-                  value={newKind}
-                  onChange={e => setNewKind(e.target.value as 'membership' | 'visit')}
-                >
-                  <option value="membership">Membresía</option>
-                  <option value="visit">Pase por visita</option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor="new-plan-price">Precio MXN</label>
-                <input
-                  id="new-plan-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  required
-                  placeholder="ej. 500.00"
-                  value={newPrice}
-                  onChange={e => setNewPrice(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="new-plan-applicability">Descripción de aplicabilidad</label>
-                <textarea
-                  id="new-plan-applicability"
-                  required
-                  rows={2}
-                  placeholder="ej. Acceso a Box en horarios matutinos y vespertinos."
-                  value={newApplicability}
-                  onChange={e => setNewApplicability(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="new-plan-restriction">Restricción u observación (opcional)</label>
-                <input
-                  id="new-plan-restriction"
-                  type="text"
-                  placeholder="ej. Requiere comprobante de inscripción vigente."
-                  value={newRestriction}
-                  onChange={e => setNewRestriction(e.target.value)}
-                />
-              </div>
-
-              <div className="plan-modal-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setIsNewModalOpen(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit">Guardar plan</Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Editar Plan */}
-      {editingPlan && (
-        <div
-          className="plan-modal-backdrop"
-          role="presentation"
-          onClick={() => setEditingPlan(null)}
-        >
-          <div
-            className="plan-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="edit-plan-modal-title"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="plan-modal-header">
-              <h2 id="edit-plan-modal-title" className="plan-modal-title">
-                Editar plan
-              </h2>
-              <button
-                type="button"
-                className="plan-modal-close-btn"
-                onClick={() => setEditingPlan(null)}
-                aria-label="Cerrar modal"
-              >
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEditPlan} className="plan-form-grid">
-              {editError && <Notice tone="error">{editError}</Notice>}
-
-              <div className="field">
-                <label htmlFor="edit-plan-name">Nombre del plan</label>
-                <input
-                  id="edit-plan-name"
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="edit-plan-kind">Tipo de acceso</label>
-                <select
-                  id="edit-plan-kind"
-                  value={editKind}
-                  onChange={e => setEditKind(e.target.value as 'membership' | 'visit')}
-                >
-                  <option value="membership">Membresía</option>
-                  <option value="visit">Pase por visita</option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor="edit-plan-price">Precio MXN</label>
-                <input
-                  id="edit-plan-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  required
-                  value={editPrice}
-                  onChange={e => setEditPrice(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="edit-plan-applicability">Descripción de aplicabilidad</label>
-                <textarea
-                  id="edit-plan-applicability"
-                  required
-                  rows={2}
-                  value={editApplicability}
-                  onChange={e => setEditApplicability(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="edit-plan-restriction">Restricción u observación (opcional)</label>
-                <input
-                  id="edit-plan-restriction"
-                  type="text"
-                  value={editRestriction}
-                  onChange={e => setEditRestriction(e.target.value)}
-                />
-              </div>
-
-              <div className="plan-modal-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setEditingPlan(null)}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit">Guardar cambios</Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
+      {isNewModalOpen ? <PlanEditor onClose={() => setIsNewModalOpen(false)} onSave={savePlan} /> : null}
+      {editingPlan ? <PlanEditor key={editingPlan.id} plan={editingPlan} onClose={() => setEditingPlan(null)} onSave={input => { updatePlan(editingPlan.id, input); }} /> : null}
       {/* Modal: Confirmar Activar / Desactivar */}
       {confirmTogglePlan && (
         <div

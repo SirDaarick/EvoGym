@@ -1,7 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getActivePlans,
+  reloadPlans,
+  getPlanStorageIssue,
   getPlanList,
   INITIAL_PLANS,
   plans,
@@ -20,7 +22,7 @@ describe('plan store and management', () => {
   });
 
   describe('initial plans and defaults', () => {
-    it('initializes with all default plans active', () => {
+    it('preserves existing offers and adds the operative catalog', () => {
       expect(INITIAL_PLANS.length).toBeGreaterThan(0);
       for (const plan of INITIAL_PLANS) {
         expect(plan.active).toBe(true);
@@ -174,4 +176,119 @@ describe('plan store and management', () => {
       expect(result.current.some(p => p.id === 'visit-single')).toBe(true);
     });
   });
+});
+
+describe('saved plan composition contract', () => {
+  beforeEach(() => { vi.restoreAllMocks(); resetPlans(); });
+  it('reproduces all twenty operative membership prices, excluding legacy extras', () => {
+    const expected: Record<string, number> = {
+      'gym-month': 50000, 'box-month': 50000, 'combo-month-old': 65000, 'combo-month': 75000,
+      'gym-student': 40000, 'box-student': 40000, 'gym-week': 15000, 'box-week': 15000,
+      'combo-week': 20000, 'custom-fortnight': 25000, 'gym-quarter': 120000, 'box-quarter': 120000,
+      'combo-quarter': 175000, 'gym-semester': 250000, 'box-semester': 250000, 'combo-semester': 330000,
+      'gym-annual': 450000, 'box-annual': 450000, 'combo-annual': 610000, 'box-kids': 35000,
+    };
+    const memberships = getActivePlans().filter(plan => plan.kind === 'membership' && plan.sourceLabel);
+    expect(Object.fromEntries(memberships.map(plan => [plan.id, plan.amountMinor]))).toEqual(expected);
+    expect(memberships.every(plan => plan.composition && plan.revision === 1)).toBe(true);
+    expect(memberships.find(plan => plan.id === 'custom-fortnight')?.composition?.serviceStatus).toBe('pending');
+  });
+
+  it('deep clones composition and advances revision without changing earlier snapshots', () => {
+    resetPlans();
+    const before = getPlanList().find(plan => plan.id === 'gym-month')!;
+    const original = JSON.parse(JSON.stringify(before));
+    before.composition!.services.push('box');
+    before.composition!.period.value = 9;
+    expect(getPlanList().find(plan => plan.id === before.id)).toEqual(original);
+    const updated = updatePlan(before.id, { amountMinor: 55000 })!;
+    expect(updated.revision).toBe(2);
+    expect(original.amountMinor).toBe(50000);
+  });
+});
+
+
+describe('catalog persistence and migration', () => {
+  beforeEach(() => { vi.restoreAllMocks(); resetPlans(); });
+
+  it('migrates untouched legacy seeds, appends missing source plans and preserves customized entries', () => {
+    localStorage.setItem('evogym_plan_catalog', JSON.stringify([
+      { id: 'gym-semester', name: 'Gym semestral', amountMinor: 230000, applicability: 'Individual; una sola área. Semestre.', kind: 'membership', active: true },
+      { id: 'box-semester', name: 'Box semestral', amountMinor: 210000, applicability: 'Precio acordado', kind: 'membership', active: true },
+      { id: 'custom', name: 'Plan propio', amountMinor: 99000, applicability: 'Especial', kind: 'membership', active: false },
+    ]));
+    reloadPlans();
+    expect(getPlanList().find(plan => plan.id === 'gym-semester')?.amountMinor).toBe(250000);
+    expect(getPlanList().find(plan => plan.id === 'box-semester')?.amountMinor).toBe(210000);
+    expect(getPlanList().find(plan => plan.id === 'custom')?.active).toBe(false);
+    expect(getPlanList().find(plan => plan.id === 'combo-annual')?.amountMinor).toBe(610000);
+    expect(getPlanStorageIssue()).toContain('ajustes previos');
+    updatePlan('custom', { name: 'Plan propio actualizado' });
+    expect(JSON.parse(localStorage.getItem('evogym_plan_catalog')!).version).toBe(2);
+    reloadPlans();
+    expect(getPlanList().find(plan => plan.id === 'box-semester')?.amountMinor).toBe(210000);
+    expect(getPlanList().find(plan => plan.id === 'custom')?.name).toBe('Plan propio actualizado');
+  });
+
+  it.each(['{broken', JSON.stringify({ version: 99, plans: [] }), JSON.stringify([{ id: 'bad' }])])('does not overwrite unreadable or unsupported storage: %s', raw => {
+    localStorage.setItem('evogym_plan_catalog', raw);
+    reloadPlans();
+    expect(getPlanStorageIssue()).toContain('No se pudo leer');
+    expect(() => updatePlan('gym-month', { amountMinor: 60000 })).toThrow();
+    expect(localStorage.getItem('evogym_plan_catalog')).toBe(raw);
+    resetPlans();
+  });
+
+  it('does not falsely report success or mutate memory on a storage quota error', () => {
+    const before = getPlanList();
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+    expect(() => updatePlan('gym-month', { amountMinor: 60000 })).toThrow('No se pudo guardar');
+    expect(getPlanList()).toEqual(before);
+    spy.mockRestore();
+  });
+
+  it('persists a composed custom plan, reloads it and protects both returned and input nested objects', () => {
+    const input = { ...getPlanList().find(plan => plan.id === 'gym-month')!, id: 'custom-combo', name: 'Combinación guardada' };
+    input.composition!.services.push('box');
+    const saved = savePlan(input);
+    input.composition!.conditions.notes = 'Mutation';
+    saved.composition!.period.value = 9;
+    reloadPlans();
+    const stored = getPlanList().find(plan => plan.id === saved.id)!;
+    expect(stored.composition?.services).toEqual(['gym', 'box']);
+    expect(stored.composition?.period.value).toBe(1);
+    expect(stored.composition?.conditions.notes).toBe('');
+  });
+});
+
+it('keeps an explicit reference price through persistence, migration and snapshot projection', async () => {
+  resetPlans();
+  const plan = getPlanList().find(plan => plan.id === 'gym-month')!;
+  const { snapshotPlan } = await import('./plans');
+  const saved = savePlan({ ...plan, referenceAmountMinor: 65000 });
+  reloadPlans();
+  expect(getPlanList().find(plan => plan.id === saved.id)?.referenceAmountMinor).toBe(65000);
+  expect(snapshotPlan(saved).referenceAmountMinor).toBe(65000);
+  localStorage.setItem('evogym_plan_catalog', JSON.stringify([{ ...plan, revision: undefined, composition: undefined, referenceAmountMinor: 70000 }]));
+  reloadPlans();
+  expect(getPlanList().find(plan => plan.id === saved.id)?.referenceAmountMinor).toBe(70000);
+  resetPlans();
+});
+
+it('refuses invalid references but keeps legacy snapshots free of invented reference prices', async () => {
+  resetPlans();
+  const { snapshotPlan } = await import('./plans');
+  const initial = getPlanList().find(plan => plan.id === 'gym-month')!;
+  expect(snapshotPlan(initial)).not.toHaveProperty('referenceAmountMinor');
+  for (const invalid of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => updatePlan(initial.id, { referenceAmountMinor: invalid })).toThrow();
+  }
+  localStorage.setItem('evogym_plan_catalog', JSON.stringify([{
+    id: 'gym-month', name: 'Gym mensual', amountMinor: 50000,
+    applicability: 'Una área: Gym. Mensual por fechas de calendario.', kind: 'membership', active: true,
+    referenceAmountMinor: 70000,
+  }]));
+  reloadPlans();
+  expect(getPlanList().find(plan => plan.id === initial.id)?.referenceAmountMinor).toBe(70000);
+  resetPlans();
 });

@@ -288,3 +288,108 @@
   padding-top: 16px;
   margin-top: 8px;
 }
+
+/* Saved-plan composer: native modal isolation, bounded scrolling, touch targets. */
+.plan-editor-dialog {
+  width: min(46rem, calc(100% - 2rem));
+  max-width: 46rem;
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 24px 64px rgb(42 31 20 / 24%);
+  overflow: hidden;
+}
+.plan-editor-dialog::backdrop { background: rgb(28 23 18 / 55%); backdrop-filter: blur(3px); }
+.plan-editor-form { display: flex; flex-direction: column; max-height: calc(100dvh - 2rem); }
+.plan-editor-header { display: flex; align-items: flex-start; gap: 1rem; padding: 1.5rem 1.75rem 1.25rem; border-bottom: 1px solid var(--color-divider); }
+.plan-editor-header h2 { margin: .25rem 0 .5rem; font-size: 1.5rem; letter-spacing: -.025em; }
+.plan-editor-header p { margin: 0; }
+.plan-editor-header .eyebrow { font-size: .65rem; }
+.plan-editor-header .muted { font-size: .875rem; max-width: 52ch; line-height: 1.5; }
+.plan-editor-header .plan-modal-close-btn { margin-left: auto; flex-shrink: 0; }
+.plan-editor-body { overflow-y: auto; overscroll-behavior: contain; min-height: 0; padding: 1.5rem 1.75rem; display: grid; gap: 1.5rem; }
+.plan-editor-section { display: grid; gap: 1rem; min-width: 0; }
+.plan-editor-section h3 { font-size: .95rem; margin: 0; letter-spacing: -.01em; }
+.plan-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.plan-editor-dialog .field { margin: 0; min-width: 0; }
+.plan-editor-dialog input:not([type=checkbox]), .plan-editor-dialog select, .plan-editor-dialog textarea { width: 100%; max-width: 100%; min-height: 44px; box-sizing: border-box; font-size: 1rem; }
+.plan-editor-dialog textarea { resize: vertical; }
+.plan-editor-dialog .field small { display: block; margin-top: .4rem; font-size: .75rem; line-height: 1.5; }
+.plan-editor-services { border: 0; padding: 0; margin: 0; min-width: 0; }
+.plan-editor-services legend { font-size: .85rem; font-weight: 600; margin-bottom: .5rem; }
+.plan-editor-service-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.plan-editor-service { display: flex; align-items: center; gap: .65rem; padding: .9rem .75rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); cursor: pointer; min-height: 44px; transition: border-color 150ms, background 150ms; }
+.plan-editor-service.is-selected { border-color: var(--color-primary); background: var(--color-soft); }
+.plan-editor-service input, .plan-editor-check input { width: 1.1rem; height: 1.1rem; flex-shrink: 0; accent-color: var(--color-primary); }
+.plan-editor-service strong { display: block; font-size: .875rem; }
+.plan-editor-service small { display: block; font-size: .7rem; color: var(--color-muted); margin-top: .2rem; }
+.plan-editor-check { display: flex; align-items: center; gap: .6rem; min-height: 44px; font-size: .8rem; cursor: pointer; }
+.plan-editor-warning, .plan-editor-history { border-radius: var(--radius-control); background: var(--color-soft); padding: 1rem; font-size: .8rem; line-height: 1.6; margin: 0; }
+.plan-editor-history p { margin: .35rem 0 0; }
+.plan-editor-error { color: var(--color-danger, #a53020); font-size: .8rem; line-height: 1.5; margin: .25rem 0 0; }
+.plan-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.75rem; border-top: 1px solid var(--color-divider); background: var(--color-surface); }
+.plan-editor-buttons { display: flex; align-items: center; gap: .65rem; }
+.plan-editor-total small { display: block; color: var(--color-muted); font-size: .7rem; }
+.plan-editor-total strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plan-editor-total span { font-size: .65rem; color: var(--color-muted); }
+.plan-editor-dialog button, .plan-action-btn-sm, .plan-pill-btn { min-height: 44px; }
+.plan-editor-dialog .plan-modal-close-btn { min-width: 44px; }
+.plan-editor-dialog :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .plan-editor-dialog { width: calc(100% - 1rem); max-height: calc(100dvh - 1rem); }
+  .plan-editor-form { max-height: calc(100dvh - 1rem); }
+  .plan-editor-header, .plan-editor-body { padding: 1rem; }
+  .plan-editor-grid { grid-template-columns: 1fr; }
+  .plan-editor-service-grid { grid-template-columns: 1fr; }
+  .plan-editor-service small { margin-top: .1rem; }
+  .plan-editor-footer { padding: .85rem 1rem; flex-wrap: wrap; }
+  .plan-editor-total { width: 100%; display: flex; align-items: baseline; justify-content: space-between; }
+  .plan-editor-buttons { width: 100%; }
+  .plan-editor-buttons button { flex: 1; }
+}
+
+/* Three-step plan editor: one active body, reusable shared progress indicator. */
+.plan-editor-header, .plan-editor-progress, .plan-editor-footer { flex-shrink: 0; }
+.plan-editor-progress { padding: .75rem 1.75rem 0; }
+.plan-editor-stepper .stepper__body { display: none; }
+.plan-editor-stepper .stepper__header { padding: 0; }
+.plan-editor-stepper .stepper__segment { min-height: 44px; }
+.plan-editor-help { margin: -.35rem 0 .25rem; font-size: .875rem; line-height: 1.6; }
+.plan-editor-section > h3:focus { outline: none; }
+.plan-editor-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.plan-editor-presets button { border: 1px solid var(--color-divider); border-radius: var(--radius-control); color: var(--color-ink); background: var(--color-surface); font: inherit; font-size: .85rem; cursor: pointer; padding: .65rem; transition: border-color 150ms, background 150ms; }
+.plan-editor-presets button:hover { border-color: var(--color-primary); }
+.plan-editor-presets button[aria-pressed="true"] { background: var(--color-soft); border-color: var(--color-primary); color: var(--color-primary); font-weight: 600; }
+.plan-editor-period-summary { margin: 0; padding: .85rem 1rem; border-radius: var(--radius-control); background: var(--color-soft); font-size: .875rem; }
+.plan-editor-details { min-width: 0; border-top: 1px solid var(--color-divider); }
+.plan-editor-details summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; padding: .75rem .15rem; font-size: .8rem; font-weight: 600; color: var(--color-muted); }
+.plan-editor-details summary:hover { color: var(--color-ink); }
+.plan-editor-details[open] > .plan-editor-section, .plan-editor-details[open] > .field { padding-top: .5rem; }
+.plan-editor-review { display: grid; gap: .75rem; margin: 0; padding: 1rem; background: var(--color-canvas); border-radius: var(--radius-control); }
+.plan-editor-review > div { display: grid; grid-template-columns: minmax(6rem, .7fr) minmax(0, 2fr); gap: 1rem; }
+.plan-editor-review dt { font-size: .75rem; color: var(--color-muted); }
+.plan-editor-review dd { margin: 0; font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; }
+.plan-editor-footer .plan-editor-total { min-width: 0; }
+.plan-editor-footer .plan-editor-total strong { display: block; overflow-wrap: anywhere; white-space: normal; font-size: 1rem; }
+.plan-editor-footer { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+@media (max-width: 600px) {
+  .plan-editor-progress { padding: .5rem 1rem 0; }
+  .plan-editor-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-editor-review > div { grid-template-columns: 1fr; gap: .2rem; }
+  .plan-editor-footer .plan-editor-total strong { font-size: .95rem; }
+  .plan-editor-footer .plan-editor-buttons { gap: .4rem; }
+  .plan-editor-footer .plan-editor-buttons button { padding-inline: .65rem; min-width: 0; }
+}
+
+/* Linked reference and actual charge; percentage is an editable calculation. */
+.plan-editor-pricing { display: grid; gap: 1rem; min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); }
+.plan-editor-pricing legend { padding: 0 .4rem; font-size: .85rem; font-weight: 600; }
+.plan-editor-pricing > small { font-size: .75rem; line-height: 1.6; }
+.plan-editor-pricing .plan-editor-help { margin: -.4rem 0 0; font-size: .75rem; }
+.plan-editor-percentage { position: relative; }
+.plan-editor-percentage input { padding-right: 2.2rem; }
+.plan-editor-percentage > span { position: absolute; top: 50%; right: .8rem; transform: translateY(-50%); color: var(--color-muted); pointer-events: none; }
