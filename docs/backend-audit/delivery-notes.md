@@ -66,6 +66,28 @@ Exclusions: no PostgreSQL/Docker/hosted run, new migration, changed isolation gu
 Dirty structural proof: installed-PyYAML/AST checks pass; unchanged test logic apart from the helper/import and four expected-head comparisons is verified, not database behavior.
 Dirty collection command: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_migrations_postgres.py` with database URLs absent → 4 skipped, exit 0.
 Proof scope: dirty graph resolved `0030_staff_schedules`; 30-minute job/15-minute step bounds and three module paths were checked structurally only.
-Clean-prefix verification: PENDING against the owned R1–R5 tree; an absent PG target yields skips, never a migration PASS.
+Clean-prefix verification: `f1153da6ef5718a64cd8480a69f107699ac4ebea` — YAML/AST passed; clean head 0029; migration collection 4 skipped, not PostgreSQL proof.
 Rollback: R5 additions in `.github/workflows/api.yml` and helper/import/four comparison hunks in `api/tests/test_migrations_postgres.py`; preserve historical migration targets and fixture guards.
-Commit identity: PENDING; CI execution and clean-prefix proof remain separately unverified.
+Commit identity: `f1153da6ef5718a64cd8480a69f107699ac4ebea`; results above identify this exact clean prefix.
+
+## Clean committed full-suite receipt — partial frontend result
+
+Source prefix: `f1153da6ef5718a64cd8480a69f107699ac4ebea`, tree `766529c26777de83338d394ac70c39c152a41107`; clean Alembic graph: **`0029_class_sample_check_ins (head)`**, not the uncommitted schedule draft 0030. The six source commits above are observed; D1–D3 documentation commits remain pending. No unowned source was adopted.
+
+API commands used the existing shared primary-checkout `api/.venv/Scripts/python.exe`, with clean-checkout API imports (`PYTHONPATH` and `app.__file__` checked), fresh test-only process settings and database URLs absent. `$Python` below is a documentation alias for that same interpreter, not a claimed saved wrapper.
+
+| Working directory / command | Observed clean-R5 result |
+|---|---|
+| Clean root: `& $Python -m pytest -q -p no:cacheprovider api/tests` | **335 passed, 17 PG skipped, 18 warnings**, 371.75s |
+| Clean root: `& $Python -m pip check` | No broken requirements |
+| Clean `api/`: `& $Python -m alembic heads` | `0029_class_sample_check_ins (head)` |
+| Clean `frontend/`: `npm.cmd run typecheck` | Passed, 7.37s |
+| Clean `frontend/`: `npm.cmd test -- --maxWorkers=2 --reporter=dot` | **2 failed, 471 passed**, 63 files, 381.87s; NOT an all-green verdict |
+| Clean `frontend/`: `npm.cmd run build` | Production/PWA passed, approximately 38.79s; Vite 2.75s; 524.79kB entry advisory |
+| Clean root: `& $Python -m pytest -q -p no:cacheprovider api/tests/test_migrations_postgres.py` | **4 skipped**, 0.98s; not PostgreSQL execution |
+
+The full frontend failures were the Members measured-visit mount/loading timeout (`frontend/src/features/members/Members.test.tsx:10`) and Owner keyboard focus expecting `Desde` after 20 tabs (`frontend/src/features/owner/Owner.test.tsx:51`). No assertion was weakened and the original failed full-run result is retained.
+
+Same filtered command in clean R5 and baseline `709466caa545d862c6effc53a9bbaf1a8a28d65f`: `npm.cmd test -- --maxWorkers=2 --reporter=dot src/features/members/Members.test.tsx src/features/owner/Owner.test.tsx -t "registers a measured visit|keeps the skip link"` → **1 passed, 1 failed, 22 filtered skips** in both (13.92s / 15.00s). Members passed and Owner failed in both; relevant production/test directories were unchanged between those commits. Owner is a reproduced pre-existing baseline failure; Members' full-suite timeout did not reproduce in this focused comparison, and timing/load remains only a hypothesis. No full-suite retry occurred because both focused checks were not passing.
+
+The earlier dirty snapshot's 367 API/578 frontend passes and graph 0030 include unowned drafts and are separate historical evidence, never clean-prefix proof. Current readiness is **scoped source checks passed, clean full frontend partial**. PostgreSQL/hosted CI, browser E2E, vulnerability scans and production/deployment were not run; no production certification or new functional approval follows from this receipt.
