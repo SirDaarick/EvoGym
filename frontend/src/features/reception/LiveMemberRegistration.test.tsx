@@ -1,0 +1,48 @@
+﻿import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { LiveMemberRegistration } from './LiveMemberRegistration';
+const api = vi.hoisted(() => ({ create: vi.fn(), number: vi.fn() }));
+vi.mock('../../api/membershipCheckoutApi', () => ({ createMember: api.create, createMemberNumber: api.number }));
+vi.mock('./LiveMembershipCheckout', () => ({ LiveMembershipCheckout: ({ member, onClose }: { member: { id: string }; onClose: () => void }) => <section><h3>Venta de membresía</h3><p>{member.id}</p><button type="button" onClick={onClose}>Cerrar</button></section> }));
+beforeEach(() => { vi.clearAllMocks(); api.number.mockReturnValue('M' + 'a'.repeat(31)); });
+describe('LiveMemberRegistration', () => {
+  it('creates the member before handing its backend identity to checkout', async () => {
+    api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana Pérez', phone: '5551234567' });
+    render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana Pérez' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.change(screen.getByLabelText('Correo electrónico (opcional)'), { target: { value: 'ana@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
+    expect(api.create).toHaveBeenCalledWith({ member_number: 'M' + 'a'.repeat(31), full_name: 'Ana Pérez', phone: '5551234567', email: 'ana@example.com' });
+    expect(screen.getByText('Identificador backend: backend-uuid')).toBeInTheDocument();
+  });
+  it('retries uncertain creation with the exact original payload and number', async () => {
+    api.create.mockRejectedValueOnce(Object.assign(new Error('network'), { kind: 'network' })).mockResolvedValueOnce({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });
+    const onUnresolvedChange = vi.fn();
+    render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={onUnresolvedChange} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    expect(await screen.findByRole('button', { name: 'Reintentar registro seguro' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre completo')).toBeDisabled();
+    expect(onUnresolvedChange).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar registro seguro' }));
+    await screen.findByRole('heading', { name: /Venta de membresía/ });
+    expect(api.number).toHaveBeenCalledTimes(1);
+    expect(api.create.mock.calls[0][0]).toEqual(api.create.mock.calls[1][0]);
+  });
+  it('keeps the member after checkout closes and offers lookup later', async () => {
+    const findLater = vi.fn();
+    api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });
+    render(<LiveMemberRegistration onFindLater={findLater} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cerrar' }));
+    expect(screen.getByText(/El perfil ya está registrado/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar socio para continuar después' }));
+    expect(findLater).toHaveBeenCalledWith('M' + 'a'.repeat(31));
+    expect(api.create).toHaveBeenCalledTimes(1);
+  });
+});

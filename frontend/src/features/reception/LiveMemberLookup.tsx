@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { clearOperationalToken, getReceptionMember, getReceptionConfig, readOperationalToken, searchReceptionMembers, type OperationalMember, type OperationalMemberDetail } from '../../api/receptionApi';
 import { OperationalLogin } from '../auth/OperationalLogin';
 import { LiveMembershipCheckout } from './LiveMembershipCheckout';
+import { LiveMemberRegistration } from './LiveMemberRegistration';
 
 function money(minor: number) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(minor / 100); }
 
@@ -11,6 +12,8 @@ export function LiveMemberLookup() {
   const [members, setMembers] = useState<OperationalMember[]>([]);
   const [selected, setSelected] = useState<OperationalMemberDetail | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [registrationUnresolved, setRegistrationUnresolved] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const searchGeneration = useRef(0);
@@ -24,7 +27,7 @@ export function LiveMemberLookup() {
     previousToken.current = token;
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    setMembers([]); setSelected(null); setCheckoutOpen(false); setError(''); setLoading(false);
+    setMembers([]); setSelected(null); setCheckoutOpen(false); setRegistrationOpen(false); setError(''); setLoading(false);
   }, [token]);
 
   useEffect(() => {
@@ -64,20 +67,21 @@ export function LiveMemberLookup() {
   function changeQuery(value: string) {
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    setQuery(value); setSelected(null); setCheckoutOpen(false); setMembers([]); setError(''); setLoading(false);
+    setQuery(value); setSelected(null); setCheckoutOpen(false); setRegistrationOpen(false); setMembers([]); setError(''); setLoading(false);
   }
   function logout() {
     searchGeneration.current += 1;
     detailGeneration.current += 1;
-    clearOperationalToken(); setToken(null); setSelected(null); setCheckoutOpen(false); setMembers([]); setQuery(''); setError(''); setLoading(false);
+    clearOperationalToken(); setToken(null); setSelected(null); setCheckoutOpen(false); setRegistrationOpen(false); setMembers([]); setQuery(''); setError(''); setLoading(false);
   }
 
   if (configError) return <main className="panel" role="alert" style={{ margin: '2rem', padding: '2rem' }}><h1>Recepción operativa no disponible</h1><p>{configError}</p><p>El modo de demostración sigue separado en su acceso habitual.</p></main>;
   if (!token) return <OperationalLogin onAuthenticated={() => setToken(readOperationalToken())} />;
   return <main className="panel" style={{ maxWidth: 760, margin: '2rem auto', padding: '2rem' }}>
-    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}><div><h1>Recepción operativa</h1><p>Socios y saldos actuales del backend.</p></div><button type="button" onClick={logout} disabled={checkoutOpen}>Cerrar sesión</button></header>
+    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}><div><h1>Recepción operativa</h1><p>Socios y saldos actuales del backend.</p></div><button type="button" onClick={logout} disabled={checkoutOpen || registrationUnresolved}>Cerrar sesión</button></header>
     <label htmlFor="live-member-search">Buscar por número, nombre o teléfono</label>
-    <input id="live-member-search" value={query} onChange={event => changeQuery(event.target.value)} disabled={checkoutOpen} />
+    <input id="live-member-search" value={query} onChange={event => changeQuery(event.target.value)} disabled={checkoutOpen || registrationUnresolved} />
+    <button type="button" onClick={() => setRegistrationOpen(value => !value)} disabled={checkoutOpen || registrationUnresolved}>Registrar socio nuevo</button>
     {loading && <p role="status">Consultando backend…</p>}
     {error && <p role="alert">{error}</p>}
     <ul aria-label="Resultados de socios">
@@ -95,5 +99,6 @@ export function LiveMemberLookup() {
       onClose={() => setCheckoutOpen(false)}
       onCompleted={() => void refresh()}
     />}
+    {registrationOpen && <LiveMemberRegistration onFindLater={memberNumber => { setRegistrationOpen(false); changeQuery(memberNumber); }} onUnresolvedChange={setRegistrationUnresolved} />}
   </main>;
 }

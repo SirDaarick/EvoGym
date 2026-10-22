@@ -56,11 +56,11 @@ The standard frontend registration and checkout read and write demo state, while
 
 ### BK-028-T4 - New-member live registration and checkout handoff
 
-- [ ] Add a new-member form to authenticated live reception using backend-required full name and phone, optional email, and a system-generated member number; do not change demo registration.
-- [ ] On successful member creation, use the returned backend member UUID to open the existing live membership checkout; do not create a sale before a member exists.
-- [ ] Clearly preserve the partial outcome: member creation is a separate API transaction from sale. If checkout is cancelled or fails, show the created member number and allow lookup/checkout later; never imply the account was rolled back.
-- [ ] Cover validation, duplicate/retried creation, response uncertainty, cash/transfer handoff, and ensure no DemoProvider operation runs.
-- [ ] Update the task ledger and phase card. Mercado Pago remains explicitly last and is not implemented in T3/T4.
+- [x] Add a new-member form to authenticated live reception using backend-required full name and phone, optional email, and a system-generated member number; do not change demo registration.
+- [x] On successful member creation, use the returned backend member UUID to open the existing live membership checkout; do not create a sale before a member exists.
+- [x] Clearly preserve the partial outcome: member creation is a separate API transaction from sale. If checkout is cancelled or fails, show the created member number and allow lookup/checkout later; never imply the account was rolled back.
+- [x] Cover validation, duplicate/retried creation, response uncertainty, cash/transfer handoff, and ensure no DemoProvider operation runs.
+- [x] Update the task ledger and phase card. Mercado Pago remains explicitly last and is not implemented in T3/T4.
 - **Authorized surfaces:** `frontend/src/features/reception/LiveMemberLookup.tsx`, `frontend/src/features/reception/LiveMemberLookup.test.tsx`, `frontend/src/features/reception/LiveMemberRegistration.tsx`, `frontend/src/features/reception/LiveMemberRegistration.test.tsx`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
 - **Checks:** focused API and live registration/checkout tests; scoped `git diff --check`.
 - **Runtime harness:** Component tests with mocked API calls; no live backend/payment request.
@@ -90,7 +90,17 @@ The standard frontend registration and checkout read and write demo state, while
 - T2 work-unit commit: `34aa27a` (`feat(frontend): integrar venta de membresías en recepción operativa`).
 - T3 RED: `npm test -- --run src/api/membershipCheckoutApi.test.ts` failed on the four new member API/generator cases because `createMember` and `createMemberNumber` were not implemented; five existing API tests passed. T3 GREEN: the same focused command passed (1 file, 9 tests). Mocked cases cover member number length, authenticated POST body, verified 409 reconciliation, and preserving 409 for identity mismatch.
 - T3 work-unit commit: `580083e` (`feat(frontend): agregar alta de socios en API`).
-- New-member registration UI T4 is next; DemoProvider screens remain out of scope and Mercado Pago remains last.
+- T4 live registration is implemented in authenticated reception. DemoProvider-backed screens remain untouched; Mercado Pago is explicitly the final integration step and was not implemented in T4.
+
+### BK-028-T4 implementation proof
+
+- **Route:** Delegated direct. Trigger evidence: live lookup integration, registration form, focused tests, and synchronized plan/task documentation span multiple non-trivial files; existing API/checkout behavior was read before implementation.
+- **RED:** `npm test -- --run src/features/reception/LiveMemberRegistration.test.tsx` failed because `LiveMemberRegistration` did not exist.
+- **GREEN:** `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMemberRegistration.test.tsx` — 18 tests passed. Mocked API calls verify generated number/payload, backend UUID handoff, and stable retry payload after unknown create outcome; no live API/payment calls.
+- **Whitespace:** `git diff --check` scoped to the seven T4 paths passed.
+- **Behavior:** Unknown create outcome locks edits and prevents leaving the live registration flow until retry resolves the original request; successful creation remains visible if checkout closes and supports later lookup. Cash/transfer remain the existing checkout's distinct paths.
+- **Exclusions:** No demo registration/provider, normal members pages, or Mercado Pago code changed. Mercado Pago remains the final integration step.
+- **Work-unit commit:** `PENDING`.
 
 ## Next step
 

@@ -6,8 +6,9 @@ const search = vi.fn();
 const detail = vi.fn();
 const tokenRead = vi.fn();
 const clear = vi.fn();
-const checkoutApi = vi.hoisted(() => ({ plans: vi.fn(), registers: vi.fn(), shift: vi.fn(), cash: vi.fn(), transfer: vi.fn() }));
+const checkoutApi = vi.hoisted(() => ({ plans: vi.fn(), registers: vi.fn(), shift: vi.fn(), cash: vi.fn(), transfer: vi.fn(), createMember: vi.fn(), createMemberNumber: vi.fn() }));
 vi.mock('../../api/membershipCheckoutApi', () => ({
+  createMember: checkoutApi.createMember, createMemberNumber: checkoutApi.createMemberNumber,
   getActiveMembershipPlans: checkoutApi.plans, getRegisters: checkoutApi.registers, getCurrentRegisterShift: checkoutApi.shift,
   submitMembershipCashSale: checkoutApi.cash, submitMembershipTransferSale: checkoutApi.transfer,
 }));
@@ -90,6 +91,15 @@ describe('LiveMemberLookup', () => {
     expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
     expect(checkoutApi.plans).toHaveBeenCalledTimes(1);
     expect(checkoutApi.registers).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes registration only inside the authenticated live reception flow', async () => {
+    render(<LiveMemberLookup />);
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio nuevo' }));
+    expect(screen.getByRole('heading', { name: 'Registrar socio nuevo' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre completo')).toBeRequired();
+    expect(screen.getByLabelText('Teléfono')).toBeRequired();
+    expect(screen.getByLabelText('Correo electrónico (opcional)')).not.toBeRequired();
   });
 
 });
