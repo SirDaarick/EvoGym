@@ -2,6 +2,8 @@
 
 Repositorio oficial del sistema integral de gestión y operaciones para **EvoGym**.
 
+**Estado al 2026-10-22, entrega local:** las correcciones acotadas de CORS/recepción, compilación, errores públicos, tres resolutores de autenticación y validación de socios tienen commits locales y verificaciones enfocadas. En el prefijo limpio R5: **335 pruebas API aprobadas, 17 omitidas de PostgreSQL; frontend completo: 2 fallidas y 471 aprobadas**. Tipos y build/PWA pasaron, pero el resultado frontend sigue siendo parcial: un fallo de teclado reproduce en la base y otro timeout no se reprodujo de forma enfocada. Los anteriores 367/578 aprobados pertenecen a otro snapshot con trabajo sin incorporar. La [auditoría](docs/backend-audit/README.md) documenta límites; no es un backend completo ni certificación de producción.
+
 ---
 
 ## 🏗️ Estructura del Repositorio
@@ -13,8 +15,9 @@ EvoGym/
 ├── frontend/               # Aplicación cliente en React 19 + TypeScript + Vite
 │   ├── src/                # Código fuente estructurado por features y dominio
 │   └── README.md           # Documentación específica del frontend
-├── backend/                # Servicio API, persistencia PostgreSQL y scripts de migración
-│   └── README.md           # Entorno de notebooks para análisis de datos migrados
+├── api/                    # Servicio FastAPI, SQLAlchemy, pruebas y migraciones Alembic
+│   └── README.md           # Desarrollo local y límites del servicio
+├── backend/                # Workspace local de notebooks y datos privados; no es la API
 ├── docs/                   # Especificación técnica y diseño de datos
 │   ├── database-map.md     # Mapeo relacional de base de datos detallado
 │   └── er-diagram.md       # Diagrama Entidad-Relación (ER) modular por Bounded Contexts
@@ -54,7 +57,7 @@ El diseño del sistema y el modelo de datos están alineados con las reglas oper
 - **Bitácora Saliente (`notification_logs`):** Previene envíos duplicados de recordatorios de cobro y comprobantes de pago.
 
 ### 6. Control de Fiado / Crédito y Alcance Acotado
-- **Política de Crédito:** `credit_limit_minor` tiene valor por defecto `0`. Si el límite es 0, no se permite fiado. Si el socio tiene saldo deudor, el check-in en recepción queda bloqueado hasta saldar.
+- **Política de Crédito:** no se infiere autorización de crédito automática. El pago parcial en efectivo ya aprobado puede mantener acceso durante la vigencia con advertencia de saldo; restricciones por revisión de fondos y decisiones administrativas tienen reglas específicas. La política restante se rige por D-013 en el [registro de decisiones](docs/backend-plan/02-business-rules-and-decisions.md), no por un bloqueo general de toda deuda.
 - **Fuera de Alcance Confirmado:** Torniquetes/hardware RFID y congelamiento/pausa de membresías no forman parte del sistema (la recepción es manual y la vigencia corre continuo).
 
 ---
@@ -72,6 +75,10 @@ Para garantizar la integridad financiera y operativa, el sistema opera con dos e
 
 ## 📚 Documentación Técnica Detallada
 
+- [Auditoría del backend](docs/backend-audit/README.md): estado observado, resultados y límites de verificación.
+- [Hallazgos y pasos de corrección](docs/backend-audit/findings.md), [brechas del frontend](docs/backend-audit/frontend-contract-gaps.md) y [ruta de finalización](docs/backend-audit/roadmap.md).
+- [Índice del plan backend](docs/backend-plan/README.md): decisiones de negocio y documentación histórica.
+- [API](api/README.md): configuración y ejecución local; no trasladar datos privados al servicio.
 - [docs/database-map.md](docs/database-map.md): Mapeo completo de tablas, campos, tipos minor/bigint, convenciones y restricciones.
 - [docs/er-diagram.md](docs/er-diagram.md): Diagrama Entidad-Relación modular por Bounded Contexts con diagramas interactivos Mermaid.
 - [Design.md](Design.md): Guía de estilo visual y componentes UI.
@@ -99,9 +106,6 @@ npm run build        # Compilación de producción con Vite
 
 ---
 
-## 🚀 Próximos Pasos: Desarrollo del Backend
+## 🚀 Próximo paso del backend
 
-1. **Definición de Stack Backend:** Selección de framework/runtime (Node.js/TypeScript o Python) y ORM/Query Builder (Drizzle / Prisma / SQLAlchemy).
-2. **Migraciones DDL:** Creación de scripts SQL en PostgreSQL con extensión `pgvector`.
-3. **Migración de Datos Históricos:** Scripts para cargar los 4,337 socios y 17,776 membresías históricas desde los archivos de `backend/`.
-4. **Endpoints de la API:** Rutas REST / tRPC organizadas por los mismos Bounded Contexts del frontend.
+Documentar y resolver los dos resultados pendientes de la suite frontend sin debilitar sus pruebas; después, integrar lecturas autorizadas de historial/adeudos y errores tipados, u obtener prueba PostgreSQL aislada cuando se autorice. CORS y la aceptación de compilación ya están corregidos. La estrategia local `auto-chain` / `feature-branch-chain` está aprobada y seis commits de código existen; D1–D3 de documentación y sus recibos siguen pendientes. No hay PR, push ni publicación autorizados. La [ruta detallada](docs/backend-audit/roadmap.md) conserva horarios, sincronización, dominios y preparación de producción como trabajo restante.
