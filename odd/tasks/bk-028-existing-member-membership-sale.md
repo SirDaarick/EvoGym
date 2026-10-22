@@ -89,7 +89,7 @@ The standard frontend registration and checkout read and write demo state, while
 - T2 outcome at that task boundary: existing-member live checkout acceptance is complete. No demo operation is wired into the live checkout. The user later authorized T3/T4 and requested Mercado Pago last.
 - T2 work-unit commit: `34aa27a` (`feat(frontend): integrar venta de membresías en recepción operativa`).
 - T3 RED: `npm test -- --run src/api/membershipCheckoutApi.test.ts` failed on the four new member API/generator cases because `createMember` and `createMemberNumber` were not implemented; five existing API tests passed. T3 GREEN: the same focused command passed (1 file, 9 tests). Mocked cases cover member number length, authenticated POST body, verified 409 reconciliation, and preserving 409 for identity mismatch.
-- T3 work-unit commit: pending.
+- T3 work-unit commit: `580083e` (`feat(frontend): agregar alta de socios en API`).
 - New-member registration UI T4 is next; DemoProvider screens remain out of scope and Mercado Pago remains last.
 
 ## Next step
