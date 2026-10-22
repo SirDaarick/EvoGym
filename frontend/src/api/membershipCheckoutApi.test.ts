@@ -69,11 +69,22 @@ describe('membership checkout API', () => {
   });
 
   it('loads active membership plans and registers with the operational bearer token', async () => {
-    const plans = [{ id: 'plan-1', current_version: { id: 'published-version' }, versions: [] }];
-    const registers = [{ id: 'register-1', has_open_shift: true }];
+    const plans = [{
+      id: 'plan-1', code: 'month', name: 'Mensual', kind: 'membership', status: 'active',
+      created_at: '2026-10-22T00:00:00Z', updated_at: '2026-10-22T00:00:00Z',
+      current_version: {
+        id: 'published-version', plan_id: 'plan-1', version_number: 1, name: 'Mensual',
+        price_minor: 50000, currency: 'MXN', reference_amount_minor: null,
+        duration_value: 1, duration_unit: 'month', entitlement_mode: 'period',
+        eligibility_type: null, restriction_notes: null, is_active: true,
+        published_at: '2026-10-22T00:00:00Z', services: [],
+      },
+      versions: [], future_field: true,
+    }];
+    const registers = [{ id: 'register-1', branch_id: branchId, code: 'front', name: 'Caja', status: 'active', has_open_shift: true }];
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: plans }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: registers }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(plans), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(registers), { status: 200 }));
 
     await expect(getActiveMembershipPlans()).resolves.toEqual(plans);
     await expect(getRegisters()).resolves.toEqual(registers);
@@ -83,10 +94,45 @@ describe('membership checkout API', () => {
   });
 
   it('resolves the current open shift for a register ID', async () => {
-    const shift = { id: 'shift-1', register_id: 'register-1', status: 'open' };
+    const shift = { id: 'shift-1', cash_register_id: 'register-1', status: 'open' };
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(shift), { status: 200 }));
     await expect(getCurrentRegisterShift('register-1')).resolves.toEqual(shift);
     expect(fetchMock.mock.calls[0][0]).toBe('https://gym.example/api/v1/shifts/current?register_id=register-1');
+  });
+
+  it.each([getActiveMembershipPlans, getRegisters])('accepts an empty serialized list', async (load) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]', { status: 200 }));
+    await expect(load()).resolves.toEqual([]);
+  });
+
+  it.each([
+    { current_version: null, versions: [{ id: 'old-version', price_minor: 1 }] },
+    { current_version: { id: 'sample-version', price_minor: 0, entitlement_mode: 'single_entry', duration_value: null, duration_unit: null }, versions: [] },
+  ])('preserves unpublished and free sample plan semantics', async (fields) => {
+    const plans = [{ id: 'plan-1', kind: 'membership', ...fields }];
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(plans), { status: 200 }));
+    await expect(getActiveMembershipPlans()).resolves.toEqual(plans);
+  });
+
+  it.each([
+    {}, { items: [] }, [null], [{ id: '', current_version: null }],
+    [{ id: 'plan-1', current_version: { id: 'version-1', price_minor: -1 } }],
+    [{ id: 'plan-1', current_version: { id: 'version-1', price_minor: 1.5 } }],
+    [{ id: 'plan-1', current_version: { id: 'version-1', price_minor: '50000' } }],
+    [{ id: 'plan-1', current_version: { id: 42, price_minor: 50000 } }],
+  ].map(body => ({ body })))('rejects malformed plan response $body', async ({ body }) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    await expect(getActiveMembershipPlans()).rejects.toThrow();
+  });
+
+  it.each([{}, { items: [] }, [null], [{ id: 'register-1', has_open_shift: 'true' }], [{ id: '', has_open_shift: true }]].map(body => ({ body })))('rejects malformed register response $body', async ({ body }) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    await expect(getRegisters()).rejects.toThrow();
+  });
+
+  it.each([null, {}, { id: 'shift-1', register_id: 'register-1' }, { id: '', cash_register_id: 'register-1' }])('rejects malformed current-shift response %j', async (body) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    await expect(getCurrentRegisterShift('register-1')).rejects.toThrow();
   });
 
   it('routes cash and transfer to distinct endpoints and preserves idempotency keys exactly', async () => {

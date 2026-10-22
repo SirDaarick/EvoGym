@@ -2,13 +2,13 @@ import { getReceptionConfig, readOperationalToken } from './receptionApi';
 
 export interface PublishedMembershipPlanVersion {
   id: string;
+  price_minor: number;
   [key: string]: unknown;
 }
 
 export interface ActiveMembershipPlan {
   id: string;
-  current_version?: PublishedMembershipPlanVersion | null;
-  versions: PublishedMembershipPlanVersion[];
+  current_version: PublishedMembershipPlanVersion | null;
   [key: string]: unknown;
 }
 
@@ -20,7 +20,7 @@ export interface CheckoutRegister {
 
 export interface CurrentRegisterShift {
   id: string;
-  register_id: string;
+  cash_register_id: string;
   [key: string]: unknown;
 }
 
@@ -120,8 +120,33 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export async function getActiveMembershipPlans(): Promise<ActiveMembershipPlan[]> {
-  const response = await request<{ items: ActiveMembershipPlan[] }>('/api/v1/catalog/plans?kind=membership&status=active');
-  return response.items;
+  const response = await request<unknown>('/api/v1/catalog/plans?kind=membership&status=active');
+  if (!Array.isArray(response) || !response.every(isActiveMembershipPlan)) {
+    throw new Error('La respuesta de planes no es válida.');
+  }
+  return response;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isPublishedVersion(value: unknown): value is PublishedMembershipPlanVersion {
+  return isRecord(value) && isIdentifier(value.id)
+    && typeof value.price_minor === 'number' && Number.isSafeInteger(value.price_minor) && value.price_minor >= 0;
+}
+
+function isActiveMembershipPlan(value: unknown): value is ActiveMembershipPlan {
+  return isRecord(value) && isIdentifier(value.id)
+    && (value.current_version === null || isPublishedVersion(value.current_version));
+}
+
+function isCheckoutRegister(value: unknown): value is CheckoutRegister {
+  return isRecord(value) && isIdentifier(value.id) && typeof value.has_open_shift === 'boolean';
 }
 
 export function createMemberNumber(): string {
@@ -163,13 +188,20 @@ export async function createMember(requestBody: CreateMemberRequest): Promise<Cr
 }
 
 export async function getRegisters(): Promise<CheckoutRegister[]> {
-  const response = await request<{ items: CheckoutRegister[] }>('/api/v1/registers');
-  return response.items;
+  const response = await request<unknown>('/api/v1/registers');
+  if (!Array.isArray(response) || !response.every(isCheckoutRegister)) {
+    throw new Error('La respuesta de cajas no es válida.');
+  }
+  return response;
 }
 
-export function getCurrentRegisterShift(registerId: string): Promise<CurrentRegisterShift> {
+export async function getCurrentRegisterShift(registerId: string): Promise<CurrentRegisterShift> {
   const query = new URLSearchParams({ register_id: registerId });
-  return request<CurrentRegisterShift>(`/api/v1/shifts/current?${query}`);
+  const response = await request<unknown>(`/api/v1/shifts/current?${query}`);
+  if (!isRecord(response) || !isIdentifier(response.id) || !isIdentifier(response.cash_register_id)) {
+    throw new Error('La respuesta del turno no es válida.');
+  }
+  return { ...response, id: response.id, cash_register_id: response.cash_register_id };
 }
 
 export function submitMembershipCashSale(

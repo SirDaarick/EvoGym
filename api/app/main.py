@@ -194,8 +194,9 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
             CORSMiddleware,
             allow_origins=list(configuration.cors_origin_allowlist),
             allow_credentials=False,
-            allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+            expose_headers=["X-Request-ID"],
         )
     return application
 

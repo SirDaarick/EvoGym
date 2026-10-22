@@ -33,8 +33,8 @@ function formatMoney(minor: number): string {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(minor / 100);
 }
 
-function currentVersion(plan: ActiveMembershipPlan): Record<string, unknown> | null {
-  return isObject(plan.current_version) && typeof plan.current_version.id === 'string' ? plan.current_version : null;
+function currentVersion(plan: ActiveMembershipPlan): ActiveMembershipPlan['current_version'] {
+  return plan.current_version;
 }
 
 export function LiveMembershipCheckout({ member, onClose, onCompleted }: {
@@ -81,7 +81,7 @@ export function LiveMembershipCheckout({ member, onClose, onCompleted }: {
     if (!registerId) return () => { active = false; };
     setShiftLoading(true);
     void getCurrentRegisterShift(registerId).then(value => {
-      if (active && value.register_id === registerId) setShift(value);
+      if (active && value.cash_register_id === registerId) setShift(value);
     }).catch(reason => {
       if (active) setError(reason instanceof Error ? reason.message : 'No se pudo consultar el turno abierto.');
     }).finally(() => { if (active) setShiftLoading(false); });

@@ -16,7 +16,7 @@ vi.mock('../../api/membershipCheckoutApi', () => ({
 const member = { id: 'member-live-uuid', name: 'Socio Real' };
 const plan = { id: 'plan-live-id', name: 'Mensual', current_version: { id: 'version-live-id', name: 'Mensual v2', price_minor: 50000 }, versions: [] };
 const register = { id: 'register-live-id', name: 'Caja recepción', has_open_shift: true };
-const shift = { id: 'shift-live-id', register_id: register.id };
+const shift = { id: 'shift-live-id', cash_register_id: register.id };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -78,5 +78,39 @@ describe('LiveMembershipCheckout', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/no superar el precio publicado/);
     expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeDisabled();
     expect(api.cash).not.toHaveBeenCalled();
+  });
+
+  it.each(['different-register', null])('does not enable sale without a matching current shift (%s)', async (cashRegisterId) => {
+    if (cashRegisterId === null) api.shift.mockRejectedValueOnce(new Error('No current shift'));
+    else api.shift.mockResolvedValueOnce({ id: 'other-shift', cash_register_id: cashRegisterId });
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('Plan de membresía'), { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(api.shift).toHaveBeenCalledWith(register.id));
+    await waitFor(() => expect(screen.queryByText('Consultando turno…')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Transferencia bancaria' })).toBeDisabled();
+    expect(api.cash).not.toHaveBeenCalled();
+    expect(api.transfer).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to a historical version for an unpublished plan', async () => {
+    api.plans.mockResolvedValueOnce([{ ...plan, current_version: null, versions: [plan.current_version] }]);
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await screen.findByLabelText('Plan de membresía');
+    expect(screen.queryByRole('option', { name: 'Mensual' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeDisabled();
+  });
+
+  it('keeps a published free single-entry plan selectable without a period duration', async () => {
+    api.plans.mockResolvedValueOnce([{
+      ...plan,
+      current_version: { ...plan.current_version, price_minor: 0, entitlement_mode: 'single_entry', duration_value: null, duration_unit: null },
+    }]);
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('Plan de membresía'), { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeEnabled());
+    expect(screen.getByText('Precio publicado: $0.00')).toBeInTheDocument();
   });
 });

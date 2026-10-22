@@ -74,7 +74,7 @@ def test_cors_requires_narrow_explicit_origin_allowlist_and_never_enables_creden
     assert allowed.headers["access-control-allow-origin"] == allowed_origin
     assert "authorization" in allowed.headers["access-control-allow-headers"].lower()
     assert "content-type" in allowed.headers["access-control-allow-headers"].lower()
-    assert set(allowed.headers["access-control-allow-methods"].split(", ")) == {"GET", "POST"}
+    assert set(allowed.headers["access-control-allow-methods"].split(", ")) == {"GET", "POST", "PATCH", "PUT", "DELETE"}
     assert "access-control-allow-credentials" not in allowed.headers
     assert "access-control-allow-origin" not in denied.headers
 
@@ -89,6 +89,59 @@ def test_cors_configuration_fails_closed_for_unset_or_wildcard_allowlist():
     for invalid_origin in ("https://reception.example/path", "https://user:password@reception.example", "https://reception.example,https://reception.example"):
         with pytest.raises(ValueError):
             Settings(environment="test", cors_allowed_origins=invalid_origin, _env_file=None)
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
+def test_cors_allows_implemented_browser_methods_and_idempotency_header(method):
+    origin = "https://reception.example"
+    app = create_test_app(Settings(environment="test", cors_allowed_origins=origin, _env_file=None))
+
+    async def preflight():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.options("/api/v1/members", headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": "Authorization,Content-Type,Idempotency-Key",
+            })
+
+    response = asyncio.run(preflight())
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
+    assert "access-control-allow-credentials" not in response.headers
+
+
+@pytest.mark.parametrize(("origin", "method", "headers"), [
+    ("https://other.example", "POST", "Authorization"),
+    ("https://reception.example", "TRACE", "Authorization"),
+    ("https://reception.example", "POST", "X-Unapproved-Header"),
+])
+def test_cors_rejects_unapproved_origins_methods_and_headers(origin, method, headers):
+    app = create_test_app(Settings(environment="test", cors_allowed_origins="https://reception.example", _env_file=None))
+
+    async def preflight():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.options("/api/v1/members", headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": headers,
+            })
+
+    response = asyncio.run(preflight())
+    assert response.status_code == 400
+    assert "access-control-allow-credentials" not in response.headers
+    if origin != "https://reception.example":
+        assert "access-control-allow-origin" not in response.headers
+
+
+def test_cors_exposes_only_request_correlation_on_actual_responses():
+    origin = "https://reception.example"
+    app = create_test_app(Settings(environment="test", cors_allowed_origins=origin, _env_file=None))
+    response = request_with_origin(app, "/health/live", origin)
+    assert response.status_code == 200
+    assert response.headers["access-control-expose-headers"] == "X-Request-ID"
+    assert response.headers["x-request-id"]
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def request_with_origin(app, path, origin):

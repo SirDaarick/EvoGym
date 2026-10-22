@@ -38,6 +38,7 @@ describe('classifyOfflineCaptureTime', () => {
 
   it('preserves capture time and requests review when the anchor is unavailable', () => {
     const result = classifyOfflineCaptureTime({
+      sameMonotonicOrigin: true,
       deviceCapturedAtMs: 1_800_000_123_000,
       localMonotonicAtCaptureMs: 70_000,
     });
