@@ -402,4 +402,55 @@ describe('getOperationalAlerts selector', () => {
     expect(result.alerts[0].id).toBe('alert-expense-exp-later');
     expect(result.alerts[1].id).toBe('alert-expense-exp-earlier');
   });
+
+  it('generates return alert for refunded sales and includes waste reasons', () => {
+    const base = createDemoState();
+    const testState: DemoState = {
+      ...base,
+      shifts: [],
+      expenses: [],
+      payments: [],
+      stockMovements: [
+        {
+          id: 'waste-with-reason',
+          productId: 'demo-water',
+          shiftId: 'shift-1',
+          kind: 'waste',
+          quantity: 1,
+          reason: 'Botella rota por caída',
+          recordedAt: '2026-10-08T10:00:00-06:00',
+        },
+      ],
+      sales: [
+        {
+          id: 'sale-refunded',
+          kind: 'product',
+          productId: 'demo-water',
+          description: 'Agua purificada',
+          quantity: 1,
+          unitPriceMinor: 2000,
+          amountMinor: 2000,
+          method: 'cash',
+          status: 'confirmed',
+          shiftId: 'shift-1',
+          recordedAt: '2026-10-08T09:00:00-06:00',
+          refundedAt: '2026-10-08T11:00:00-06:00',
+          refundReason: 'Cliente insatisfecho',
+          memberId: 'demo-001',
+        },
+      ],
+    };
+
+    const result = getOperationalAlerts(testState, 'all');
+    expect(result.totalCount).toBe(2);
+
+    const wasteAlert = result.alerts.find(a => a.id === 'alert-waste-waste-with-reason');
+    expect(wasteAlert?.detail).toContain('Botella rota por caída');
+
+    const returnAlert = result.alerts.find(a => a.id === 'alert-return-sale-sale-refunded');
+    expect(returnAlert).toBeDefined();
+    expect(returnAlert?.category).toBe('return');
+    expect(returnAlert?.title).toContain('Devolución de producto:');
+    expect(returnAlert?.detail).toContain('Cliente insatisfecho');
+  });
 });

@@ -1,7 +1,7 @@
 import type { DemoState } from '../domain/models';
 import { formatMoney } from './adapter';
 
-export type AlertCategory = 'cash_difference' | 'waste' | 'expense' | 'pending_transfer';
+export type AlertCategory = 'cash_difference' | 'waste' | 'expense' | 'pending_transfer' | 'return';
 export type AlertSeverity = 'critical' | 'warning' | 'info';
 export type AlertPeriod = 'today' | 'week' | 'month' | 'all' | { from: string; to: string };
 
@@ -68,6 +68,12 @@ export const ALERT_CATEGORY_CONFIG: Record<
     label: 'Transferencia pendiente',
     shortLabel: 'Transferencia',
     color: '#FC6C06',
+    severity: 'warning',
+  },
+  return: {
+    label: 'Devolución',
+    shortLabel: 'Devolución',
+    color: '#8B5CF6',
     severity: 'warning',
   },
 };
@@ -183,7 +189,9 @@ export function getOperationalAlerts(
         timestamp: movement.recordedAt,
         shiftId: movement.shiftId,
         title: `Merma de ${productName}`,
-        detail: `${movement.quantity} ${movement.quantity === 1 ? 'unidad descartada' : 'unidades descartadas'} por merma o rotura (${productName}).`,
+        detail: movement.reason
+          ? `${movement.quantity} ${movement.quantity === 1 ? 'unidad descartada' : 'unidades descartadas'} por merma (${productName}). Motivo: ${movement.reason}.`
+          : `${movement.quantity} ${movement.quantity === 1 ? 'unidad descartada' : 'unidades descartadas'} por merma o rotura (${productName}).`,
         responsible: movement.shiftId ? `Turno ${movement.shiftId}` : 'Inventario general',
         impactMinor,
         impactFormatted: formattedImpact,
@@ -262,6 +270,107 @@ export function getOperationalAlerts(
     }
   }
 
+  // 5. Customer Returns / Devoluciones
+  for (const sale of state.sales ?? []) {
+    if (sale.refundedAt) {
+      const member = state.members?.find(m => m.id === sale.memberId);
+      const memberName = member?.name ?? sale.memberName ?? 'Socio';
+      const formattedImpact = `-${formatMoney(sale.amountMinor)} MXN`;
+
+      rawAlerts.push({
+        id: `alert-return-sale-${sale.id}`,
+        category: 'return',
+        categoryLabel: ALERT_CATEGORY_CONFIG.return.label,
+        severity: ALERT_CATEGORY_CONFIG.return.severity,
+        timestamp: sale.refundedAt,
+        shiftId: sale.shiftId,
+        title: `Devolución de producto: ${sale.description}`,
+        detail: `Devolución para ${memberName}. Reembolso de ${formatMoney(sale.amountMinor)} MXN.${sale.refundReason ? ` Motivo: ${sale.refundReason}.` : ''}`,
+        responsible: memberName,
+        impactMinor: -sale.amountMinor,
+        impactFormatted: formattedImpact,
+        targetRoute: '/owner/history',
+        actionLabel: 'Ver historial',
+      });
+    }
+  }
+
+  for (const sup of state.supplementSales ?? []) {
+    if (sup.refundedAt) {
+      const member = state.members?.find(m => m.id === sup.memberId);
+      const memberName = member?.name ?? sup.memberName ?? 'Socio';
+      const formattedImpact = `-${formatMoney(sup.amountMinor)} MXN`;
+
+      rawAlerts.push({
+        id: `alert-return-sup-${sup.id}`,
+        category: 'return',
+        categoryLabel: ALERT_CATEGORY_CONFIG.return.label,
+        severity: ALERT_CATEGORY_CONFIG.return.severity,
+        timestamp: sup.refundedAt,
+        shiftId: sup.shiftId,
+        title: `Devolución de suplemento: ${sup.name}`,
+        detail: `Devolución para ${memberName}. Reembolso de ${formatMoney(sup.amountMinor)} MXN.${sup.refundReason ? ` Motivo: ${sup.refundReason}.` : ''}`,
+        responsible: memberName,
+        impactMinor: -sup.amountMinor,
+        impactFormatted: formattedImpact,
+        targetRoute: '/owner/history',
+        actionLabel: 'Ver historial',
+      });
+    }
+  }
+
+  for (const payment of state.payments ?? []) {
+    if (payment.refundedAt) {
+      const member = state.members?.find(m => m.id === payment.memberId);
+      const memberName = member?.name ?? 'Socio';
+      const formattedImpact = `-${formatMoney(payment.amountMinor)} MXN`;
+
+      rawAlerts.push({
+        id: `alert-return-pay-${payment.id}`,
+        category: 'return',
+        categoryLabel: ALERT_CATEGORY_CONFIG.return.label,
+        severity: ALERT_CATEGORY_CONFIG.return.severity,
+        timestamp: payment.refundedAt,
+        shiftId: payment.shiftId,
+        title: `Devolución de membresía: ${payment.planName}`,
+        detail: `Cancelación y reembolso de membresía para ${memberName}. Reembolso de ${formatMoney(payment.amountMinor)} MXN.${payment.refundReason ? ` Motivo: ${payment.refundReason}.` : ''}`,
+        responsible: memberName,
+        impactMinor: -payment.amountMinor,
+        impactFormatted: formattedImpact,
+        targetRoute: '/owner/history',
+        actionLabel: 'Ver historial',
+      });
+    }
+  }
+
+  // Other refund ledger events (lockers, gloves)
+  for (const event of state.ledger ?? []) {
+    if (event.id.startsWith('refund-event-')) {
+      const alreadyHandled = rawAlerts.some(a => a.id.includes(event.paymentId));
+      if (!alreadyHandled) {
+        const member = state.members?.find(m => m.id === event.memberId);
+        const memberName = member?.name ?? 'Socio';
+        const formattedImpact = `-${formatMoney(Math.abs(event.amountMinor))} MXN`;
+
+        rawAlerts.push({
+          id: `alert-${event.id}`,
+          category: 'return',
+          categoryLabel: ALERT_CATEGORY_CONFIG.return.label,
+          severity: ALERT_CATEGORY_CONFIG.return.severity,
+          timestamp: event.recordedAt,
+          shiftId: event.shiftId,
+          title: 'Devolución de servicio',
+          detail: `Devolución de servicio procesada para ${memberName}. Reembolso de ${formatMoney(Math.abs(event.amountMinor))} MXN.`,
+          responsible: memberName,
+          impactMinor: event.amountMinor,
+          impactFormatted: formattedImpact,
+          targetRoute: '/owner/history',
+          actionLabel: 'Ver historial',
+        });
+      }
+    }
+  }
+
   // Filter alerts by period
   const filteredAlerts = rawAlerts.filter(alert =>
     matchesPeriod(alert.timestamp, period, refDate)
@@ -280,6 +389,7 @@ export function getOperationalAlerts(
     waste: { count: 0, amountMinor: 0 },
     expense: { count: 0, amountMinor: 0 },
     pending_transfer: { count: 0, amountMinor: 0 },
+    return: { count: 0, amountMinor: 0 },
   };
 
   for (const alert of filteredAlerts) {
@@ -289,7 +399,7 @@ export function getOperationalAlerts(
     categoryAggregates[alert.category].count += 1;
     categoryAggregates[alert.category].amountMinor += absImpact;
 
-    if (alert.category === 'cash_difference' || alert.category === 'expense') {
+    if (alert.category === 'cash_difference' || alert.category === 'expense' || alert.category === 'return') {
       cashImpactMinor += absImpact;
     } else if (alert.category === 'pending_transfer') {
       pendingTransfersMinor += absImpact;

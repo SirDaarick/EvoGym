@@ -131,4 +131,40 @@ describe('shiftDashboard', () => {
     expect(shiftDashboard(state, 'demo-shift-01')?.rows).toEqual([]);
     expect(shiftDashboard(state, 'demo-shift-01')?.inventoryRows).toEqual([]);
   });
+
+  it('reflects negative refund events as Devolución and deducts expected cash', () => {
+    const state = createDemoState();
+    state.shifts[0].openingCashMinor = 50000;
+    state.expenses = [];
+    state.extras = [];
+    state.ledger = [
+      {
+        id: 'sale-event-1',
+        paymentId: 'sale-1',
+        shiftId: 'demo-shift-01',
+        kind: 'product',
+        amountMinor: 2000,
+        method: 'cash',
+        recordedAt: '2026-10-08T10:00:00Z',
+      },
+      {
+        id: 'refund-event-1',
+        paymentId: 'sale-1',
+        shiftId: 'demo-shift-01',
+        kind: 'product',
+        amountMinor: -2000,
+        method: 'cash',
+        recordedAt: '2026-10-08T11:00:00Z',
+      },
+    ];
+
+    const result = shiftDashboard(state, 'demo-shift-01');
+    expect(result?.cashMinor).toBe(0);
+    expect(result?.confirmedMinor).toBe(0);
+    expect(result?.expectedCashMinor).toBe(50000);
+
+    const refundRow = result?.rows.find(r => r.id === 'ledger:refund-event-1');
+    expect(refundRow?.description).toContain('Devolución:');
+    expect(refundRow?.amountMinor).toBe(-2000);
+  });
 });

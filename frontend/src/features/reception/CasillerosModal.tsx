@@ -1,34 +1,62 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { LockerItem, LockerStatus, PaymentMethod } from '../../domain/models';
+import type { GimiAlert } from '../../domain/gimi';
 import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney, parseMoney } from '../../demo/adapter';
 import { memberStatus } from '../../demo/memberStatus';
-import { assignLocker, calculateNextMonthExpiry, evictLocker, releaseLocker, updateLockerStatus } from '../../demo/lockerOperations';
+import { assignLocker, calculateNextMonthExpiry, releaseLocker, renewLocker } from '../../demo/lockerOperations';
+import { getStoredAlerts, saveStoredAlerts } from '../gimi/gimiStore';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
-import JellyRadio from '../catalog/react-bits/JellyRadio';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
+import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 
 export interface CasillerosModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const statusLabels: Record<LockerStatus, string> = {
-  available: 'Disponible',
-  assigned: 'Vendido',
-  employee: 'Empleado',
-  evicted: 'Desalojado',
-  out_of_service: 'Fuera de servicio',
-};
+export type EffectiveLockerStatus = 'available' | 'assigned' | 'expired' | 'evict' | 'employee' | 'out_of_service';
 
-const statusBadgeClasses: Record<LockerStatus, string> = {
-  available: 'casillero-badge-available',
-  assigned: 'casillero-badge-assigned',
-  employee: 'casillero-badge-employee',
-  evicted: 'casillero-badge-evicted',
-  out_of_service: 'casillero-badge-service',
-};
+export function getLockerEffectiveStatus(locker: LockerItem, nowIso: string) {
+  if (locker.status === 'out_of_service') {
+    return { status: 'out_of_service' as const, label: 'Fuera de servicio', badgeClass: 'casillero-badge-service' };
+  }
+  if (locker.status === 'employee') {
+    return { status: 'employee' as const, label: 'Empleado', badgeClass: 'casillero-badge-employee' };
+  }
+  if (locker.status === 'evicted') {
+    return { status: 'evict' as const, label: 'Desalojar', badgeClass: 'casillero-badge-evicted' };
+  }
+  if (locker.status === 'available' || (!locker.assignedMemberId && !locker.expiresAt)) {
+    return { status: 'available' as const, label: 'Disponible', badgeClass: 'casillero-badge-available' };
+  }
+
+  // Active assignment: calculate 1 month and overdue
+  const nowMs = new Date(nowIso).getTime();
+  const expiryMs = locker.expiresAt ? new Date(locker.expiresAt).getTime() : nowMs;
+
+  if (nowMs <= expiryMs) {
+    return { status: 'assigned' as const, label: 'Ocupado', badgeClass: 'casillero-badge-assigned' };
+  }
+
+  const overdueDays = Math.max(1, Math.floor((nowMs - expiryMs) / (1000 * 60 * 60 * 24)));
+  if (overdueDays <= 14) {
+    return {
+      status: 'expired' as const,
+      label: 'Vencido',
+      badgeClass: 'casillero-badge-expired',
+      overdueDays,
+    };
+  }
+
+  return {
+    status: 'evict' as const,
+    label: 'Desalojar',
+    badgeClass: 'casillero-badge-evicted',
+    overdueDays,
+  };
+}
 
 export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
   const { state, transact } = useDemo();
@@ -36,8 +64,6 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
 
   const [selectedLockerId, setSelectedLockerId] = useState<string>('locker-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
-  const [method, setMethod] = useState<PaymentMethod>('cash');
-  const [tenderedAmount, setTenderedAmount] = useState<string>('');
 
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -99,7 +125,6 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
     if (isOpen) {
       setSelectedLockerId('locker-01');
       setAssignedMemberId(null);
-      setTenderedAmount('');
       setToast(null);
     }
   }, [isOpen]);
@@ -188,29 +213,40 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
     setSelectedMemberIndex(-1);
   }
 
-  const tenderedMinor = parseMoney(tenderedAmount);
-  const changeMinor =
-    tenderedMinor !== null && selectedLocker
-      ? tenderedMinor - selectedLocker.monthlyPriceMinor
-      : null;
-
-  function handleConfirmAssignment() {
+  function handleConfirmAssignment(breakdown?: CheckoutPaymentBreakdown, forcePending?: boolean) {
     if (!selectedLocker || !assignedMemberId) return;
+    const paymentMethodToUse: PaymentMethod = breakdown
+      ? (breakdown.mode === 'mixed' ? (breakdown.mixedMethod1 ?? 'cash') : breakdown.method)
+      : 'cash';
+    const shortfall = breakdown?.shortfallMinor ?? 0;
+
     const rentalId = `locker-rental-${crypto.randomUUID()}`;
-    const result = transact(current =>
-      assignLocker(current, {
+    const result = transact(current => {
+      const assignTx = assignLocker(current, {
         id: rentalId,
         lockerId: selectedLocker.id,
         memberId: assignedMemberId,
-        method,
-      })
-    );
+        method: paymentMethodToUse,
+      });
+      if (assignTx.result.status === 'error') return assignTx;
+      if (shortfall > 0 && forcePending) {
+        return {
+          ...assignTx,
+          state: {
+            ...assignTx.state,
+            members: assignTx.state.members.map(m =>
+              m.id === assignedMemberId ? { ...m, creditMinor: m.creditMinor - shortfall } : m
+            ),
+          },
+        };
+      }
+      return assignTx;
+    });
 
     if (result.status === 'paid' || result.status === 'pending') {
       const memberName = assignedMember?.name ?? 'socio';
       const msg = `Casillero ${selectedLocker.code} asignado a ${memberName}.`;
       setAssignedMemberId(null);
-      setTenderedAmount('');
       setToast({
         open: true,
         title: 'Casillero asignado',
@@ -249,17 +285,83 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
     }
   }
 
-  function handleEvictLocker() {
+  function handleCancelLocker() {
     if (!selectedLocker) return;
     const code = selectedLocker.code;
-    const result = transact(current => evictLocker(current, selectedLocker.id));
+    const memberName = selectedLocker.assignedMemberName || rentedMember?.name || 'Socio';
 
-    if (result.status === 'evicted') {
+    const result = transact(current => releaseLocker(current, selectedLocker.id));
+
+    if (result.status === 'released') {
+      const adminAlert: GimiAlert = {
+        id: `alert-cancel-locker-${Date.now()}`,
+        conversationId: 'casilleros',
+        clientName: memberName,
+        channel: 'web',
+        type: 'churn_risk',
+        severity: 'medium',
+        message: `Cancelación anticipada: Casillero ${code} liberado de ${memberName}. Casillero reactivado como disponible.`,
+        timestamp: state.demoClock || new Date().toISOString(),
+        status: 'pending',
+      };
+      saveStoredAlerts([adminAlert, ...getStoredAlerts()]);
+
+      setToast({
+        open: true,
+        title: 'Casillero cancelado y liberado',
+        description: `Casillero ${code} ahora está disponible. Se notificó la cancelación a administración.`,
+        type: 'warning',
+      });
+    } else if (result.status === 'error') {
+      setToast({
+        open: true,
+        title: 'Error al cancelar',
+        description: result.message,
+        type: 'error',
+      });
+    }
+  }
+
+  function handleRenewLocker() {
+    if (!selectedLocker) return;
+    const code = selectedLocker.code;
+    const result = transact(current => renewLocker(current, selectedLocker.id));
+
+    if (result.status === 'updated') {
+      const newExpiry = result.locker.expiresAt
+        ? new Date(result.locker.expiresAt).toLocaleDateString('es-MX', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })
+        : '1 mes';
+      setToast({
+        open: true,
+        title: 'Mensualidad renovada',
+        description: `Casillero ${code} extendido por 1 mes (vigente hasta: ${newExpiry}).`,
+        type: 'success',
+      });
+    } else if (result.status === 'error') {
+      setToast({
+        open: true,
+        title: 'Error al renovar',
+        description: result.message,
+        type: 'error',
+      });
+    }
+  }
+
+  function handleEvictAndReleaseLocker() {
+    if (!selectedLocker) return;
+    const code = selectedLocker.code;
+    const result = transact(current => releaseLocker(current, selectedLocker.id));
+
+    if (result.status === 'released') {
       setToast({
         open: true,
         title: 'Casillero desalojado',
-        description: `Casillero ${code} marcado como desalojado.`,
-        type: 'warning',
+        description: `Casillero ${code} desalojado con éxito y puesto como disponible.`,
+        type: 'success',
       });
     } else if (result.status === 'error') {
       setToast({
@@ -267,21 +369,6 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
         title: 'Error al desalojar',
         description: result.message,
         type: 'error',
-      });
-    }
-  }
-
-  function handleStatusChange(newStatus: LockerStatus) {
-    if (!selectedLocker) return;
-    const code = selectedLocker.code;
-    const result = transact(current => updateLockerStatus(current, selectedLocker.id, newStatus));
-
-    if (result.status === 'updated') {
-      setToast({
-        open: true,
-        title: 'Estado actualizado',
-        description: `Casillero ${code} cambiado a "${statusLabels[newStatus]}".`,
-        type: 'success',
       });
     }
   }
@@ -321,6 +408,7 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
           <div className="casilleros-grid-container" role="group" aria-label="Casilleros del gimnasio">
             {lockers.map(locker => {
               const isSelected = selectedLocker?.id === locker.id;
+              const eff = getLockerEffectiveStatus(locker, state.demoClock);
 
               return (
                 <button
@@ -333,19 +421,27 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
                   }}
                 >
                   <div className="casillero-card-top">
-                    <span className={`casillero-badge ${statusBadgeClasses[locker.status]}`}>
-                      {statusLabels[locker.status]}
+                    <span className={`casillero-badge ${eff.badgeClass}`}>
+                      {eff.label}
                     </span>
                   </div>
                   <strong className="casillero-card-number">{locker.code}</strong>
                   <span className="casillero-card-client">
-                    {locker.status === 'available'
+                    {eff.status === 'available'
                       ? 'Disponible'
-                      : locker.assignedMemberName || statusLabels[locker.status]}
+                      : eff.status === 'assigned'
+                      ? locker.assignedMemberName || 'Ocupado'
+                      : eff.status === 'expired'
+                      ? `${locker.assignedMemberName || 'Socio'} (Vencido)`
+                      : eff.status === 'evict'
+                      ? `${locker.assignedMemberName ? `${locker.assignedMemberName} (Desalojar)` : 'Desalojar'}`
+                      : locker.assignedMemberName || eff.label}
                   </span>
                   <span className="casillero-card-price">
-                    {locker.status === 'assigned' && locker.expiresAt
+                    {locker.expiresAt && (eff.status === 'assigned' || eff.status === 'expired')
                       ? `Vence: ${new Date(locker.expiresAt).toLocaleDateString('es-MX', { month: 'short', day: 'numeric' })}`
+                      : eff.status === 'evict'
+                      ? 'Desalojo requerido'
                       : `${formatMoney(locker.monthlyPriceMinor)}/mes`}
                   </span>
                 </button>
@@ -353,326 +449,295 @@ export function CasillerosModal({ isOpen, onClose }: CasillerosModalProps) {
             })}
           </div>
 
-          {/* Right Sidebar: 4 Bento Cards */}
-          {selectedLocker && (
-            <div className="guantes-sidebar-column">
-              {/* Card 1: Asignar status */}
-              <div className="guantes-bento-card">
-                <h3>Asignar status</h3>
-                <div className="casillero-status-pills">
-                  {(['available', 'assigned', 'employee', 'evicted', 'out_of_service'] as LockerStatus[]).map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      className={`casillero-status-btn ${selectedLocker.status === st ? 'active' : ''}`}
-                      onClick={() => handleStatusChange(st)}
-                    >
-                      {statusLabels[st]}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* Right Sidebar: Dynamic Status & Management */}
+          {selectedLocker && (() => {
+            const effSelected = getLockerEffectiveStatus(selectedLocker, state.demoClock);
 
-              {/* Card 2: Asignar a cliente o cliente asignado */}
-              <div className="guantes-bento-card">
-                <h3>{selectedLocker.status === 'available' ? 'Asignar a cliente' : 'Cliente asignado'}</h3>
-
-                {selectedLocker.status === 'available' ? (
-                  <>
-                    {!assignedMember ? (
-                      <div className="cart-member-search" ref={memberSearchContainerRef}>
-                        <div className="field">
-                          <label htmlFor="casilleros-assign-member-input">Buscar socio activo</label>
-                          <div className="cart-member-search-input-wrap">
-                            <input
-                              ref={memberInputRef}
-                              id="casilleros-assign-member-input"
-                              type="text"
-                              role="combobox"
-                              aria-label="Buscar socio activo"
-                              aria-expanded={isSearchOpen}
-                              aria-autocomplete="list"
-                              autoComplete="off"
-                              placeholder="Buscar por nombre o teléfono..."
-                              value={memberQuery}
-                              onFocus={() => setIsSearchOpen(true)}
-                              onChange={e => {
-                                setMemberQuery(e.target.value);
-                                setIsSearchOpen(true);
-                                setSelectedMemberIndex(-1);
-                              }}
-                              onKeyDown={e => {
-                                if (e.key === 'Escape') {
-                                  setIsSearchOpen(false);
-                                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                                  e.preventDefault();
+            return (
+              <div className="guantes-sidebar-column">
+                {effSelected.status === 'available' ? (
+                  <CurrentPurchaseCard
+                    className="current-purchase-card--modal"
+                    title={`Casillero ${selectedLocker.code}`}
+                    totalMinor={selectedLocker.monthlyPriceMinor}
+                    step1Title="Casillero"
+                    step2Title="Cobro"
+                    confirmActionLabel="Confirmar cobro y asignar"
+                    step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedLocker.monthlyPriceMinor)} MXN →`}
+                    step1ActionDisabled={!assignedMemberId}
+                    assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
+                    onAssignMemberClick={() => setIsSearchOpen(true)}
+                    onConfirmPayment={handleConfirmAssignment}
+                  >
+                    {/* Step 1: Member Assignment */}
+                    <div className="modal-cart-section">
+                      <h3 className="modal-cart-section-title">Asignar a cliente</h3>
+                      {!assignedMember ? (
+                        <div className="cart-member-search" ref={memberSearchContainerRef}>
+                          <div className="field">
+                            <label htmlFor="casilleros-assign-member-input">Buscar socio activo</label>
+                            <div className="cart-member-search-input-wrap">
+                              <input
+                                ref={memberInputRef}
+                                id="casilleros-assign-member-input"
+                                type="text"
+                                role="combobox"
+                                aria-label="Buscar socio activo"
+                                aria-expanded={isSearchOpen}
+                                aria-autocomplete="list"
+                                autoComplete="off"
+                                placeholder="Buscar por nombre o teléfono..."
+                                value={memberQuery}
+                                onFocus={() => setIsSearchOpen(true)}
+                                onChange={e => {
+                                  setMemberQuery(e.target.value);
                                   setIsSearchOpen(true);
-                                  const count = flatActiveMembers.length;
-                                  if (count > 0) {
-                                    const next =
-                                      selectedMemberIndex < 0
-                                        ? e.key === 'ArrowDown' ? 0 : count - 1
-                                        : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
-                                    setSelectedMemberIndex(next);
-                                  }
-                                } else if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
-                                    handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
-                                  }
-                                }
-                              }}
-                            />
-                            {memberQuery && (
-                              <button
-                                type="button"
-                                className="cart-search-clear-btn"
-                                aria-label="Limpiar búsqueda"
-                                onClick={() => {
-                                  setMemberQuery('');
-                                  memberInputRef.current?.focus();
+                                  setSelectedMemberIndex(-1);
                                 }}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {isSearchOpen && (
-                          <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
-                            {flatActiveMembers.length > 0 ? (
-                              <AnimatedList
-                                id="casillero-member-item"
-                                listboxId="casillero-member-results"
-                                tabIndex={-1}
-                                groups={memberGroups}
-                                selectedIndex={selectedMemberIndex}
-                                onSelectedIndexChange={setSelectedMemberIndex}
-                                onItemSelect={(_item, index) => {
-                                  const m = flatActiveMembers[index];
-                                  if (m) handleAssignMember(m.id);
+                                onKeyDown={e => {
+                                  if (e.key === 'Escape') {
+                                    setIsSearchOpen(false);
+                                  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setIsSearchOpen(true);
+                                    const count = flatActiveMembers.length;
+                                    if (count > 0) {
+                                      const next =
+                                        selectedMemberIndex < 0
+                                          ? e.key === 'ArrowDown' ? 0 : count - 1
+                                          : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
+                                      setSelectedMemberIndex(next);
+                                    }
+                                  } else if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
+                                      handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
+                                    }
+                                  }
                                 }}
-                                theme={dark ? 'dark' : 'light'}
-                                accentColor="#FC6C06"
-                                frame={false}
-                                loop={false}
-                                animation="pop"
-                                width="100%"
-                                maxHeight={200}
                               />
-                            ) : (
-                              <p className="cart-no-members-msg" role="status">
-                                No hay socios activos coincidentes.
-                              </p>
-                            )}
+                              {memberQuery && (
+                                <button
+                                  type="button"
+                                  className="cart-search-clear-btn"
+                                  aria-label="Limpiar búsqueda"
+                                  onClick={() => {
+                                    setMemberQuery('');
+                                    memberInputRef.current?.focus();
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        )}
 
-                        <div className="guantes-quick-members">
-                          <span className="guantes-quick-label">Sugeridos:</span>
-                          <div className="guantes-quick-chips">
-                            {flatActiveMembers.slice(0, 3).map(m => (
-                              <button
-                                key={m.id}
-                                type="button"
-                                className="guantes-quick-chip"
-                                onClick={() => handleAssignMember(m.id)}
-                              >
-                                {m.name}
-                              </button>
-                            ))}
+                          {isSearchOpen && (
+                            <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
+                              {flatActiveMembers.length > 0 ? (
+                                <AnimatedList
+                                  id="casillero-member-item"
+                                  listboxId="casillero-member-results"
+                                  tabIndex={-1}
+                                  groups={memberGroups}
+                                  selectedIndex={selectedMemberIndex}
+                                  onSelectedIndexChange={setSelectedMemberIndex}
+                                  onItemSelect={(_item, index) => {
+                                    const m = flatActiveMembers[index];
+                                    if (m) handleAssignMember(m.id);
+                                  }}
+                                  theme={dark ? 'dark' : 'light'}
+                                  accentColor="#FC6C06"
+                                  frame={false}
+                                  loop={false}
+                                  animation="pop"
+                                  width="100%"
+                                  maxHeight={200}
+                                />
+                              ) : (
+                                <p className="cart-no-members-msg" role="status">
+                                  No hay socios activos coincidentes.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="assigned-member-card">
+                          <div className="assigned-member-info">
+                            <span className="assigned-member-tag">Socio asignado:</span>
+                            <strong>{assignedMember.name}</strong>
+                            {assignedMember.phone && <span className="muted">Tel: {assignedMember.phone}</span>}
                           </div>
+                          <Button
+                            variant="secondary"
+                            className="button-sm"
+                            aria-label="Desasignar socio"
+                            onClick={() => {
+                              setAssignedMemberId(null);
+                              setMemberQuery('');
+                            }}
+                          >
+                            Desasignar
+                          </Button>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="assigned-member-card">
-                        <div className="assigned-member-info">
-                          <span className="assigned-member-tag">Socio asignado:</span>
-                          <strong>{assignedMember.name}</strong>
-                          {assignedMember.phone && <span className="muted">Tel: {assignedMember.phone}</span>}
-                        </div>
-                        <Button
-                          variant="secondary"
-                          className="button-sm"
-                          aria-label="Desasignar socio"
-                          onClick={() => {
-                            setAssignedMemberId(null);
-                            setMemberQuery('');
-                          }}
-                        >
-                          Desasignar
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="guantes-assigned-details">
-                    <div className="guantes-spec-row">
-                      <span className="muted">Asignado a:</span>
-                      <strong>{selectedLocker.assignedMemberName || rentedMember?.name || 'Sin asignar'}</strong>
-                    </div>
-                    {rentedMember?.phone && (
-                      <div className="guantes-spec-row">
-                        <span className="muted">Teléfono:</span>
-                        <span>{rentedMember.phone}</span>
-                      </div>
-                    )}
-                    {selectedLocker.assignedAt && (
-                      <div className="guantes-spec-row">
-                        <span className="muted">Asignado el:</span>
-                        <span>{new Date(selectedLocker.assignedAt).toLocaleDateString('es-MX')}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Card 3: Costo o vencimiento del pago (1 mes) */}
-              <div className="guantes-bento-card">
-                <h3>Costo y vigencia (1 mes)</h3>
-                <div className="guantes-spec-list">
-                  <div className="guantes-spec-row">
-                    <span className="muted">Casillero:</span>
-                    <strong>{selectedLocker.code}</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Tarifa mensual:</span>
-                    <strong>{formatMoney(selectedLocker.monthlyPriceMinor)} MXN</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Periodo:</span>
-                    <span>1 mes calendario</span>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Vencimiento:</span>
-                    <strong>
-                      {selectedLocker.expiresAt
-                        ? new Date(selectedLocker.expiresAt).toLocaleDateString('es-MX', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                          })
-                        : new Date(projectedExpiry).toLocaleDateString('es-MX', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                          })}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 4: Pagado, liberado, desalojado o desasignar */}
-              <div className="guantes-bento-card">
-                <h3>{selectedLocker.status === 'available' ? 'Cobro y asignación' : 'Acciones de casillero'}</h3>
-
-                {selectedLocker.status === 'available' ? (
-                  <>
-                    <div className="cart-payment-methods-box" style={{ margin: '0 0 10px' }}>
-                      <span className="field-label">Método de cobro</span>
-                      <div className="cart-jelly-method-wrap">
-                        <JellyRadio
-                          items={[
-                            { value: 'cash', label: 'Efectivo' },
-                            { value: 'card', label: 'Tarjeta' },
-                            { value: 'transfer', label: 'Transferencia' },
-                          ]}
-                          value={method}
-                          onChange={val => setMethod(val as PaymentMethod)}
-                          size="sm"
-                          radius={10}
-                          swell={0}
-                          barge={0}
-                          shrink={0}
-                          chipColor={dark ? '#26232E' : '#EFEFED'}
-                          activeColor="#FC6C06"
-                          textColor={dark ? '#D1D0D5' : '#3F3F46'}
-                          activeTextColor="#FFFFFF"
-                          ariaLabel="Método de cobro"
-                        />
-                      </div>
+                      )}
                     </div>
 
-                    {method === 'cash' && (
-                      <div className="cash-tender-card" style={{ margin: '0 0 10px' }}>
-                        <div className="field">
-                          <label htmlFor="casillero-cash-tendered-input">Monto recibido</label>
-                          <div className="cash-tender-input-row">
-                            <input
-                              id="casillero-cash-tendered-input"
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0.00"
-                              value={tenderedAmount}
-                              onChange={e => setTenderedAmount(e.target.value)}
-                            />
-                            <Button
-                              variant="secondary"
-                              className="button-sm"
-                              onClick={() => {
-                                setTenderedAmount((selectedLocker.monthlyPriceMinor / 100).toFixed(2));
-                              }}
-                            >
-                              Pago exacto
-                            </Button>
-                          </div>
+                    {/* Step 1: Costo y vigencia (1 mes) */}
+                    <div className="modal-cart-section" style={{ marginTop: '8px' }}>
+                      <h3 className="modal-cart-section-title">Costo y vigencia (1 mes)</h3>
+                      <div className="guantes-spec-list">
+                        <div className="guantes-spec-row">
+                          <span className="muted">Casillero:</span>
+                          <strong>{selectedLocker.code}</strong>
                         </div>
-                        <div className="cash-change-result">
-                          <span>Cambio a devolver:</span>
+                        <div className="guantes-spec-row">
+                          <span className="muted">Tarifa mensual:</span>
+                          <strong>{formatMoney(selectedLocker.monthlyPriceMinor)} MXN</strong>
+                        </div>
+                        <div className="guantes-spec-row">
+                          <span className="muted">Periodo:</span>
+                          <span>1 mes calendario</span>
+                        </div>
+                        <div className="guantes-spec-row">
+                          <span className="muted">Vencimiento:</span>
                           <strong>
-                            {changeMinor !== null && changeMinor >= 0
-                              ? `${formatMoney(changeMinor)} MXN`
-                              : changeMinor !== null
-                              ? 'Monto insuficiente'
-                              : '$0.00 MXN'}
+                            {selectedLocker.expiresAt
+                              ? new Date(selectedLocker.expiresAt).toLocaleDateString('es-MX', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })
+                              : new Date(projectedExpiry).toLocaleDateString('es-MX', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })}
                           </strong>
                         </div>
                       </div>
-                    )}
-
-                    {method === 'transfer' && (
-                      <Notice tone="warning">
-                        T03: La transferencia queda pendiente hasta verificar el comprobante bancario en caja.
-                      </Notice>
-                    )}
-
-                    <Button
-                      variant="primary"
-                      disabled={!assignedMemberId || (method === 'cash' && changeMinor !== null && changeMinor < 0)}
-                      onClick={handleConfirmAssignment}
-                    >
-                      Confirmar cobro y asignar
-                    </Button>
-                  </>
-                ) : (
-                  <div className="casillero-action-buttons">
-                    {selectedLocker.status === 'assigned' && (
-                      <div className="guantes-payment-summary" style={{ marginBottom: '10px' }}>
-                        <span className="guantes-summary-label">Estado de renta:</span>
-                        <strong>
-                          {selectedLocker.paymentStatus === 'pending'
-                            ? 'Transferencia pendiente'
-                            : `Pagado (${selectedLocker.paymentMethod === 'card' ? 'Tarjeta' : selectedLocker.paymentMethod === 'transfer' ? 'Transferencia' : 'Efectivo'})`}
-                        </strong>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <Button variant="secondary" onClick={handleReleaseLocker}>
-                        Liberar casillero
-                      </Button>
-                      {selectedLocker.status === 'assigned' && (
-                        <Button variant="secondary" onClick={handleEvictLocker}>
-                          Desalojar casillero
-                        </Button>
-                      )}
                     </div>
-                  </div>
+                  </CurrentPurchaseCard>
+                ) : (
+                  <>
+                    <div className="guantes-bento-card">
+                      <h3>{effSelected.status === 'evict' ? 'Casillero por desalojar' : 'Cliente asignado'}</h3>
+                      <div className="guantes-assigned-details">
+                        <div className="guantes-spec-row">
+                          <span className="muted">Estado:</span>
+                          <span className={`casillero-badge ${effSelected.badgeClass}`}>
+                            {effSelected.label}
+                          </span>
+                        </div>
+                        <div className="guantes-spec-row">
+                          <span className="muted">{effSelected.status === 'evict' ? 'Último socio:' : 'Asignado a:'}</span>
+                          <strong>{selectedLocker.assignedMemberName || rentedMember?.name || 'Staff EvoGym'}</strong>
+                        </div>
+                        {rentedMember?.phone && (
+                          <div className="guantes-spec-row">
+                            <span className="muted">Teléfono:</span>
+                            <span>{rentedMember.phone}</span>
+                          </div>
+                        )}
+                        {selectedLocker.assignedAt && (
+                          <div className="guantes-spec-row">
+                            <span className="muted">Asignado el:</span>
+                            <span>{new Date(selectedLocker.assignedAt).toLocaleDateString('es-MX')}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="guantes-bento-card">
+                      <h3>Vigencia y estado</h3>
+                      <div className="guantes-spec-list">
+                        <div className="guantes-spec-row">
+                          <span className="muted">Casillero:</span>
+                          <strong>{selectedLocker.code}</strong>
+                        </div>
+                        <div className="guantes-spec-row">
+                          <span className="muted">Tarifa mensual:</span>
+                          <strong>{formatMoney(selectedLocker.monthlyPriceMinor)} MXN</strong>
+                        </div>
+                        <div className="guantes-spec-row">
+                          <span className="muted">Vencimiento:</span>
+                          <strong>
+                            {selectedLocker.expiresAt
+                              ? new Date(selectedLocker.expiresAt).toLocaleDateString('es-MX', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })
+                              : 'Vencimiento no programado'}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="guantes-bento-card">
+                      <h3>Acciones de casillero</h3>
+                      <div className="casillero-action-buttons">
+                        {effSelected.status === 'assigned' && (
+                          <>
+                            <div className="guantes-payment-summary" style={{ marginBottom: '10px' }}>
+                              <span className="guantes-summary-label">Estado de suscripción:</span>
+                              <strong>
+                                {selectedLocker.paymentStatus === 'pending'
+                                  ? 'Transferencia pendiente'
+                                  : `Ocupado · Pagado (${selectedLocker.paymentMethod === 'card' ? 'Tarjeta' : selectedLocker.paymentMethod === 'transfer' ? 'Transferencia' : 'Efectivo'})`}
+                              </strong>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <Button variant="secondary" onClick={handleRenewLocker}>
+                                Renovar mensualidad (+1 mes)
+                              </Button>
+                              <Button variant="secondary" onClick={handleCancelLocker}>
+                                Cancelar asignación (Liberar)
+                              </Button>
+                            </div>
+                          </>
+                        )}
+
+                        {effSelected.status === 'expired' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <Notice tone="warning">
+                              Suscripción vencida hace {effSelected.overdueDays} día(s). En período de gracia (hasta 14 días para renovar antes de desalojo).
+                            </Notice>
+                            <Button onClick={handleRenewLocker}>
+                              Renovar casillero (+1 mes)
+                            </Button>
+                            <Button variant="secondary" onClick={handleEvictAndReleaseLocker}>
+                              Desalojar casillero
+                            </Button>
+                          </div>
+                        )}
+
+                        {effSelected.status === 'evict' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <Notice tone="error">
+                              Casillero con más de 2 semanas vencido sin renovar ({effSelected.overdueDays ?? 15} días de atraso). Requiere desalojo inmediato para liberar el espacio.
+                            </Notice>
+                            <Button onClick={handleEvictAndReleaseLocker}>
+                              Desalojar casillero
+                            </Button>
+                          </div>
+                        )}
+
+                        {(effSelected.status === 'employee' || effSelected.status === 'out_of_service') && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <Button variant="secondary" onClick={handleReleaseLocker}>
+                              Liberar casillero
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

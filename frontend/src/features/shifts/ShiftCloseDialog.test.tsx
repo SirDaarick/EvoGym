@@ -154,5 +154,48 @@ describe('ShiftCloseDialog', () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(JSON.parse(localStorage.getItem('evogym.demo.operational.v1')!).drafts['demo-shift-01']).toBeTruthy();
   });
+
+  it('supports click to add and right-click to subtract denominations', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await screen.findByLabelText('Forma de conteo');
+    const billBtn = await screen.findByRole('button', { name: 'Agregar 1 Billete de $500.00' });
+
+    // Left-click adds 1
+    await user.click(billBtn);
+    expect(screen.getByLabelText('Billete $500.00 · cantidad')).toHaveValue('1');
+    expect(screen.getByText('Subtotal $500.00 MXN')).toBeInTheDocument();
+
+    // Left-click adds another 1 -> 2
+    await user.click(billBtn);
+    expect(screen.getByLabelText('Billete $500.00 · cantidad')).toHaveValue('2');
+    expect(screen.getByText('Subtotal $1,000.00 MXN')).toBeInTheDocument();
+
+    // Right-click (contextmenu) subtracts 1 -> 1
+    fireEvent.contextMenu(screen.getByText('Billete $500.00 · cantidad').closest('.shift-close-denomination')!);
+    expect(screen.getByLabelText('Billete $500.00 · cantidad')).toHaveValue('1');
+    expect(screen.getByText('Subtotal $500.00 MXN')).toBeInTheDocument();
+  });
+
+  it('allows counting by money amount with segmented toggle', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await screen.findByLabelText('Forma de conteo');
+
+    // Switch to money amount mode
+    await user.click(await screen.findByRole('radio', { name: /Por importe en dinero/ }));
+    const billAmountInput = await screen.findByLabelText('Billete $500.00 · importe ($)');
+
+    // Type 1500 (representing $1,500 in $500 bills = 3 bills)
+    await user.type(billAmountInput, '1500');
+    expect(screen.getByText('3 billetes')).toBeInTheDocument();
+    expect(screen.getByText('Subtotal $1,500.00 MXN')).toBeInTheDocument();
+
+    const saved = JSON.parse(localStorage.getItem('evogym.demo.operational.v1')!);
+    expect(saved.drafts['demo-shift-01']['quantity-50000']).toBe('3');
+    expect(saved.drafts['demo-shift-01']['amount-50000']).toBe('1500');
+  });
 });
 

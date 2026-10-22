@@ -58,9 +58,9 @@ describe('GuantesModal', () => {
     expect(screen.getByRole('heading', { name: 'Asignar a socio' })).toBeVisible();
     expect(screen.getByRole('combobox', { name: 'Buscar socio activo' })).toBeVisible();
 
-    // Assign member Mariana López via quick chip
-    const marianaChip = screen.getByRole('button', { name: 'Mariana López' });
-    await userEvent.click(marianaChip);
+    // Assign member Mariana López via search combobox
+    await userEvent.type(screen.getByRole('combobox', { name: 'Buscar socio activo' }), 'Mariana');
+    await userEvent.click(screen.getByRole('option', { name: /Mariana López/i }));
 
     expect(screen.getByText('Mariana López')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Desasignar socio' })).toBeVisible();
@@ -78,9 +78,16 @@ describe('GuantesModal', () => {
     const card03 = screen.getByText('#03 · Azul · 10 oz').closest('button');
     await userEvent.click(card03!);
 
-    // Assign Mariana López via quick chip
-    const marianaChip = screen.getByRole('button', { name: 'Mariana López' });
-    await userEvent.click(marianaChip);
+    // Assign Mariana López via search combobox
+    await userEvent.type(screen.getByRole('combobox', { name: 'Buscar socio activo' }), 'Mariana');
+    await userEvent.click(screen.getByRole('option', { name: /Mariana López/i }));
+
+    // Proceed to payment step
+    const proceedBtn = screen.getByRole('button', { name: /revisar cobro|proceder al cobro/i });
+    await userEvent.click(proceedBtn);
+
+    // Select Efectivo method
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
 
     // Confirm rental
     const confirmBtn = screen.getByRole('button', { name: 'Confirmar cobro y entregar' });

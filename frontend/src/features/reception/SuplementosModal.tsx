@@ -6,8 +6,9 @@ import { memberStatus } from '../../demo/memberStatus';
 import { quoteSupplementCart, registerSupplementCart } from '../../demo/supplementOperations';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
-import JellyRadio from '../catalog/react-bits/JellyRadio';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
+import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
+import { ProductCard } from './ProductCard';
 
 export interface SuplementosModalProps {
   isOpen: boolean;
@@ -29,9 +30,7 @@ export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
   const supplements = state.supplements ?? [];
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [method, setMethod] = useState<PaymentMethod>('cash');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
-  const [tenderedAmount, setTenderedAmount] = useState<string>('');
 
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -93,7 +92,6 @@ export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
     if (isOpen) {
       setQuantities({});
       setAssignedMemberId(null);
-      setTenderedAmount('');
       setToast(null);
     }
   }, [isOpen]);
@@ -110,10 +108,6 @@ export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
   const assignedMember = assignedMemberId
     ? state.members.find(m => m.id === assignedMemberId) ?? null
     : null;
-
-  const tenderedMinor = parseMoney(tenderedAmount);
-  const changeMinor =
-    tenderedMinor !== null && quote ? tenderedMinor - quote.totalMinor : null;
 
   const activeMembers = state.members.filter(m => {
     return memberStatus(m, state.demoClock).status === 'active';
@@ -197,23 +191,40 @@ export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
     }));
   }
 
-  function handleConfirmSale() {
+  function handleConfirmSale(breakdown?: CheckoutPaymentBreakdown, forcePending?: boolean) {
     if (!quote || !lines.length) return;
+    const paymentMethodToUse: PaymentMethod = breakdown
+      ? (breakdown.mode === 'mixed' ? (breakdown.mixedMethod1 ?? 'cash') : breakdown.method)
+      : 'cash';
+    const shortfall = breakdown?.shortfallMinor ?? 0;
+
     const cartId = `sup-cart-${crypto.randomUUID()}`;
 
-    const result = transact(current =>
-      registerSupplementCart(current, {
+    const result = transact(current => {
+      const saleTx = registerSupplementCart(current, {
         id: cartId,
-        method,
+        method: paymentMethodToUse,
         memberId: assignedMemberId,
         lines,
-      })
-    );
+      });
+      if (saleTx.result.status === 'error') return saleTx;
+      if (shortfall > 0 && forcePending && assignedMemberId) {
+        return {
+          ...saleTx,
+          state: {
+            ...saleTx.state,
+            members: saleTx.state.members.map(m =>
+              m.id === assignedMemberId ? { ...m, creditMinor: m.creditMinor - shortfall } : m
+            ),
+          },
+        };
+      }
+      return saleTx;
+    });
 
     if (result.status === 'confirmed' || result.status === 'pending') {
       const msg = `Venta de ${lines.reduce((acc, l) => acc + l.scoops, 0)} porción(es) de suplemento confirmada.`;
       setQuantities({});
-      setTenderedAmount('');
       setToast({
         open: true,
         title: 'Cobro de suplementos confirmado',
@@ -265,324 +276,204 @@ export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
               const qty = quantities[sup.id] || 0;
               const hasStock = sup.availableScoops > 0;
 
-              const labelSuffix = sup.flavor ? ` (${sup.flavor})` : '';
-
               return (
-                <div
+                <ProductCard
                   key={sup.id}
-                  className={`product-clay-card ${qty > 0 ? 'product-selected' : ''}`}
-                    >
-                      <div className="product-card-top">
-                        <span
-                          className={`product-stock-badge ${
-                            sup.availableScoops <= 5 ? 'stock-low' : ''
-                          }`}
-                        >
-                          {hasStock ? `${sup.availableScoops} scoops` : 'Agotado'}
-                        </span>
-                      </div>
-
-                      <div className="product-card-middle">
-                        <strong>{sup.name}</strong>
-                        {sup.flavor && <span className="muted" style={{ fontSize: '12px' }}>{sup.flavor}</span>}
-                        <span className="product-card-price">{formatMoney(sup.scoopPriceMinor)} / scoop</span>
-                      </div>
-
-                      <div className="suplemento-qty-controls">
-                        <button
-                          type="button"
-                          className="qty-btn"
-                          aria-label={`Disminuir ${sup.name}${labelSuffix}`}
-                          disabled={qty <= 0}
-                          onClick={() => changeQuantity(sup.id, qty - 1)}
-                        >
-                          −
-                        </button>
-                        <span className="suplemento-qty-val" aria-label={`Cantidad de ${sup.name}${labelSuffix}`}>
-                          {qty}
-                        </span>
-                        <button
-                          type="button"
-                          className="qty-btn"
-                          aria-label={`Aumentar ${sup.name}${labelSuffix}`}
-                          disabled={qty >= sup.availableScoops}
-                          onClick={() => changeQuantity(sup.id, qty + 1)}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  );
+                  product={{
+                    id: sup.id,
+                    name: sup.name,
+                    priceMinor: sup.scoopPriceMinor,
+                    flavor: sup.flavor,
+                  }}
+                  subtitle={sup.flavor}
+                  stock={sup.availableScoops}
+                  stockLabel={hasStock ? `${sup.availableScoops} scoops` : 'Agotado'}
+                  stockLowThreshold={5}
+                  priceSuffix=" / scoop"
+                  quantity={qty}
+                  disabled={!hasStock && qty === 0}
+                  onQuantityChange={newQty => changeQuantity(sup.id, newQty)}
+                />
+              );
             })}
           </div>
 
-          {/* Right: Cart Panel */}
+          {/* Right: Cart Panel with CurrentPurchaseCard */}
           <div className="guantes-sidebar-column">
-            <div className="guantes-bento-card">
-              <h3>Carrito de suplementos</h3>
-
-              {/* Asignar socio */}
-              {!assignedMember ? (
-                <div className="cart-member-search" ref={memberSearchContainerRef}>
-                  <div className="field">
-                    <label htmlFor="sup-assign-member-input">Asignar cliente</label>
-                    <div className="cart-member-search-input-wrap">
-                      <input
-                        ref={memberInputRef}
-                        id="sup-assign-member-input"
-                        type="text"
-                        role="combobox"
-                        aria-label="Asignar cliente"
-                        aria-expanded={isSearchOpen}
-                        aria-autocomplete="list"
-                        autoComplete="off"
-                        placeholder="Buscar socio activo..."
-                        value={memberQuery}
-                        onFocus={() => setIsSearchOpen(true)}
-                        onChange={e => {
-                          setMemberQuery(e.target.value);
-                          setIsSearchOpen(true);
-                          setSelectedMemberIndex(-1);
-                        }}
-                        onKeyDown={e => {
-                          if (e.key === 'Escape') {
-                            setIsSearchOpen(false);
-                          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                            e.preventDefault();
+            <CurrentPurchaseCard
+              className="current-purchase-card--modal"
+              title="Venta de suplementos"
+              totalMinor={totalMinor}
+              step1Title="Carrito"
+              step2Title="Cobro"
+              confirmActionLabel="Confirmar cobro de suplementos"
+              step1ActionLabel={lines.length > 0 ? `Proceder al cobro · ${formatMoney(totalMinor)} MXN →` : 'Proceder al cobro'}
+              step1ActionDisabled={lines.length === 0}
+              assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
+              onAssignMemberClick={() => setIsSearchOpen(true)}
+              onConfirmPayment={handleConfirmSale}
+            >
+              {/* Step 1: Member Assignment */}
+              <div className="modal-cart-section">
+                <h3 className="modal-cart-section-title">Asignar cliente</h3>
+                {!assignedMember ? (
+                  <div className="cart-member-search" ref={memberSearchContainerRef}>
+                    <div className="field">
+                      <label htmlFor="sup-assign-member-input">Buscar socio activo</label>
+                      <div className="cart-member-search-input-wrap">
+                        <input
+                          ref={memberInputRef}
+                          id="sup-assign-member-input"
+                          type="text"
+                          role="combobox"
+                          aria-label="Asignar cliente"
+                          aria-expanded={isSearchOpen}
+                          aria-autocomplete="list"
+                          autoComplete="off"
+                          placeholder="Buscar socio activo..."
+                          value={memberQuery}
+                          onFocus={() => setIsSearchOpen(true)}
+                          onChange={e => {
+                            setMemberQuery(e.target.value);
                             setIsSearchOpen(true);
-                            const count = flatActiveMembers.length;
-                            if (count > 0) {
-                              const next =
-                                selectedMemberIndex < 0
-                                  ? e.key === 'ArrowDown' ? 0 : count - 1
-                                  : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
-                              setSelectedMemberIndex(next);
-                            }
-                          } else if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
-                              handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
-                            }
-                          }
-                        }}
-                      />
-                      {memberQuery && (
-                        <button
-                          type="button"
-                          className="cart-search-clear-btn"
-                          aria-label="Limpiar búsqueda"
-                          onClick={() => {
-                            setMemberQuery('');
-                            memberInputRef.current?.focus();
+                            setSelectedMemberIndex(-1);
                           }}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {isSearchOpen && (
-                    <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
-                      {flatActiveMembers.length > 0 ? (
-                        <AnimatedList
-                          id="sup-member-item"
-                          listboxId="sup-member-results"
-                          tabIndex={-1}
-                          groups={memberGroups}
-                          selectedIndex={selectedMemberIndex}
-                          onSelectedIndexChange={setSelectedMemberIndex}
-                          onItemSelect={(_item, index) => {
-                            const m = flatActiveMembers[index];
-                            if (m) handleAssignMember(m.id);
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') {
+                              setIsSearchOpen(false);
+                            } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setIsSearchOpen(true);
+                              const count = flatActiveMembers.length;
+                              if (count > 0) {
+                                const next =
+                                  selectedMemberIndex < 0
+                                    ? e.key === 'ArrowDown' ? 0 : count - 1
+                                    : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
+                                setSelectedMemberIndex(next);
+                              }
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
+                                handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
+                              }
+                            }
                           }}
-                          theme={dark ? 'dark' : 'light'}
-                          accentColor="#FC6C06"
-                          frame={false}
-                          loop={false}
-                          animation="pop"
-                          width="100%"
-                          maxHeight={180}
                         />
-                      ) : (
-                        <p className="cart-no-members-msg" role="status">
-                          Sin socios activos coincidentes.
-                        </p>
-                      )}
+                        {memberQuery && (
+                          <button
+                            type="button"
+                            className="cart-search-clear-btn"
+                            aria-label="Limpiar búsqueda"
+                            onClick={() => {
+                              setMemberQuery('');
+                              memberInputRef.current?.focus();
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  )}
 
-                  <div className="guantes-quick-members">
-                    <span className="guantes-quick-label">Sugeridos:</span>
-                    <div className="guantes-quick-chips">
-                      {flatActiveMembers.slice(0, 3).map(m => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className="guantes-quick-chip"
-                          onClick={() => handleAssignMember(m.id)}
-                        >
-                          {m.name}
-                        </button>
-                      ))}
+                    {isSearchOpen && (
+                      <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
+                        {flatActiveMembers.length > 0 ? (
+                          <AnimatedList
+                            id="sup-member-item"
+                            listboxId="sup-member-results"
+                            tabIndex={-1}
+                            groups={memberGroups}
+                            selectedIndex={selectedMemberIndex}
+                            onSelectedIndexChange={setSelectedMemberIndex}
+                            onItemSelect={(_item, index) => {
+                              const m = flatActiveMembers[index];
+                              if (m) handleAssignMember(m.id);
+                            }}
+                            theme={dark ? 'dark' : 'light'}
+                            accentColor="#FC6C06"
+                            frame={false}
+                            loop={false}
+                            animation="pop"
+                            width="100%"
+                            maxHeight={180}
+                          />
+                        ) : (
+                          <p className="cart-no-members-msg" role="status">
+                            Sin socios activos coincidentes.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="assigned-member-card">
+                    <div className="assigned-member-info">
+                      <span className="assigned-member-tag">Socio asignado:</span>
+                      <strong>{assignedMember.name}</strong>
                     </div>
+                    <Button
+                      variant="secondary"
+                      className="button-sm"
+                      aria-label="Desasignar socio"
+                      onClick={() => {
+                        setAssignedMemberId(null);
+                        setMemberQuery('');
+                      }}
+                    >
+                      Desasignar
+                    </Button>
                   </div>
-                </div>
-              ) : (
-                <div className="assigned-member-card">
-                  <div className="assigned-member-info">
-                    <span className="assigned-member-tag">Socio asignado:</span>
-                    <strong>{assignedMember.name}</strong>
-                  </div>
-                  <Button
-                    variant="secondary"
-                    className="button-sm"
-                    aria-label="Desasignar socio"
-                    onClick={() => {
-                      setAssignedMemberId(null);
-                      setMemberQuery('');
-                    }}
-                  >
-                    Desasignar
-                  </Button>
-                </div>
-              )}
-
-              {/* Método de pago */}
-              <div className="cart-payment-methods-box" style={{ margin: '10px 0' }}>
-                <span className="field-label">Método de pago</span>
-                <div className="cart-jelly-method-wrap">
-                  <JellyRadio
-                    items={[
-                      { value: 'cash', label: 'Efectivo' },
-                      { value: 'card', label: 'Tarjeta' },
-                      { value: 'transfer', label: 'Transferencia' },
-                    ]}
-                    value={method}
-                    onChange={val => setMethod(val as PaymentMethod)}
-                    size="sm"
-                    radius={10}
-                    swell={0}
-                    barge={0}
-                    shrink={0}
-                    chipColor={dark ? '#26232E' : '#EFEFED'}
-                    activeColor="#FC6C06"
-                    textColor={dark ? '#D1D0D5' : '#3F3F46'}
-                    activeTextColor="#FFFFFF"
-                    ariaLabel="Método de pago"
-                  />
-                </div>
+                )}
               </div>
 
-              {/* Cash tender / change */}
-              {method === 'cash' && (
-                <div className="cash-tender-card" style={{ margin: '0 0 10px' }}>
-                  <div className="field">
-                    <label htmlFor="sup-cash-tendered-input">Monto recibido</label>
-                    <div className="cash-tender-input-row">
-                      <input
-                        id="sup-cash-tendered-input"
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        value={tenderedAmount}
-                        onChange={e => setTenderedAmount(e.target.value)}
-                      />
-                      <Button
-                        variant="secondary"
-                        className="button-sm"
-                        disabled={!quote}
-                        onClick={() => {
-                          if (quote) {
-                            setTenderedAmount((quote.totalMinor / 100).toFixed(2));
-                          }
-                        }}
-                      >
-                        Pago exacto
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="cash-change-result">
-                    <span>Cambio a devolver:</span>
-                    <strong>
-                      {changeMinor !== null && changeMinor >= 0
-                        ? `${formatMoney(changeMinor)} MXN`
-                        : changeMinor !== null
-                        ? 'Monto insuficiente'
-                        : '$0.00 MXN'}
-                    </strong>
-                  </div>
-                </div>
-              )}
-
-              {method === 'transfer' && (
-                <Notice tone="warning">
-                  T03: La transferencia queda pendiente hasta verificar el comprobante bancario en caja.
-                </Notice>
-              )}
-
-              {/* Items in cart */}
-              <div className="cart-items-section" style={{ margin: '10px 0' }}>
+              {/* Step 1: Items in cart */}
+              <div className="cart-items-section" style={{ marginTop: '12px' }}>
                 {!lines.length ? (
                   <p className="cart-empty-msg">Sin suplementos en el carrito.</p>
                 ) : (
                   <ul className="cart-lines">
                     {quote?.lines.map(line => (
                       <li key={line.supplementId} className="cart-line-row">
-                        <div className="cart-line-details">
-                          <span>{line.scoops} × {line.name}</span>
+                        <div className="cart-line-top-row">
+                          <span className="cart-line-title">{line.scoops} × {line.name}</span>
+                          <strong className="cart-line-total">{formatMoney(line.amountMinor)} MXN</strong>
+                        </div>
+                        <div className="cart-line-bottom-row">
                           <span className="cart-line-unit muted">{formatMoney(line.unitPriceMinor)} c/u</span>
+                          <div className="cart-line-actions">
+                            <button
+                              type="button"
+                              className="qty-btn"
+                              aria-label={`Disminuir ${line.name}`}
+                              onClick={() => changeQuantity(line.supplementId, line.scoops - 1)}
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              className="qty-btn"
+                              aria-label={`Aumentar ${line.name}`}
+                              onClick={() => changeQuantity(line.supplementId, line.scoops + 1)}
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              className="qty-btn qty-btn-remove"
+                              aria-label={`Quitar ${line.name}`}
+                              onClick={() => changeQuantity(line.supplementId, 0)}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
                         </div>
-                        <div className="cart-line-actions">
-                          <button
-                            type="button"
-                            className="qty-btn"
-                            aria-label={`Disminuir ${line.name}`}
-                            onClick={() => changeQuantity(line.supplementId, line.scoops - 1)}
-                          >
-                            −
-                          </button>
-                          <button
-                            type="button"
-                            className="qty-btn"
-                            aria-label={`Aumentar ${line.name}`}
-                            onClick={() => changeQuantity(line.supplementId, line.scoops + 1)}
-                          >
-                            +
-                          </button>
-                          <button
-                            type="button"
-                            className="qty-btn qty-btn-remove"
-                            aria-label={`Quitar ${line.name}`}
-                            onClick={() => changeQuantity(line.supplementId, 0)}
-                          >
-                            <TrashIcon />
-                          </button>
-                        </div>
-                        <strong>{formatMoney(line.amountMinor)}</strong>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
-
-              {/* Total & Action */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-                <span className="field-label" style={{ fontSize: '15px' }}>Total a cobrar:</span>
-                <strong style={{ fontSize: '18px', color: 'var(--color-primary)' }}>
-                  {formatMoney(totalMinor)} MXN
-                </strong>
-              </div>
-
-              <Button
-                variant="primary"
-                disabled={!lines.length || (method === 'cash' && changeMinor !== null && changeMinor < 0)}
-                onClick={handleConfirmSale}
-                style={{ marginTop: '12px' }}
-              >
-                Confirmar cobro de suplementos
-              </Button>
-            </div>
+            </CurrentPurchaseCard>
           </div>
         </div>
       </div>

@@ -275,3 +275,42 @@ export function updateLockerStatus(
     },
   };
 }
+
+export function renewLocker(
+  state: DemoState,
+  lockerId: string
+): Transaction<LockerOperationResult> {
+  const fail = (message: string): Transaction<LockerOperationResult> => ({
+    state,
+    result: { status: 'error', message },
+  });
+
+  const lockers = state.lockers ?? [];
+  const locker = lockers.find(l => l.id === lockerId);
+  if (!locker) {
+    return fail('Casillero no encontrado.');
+  }
+
+  const baseDate = locker.expiresAt ? new Date(locker.expiresAt) : new Date();
+  const nextExpiry = calculateNextMonthExpiry(baseDate < new Date() ? new Date() : baseDate);
+
+  const updatedLocker: LockerItem = {
+    ...locker,
+    status: 'assigned',
+    expiresAt: nextExpiry,
+  };
+
+  const updatedLockers = lockers.map(l => (l.id === locker.id ? updatedLocker : l));
+
+  return {
+    state: {
+      ...state,
+      revision: state.revision + 1,
+      lockers: updatedLockers,
+    },
+    result: {
+      status: 'updated',
+      locker: updatedLocker,
+    },
+  };
+}

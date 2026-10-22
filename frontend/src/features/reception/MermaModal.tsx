@@ -4,30 +4,58 @@ import { formatMoney } from '../../demo/adapter';
 import { expectedStock } from '../../demo/inventoryOperations';
 import { Button, Notice } from '../../shared/ui';
 
+export interface WasteItem {
+  product: Product;
+  quantity: number;
+}
+
 export interface MermaModalProps {
   isOpen: boolean;
   onClose: () => void;
-  products: Product[];
+  products?: Product[];
+  items?: WasteItem[];
+  selectedProductId?: string;
   state: DemoState;
-  onConfirmWaste: (productId: string, quantity: number, reason: string) => { status: 'ok' } | { status: 'error'; message: string };
+  onConfirmWaste: (
+    itemsOrProductId: WasteItem[] | string,
+    quantityOrReason?: number | string,
+    maybeReason?: string
+  ) => { status: 'ok' } | { status: 'error'; message: string };
 }
 
-export function MermaModal({ isOpen, onClose, products, state, onConfirmWaste }: MermaModalProps) {
-  const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id ?? '');
-  const [quantity, setQuantity] = useState<number>(1);
+export function MermaModal({
+  isOpen,
+  onClose,
+  products = [],
+  items = [],
+  selectedProductId: initialProductId,
+  state,
+  onConfirmWaste,
+}: MermaModalProps) {
+  // If items prop is provided with selected items from the screen, use them directly
+  const activeItems: WasteItem[] =
+    items.length > 0
+      ? items
+      : initialProductId
+      ? [
+          {
+            product: (products.find(p => p.id === initialProductId) ?? state.products.find(p => p.id === initialProductId))!,
+            quantity: 1,
+          },
+        ].filter(i => Boolean(i.product))
+      : products.length > 0
+      ? [{ product: products[0], quantity: 1 }]
+      : [];
+
   const [reason, setReason] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
-      if (products.length > 0 && !selectedProductId) {
-        setSelectedProductId(products[0].id);
-      }
-      setQuantity(1);
       setReason('');
       setErrorMessage('');
     }
-  }, [isOpen, products, selectedProductId]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -42,22 +70,31 @@ export function MermaModal({ isOpen, onClose, products, state, onConfirmWaste }:
 
   if (!isOpen) return null;
 
-  const currentProduct = products.find(p => p.id === selectedProductId) ?? products[0];
-  const availableStock = currentProduct ? expectedStock(state, currentProduct.id) : 0;
-  const estimatedValue = currentProduct ? currentProduct.priceMinor * Math.max(0, quantity) : 0;
+  const totalEstimatedValue = activeItems.reduce(
+    (sum, item) => sum + item.product.priceMinor * item.quantity,
+    0
+  );
+
+  const totalQuantity = activeItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Validate stock for all items
+  const stockExceededItem = activeItems.find(
+    item => item.quantity > expectedStock(state, item.product.id)
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!currentProduct) {
-      setErrorMessage('Selecciona un producto válido.');
+    if (activeItems.length === 0) {
+      setErrorMessage('No hay productos seleccionados para dar de baja.');
       return;
     }
-    if (quantity <= 0 || !Number.isSafeInteger(quantity)) {
-      setErrorMessage('La cantidad debe ser un entero positivo.');
-      return;
-    }
-    if (quantity > availableStock) {
-      setErrorMessage('La merma supera la existencia disponible.');
+    if (stockExceededItem) {
+      setErrorMessage(
+        `La cantidad a dar de baja de "${stockExceededItem.product.name}" supera el stock disponible (${expectedStock(
+          state,
+          stockExceededItem.product.id
+        )}).`
+      );
       return;
     }
     if (!reason.trim()) {
@@ -65,7 +102,7 @@ export function MermaModal({ isOpen, onClose, products, state, onConfirmWaste }:
       return;
     }
 
-    const result = onConfirmWaste(currentProduct.id, quantity, reason.trim());
+    const result = onConfirmWaste(activeItems, reason.trim());
     if (result.status === 'error') {
       setErrorMessage(result.message);
     } else {
@@ -80,85 +117,146 @@ export function MermaModal({ isOpen, onClose, products, state, onConfirmWaste }:
       aria-modal="true"
       aria-labelledby="modal-merma-title"
     >
-      <div className="staff-modal-card merma-modal-card">
-        <div className="staff-modal-header" style={{ width: '100%', textAlign: 'left', alignItems: 'flex-start' }}>
-          <h2 id="modal-merma-title">Registrar merma de producto</h2>
-          <p className="muted">
-            Da de baja productos dañados, cortesías o consumo interno. Se descontará de forma inmediata del inventario.
-          </p>
+      <div
+        className="staff-modal-card merma-modal-card"
+        style={{
+          maxWidth: '460px',
+          width: '95vw',
+          padding: '20px',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div>
+            <h2 id="modal-merma-title" style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>
+              Registrar merma de producto
+            </h2>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>
+              Se descontarán de forma inmediata del inventario y quedarán registrados en el turno.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar modal"
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '18px',
+              cursor: 'pointer',
+              color: 'var(--color-muted)',
+              padding: '4px',
+            }}
+          >
+            ✕
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div className="field">
-            <label htmlFor="merma-product-select">Producto a dar de baja *</label>
-            <select
-              id="merma-product-select"
-              value={selectedProductId}
-              onChange={e => {
-                setSelectedProductId(e.target.value);
-                setQuantity(1);
-                setErrorMessage('');
+        <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* List of already selected products */}
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-muted)', display: 'block', marginBottom: '6px' }}>
+              Productos seleccionados ({totalQuantity} {totalQuantity === 1 ? 'unidad' : 'unidades'}):
+            </label>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                maxHeight: '180px',
+                overflowY: 'auto',
               }}
             >
-              {products.map(product => {
-                const stock = expectedStock(state, product.id);
+              {activeItems.map(item => {
+                const stock = expectedStock(state, item.product.id);
                 return (
-                  <option key={product.id} value={product.id}>
-                    {product.name} · Disponibles: {stock}
-                  </option>
+                  <div
+                    key={item.product.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      background: 'var(--color-surface)',
+                      border: '1px solid var(--color-divider)',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                    }}
+                  >
+                    <div>
+                      <strong>{item.product.name}</strong>
+                      <div className="muted" style={{ fontSize: '11px' }}>
+                        {item.quantity} {item.quantity === 1 ? 'unidad' : 'unidades'} · Disponibles: {stock}
+                      </div>
+                    </div>
+                    <strong style={{ color: '#dc2626', fontSize: '13px' }}>
+                      {formatMoney(item.product.priceMinor * item.quantity)} MXN
+                    </strong>
+                  </div>
                 );
               })}
-            </select>
+            </div>
           </div>
 
+          {/* Loss Value Summary Box */}
+          <div
+            className="merma-value-summary"
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid #ef4444',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span style={{ fontSize: '13px', fontWeight: 600 }}>Valor total de la merma:</span>
+            <strong style={{ fontSize: '16px', color: '#dc2626' }}>
+              {formatMoney(totalEstimatedValue)} MXN
+            </strong>
+          </div>
+
+          {/* Reason Input */}
           <div className="field">
-            <label htmlFor="merma-quantity-input">
-              Cantidad a descontar * (Disponibles: {availableStock})
+            <label htmlFor="merma-reason-input" style={{ fontSize: '12px', fontWeight: 600 }}>
+              Motivo o comentario *
             </label>
-            <input
-              id="merma-quantity-input"
-              type="number"
-              min="1"
-              max={availableStock}
-              value={quantity || ''}
-              onChange={e => {
-                setQuantity(Number(e.target.value));
-                setErrorMessage('');
-              }}
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="merma-reason-input">Motivo o comentario *</label>
             <input
               id="merma-reason-input"
               type="text"
-              placeholder="Ej. Producto dañado, cortesía o consumo personal"
+              placeholder="Ej. Producto dañado, roto, caducado o consumo interno"
               value={reason}
               onChange={e => {
                 setReason(e.target.value);
                 setErrorMessage('');
               }}
               required
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: '13px',
+                borderRadius: '8px',
+                boxSizing: 'border-box',
+              }}
             />
-          </div>
-
-          <div className="merma-value-summary">
-            <span>Valor estimado (precio venta):</span>
-            <strong>{formatMoney(estimatedValue)} MXN</strong>
           </div>
 
           {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
 
-          <div className="staff-modal-actions">
+          <div className="staff-modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
             <Button variant="secondary" type="button" onClick={onClose}>
               Cancelar
             </Button>
             <Button
               variant="primary"
               type="submit"
-              disabled={availableStock <= 0 || quantity <= 0 || quantity > availableStock || !reason.trim()}
+              disabled={activeItems.length === 0 || Boolean(stockExceededItem) || !reason.trim()}
+              style={{
+                background: !reason.trim() ? undefined : '#dc2626',
+                borderColor: !reason.trim() ? undefined : '#b91c1c',
+              }}
             >
               Confirmar merma
             </Button>

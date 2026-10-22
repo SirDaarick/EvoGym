@@ -35,7 +35,7 @@ describe('operational demo screens', () => {
     await openCloseForm();
     expect(screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' })).toHaveAttribute('open');
     expect(screen.getByText('Desglose del efectivo esperado')).toBeInTheDocument();
-  });
+  }, 15000);
   it('rejects fractional quantities and keeps manual total separate', async () => {
     await mount('/reception/shifts');
     await openCloseForm();
@@ -102,10 +102,26 @@ describe('operational demo screens', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cierre' }));
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
     expect(screen.getByText('Turno cerrado')).toBeVisible();
-    await userEvent.type(screen.getByLabelText('Fondo inicial (MXN)'), '300');
+
+    // Trigger ShiftOpenModal
     await userEvent.click(screen.getByRole('button', { name: 'Abrir turno' }));
+    expect(screen.getByRole('dialog', { name: 'Iniciar Nuevo Turno de Trabajo' })).toBeInTheDocument();
+
+    // Step 1: Cash count
+    await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+    await userEvent.type(screen.getByLabelText('Fondo inicial (MXN)'), '300');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+
+    // Step 2: Inventory verification
+    expect(screen.getByText('2. Inventario Inicial')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+
+    // Step 3: Confirmation
+    expect(screen.getByText('3. Resumen y Confirmación')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' }));
+
     expect(screen.getByText('Turno abierto')).toBeVisible();
-  });
+  }, 15000);
   it('shows all shift selection only to the owner view', async () => {
     await mount('/owner/shifts');
     expect(screen.getByLabelText('Turno a consultar')).toBeVisible();

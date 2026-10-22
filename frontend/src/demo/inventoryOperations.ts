@@ -29,7 +29,7 @@ export function currentShiftStockBreakdown(state: DemoState, productId: string) 
   const opening = expected - restocked + sold + waste;
   return { opening, restocked, sold, waste, expected };
 }
-export function recordMovement(state: DemoState, request: { id: string; productId: string; kind: 'restock' | 'waste'; quantity: number }): Transaction<OperationResult> {
+export function recordMovement(state: DemoState, request: { id: string; productId: string; kind: 'restock' | 'waste'; quantity: number; reason?: string }): Transaction<OperationResult> {
   const fail = (message: string): Transaction<OperationResult> => ({ state, result: { status: 'error', message } });
   const existing = state.stockMovements.find(item => item.id === request.id);
   if (existing) return existing.productId === request.productId && existing.kind === request.kind && existing.quantity === request.quantity

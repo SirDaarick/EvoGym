@@ -13,6 +13,7 @@ export interface ShiftActivityRow {
   cashImpactMinor?: number;
   quantity?: number;
   recordedAt: string;
+  isOvertime?: boolean;
 }
 export interface ShiftInventoryRow {
   id: string;
@@ -59,16 +60,25 @@ export function shiftDashboard(state: DemoState, shiftId: string) {
     const planName = source && 'planName' in source ? source.planName : undefined;
     const specializedName = source && 'name' in source ? source.name : undefined;
     const sourceMemberName = source && 'memberName' in source ? source.memberName ?? undefined : undefined;
-    const description = sourceDescription ?? specializedName ?? (family === 'membership' ? (planName ?? 'Membresía') : family === 'visit' ? 'Visita'
+    const baseDescription = sourceDescription ?? specializedName ?? (family === 'membership' ? (planName ?? 'Membresía') : family === 'visit' ? 'Visita'
       : family === 'glove' ? 'Renta de guante' : family === 'locker' ? 'Asignación de casillero' : 'Producto');
+    const isRefund = event.amountMinor < 0 || event.id.startsWith('refund-');
+    const description = isRefund ? `Devolución: ${baseDescription}` : baseDescription;
+    const isOvertime = Boolean(
+      source &&
+      typeof source === 'object' &&
+      (('isOvertime' in source && source.isOvertime) || ('is_overtime' in source && source.is_overtime))
+    );
     return { id: `ledger:${event.id}`, family, description, actor: memberName ?? sourceMemberName, reference: event.paymentId,
-      method: event.method, status: 'confirmed', amountMinor: event.amountMinor, cashImpactMinor: event.method === 'cash' ? event.amountMinor : 0, recordedAt: event.recordedAt };
+      method: event.method, status: 'confirmed', amountMinor: event.amountMinor, cashImpactMinor: event.method === 'cash' ? event.amountMinor : 0, recordedAt: event.recordedAt, isOvertime };
   });
   const productName = (productId: string) => state.products.find(item => item.id === productId)?.name ?? 'Producto';
   const inventoryRows: ShiftInventoryRow[] = [
     ...byShift(state.stockMovements, shiftId).filter(item => item.kind !== 'sale').map(item => ({
       id: `stock:${item.id}`, movement: item.kind === 'restock' ? 'Reposición' as const : 'Merma' as const,
-      product: productName(item.productId), quantity: `${item.quantity} unidades`, recordedAt: item.recordedAt,
+      product: productName(item.productId),
+      quantity: item.reason ? `${item.quantity} unidades (${item.reason})` : `${item.quantity} unidades`,
+      recordedAt: item.recordedAt,
     })),
     ...byShift(state.counts, shiftId).map(item => ({ id: `count:${item.id}`, movement: 'Conteo físico' as const,
       product: productName(item.productId), quantity: `${item.quantity} unidades · esperado ${item.expectedAtCount} · diferencia ${item.variance}`,

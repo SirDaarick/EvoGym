@@ -5,7 +5,13 @@ import { activeShift, expectedStock } from './inventoryOperations';
 export type SaleRequest = { id: string; quantity: number; method: PaymentMethod } &
   ({ kind: 'product'; productId: string } | { kind: 'visit'; area: VisitArea });
 export type SaleResult = { status: 'confirmed' | 'pending'; sale: Sale } | { status: 'error'; message: string };
-export interface CartRequest { id: string; method: PaymentMethod; lines: { productId: string; quantity: number }[]; }
+export interface CartRequest {
+  id: string;
+  method: PaymentMethod;
+  lines: { productId: string; quantity: number }[];
+  isOvertime?: boolean;
+  is_overtime?: boolean;
+}
 export type CartResult = { status: 'confirmed' | 'pending'; sales: Sale[] } | { status: 'error'; message: string };
 
 export function cartQuote(state: DemoState, lines: CartRequest['lines']) {
@@ -41,8 +47,19 @@ export function registerCart(state: DemoState, request: CartRequest): Transactio
   if (quote.lines.some(line => !Number.isSafeInteger(expectedStock(state, line.productId)) || line.quantity > expectedStock(state, line.productId))) return fail('Existencia insuficiente para esta compra.');
   const status = request.method === 'transfer' ? 'pending' : 'confirmed';
   const recordedAt = new Date().toISOString();
-  const sales: Sale[] = quote.lines.map((line, index) => ({ ...line, id: `${request.id}:line:${index}`, cartId: request.id,
-    kind: 'product', method: request.method, status, shiftId: state.currentShiftId, recordedAt }));
+  const isOvertime = Boolean(request.isOvertime ?? request.is_overtime);
+  const sales: Sale[] = quote.lines.map((line, index) => ({
+    ...line,
+    id: `${request.id}:line:${index}`,
+    cartId: request.id,
+    kind: 'product',
+    method: request.method,
+    status,
+    shiftId: state.currentShiftId,
+    recordedAt,
+    isOvertime,
+    is_overtime: isOvertime,
+  }));
   if (state.sales.some(sale => sale.id === request.id) || sales.some(sale => state.sales.some(item => item.id === sale.id)
     || state.ledger.some(item => item.id === `sale-event-${sale.id}`) || state.stockMovements.some(item => item.id === `sale-stock-${sale.id}`))) return fail('Referencia de compra no disponible.');
   // One immutable transition: never register individual lines sequentially.

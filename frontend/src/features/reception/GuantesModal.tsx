@@ -6,8 +6,8 @@ import { memberStatus } from '../../demo/memberStatus';
 import { rentGlove, returnGlove } from '../../demo/gloveOperations';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
-import JellyRadio from '../catalog/react-bits/JellyRadio';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
+import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 
 export interface GuantesModalProps {
   isOpen: boolean;
@@ -20,8 +20,6 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
 
   const [selectedGloveId, setSelectedGloveId] = useState<string>('glove-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
-  const [method, setMethod] = useState<PaymentMethod>('cash');
-  const [tenderedAmount, setTenderedAmount] = useState<string>('');
 
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -87,7 +85,6 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
     if (isOpen) {
       setSelectedGloveId('glove-01');
       setAssignedMemberId(null);
-      setTenderedAmount('');
       setToast(null);
     }
   }, [isOpen]);
@@ -176,29 +173,40 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
     setSelectedMemberIndex(-1);
   }
 
-  const tenderedMinor = parseMoney(tenderedAmount);
-  const changeMinor =
-    tenderedMinor !== null && selectedGlove
-      ? tenderedMinor - selectedGlove.priceMinor
-      : null;
-
-  function handleConfirmRental() {
+  function handleConfirmRental(breakdown?: CheckoutPaymentBreakdown, forcePending?: boolean) {
     if (!selectedGlove || !assignedMemberId) return;
+    const paymentMethodToUse: PaymentMethod = breakdown
+      ? (breakdown.mode === 'mixed' ? (breakdown.mixedMethod1 ?? 'cash') : breakdown.method)
+      : 'cash';
+    const shortfall = breakdown?.shortfallMinor ?? 0;
+
     const rentalId = `rental-${crypto.randomUUID()}`;
-    const result = transact(current =>
-      rentGlove(current, {
+    const result = transact(current => {
+      const rentalTx = rentGlove(current, {
         id: rentalId,
         gloveId: selectedGlove.id,
         memberId: assignedMemberId,
-        method,
-      })
-    );
+        method: paymentMethodToUse,
+      });
+      if (rentalTx.result.status === 'error') return rentalTx;
+      if (shortfall > 0 && forcePending) {
+        return {
+          ...rentalTx,
+          state: {
+            ...rentalTx.state,
+            members: rentalTx.state.members.map(m =>
+              m.id === assignedMemberId ? { ...m, creditMinor: m.creditMinor - shortfall } : m
+            ),
+          },
+        };
+      }
+      return rentalTx;
+    });
 
     if (result.status === 'paid' || result.status === 'pending') {
       const memberName = assignedMember?.name ?? 'socio';
       const success = `Guantes ${selectedGlove.code} rentados exitosamente a ${memberName}.`;
       setAssignedMemberId(null);
-      setTenderedAmount('');
       setToast({
         open: true,
         title: 'Renta confirmada',
@@ -304,15 +312,26 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
             })}
           </div>
 
-          {/* Right Sidebar: 3 Bento Cards */}
+          {/* Right Sidebar: CurrentPurchaseCard (available) or Return info (rented) */}
           {selectedGlove && (
             <div className="guantes-sidebar-column">
-              {/* Card 1: Asignar a socio / Socio asignado */}
-              <div className="guantes-bento-card">
-                <h3>{selectedGlove.status === 'available' ? 'Asignar a socio' : 'Socio asignado'}</h3>
-
-                {selectedGlove.status === 'available' ? (
-                  <>
+              {selectedGlove.status === 'available' ? (
+                <CurrentPurchaseCard
+                  className="current-purchase-card--modal"
+                  title={`Guantes ${selectedGlove.code}`}
+                  totalMinor={selectedGlove.priceMinor}
+                  step1Title="Guante"
+                  step2Title="Cobro"
+                  confirmActionLabel="Confirmar cobro y entregar"
+                  step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedGlove.priceMinor)} MXN →`}
+                  step1ActionDisabled={!assignedMemberId}
+                  assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
+                  onAssignMemberClick={() => setIsSearchOpen(true)}
+                  onConfirmPayment={handleConfirmRental}
+                >
+                  {/* Step 1: Member Assignment */}
+                  <div className="modal-cart-section">
+                    <h3 className="modal-cart-section-title">Asignar a socio</h3>
                     {!assignedMember ? (
                       <div className="cart-member-search" ref={memberSearchContainerRef}>
                         <div className="field">
@@ -403,23 +422,6 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
                             )}
                           </div>
                         )}
-
-                        {/* Quick member suggestions chips */}
-                        <div className="guantes-quick-members">
-                          <span className="guantes-quick-label">Sugeridos:</span>
-                          <div className="guantes-quick-chips">
-                            {flatActiveMembers.slice(0, 3).map(m => (
-                              <button
-                                key={m.id}
-                                type="button"
-                                className="guantes-quick-chip"
-                                onClick={() => handleAssignMember(m.id)}
-                              >
-                                {m.name}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
                       </div>
                     ) : (
                       <div className="assigned-member-card">
@@ -443,151 +445,96 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
                         </Button>
                       </div>
                     )}
-                  </>
-                ) : (
-                  <div className="guantes-assigned-details">
-                    <div className="guantes-spec-row">
-                      <span className="muted">Socio:</span>
-                      <strong>{selectedGlove.assignedMemberName || rentedMember?.name || 'No especificado'}</strong>
-                    </div>
-                    {rentedMember?.phone && (
+                  </div>
+
+                  {/* Step 1: Especificación de los guantes */}
+                  <div className="modal-cart-section" style={{ marginTop: '8px' }}>
+                    <h3 className="modal-cart-section-title">Especificación de los guantes</h3>
+                    <div className="guantes-spec-list">
                       <div className="guantes-spec-row">
-                        <span className="muted">Teléfono:</span>
-                        <span>{rentedMember.phone}</span>
+                        <span className="muted">Código:</span>
+                        <strong>{selectedGlove.code}</strong>
                       </div>
-                    )}
-                    {selectedGlove.assignedAt && (
                       <div className="guantes-spec-row">
-                        <span className="muted">Hora de préstamo:</span>
-                        <span>
-                          {new Date(selectedGlove.assignedAt).toLocaleTimeString('es-MX', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+                        <span className="muted">Color:</span>
+                        <strong>{selectedGlove.color}</strong>
                       </div>
-                    )}
-                    <div className="guantes-spec-row">
-                      <span className="muted">Estado:</span>
-                      <span className="guante-badge guante-badge-rented">En uso · Rentado</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Card 2: Especificación de los guantes */}
-              <div className="guantes-bento-card">
-                <h3>Especificación de los guantes</h3>
-                <div className="guantes-spec-list">
-                  <div className="guantes-spec-row">
-                    <span className="muted">Código:</span>
-                    <strong>{selectedGlove.code}</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Color:</span>
-                    <strong>{selectedGlove.color}</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Onzas:</span>
-                    <strong>{selectedGlove.ounces} oz</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Estado:</span>
-                    <strong>{selectedGlove.status === 'available' ? 'Disponible' : 'En uso'}</strong>
-                  </div>
-                  <div className="guantes-spec-row">
-                    <span className="muted">Tarifa:</span>
-                    <strong>{formatMoney(selectedGlove.priceMinor)} MXN</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 3: Cobro y entrega / Devolución */}
-              <div className="guantes-bento-card">
-                <h3>{selectedGlove.status === 'available' ? 'Cobro y entrega' : 'Devolución'}</h3>
-
-                {selectedGlove.status === 'available' ? (
-                  <>
-                    <div className="cart-payment-methods-box" style={{ margin: '0 0 10px' }}>
-                      <span className="field-label" id="guantes-payment-method-label">
-                        Método de cobro
-                      </span>
-                      <div className="cart-jelly-method-wrap">
-                        <JellyRadio
-                          items={[
-                            { value: 'cash', label: 'Efectivo' },
-                            { value: 'card', label: 'Tarjeta' },
-                            { value: 'transfer', label: 'Transferencia' },
-                          ]}
-                          value={method}
-                          onChange={val => setMethod(val as PaymentMethod)}
-                          size="sm"
-                          radius={10}
-                          swell={0}
-                          barge={0}
-                          shrink={0}
-                          chipColor={dark ? '#26232E' : '#EFEFED'}
-                          activeColor="#FC6C06"
-                          textColor={dark ? '#D1D0D5' : '#3F3F46'}
-                          activeTextColor="#FFFFFF"
-                          ariaLabel="Método de cobro"
-                        />
+                      <div className="guantes-spec-row">
+                        <span className="muted">Onzas:</span>
+                        <strong>{selectedGlove.ounces} oz</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Estado:</span>
+                        <strong>Disponible</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Tarifa:</span>
+                        <strong>{formatMoney(selectedGlove.priceMinor)} MXN</strong>
                       </div>
                     </div>
-
-                    {method === 'cash' && (
-                      <div className="cash-tender-card" style={{ margin: '0 0 10px' }}>
-                        <div className="field">
-                          <label htmlFor="guantes-cash-tendered-input">Monto recibido</label>
-                          <div className="cash-tender-input-row">
-                            <input
-                              id="guantes-cash-tendered-input"
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0.00"
-                              value={tenderedAmount}
-                              onChange={e => setTenderedAmount(e.target.value)}
-                            />
-                            <Button
-                              variant="secondary"
-                              className="button-sm"
-                              onClick={() => {
-                                setTenderedAmount((selectedGlove.priceMinor / 100).toFixed(2));
-                              }}
-                            >
-                              Pago exacto
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="cash-change-result">
-                          <span>Cambio a devolver:</span>
-                          <strong>
-                            {changeMinor !== null && changeMinor >= 0
-                              ? `${formatMoney(changeMinor)} MXN`
-                              : changeMinor !== null
-                              ? 'Monto insuficiente'
-                              : '$0.00 MXN'}
-                          </strong>
-                        </div>
+                  </div>
+                </CurrentPurchaseCard>
+              ) : (
+                <>
+                  <div className="guantes-bento-card">
+                    <h3>Socio asignado</h3>
+                    <div className="guantes-assigned-details">
+                      <div className="guantes-spec-row">
+                        <span className="muted">Socio:</span>
+                        <strong>{selectedGlove.assignedMemberName || rentedMember?.name || 'No especificado'}</strong>
                       </div>
-                    )}
+                      {rentedMember?.phone && (
+                        <div className="guantes-spec-row">
+                          <span className="muted">Teléfono:</span>
+                          <span>{rentedMember.phone}</span>
+                        </div>
+                      )}
+                      {selectedGlove.assignedAt && (
+                        <div className="guantes-spec-row">
+                          <span className="muted">Hora de préstamo:</span>
+                          <span>
+                            {new Date(selectedGlove.assignedAt).toLocaleTimeString('es-MX', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      <div className="guantes-spec-row">
+                        <span className="muted">Estado:</span>
+                        <span className="guante-badge guante-badge-rented">En uso · Rentado</span>
+                      </div>
+                    </div>
+                  </div>
 
-                    {method === 'transfer' && (
-                      <Notice tone="warning">
-                        T03: La transferencia queda pendiente hasta verificar el comprobante bancario en caja.
-                      </Notice>
-                    )}
+                  <div className="guantes-bento-card">
+                    <h3>Especificación de los guantes</h3>
+                    <div className="guantes-spec-list">
+                      <div className="guantes-spec-row">
+                        <span className="muted">Código:</span>
+                        <strong>{selectedGlove.code}</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Color:</span>
+                        <strong>{selectedGlove.color}</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Onzas:</span>
+                        <strong>{selectedGlove.ounces} oz</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Estado:</span>
+                        <strong>En uso</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Tarifa:</span>
+                        <strong>{formatMoney(selectedGlove.priceMinor)} MXN</strong>
+                      </div>
+                    </div>
+                  </div>
 
-                    <Button
-                      variant="primary"
-                      disabled={!assignedMemberId || (method === 'cash' && changeMinor !== null && changeMinor < 0)}
-                      onClick={handleConfirmRental}
-                    >
-                      Confirmar cobro y entregar
-                    </Button>
-                  </>
-                ) : (
-                  <>
+                  <div className="guantes-bento-card">
+                    <h3>Devolución</h3>
                     <div className="guantes-payment-summary">
                       <span className="guantes-summary-label">Resumen de cobro:</span>
                       <strong>
@@ -609,9 +556,9 @@ export function GuantesModal({ isOpen, onClose }: GuantesModalProps) {
                     >
                       Marcar como devuelto
                     </Button>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

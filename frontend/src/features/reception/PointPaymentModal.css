@@ -1,0 +1,217 @@
+/* Point Payment Modal Styles - EvoGym Claymorphism */
+.point-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  animation: pointFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pointFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.point-modal-card {
+  background: var(--color-surface);
+  border: none;
+  border-radius: 28px;
+  padding: 32px 28px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: var(--shadow-clay), 0 24px 55px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  animation: pointCardIn 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+  position: relative;
+}
+
+[data-theme='dark'] .point-modal-card {
+  box-shadow: var(--shadow-clay), 0 24px 60px rgba(0, 0, 0, 0.65);
+}
+
+@keyframes pointCardIn {
+  from {
+    transform: scale(0.96) translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.point-header-icon-box {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto;
+}
+
+.point-icon-pulse {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(252, 108, 6, 0.12);
+  color: #FC6C06;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 4px rgba(252, 108, 6, 0.15), 0 8px 20px rgba(252, 108, 6, 0.18);
+  animation: pointPulse 2s infinite;
+}
+
+@keyframes pointPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(252, 108, 6, 0.4), inset 0 2px 4px rgba(252, 108, 6, 0.15);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgba(252, 108, 6, 0), inset 0 2px 4px rgba(252, 108, 6, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(252, 108, 6, 0), inset 0 2px 4px rgba(252, 108, 6, 0.15);
+  }
+}
+
+.point-icon-success {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #EAF6EE;
+  color: #15803D;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 4px rgba(21, 128, 61, 0.15), 0 8px 20px rgba(21, 128, 61, 0.18);
+}
+
+[data-theme='dark'] .point-icon-success {
+  background: #14532D;
+  color: #86EFAC;
+  box-shadow: inset 0 2px 4px rgba(134, 239, 172, 0.2), 0 8px 20px rgba(20, 83, 45, 0.4);
+}
+
+.point-modal-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-ink);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.point-modal-desc {
+  font-size: 14px;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+/* Tactile Clay Terminal Pill */
+.point-terminal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-canvas);
+  border: none;
+  color: var(--color-ink);
+  padding: 6px 14px;
+  border-radius: 999px;
+  margin: 0 auto;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme='dark'] .point-terminal-pill {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.point-terminal-pill .point-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22C55E;
+}
+
+.point-amount-display {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--color-primary);
+  margin: 4px 0 0;
+}
+
+/* Voucher Ticket Box - Soft Sunken Clay */
+.point-voucher-ticket {
+  background: var(--color-canvas);
+  border: none;
+  border-radius: 20px;
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.07), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .point-voucher-ticket {
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.point-voucher-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13.5px;
+}
+
+.point-voucher-label {
+  color: var(--color-muted);
+}
+
+.point-voucher-value {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.point-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.point-modal-actions .point-cancel-btn {
+  border: none;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-clay);
+  border-radius: var(--radius-control, 12px);
+  font-weight: 600;
+  transition: transform 140ms ease, box-shadow 160ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.point-modal-actions .point-cancel-btn:hover {
+  background: var(--color-soft);
+  color: #DC2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.15);
+}
+
+.point-modal-actions .button-primary {
+  border: none;
+  border-radius: var(--radius-control, 12px);
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(252, 108, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: transform 140ms ease, box-shadow 160ms ease, background-color 140ms ease;
+}
+
+.point-modal-actions .button-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(252, 108, 6, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}

@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createDemoState } from '../../demo/adapter';
 import { collectMembership, confirmedCollections } from '../../demo/operations';
-import { plans } from '../../demo/plans';
+import { plans, resetPlans, updatePlan, reloadPlans, getPlanList } from '../../demo/plans';
 
 describe('membership collection adapter', () => {
+  beforeEach(resetPlans);
   const request = { id: 'payment-test', memberId: 'demo-001', planId: 'gym-month', method: 'cash' as const };
   it('records a full cash payment once without inventing access dates or spending credit', () => {
     const initial = createDemoState();
@@ -44,4 +45,43 @@ describe('membership collection adapter', () => {
     const first = collectMembership(initial, request);
     expect(collectMembership(first.state, { ...request, planId: 'combo-month' }).result.status).toBe('error');
   });
+});
+
+
+it('captures immutable purchased plan terms while later payments use current prices', () => {
+  resetPlans();
+  const request = { id: 'terms-1', memberId: 'demo-001', planId: 'gym-month', method: 'cash' as const };
+  const first = collectMembership(createDemoState(), request);
+  const original = JSON.parse(JSON.stringify(first.state.payments[0]));
+  expect(original.planSnapshot).toMatchObject({ revision: 1, name: 'Gym mensual', amountMinor: 50000, composition: { services: ['gym'] } });
+  const composition = getPlanList().find(plan => plan.id === 'gym-month')!.composition!;
+  composition.services.push('box');
+  composition.period.value = 6;
+  composition.conditions.notes = 'Contrato nuevo';
+  updatePlan('gym-month', { name: 'Gym mensual', amountMinor: 60000, composition });
+  composition.services.length = 0;
+  reloadPlans();
+  const restored = JSON.parse(JSON.stringify(first.state));
+  const second = collectMembership(restored, { ...request, id: 'terms-2' });
+  expect(second.state.payments[0]).toEqual(original);
+  expect(second.state.payments[1].planSnapshot).toMatchObject({ revision: 2, name: 'Gym mensual', amountMinor: 60000, composition: { services: ['gym', 'box'], period: { value: 6 }, conditions: { notes: 'Contrato nuevo' } } });
+  expect(second.state.members[0].membership).toEqual(first.state.members[0].membership);
+  const legacy = { ...original, planSnapshot: undefined };
+  expect(collectMembership({ ...restored, payments: [legacy] }, request).result.status).toBe('paid');
+  resetPlans();
+});
+
+it('keeps purchased reference and actual prices immutable in both earlier and later collections', () => {
+  resetPlans();
+  updatePlan('gym-month', { referenceAmountMinor: 50000, amountMinor: 40000 });
+  const request = { id: 'reference-collection-1', memberId: 'demo-001', planId: 'gym-month', method: 'cash' as const };
+  const first = collectMembership(createDemoState(), request);
+  expect(first.state.payments.at(-1)?.planSnapshot).toMatchObject({ referenceAmountMinor: 50000, amountMinor: 40000 });
+  updatePlan('gym-month', { referenceAmountMinor: 100000, amountMinor: 80000 });
+  reloadPlans();
+  const state = JSON.parse(JSON.stringify(first.state));
+  const second = collectMembership(state, { ...request, id: 'reference-collection-2' });
+  expect(second.state.payments[0]).toMatchObject({ amountMinor: 40000, planSnapshot: { referenceAmountMinor: 50000, amountMinor: 40000 } });
+  expect(second.state.payments[1]).toMatchObject({ amountMinor: 80000, planSnapshot: { referenceAmountMinor: 100000, amountMinor: 80000 } });
+  resetPlans();
 });

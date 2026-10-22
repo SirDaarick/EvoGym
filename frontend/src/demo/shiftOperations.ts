@@ -1,8 +1,28 @@
-import type { CashDenominationCount, DemoState, ShiftWindow } from '../domain/models';
+import type { CashDenominationCount, DemoState, PhysicalCount, Shift, ShiftWindow, StockMovement } from '../domain/models';
 import { cashCountTotal } from './cashDenominations';
 import type { Transaction } from './operations';
-import { activeShift, type OperationResult } from './inventoryOperations';
+import { activeShift, expectedStock, type OperationResult } from './inventoryOperations';
 import { shiftDashboard } from './shiftDashboard';
+
+export interface OpenShiftRequest {
+  id: string;
+  window: ShiftWindow;
+  openingCashMinor: number;
+  cashDenominations?: CashDenominationCount[];
+  openingCashDenominations?: CashDenominationCount[];
+  responsibleStaffId?: string;
+  responsibleStaffName?: string;
+  stockAdjustments?: {
+    productId: string;
+    kind: 'restock' | 'waste';
+    quantity: number;
+    reason?: string;
+  }[];
+  counts?: {
+    productId: string;
+    quantity: number;
+  }[];
+}
 
 export function shiftSummary(state: DemoState, shiftId: string) {
   const shift = state.shifts.find(item => item.id === shiftId);
@@ -32,11 +52,58 @@ export function closeShift(state: DemoState, countedCashMinor: number, denominat
       ...(denominations ? { cashDenominations: denominations.map(row => ({ ...row })) } : {}),
       ...(closingNotes?.trim() ? { closingNotes: closingNotes.trim() } : {}) } : item) }, result: { status: 'ok' } };
 }
-export function openShift(state: DemoState, request: { id: string; window: ShiftWindow; openingCashMinor: number }): Transaction<OperationResult> {
+export function openShift(state: DemoState, request: OpenShiftRequest): Transaction<OperationResult> {
   const fail = (message: string): Transaction<OperationResult> => ({ state, result: { status: 'error', message } });
   if (state.shifts.some(item => item.status === 'open')) return fail('Ya existe un turno abierto.');
   if (!request.id || state.shifts.some(item => item.id === request.id)) return fail('Referencia de turno no disponible.');
   if (!['06:00–14:00', '14:00–22:00'].includes(request.window) || !Number.isSafeInteger(request.openingCashMinor) || request.openingCashMinor < 0) return fail('Revisa horario y fondo inicial.');
-  return { state: { ...state, revision: state.revision + 1, currentShiftId: request.id,
-    shifts: [...state.shifts, { ...request, status: 'open', openedAt: new Date().toISOString() }] }, result: { status: 'ok' } };
+
+  const now = new Date().toISOString();
+  const createdMovements: StockMovement[] = (request.stockAdjustments ?? []).map((adj, index) => ({
+    id: `adj-open-${request.id}-${index}-${crypto.randomUUID().slice(0, 8)}`,
+    productId: adj.productId,
+    shiftId: request.id,
+    kind: adj.kind,
+    quantity: adj.quantity,
+    reason: adj.reason?.trim() || 'Ajuste inicial al abrir turno',
+    recordedAt: now,
+  }));
+
+  const createdCounts: PhysicalCount[] = (request.counts ?? []).map((cnt, index) => {
+    const exp = expectedStock(state, cnt.productId);
+    return {
+      id: `cnt-open-${request.id}-${index}-${crypto.randomUUID().slice(0, 8)}`,
+      productId: cnt.productId,
+      shiftId: request.id,
+      quantity: cnt.quantity,
+      expectedAtCount: exp,
+      variance: cnt.quantity - exp,
+      recordedAt: now,
+    };
+  });
+
+  const denominations = request.openingCashDenominations ?? request.cashDenominations;
+
+  const newShift: Shift = {
+    id: request.id,
+    window: request.window,
+    openingCashMinor: request.openingCashMinor,
+    status: 'open',
+    openedAt: now,
+    ...(denominations ? { openingCashDenominations: denominations, cashDenominations: denominations } : {}),
+    ...(request.responsibleStaffId ? { responsibleStaffId: request.responsibleStaffId } : {}),
+    ...(request.responsibleStaffName ? { responsibleStaffName: request.responsibleStaffName } : {}),
+  };
+
+  return {
+    state: {
+      ...state,
+      revision: state.revision + 1,
+      currentShiftId: request.id,
+      shifts: [...state.shifts, newShift],
+      stockMovements: createdMovements.length ? [...state.stockMovements, ...createdMovements] : state.stockMovements,
+      counts: createdCounts.length ? [...state.counts, ...createdCounts] : state.counts,
+    },
+    result: { status: 'ok' },
+  };
 }

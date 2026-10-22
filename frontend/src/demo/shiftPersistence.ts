@@ -10,8 +10,8 @@ export type HydrationResult = { status: 'ready'; record: PersistenceRecord } | {
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 const credentialField = (key: string) => {
   const normalized = key.toLowerCase().replace(/[-_]/g, '');
-  if (normalized.startsWith('author')) return false;
-  return ['pin', 'pincode', 'password', 'secret', 'token', 'credential', 'auth', 'staffprofile', 'selectedstaff', 'staffid'].some(prefix => normalized.startsWith(prefix));
+  if (normalized.startsWith('author') || normalized.startsWith('staffid') || normalized.startsWith('clock') || normalized.startsWith('recordedby')) return false;
+  return ['pin', 'pincode', 'password', 'secret', 'token', 'credential', 'auth', 'staffprofile', 'selectedstaff'].some(prefix => normalized.startsWith(prefix));
 };
 function validTree(value: unknown): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
@@ -61,6 +61,7 @@ function validDomainEntry(key: string, value: unknown): boolean {
     case 'supplementSales': return hasFields(value, ['id', 'supplementId', 'name', 'shiftId', 'recordedAt'], ['scoops', 'unitPriceMinor', 'amountMinor'], { method: ['cash', 'card', 'transfer'], status: ['confirmed', 'pending'] });
     case 'expenses': return hasFields(value, ['id', 'concept', 'payeeName', 'shiftId', 'recordedAt'], ['amountMinor']);
     case 'extras': return hasFields(value, ['id', 'concept', 'staffName', 'shiftId', 'recordedAt'], ['amountMinor']);
+    case 'staffAttendance': return isObject(value) && isString(value.id) && isString(value.staffName) && (isString(value.clockInAt) || isString(value.clock_in_at));
     default: return false;
   }
 }
@@ -68,7 +69,7 @@ function validState(value: unknown): value is DemoState {
   if (!isObject(value) || !validTree(value)) return false;
   const required = ['attendance', 'members', 'payments', 'ledger', 'shifts', 'products', 'stockMovements', 'counts', 'sales'];
   if (required.some(key => !Array.isArray(value[key]))) return false;
-  const optional = ['gloves', 'gloveRentals', 'lockers', 'lockerRentals', 'supplements', 'supplementSales', 'expenses', 'extras', 'memberNotes'];
+  const optional = ['gloves', 'gloveRentals', 'lockers', 'lockerRentals', 'supplements', 'supplementSales', 'expenses', 'extras', 'memberNotes', 'staffAttendance'];
   return [...required, ...optional].every(key => value[key] === undefined
       ? !required.includes(key)
       : Array.isArray(value[key]) && (value[key] as unknown[]).every(entry => validDomainEntry(key, entry)))
@@ -112,7 +113,7 @@ export function savePersistenceRecord(storage: Storage, record: PersistenceRecor
 
 export type WriterLockResult = { status: 'acquired'; release: () => void } | { status: 'blocked' } | { status: 'unavailable' };
 
-async function requestLockOnce(): Promise<WriterLockResult> {
+async function requestLockOnce(options: { steal?: boolean } = {}): Promise<WriterLockResult> {
   const locks = navigator.locks;
   if (!locks) return { status: 'unavailable' };
   let releaseLock!: () => void;
@@ -120,19 +121,29 @@ async function requestLockOnce(): Promise<WriterLockResult> {
   const acquired = new Promise<((() => void))>(resolve => { signalAcquired = resolve; });
   const held = new Promise<void>(resolve => { releaseLock = resolve; });
   let request: Promise<unknown>;
-  try { request = locks.request(STORAGE_KEY, { mode: 'exclusive', ifAvailable: true }, async lock => {
-    if (!lock) return;
-    signalAcquired(releaseLock);
-    await held;
-  }); } catch { return { status: 'unavailable' }; }
-  const raced = await Promise.race([acquired.then(release => ({ status: 'acquired' as const, release })),
-    request.then(() => ({ status: 'blocked' as const }), () => ({ status: 'unavailable' as const }))]);
+  try {
+    request = locks.request(
+      STORAGE_KEY,
+      options.steal ? { mode: 'exclusive', steal: true } : { mode: 'exclusive', ifAvailable: true },
+      async lock => {
+        if (!lock) return;
+        signalAcquired(releaseLock);
+        await held;
+      }
+    );
+  } catch {
+    return { status: 'unavailable' };
+  }
+  const raced = await Promise.race([
+    acquired.then(release => ({ status: 'acquired' as const, release })),
+    request.then(() => ({ status: 'blocked' as const }), () => ({ status: 'unavailable' as const }))
+  ]);
   return raced;
 }
 
-export async function acquireExclusiveWriter(retries = 3, retryDelayMs = 30): Promise<WriterLockResult> {
+export async function acquireExclusiveWriter(retries = 3, retryDelayMs = 30, options?: { steal?: boolean }): Promise<WriterLockResult> {
   for (let i = 0; i <= retries; i++) {
-    const res = await requestLockOnce();
+    const res = await requestLockOnce(options);
     if (res.status === 'acquired' || res.status === 'unavailable') return res;
     if (i < retries) {
       await new Promise(resolve => setTimeout(resolve, retryDelayMs));

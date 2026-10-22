@@ -2,6 +2,11 @@
   min-width: 0;
 }
 
+.product-card .product-subtitle {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .product-card .product-tile-btn:focus-visible,
 .product-card .qty-btn:focus-visible {
   outline: 3px solid var(--color-focus, #2455a4);
@@ -17,12 +22,12 @@
 
   .product-card.product-clay-card {
     aspect-ratio: auto;
-    min-height: 128px;
-    padding: 8px;
+    min-height: 140px;
+    padding: 10px;
   }
 
   .product-card.product-clay-card.product-selected {
-    min-height: 204px;
+    min-height: 140px;
   }
 
   .product-card .product-tile-btn {

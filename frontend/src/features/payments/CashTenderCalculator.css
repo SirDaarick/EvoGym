@@ -2,9 +2,10 @@
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid var(--border, #e4e4e7);
+  border: 1px solid var(--color-divider, #e4e4e7);
   border-radius: 14px;
-  background: var(--surface-muted, #fafafa);
+  background: var(--color-canvas, #f4f4f5);
+  color: var(--color-ink, #18181b);
 }
 
 .cash-tender-input-row {
@@ -16,15 +17,44 @@
 .cash-tender-input-row input {
   min-width: 0;
   flex: 1;
+  background: var(--color-surface, #ffffff);
+  color: var(--color-ink, #18181b);
+  border: 1px solid var(--color-boundary, #d4d4d8);
+  border-radius: 8px;
+  padding: 8px 12px;
 }
 
 .cash-change-result {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
+  font-size: 14px;
+  color: var(--color-ink);
+}
+
+.cash-change-result strong {
+  color: var(--color-primary, #FC6C06);
 }
 
 .cash-tender-shortfall {
   color: var(--color-danger, #b42318);
   font-size: 0.875rem;
 }
+
+[data-theme='dark'] .cash-tender-card {
+  background: #18181b;
+  border-color: #27272a;
+  color: #f4f4f5;
+}
+
+[data-theme='dark'] .cash-tender-input-row input {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #f4f4f5;
+}
+
+[data-theme='dark'] .cash-change-result {
+  color: #f4f4f5;
+}
+

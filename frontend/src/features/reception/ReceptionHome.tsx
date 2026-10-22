@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PaymentMethod } from '../../domain/models';
+import type { LedgerEvent, PaymentMethod, Sale } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney, parseMoney } from '../../demo/adapter';
 import { memberStatus } from '../../demo/memberStatus';
@@ -8,9 +8,10 @@ import { cartQuote, registerCart } from '../../demo/salesOperations';
 import { Button, EmptyState, Notice, PageHeader, Panel } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
-import { CurrentPurchaseCard } from './CurrentPurchaseCard';
+import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 import { AssignedMemberSummary } from './AssignedMemberSummary';
-import { MermaModal } from './MermaModal';
+import { MermaModal, type WasteItem } from './MermaModal';
+import { DevolucionesModal } from './DevolucionesModal';
 import { GuantesModal } from './GuantesModal';
 import { CasillerosModal } from './CasillerosModal';
 import { SuplementosModal } from './SuplementosModal';
@@ -19,6 +20,7 @@ import { ExtraModal } from './ExtraModal';
 import { CashTenderCalculator } from '../payments/CashTenderCalculator';
 import { ProductCard } from './ProductCard';
 import { MobileDetailPanel } from '../../shared/MobileDetailPanel';
+import { PendingBalanceModal } from './PendingBalanceModal';
 
 function TrashIcon() {
   return (
@@ -29,6 +31,38 @@ function TrashIcon() {
     </svg>
   );
 }
+
+const paymentIcons = {
+  cash: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="12" x="2" y="6" rx="2" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M6 12h.01M18 12h.01" />
+    </svg>
+  ),
+  card: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" x2="22" y1="10" y2="10" />
+    </svg>
+  ),
+  transfer: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v4M12 14v4M16 14v4" />
+    </svg>
+  ),
+  mixed: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+    </svg>
+  ),
+  pending: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  ),
+};
 
 const memberFavoriteMethods: Record<string, PaymentMethod> = {
   'demo-001': 'card',
@@ -84,9 +118,17 @@ export function ReceptionHome() {
   const { state, transact } = useDemo();
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [selectedMethods, setSelectedMethods] = useState<PaymentMethod[]>([]);
+  const [holdingMethod, setHoldingMethod] = useState<PaymentMethod | null>(null);
+  const [mixedSubStep, setMixedSubStep] = useState<1 | 2>(1);
+  const [mixedAmount1, setMixedAmount1] = useState<string>('');
+  const [mixedAmount2, setMixedAmount2] = useState<string>('');
+  const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState<string>('');
   const [isMermaOpen, setIsMermaOpen] = useState(false);
+  const [isDevolucionesOpen, setIsDevolucionesOpen] = useState(false);
+  const [selectedCatalogProductId, setSelectedCatalogProductId] = useState<string | null>(null);
   const [isGuantesOpen, setIsGuantesOpen] = useState(false);
   const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
   const [isSuplementosOpen, setIsSuplementosOpen] = useState(false);
@@ -156,6 +198,7 @@ export function ReceptionHome() {
     ? state.members.find(m => m.id === assignedMemberId) ?? null
     : null;
 
+  const currentShift = state.shifts.find(s => s.id === state.currentShiftId) ?? state.shifts.find(s => s.status === 'open');
   const tenderedMinor = parseMoney(tenderedAmount);
   // Active members only, prioritizing attendance
   const activeMembers = state.members.filter(m => {
@@ -251,18 +294,137 @@ export function ReceptionHome() {
     }
   }
 
-  function handleWasteMovement(productId: string, quantity: number, _reason: string) {
-    const result = transact(current =>
-      recordMovement(current, {
-        id: `waste-${crypto.randomUUID()}`,
-        productId,
-        kind: 'waste',
-        quantity,
-      })
-    );
+  const methodNames: Record<PaymentMethod, string> = {
+    cash: 'Efectivo',
+    card: 'Tarjeta',
+    transfer: 'Transferencia',
+  };
+
+  const holdTimerRef = useRef<{ [key in PaymentMethod]?: number }>({});
+  const didLongPressRef = useRef<{ [key in PaymentMethod]?: boolean }>({});
+
+  const toggleMixedMethod = (m: PaymentMethod) => {
+    setSelectedMethods(prev => {
+      if (prev.includes(m)) {
+        return prev.length > 1 ? prev.filter(x => x !== m) : prev;
+      }
+      if (prev.length === 1) {
+        setMixedSubStep(1);
+        setMixedAmount1('');
+        setMixedAmount2('');
+        return [prev[0], m];
+      }
+      setMixedSubStep(1);
+      setMixedAmount1('');
+      setMixedAmount2('');
+      return [m];
+    });
+  };
+
+  const handleTilePointerDown = (m: PaymentMethod) => {
+    didLongPressRef.current[m] = false;
+    setHoldingMethod(m);
+    holdTimerRef.current[m] = window.setTimeout(() => {
+      didLongPressRef.current[m] = true;
+      setHoldingMethod(null);
+      toggleMixedMethod(m);
+    }, 450);
+  };
+
+  const handleTilePointerUpOrCancel = (m: PaymentMethod) => {
+    if (holdTimerRef.current[m]) {
+      clearTimeout(holdTimerRef.current[m]);
+      delete holdTimerRef.current[m];
+    }
+    setHoldingMethod(null);
+  };
+
+  const handleTileClick = (m: PaymentMethod, e: React.MouseEvent) => {
+    if (didLongPressRef.current[m]) {
+      didLongPressRef.current[m] = false;
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      toggleMixedMethod(m);
+      return;
+    }
+
+    if (selectedMethods.length === 2) {
+      if (m === selectedMethods[0] && mixedSubStep === 2) {
+        setMixedSubStep(1);
+        return;
+      }
+      if (m === selectedMethods[1] && mixedSubStep === 1) {
+        const a1 = parseMoney(mixedAmount1);
+        if (a1 && a1 > 0) {
+          const remaining = Math.max(0, totalMinor - a1);
+          if (!mixedAmount2 && remaining > 0) {
+            setMixedAmount2((remaining / 100).toFixed(2));
+          }
+          setMixedSubStep(2);
+          return;
+        }
+      }
+    }
+
+    // Normal click: switch single selection
+    setSelectedMethods([m]);
+    setMixedSubStep(1);
+    setMixedAmount1('');
+    setMixedAmount2('');
+    setMethod(m);
+  };
+
+  function handleWasteMovement(
+    itemsOrProductId: WasteItem[] | string,
+    quantityOrReason?: number | string,
+    maybeReason?: string
+  ) {
+    const itemsToWaste: WasteItem[] = Array.isArray(itemsOrProductId)
+      ? itemsOrProductId
+      : [
+          {
+            product: state.products.find(p => p.id === itemsOrProductId)!,
+            quantity: typeof quantityOrReason === 'number' ? quantityOrReason : 1,
+          },
+        ].filter(i => Boolean(i.product));
+
+    const reason = (
+      typeof itemsOrProductId === 'string'
+        ? (typeof quantityOrReason === 'string' ? quantityOrReason : maybeReason ?? '')
+        : (typeof quantityOrReason === 'string' ? quantityOrReason : '')
+    ).trim();
+
+    const result = transact(current => {
+      let nextState = current;
+      for (const item of itemsToWaste) {
+        const op = recordMovement(nextState, {
+          id: `waste-${crypto.randomUUID()}`,
+          productId: item.product.id,
+          kind: 'waste',
+          quantity: item.quantity,
+          reason,
+        });
+        if (op.result.status === 'error') {
+          return op;
+        }
+        nextState = op.state;
+      }
+      return { state: nextState, result: { status: 'ok' as const } };
+    });
+
     if (result.status === 'ok') {
-      const prodName = state.products.find(p => p.id === productId)?.name ?? 'producto';
-      const successMsg = `Merma registrada: ${quantity} unidad(es) de ${prodName} descontada(s) del inventario.`;
+      setQuantities(prev => {
+        const next = { ...prev };
+        for (const item of itemsToWaste) {
+          delete next[item.product.id];
+        }
+        return next;
+      });
+      setSelectedCatalogProductId(null);
+      const totalUnits = itemsToWaste.reduce((sum, i) => sum + i.quantity, 0);
+      const successMsg = `Merma registrada: ${totalUnits} unidad(es) descontada(s) del inventario.`;
       setMessage(successMsg);
       setError(false);
       setToast({
@@ -274,6 +436,388 @@ export function ReceptionHome() {
     }
     return result;
   }
+
+  type CustomTransactionResult =
+    | { status: 'error'; message: string; sales?: never }
+    | { status: 'confirmed' | 'pending'; sales: Sale[]; message?: string };
+
+  const handleConfirmPayment = (
+    breakdownOrForce?: CheckoutPaymentBreakdown | boolean,
+    forcePendingShortfall = false
+  ) => {
+    if (!review) return;
+    const breakdown = typeof breakdownOrForce === 'object' ? breakdownOrForce : undefined;
+    const forcePending = typeof breakdownOrForce === 'boolean' ? breakdownOrForce : forcePendingShortfall;
+    const isMixed = breakdown ? breakdown.mode === 'mixed' : selectedMethods.length === 2;
+    const m1 = breakdown?.mode === 'mixed' ? breakdown.mixedMethod1! : selectedMethods[0];
+    const m2 = breakdown?.mode === 'mixed' ? breakdown.mixedMethod2! : selectedMethods[1];
+    const a1 = breakdown?.mode === 'mixed' ? breakdown.mixedAmount1Minor ?? 0 : parseMoney(mixedAmount1) ?? 0;
+    const a2 = breakdown?.mode === 'mixed' ? breakdown.mixedAmount2Minor ?? 0 : parseMoney(mixedAmount2) ?? 0;
+    const covered = a1 + a2;
+    const shortfall = breakdown ? breakdown.shortfallMinor : Math.max(0, totalMinor - covered);
+
+    if (isMixed) {
+      if (shortfall > 0 && !forcePending) {
+        if (!assignedMemberId) {
+          setError(true);
+          setMessage(`Faltan ${formatMoney(shortfall)} MXN. Para asignar saldo pendiente debes asignar un socio en el Paso 1 (Carrito).`);
+          return;
+        }
+        setIsPendingModalOpen(true);
+        return;
+      }
+
+      const result = transact<CustomTransactionResult>(current => {
+        if (current.revision !== review.revision) {
+          return {
+            state: current,
+            result: {
+              status: 'error' as const,
+              message: 'Los registros cambiaron. Revisa la compra de nuevo.',
+            },
+          };
+        }
+        const currentQuote = cartQuote(current, lines);
+        if (!currentQuote) {
+          return {
+            state: current,
+            result: { status: 'error' as const, message: 'Revisa productos.' },
+          };
+        }
+        for (const line of currentQuote.lines) {
+          const available = expectedStock(current, line.productId);
+          if (line.quantity > available) {
+            const product = current.products.find(p => p.id === line.productId);
+            return {
+              state: current,
+              result: {
+                status: 'error' as const,
+                message: `Existencia insuficiente para ${product?.name ?? 'producto'}. Disponible: ${available}.`,
+              },
+            };
+          }
+        }
+        const recordedAt = new Date().toISOString();
+        const sales: Sale[] = currentQuote.lines.map((line, index) => ({
+          ...line,
+          id: `${review.id}:line:${index}`,
+          cartId: review.id,
+          kind: 'product' as const,
+          method: m1,
+          status: shortfall > 0 ? ('pending' as const) : ('confirmed' as const),
+          shiftId: current.currentShiftId,
+          recordedAt,
+          memberId: assignedMemberId,
+          memberName: assignedMember?.name,
+          isOvertime: breakdown?.isOvertime,
+          is_overtime: breakdown?.isOvertime,
+        }));
+
+        const ledger: LedgerEvent[] = [];
+        if (a1 > 0 && (m1 === 'cash' || m1 === 'card')) {
+          ledger.push({
+            id: `sale-event-${review.id}:part1`,
+            paymentId: review.id,
+            shiftId: current.currentShiftId,
+            kind: 'product' as const,
+            amountMinor: a1,
+            method: m1,
+            recordedAt,
+          });
+        }
+        if (a2 > 0 && (m2 === 'cash' || m2 === 'card')) {
+          ledger.push({
+            id: `sale-event-${review.id}:part2`,
+            paymentId: review.id,
+            shiftId: current.currentShiftId,
+            kind: 'product' as const,
+            amountMinor: a2,
+            method: m2,
+            recordedAt,
+          });
+        }
+
+        const updatedMembers =
+          shortfall > 0 && assignedMemberId
+            ? current.members.map(m =>
+                m.id === assignedMemberId
+                  ? { ...m, creditMinor: m.creditMinor - shortfall }
+                  : m
+              )
+            : current.members;
+
+        const movements = currentQuote.lines.map(line => ({
+          id: `sale-stock-${review.id}:${line.productId}`,
+          productId: line.productId,
+          shiftId: current.currentShiftId,
+          kind: 'sale' as const,
+          quantity: line.quantity,
+          recordedAt,
+        }));
+
+        return {
+          state: {
+            ...current,
+            revision: current.revision + 1,
+            sales: [...current.sales, ...sales],
+            ledger: [...current.ledger, ...ledger],
+            stockMovements: [...current.stockMovements, ...movements],
+            members: updatedMembers,
+          },
+          result: {
+            status: shortfall > 0 ? ('pending' as const) : ('confirmed' as const),
+            sales,
+          },
+        };
+      });
+
+      setError(result.status === 'error');
+      setReview(null);
+      if (result.status === 'error') {
+        setMessage(result.message);
+        setToast({
+          open: true,
+          type: 'error',
+          title: 'Error en compra',
+          description: result.message,
+        });
+      } else {
+        setPending(false);
+        const successMsg =
+          shortfall > 0
+            ? `Cobro registrado: ${formatMoney(covered)} MXN cobrados y ${formatMoney(shortfall)} MXN asignados como saldo pendiente a ${assignedMember?.name}.`
+            : `Cobro mixto registrado con éxito (${formatMoney(a1)} MXN en ${methodNames[m1]} + ${formatMoney(a2)} MXN en ${methodNames[m2]}).`;
+        setMessage(successMsg);
+        setQuantities({});
+        setTenderedAmount('');
+        setMixedAmount1('');
+        setMixedAmount2('');
+        setSelectedMethods([]);
+        cartId.current = null;
+        setToast({
+          open: true,
+          type: 'success',
+          title: shortfall > 0 ? 'Cobro y saldo asignado' : 'Cobro confirmado',
+          description: successMsg,
+        });
+      }
+      return;
+    }
+
+    // Single method:
+    const singleMethod = breakdown?.mode === 'single' ? breakdown.method : selectedMethods[0];
+    if (singleMethod === 'cash') {
+      const isTenderSpecified = breakdown ? breakdown.tenderedMinor !== undefined : tenderedAmount.trim() !== '';
+      const tendered = breakdown ? (breakdown.tenderedMinor ?? totalMinor) : (isTenderSpecified ? (tenderedMinor ?? 0) : totalMinor);
+      const shortfall = breakdown ? breakdown.shortfallMinor : Math.max(0, totalMinor - tendered);
+
+      if (shortfall > 0 && !forcePending) {
+        if (!assignedMemberId) {
+          setError(true);
+          setMessage(`Faltan ${formatMoney(shortfall)} MXN. Para asignar saldo pendiente debes asignar un socio en el Paso 1 (Carrito).`);
+          return;
+        }
+        setIsPendingModalOpen(true);
+        return;
+      }
+
+      if (shortfall > 0) {
+        const result = transact<CustomTransactionResult>(current => {
+          if (current.revision !== review.revision) {
+            return {
+              state: current,
+              result: {
+                status: 'error' as const,
+                message: 'Los registros cambiaron. Revisa la compra de nuevo.',
+              },
+            };
+          }
+          const currentQuote = cartQuote(current, lines);
+          if (!currentQuote) {
+            return {
+              state: current,
+              result: { status: 'error' as const, message: 'Revisa productos.' },
+            };
+          }
+          for (const line of currentQuote.lines) {
+            const available = expectedStock(current, line.productId);
+            if (line.quantity > available) {
+              const product = current.products.find(p => p.id === line.productId);
+              return {
+                state: current,
+                result: {
+                  status: 'error' as const,
+                  message: `Existencia insuficiente para ${product?.name ?? 'producto'}. Disponible: ${available}.`,
+                },
+              };
+            }
+          }
+          const recordedAt = new Date().toISOString();
+          const sales: Sale[] = currentQuote.lines.map((line, index) => ({
+            ...line,
+            id: `${review.id}:line:${index}`,
+            cartId: review.id,
+            kind: 'product' as const,
+            method: 'cash' as PaymentMethod,
+            status: 'pending' as const,
+            shiftId: current.currentShiftId,
+            recordedAt,
+            memberId: assignedMemberId,
+            memberName: assignedMember?.name,
+            isOvertime: breakdown?.isOvertime,
+            is_overtime: breakdown?.isOvertime,
+          }));
+
+          const ledger: LedgerEvent[] = [];
+          if (tendered > 0) {
+            ledger.push({
+              id: `sale-event-${review.id}:cash`,
+              paymentId: review.id,
+              shiftId: current.currentShiftId,
+              kind: 'product' as const,
+              amountMinor: tendered,
+              method: 'cash',
+              recordedAt,
+            });
+          }
+
+          const updatedMembers = assignedMemberId
+            ? current.members.map(m =>
+                m.id === assignedMemberId
+                  ? { ...m, creditMinor: m.creditMinor - shortfall }
+                  : m
+              )
+            : current.members;
+
+          const movements = currentQuote.lines.map(line => ({
+            id: `sale-stock-${review.id}:${line.productId}`,
+            productId: line.productId,
+            shiftId: current.currentShiftId,
+            kind: 'sale' as const,
+            quantity: line.quantity,
+            recordedAt,
+          }));
+
+          return {
+            state: {
+              ...current,
+              revision: current.revision + 1,
+              sales: [...current.sales, ...sales],
+              ledger: [...current.ledger, ...ledger],
+              stockMovements: [...current.stockMovements, ...movements],
+              members: updatedMembers,
+            },
+            result: {
+              status: 'pending' as const,
+              sales,
+            },
+          };
+        });
+
+        setError(result.status === 'error');
+        setReview(null);
+        if (result.status === 'error') {
+          setMessage(result.message);
+          setToast({
+            open: true,
+            type: 'error',
+            title: 'Error en compra',
+            description: result.message,
+          });
+        } else {
+          setPending(false);
+          const successMsg = `Cobro registrado: ${formatMoney(tendered)} MXN cobrados en efectivo y ${formatMoney(shortfall)} MXN asignados como saldo pendiente a ${assignedMember?.name}.`;
+          setMessage(successMsg);
+          setQuantities({});
+          setTenderedAmount('');
+          setSelectedMethods([]);
+          cartId.current = null;
+          setToast({
+            open: true,
+            type: 'success',
+            title: 'Cobro y saldo asignado',
+            description: successMsg,
+          });
+        }
+        return;
+      }
+    }
+
+    const effectiveMethod: PaymentMethod = singleMethod;
+    const result = transact(current =>
+      current.revision !== review.revision
+        ? {
+            state: current,
+            result: {
+              status: 'error' as const,
+              message: 'Los registros cambiaron. Revisa la compra de nuevo.',
+            },
+          }
+        : registerCart(current, { id: review.id, method: effectiveMethod, lines, isOvertime: breakdown?.isOvertime })
+    );
+
+    setError(result.status === 'error');
+    setReview(null);
+    if (result.status === 'error') {
+      setMessage(result.message);
+      setToast({
+        open: true,
+        type: 'error',
+        title: 'Error en compra',
+        description: result.message,
+      });
+    } else if (result.status === 'pending') {
+      setPending(true);
+      const pendingMsg =
+        'Transferencia pendiente: compra conservada, sin cobro confirmado ni descuento de inventario.';
+      setMessage(pendingMsg);
+      setToast({
+        open: true,
+        type: 'warning',
+        title: 'Transferencia pendiente',
+        description: pendingMsg,
+      });
+    } else {
+      const successMsg = breakdown?.cardVoucher
+        ? `Cobro con Tarjeta aprobado (${breakdown.cardVoucher.cardBrand} **** ${breakdown.cardVoucher.lastFourDigits} · Auth: ${breakdown.cardVoucher.authorizationCode}). Compra registrada.`
+        : 'Cobro registrado. Compra completa registrada; lista para la siguiente compra.';
+      setMessage(successMsg);
+      setQuantities({});
+      setTenderedAmount('');
+      setMixedAmount1('');
+      setMixedAmount2('');
+      setSelectedMethods([]);
+      cartId.current = null;
+      setToast({
+        open: true,
+        type: 'success',
+        title: 'Cobro confirmado',
+        description: successMsg,
+      });
+    }
+  };
+
+  const selectedWasteItems: WasteItem[] = Object.entries(quantities)
+    .filter(([_, qty]) => qty > 0)
+    .map(([id, qty]) => {
+      const product = state.products.find(p => p.id === id);
+      return product ? { product, quantity: qty } : null;
+    })
+    .filter((item): item is WasteItem => Boolean(item));
+
+  const effectiveWasteItems: WasteItem[] =
+    selectedWasteItems.length > 0
+      ? selectedWasteItems
+      : selectedCatalogProductId
+      ? [
+          {
+            product: state.products.find(p => p.id === selectedCatalogProductId)!,
+            quantity: 1,
+          },
+        ].filter(i => Boolean(i.product))
+      : [];
+
+  const hasWasteItems = effectiveWasteItems.length > 0;
 
   return (
     <>
@@ -339,21 +883,41 @@ export function ReceptionHome() {
                 <h2>Productos disponibles</h2>
                 <p className="muted">Selecciona productos y ajusta las cantidades antes de revisar el cobro.</p>
               </div>
-              <Button
-                variant="secondary"
-                className="catalog-merma-header-btn"
-                aria-label="Merma"
-                disabled={pending}
-                onClick={() => setIsMermaOpen(true)}
-                title="Registrar merma o pérdida de producto"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  <line x1="10" y1="11" x2="10" y2="17" />
-                  <line x1="14" y1="11" x2="14" y2="17" />
-                </svg>
-                <span>Merma</span>
-              </Button>
+              <div className="catalog-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Button
+                  variant="secondary"
+                  className="catalog-devolucion-header-btn"
+                  aria-label="Devoluciones"
+                  disabled={pending}
+                  onClick={() => setIsDevolucionesOpen(true)}
+                  title="Registrar devolución de compras del día o servicios activos"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                  <span>Devoluciones</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  className={`catalog-merma-header-btn ${hasWasteItems ? 'active-merma' : ''}`}
+                  aria-label="Merma"
+                  disabled={pending || !hasWasteItems}
+                  onClick={() => setIsMermaOpen(true)}
+                  title={
+                    hasWasteItems
+                      ? `Registrar merma para los productos seleccionados (${effectiveWasteItems.reduce((s, i) => s + i.quantity, 0)} uds)`
+                      : 'Selecciona productos en el catálogo para registrar merma'
+                  }
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                  <span>Merma</span>
+                </Button>
+              </div>
             </div>
 
             {state.products.length ? (
@@ -361,7 +925,21 @@ export function ReceptionHome() {
                 {state.products.map(product => {
                   const stock = expectedStock(state, product.id);
                   const currentQty = quantities[product.id] ?? 0;
-                  return <ProductCard key={product.id} product={product} stock={stock} quantity={currentQty} disabled={pending} onQuantityChange={quantity => changeQuantity(product.id, quantity)} />;
+                  return (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      stock={stock}
+                      quantity={currentQty}
+                      selected={selectedCatalogProductId === product.id}
+                      disabled={pending}
+                      onSelect={() => setSelectedCatalogProductId(product.id)}
+                      onQuantityChange={quantity => {
+                        setSelectedCatalogProductId(product.id);
+                        changeQuantity(product.id, quantity);
+                      }}
+                    />
+                  );
                 })}
               </div>
             ) : (
@@ -374,265 +952,162 @@ export function ReceptionHome() {
         <MobileDetailPanel title="Compra actual" triggerLabel="Ver compra actual" className="reception-current-purchase-slot">
         <CurrentPurchaseCard
           totalMinor={totalMinor}
-          paymentMethod={method}
           disabled={pending}
-          onPaymentMethodChange={nextMethod => {
-            setMethod(nextMethod);
-            setReview(null);
-            cartId.current = null;
+          shiftWindow={currentShift?.window}
+          currentTime={state.demoClock}
+          assignedMember={assignedMember}
+          onAssignMemberClick={() => setReview(null)}
+          step={review ? 2 : 1}
+          onStepChange={nextStep => {
+            if (nextStep === 1) {
+              setReview(null);
+            } else if (nextStep === 2 && quote && quote.lines.length > 0) {
+              cartId.current ??= `cart-${crypto.randomUUID()}`;
+              setReview({
+                id: cartId.current,
+                revision: state.revision,
+                totalMinor: quote.totalMinor,
+              });
+              setMessage('');
+              setError(false);
+            }
           }}
-          headerContent={<>
-            {/* Primary Action Button right at top */}
-            {review ? (
-              <div className="checkout-review-section top-review">
-                <h3>Revisar cobro · {formatMoney(review.totalMinor)} MXN</h3>
+          step1ActionDisabled={!quote || quote.lines.length === 0 || pending}
+          onStep1Proceed={() => {
+            if (quote && quote.lines.length > 0) {
+              cartId.current ??= `cart-${crypto.randomUUID()}`;
+              setReview({
+                id: cartId.current,
+                revision: state.revision,
+                totalMinor: quote.totalMinor,
+              });
+              setMessage('');
+              setError(false);
+            }
+          }}
+          onConfirmPayment={handleConfirmPayment}
+          statusMessage={message}
+          statusType={error ? 'error' : pending ? 'warning' : 'success'}
+          memberAssignment={
+            <div className={`cart-member-section ${isSearchOpen ? 'is-dropdown-open' : ''}`}>
+              {!assignedMember ? (
+                <div className="cart-member-search" ref={memberSearchContainerRef}>
+                  <div className="field">
+                    <label htmlFor="assign-member-input">Asignar socio</label>
+                    <div className="cart-member-search-input-wrap">
+                      <input
+                        ref={memberInputRef}
+                        id="assign-member-input"
+                        type="text"
+                        role="combobox"
+                        aria-label="Asignar socio"
+                        aria-expanded={isSearchOpen}
+                        aria-autocomplete="list"
+                        autoComplete="off"
+                        placeholder="Buscar socio activo..."
+                        value={memberQuery}
+                        disabled={pending}
+                        onFocus={() => setIsSearchOpen(true)}
+                        onChange={e => {
+                          setMemberQuery(e.target.value);
+                          setIsSearchOpen(true);
+                          setSelectedMemberIndex(-1);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            setIsSearchOpen(false);
+                          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setIsSearchOpen(true);
+                            const count = flatActiveMembers.length;
+                            if (count > 0) {
+                              const next =
+                                selectedMemberIndex < 0
+                                  ? e.key === 'ArrowDown' ? 0 : count - 1
+                                  : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
+                              setSelectedMemberIndex(next);
+                            }
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
+                              handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
+                            }
+                          }
+                        }}
+                      />
+                      {memberQuery && (
+                        <button
+                          type="button"
+                          className="cart-search-clear-btn"
+                          aria-label="Limpiar búsqueda"
+                          onClick={() => {
+                            setMemberQuery('');
+                            memberInputRef.current?.focus();
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-                {method === 'cash' && (
-                  <Notice tone="warning">
-                    Confirma solo después de recibir el pago.
-                    {tenderedMinor !== null && tenderedMinor >= review.totalMinor ? (
-                      <>
-                        <br />
-                        Efectivo recibido: <strong>{formatMoney(tenderedMinor)} MXN</strong> · Cambio: <strong>{formatMoney(tenderedMinor - review.totalMinor)} MXN</strong>.
-                      </>
-                    ) : (
-                      <> El registro local no procesa pagos ni calcula cambio bancario.</>
+                  {isSearchOpen && (
+                    <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
+                      {flatActiveMembers.length > 0 ? (
+                        <AnimatedList
+                          id="cart-member-item"
+                          listboxId="cart-member-results"
+                          tabIndex={-1}
+                          groups={memberGroups}
+                          selectedIndex={selectedMemberIndex}
+                          onSelectedIndexChange={setSelectedMemberIndex}
+                          onItemSelect={(_item, index) => {
+                            const member = flatActiveMembers[index];
+                            if (member) handleAssignMember(member.id);
+                          }}
+                          theme={dark ? 'dark' : 'light'}
+                          accentColor="#FC6C06"
+                          frame={false}
+                          loop={false}
+                          animation="pop"
+                          width="100%"
+                          maxHeight={260}
+                        />
+                      ) : (
+                        <p className="cart-no-members-msg" role="status">
+                          No hay socios activos que coincidan.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="assigned-member-card">
+                  <AssignedMemberSummary name={assignedMember.name} phone={assignedMember.phone}>
+                    {assignedMember.creditMinor > 0 && (
+                      <span className="member-credit-pill">
+                        Saldo a favor: {formatMoney(assignedMember.creditMinor)} MXN
+                      </span>
                     )}
-                  </Notice>
-                )}
-
-                {method === 'card' && (
-                  <Notice tone="warning">
-                    <strong>Cobro en terminal bancaria:</strong> {formatMoney(review.totalMinor)} MXN.
-                    <br />
-                    <span style={{ fontSize: '12px' }}>
-                      Fórmula de comisión Clip/banco: <code>Precio - (Precio × 0.0406)</code> · Comisión estimada (4.06%): {formatMoney(Math.round(review.totalMinor * 0.0406))} MXN · Neto: {formatMoney(review.totalMinor - Math.round(review.totalMinor * 0.0406))} MXN.
-                    </span>
-                  </Notice>
-                )}
-
-                {method === 'transfer' && (
-                  <Notice tone="warning">
-                    <strong>Control de seguridad de transferencia (T03):</strong> Verifica que el comprobante recibido coincida exactamente con {formatMoney(review.totalMinor)} MXN. La compra se registrará con estado <em>pendiente</em> sin cobro confirmado ni descuento de inventario.
-                  </Notice>
-                )}
-
-                <div className="flow">
+                  </AssignedMemberSummary>
                   <Button
-                    className="confirm-checkout-btn"
+                    variant="secondary"
+                    className="button-sm"
+                    aria-label="Desasignar socio"
                     disabled={pending}
                     onClick={() => {
-                      const result = transact(current =>
-                        current.revision !== review.revision
-                          ? {
-                              state: current,
-                              result: {
-                                status: 'error' as const,
-                                message: 'Los registros cambiaron. Revisa la compra de nuevo.',
-                              },
-                            }
-                          : registerCart(current, { id: review.id, method, lines })
-                      );
-                      setError(result.status === 'error');
-                      setReview(null);
-                      if (result.status === 'error') {
-                        setMessage(result.message);
-                        setToast({
-                          open: true,
-                          type: 'error',
-                          title: 'Error en compra',
-                          description: result.message,
-                        });
-                      } else if (result.status === 'pending') {
-                        setPending(true);
-                        const pendingMsg =
-                          'Transferencia pendiente: compra conservada, sin cobro confirmado ni descuento de inventario.';
-                        setMessage(pendingMsg);
-                        setToast({
-                          open: true,
-                          type: 'warning',
-                          title: 'Transferencia pendiente',
-                          description: pendingMsg,
-                        });
-                      } else {
-                        const successMsg =
-                          'Cobro registrado. Compra completa registrada; lista para la siguiente compra.';
-                        setMessage(successMsg);
-                        setQuantities({});
-                        setTenderedAmount('');
-                        cartId.current = null;
-                        setToast({
-                          open: true,
-                          type: 'success',
-                          title: 'Cobro confirmado',
-                          description: successMsg,
-                        });
-                      }
+                      setAssignedMemberId(null);
+                      setMemberQuery('');
                     }}
                   >
-                    {method === 'transfer' ? 'Registrar compra pendiente' : 'Registrar cobro'}
-                  </Button>
-                  <Button variant="secondary" onClick={() => setReview(null)}>
-                    Volver a la compra
+                    Desasignar
                   </Button>
                 </div>
-              </div>
-            ) : (
-              !pending && (
-                <Button
-                  className="cart-primary-action-btn"
-                  disabled={!quote}
-                  onClick={() => {
-                    if (quote) {
-                      cartId.current ??= `cart-${crypto.randomUUID()}`;
-                      setReview({
-                        id: cartId.current,
-                        revision: state.revision,
-                        totalMinor: quote.totalMinor,
-                      });
-                      setMessage('');
-                    }
-                  }}
-                >
-                  Revisar cobro
-                </Button>
-              )
-            )}
-
-            {/* Outcome notification element */}
-            <div role={error ? 'alert' : 'status'} aria-label="Resultado de compra">
-              {message && (
-                <Notice tone={error ? 'error' : pending ? 'warning' : 'success'}>
-                  {message}
-                </Notice>
               )}
             </div>
-          </>}
-          memberAssignment={<>
-          {/* Member assignment search */}
-          <div className={`cart-member-section ${isSearchOpen ? 'is-dropdown-open' : ''}`}>
-            {!assignedMember ? (
-              <div className="cart-member-search" ref={memberSearchContainerRef}>
-                <div className="field">
-                  <label htmlFor="assign-member-input">Asignar socio</label>
-                  <div className="cart-member-search-input-wrap">
-                    <input
-                      ref={memberInputRef}
-                      id="assign-member-input"
-                      type="text"
-                      role="combobox"
-                      aria-label="Asignar socio"
-                      aria-expanded={isSearchOpen}
-                      aria-autocomplete="list"
-                      autoComplete="off"
-                      placeholder="Buscar socio activo..."
-                      value={memberQuery}
-                      disabled={pending}
-                      onFocus={() => setIsSearchOpen(true)}
-                      onChange={e => {
-                        setMemberQuery(e.target.value);
-                        setIsSearchOpen(true);
-                        setSelectedMemberIndex(-1);
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') {
-                          setIsSearchOpen(false);
-                        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                          e.preventDefault();
-                          setIsSearchOpen(true);
-                          const count = flatActiveMembers.length;
-                          if (count > 0) {
-                            const next =
-                              selectedMemberIndex < 0
-                                ? e.key === 'ArrowDown' ? 0 : count - 1
-                                : (selectedMemberIndex + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
-                            setSelectedMemberIndex(next);
-                          }
-                        } else if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (selectedMemberIndex >= 0 && selectedMemberIndex < flatActiveMembers.length) {
-                            handleAssignMember(flatActiveMembers[selectedMemberIndex].id);
-                          }
-                        }
-                      }}
-                    />
-                    {memberQuery && (
-                      <button
-                        type="button"
-                        className="cart-search-clear-btn"
-                        aria-label="Limpiar búsqueda"
-                        onClick={() => {
-                          setMemberQuery('');
-                          memberInputRef.current?.focus();
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {isSearchOpen && (
-                  <div className="cart-member-dropdown" onMouseDown={e => e.preventDefault()}>
-                    {flatActiveMembers.length > 0 ? (
-                      <AnimatedList
-                        id="cart-member-item"
-                        listboxId="cart-member-results"
-                        tabIndex={-1}
-                        groups={memberGroups}
-                        selectedIndex={selectedMemberIndex}
-                        onSelectedIndexChange={setSelectedMemberIndex}
-                        onItemSelect={(_item, index) => {
-                          const member = flatActiveMembers[index];
-                          if (member) handleAssignMember(member.id);
-                        }}
-                        theme={dark ? 'dark' : 'light'}
-                        accentColor="#FC6C06"
-                        frame={false}
-                        loop={false}
-                        animation="pop"
-                        width="100%"
-                        maxHeight={260}
-                      />
-                    ) : (
-                      <p className="cart-no-members-msg" role="status">
-                        No hay socios activos que coincidan.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="assigned-member-card">
-                <AssignedMemberSummary name={assignedMember.name} phone={assignedMember.phone}>
-                  {assignedMember.creditMinor > 0 && (
-                    <span className="member-credit-pill">
-                      Saldo a favor: {formatMoney(assignedMember.creditMinor)} MXN
-                    </span>
-                  )}
-                </AssignedMemberSummary>
-                <Button
-                  variant="secondary"
-                  className="button-sm"
-                  aria-label="Desasignar socio"
-                  disabled={pending}
-                  onClick={() => {
-                    setAssignedMemberId(null);
-                    setMemberQuery('');
-                  }}
-                >
-                  Desasignar
-                </Button>
-              </div>
-            )}
-          </div>
-          </>}
+          }
         >
-
-          {/* Cash Tender & Change */}
-          {method === 'cash' && <CashTenderCalculator totalMinor={totalMinor} value={tenderedAmount} onChange={setTenderedAmount} disabled={pending} />}
-
-          {/* Cart products list */}
+          {/* Step 1 Content: Cart product lines */}
           <div className="cart-items-section">
             {!lines.length ? (
               <p className="cart-empty-msg">Sin productos seleccionados.</p>
@@ -640,41 +1115,43 @@ export function ReceptionHome() {
               <ul className="cart-lines">
                 {quote?.lines.map(line => (
                   <li key={line.productId} className="cart-line-row">
-                    <div className="cart-line-details">
-                      <span>{line.quantity} × {line.description}</span>
+                    <div className="cart-line-top-row">
+                      <span className="cart-line-title">{line.quantity} × {line.description}</span>
+                      <strong className="cart-line-total">{formatMoney(line.amountMinor)} MXN</strong>
+                    </div>
+                    <div className="cart-line-bottom-row">
                       <span className="cart-line-unit muted">{formatMoney(line.unitPriceMinor)} c/u</span>
+                      <div className="cart-line-actions">
+                        <button
+                          type="button"
+                          className="qty-btn"
+                          aria-label={`Disminuir ${line.description} en carrito`}
+                          disabled={pending}
+                          onClick={() => changeQuantity(line.productId, line.quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="qty-btn"
+                          aria-label={`Aumentar ${line.description} en carrito`}
+                          disabled={pending}
+                          onClick={() => changeQuantity(line.productId, line.quantity + 1)}
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          className="qty-btn qty-btn-remove"
+                          aria-label={`Quitar ${line.description} de carrito`}
+                          title="Quitar"
+                          disabled={pending}
+                          onClick={() => changeQuantity(line.productId, 0)}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
                     </div>
-                    <div className="cart-line-actions">
-                      <button
-                        type="button"
-                        className="qty-btn"
-                        aria-label={`Disminuir ${line.description} en carrito`}
-                        disabled={pending}
-                        onClick={() => changeQuantity(line.productId, line.quantity - 1)}
-                      >
-                        −
-                      </button>
-                      <button
-                        type="button"
-                        className="qty-btn"
-                        aria-label={`Aumentar ${line.description} en carrito`}
-                        disabled={pending}
-                        onClick={() => changeQuantity(line.productId, line.quantity + 1)}
-                      >
-                        +
-                      </button>
-                      <button
-                        type="button"
-                        className="qty-btn qty-btn-remove"
-                        aria-label={`Quitar ${line.description} de carrito`}
-                        title="Quitar"
-                        disabled={pending}
-                        onClick={() => changeQuantity(line.productId, 0)}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                    <strong>{formatMoney(line.amountMinor)}</strong>
                   </li>
                 ))}
               </ul>
@@ -688,9 +1165,29 @@ export function ReceptionHome() {
       <MermaModal
         isOpen={isMermaOpen}
         onClose={() => setIsMermaOpen(false)}
+        items={effectiveWasteItems}
         products={state.products}
         state={state}
         onConfirmWaste={handleWasteMovement}
+      />
+
+      {/* Devoluciones Modal Dialog */}
+      <DevolucionesModal
+        isOpen={isDevolucionesOpen}
+        onClose={() => setIsDevolucionesOpen(false)}
+        state={state}
+        initialMemberId={assignedMemberId}
+        transact={transact}
+        onSuccess={({ message }) => {
+          setMessage(message);
+          setError(false);
+          setToast({
+            open: true,
+            type: 'success',
+            title: 'Devolución registrada',
+            description: message,
+          });
+        }}
       />
 
       {/* Guantes Modal Dialog */}

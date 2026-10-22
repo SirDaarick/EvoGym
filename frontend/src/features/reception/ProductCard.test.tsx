@@ -31,4 +31,41 @@ describe('ProductCard', () => {
     fireEvent.contextMenu(container.querySelector('article')!);
     expect(onQuantityChange).not.toHaveBeenCalled();
   });
+
+  it('renders supplement-style card with subtitle, custom priceSuffix, and custom stockLabel', async () => {
+    const onQuantityChange = vi.fn();
+    const onSelect = vi.fn();
+    const supplementItem = {
+      id: 'sup-01',
+      name: 'Proteína Whey',
+      priceMinor: 3500,
+      flavor: 'Vainilla',
+    };
+
+    const { container } = render(
+      <ProductCard
+        product={supplementItem}
+        subtitle="Vainilla"
+        stock={24}
+        stockLabel="24 scoops"
+        priceSuffix=" / scoop"
+        quantity={1}
+        onSelect={onSelect}
+        onQuantityChange={onQuantityChange}
+      />
+    );
+
+    expect(screen.getByText('24 scoops')).toBeVisible();
+    expect(screen.getByText('Vainilla')).toBeVisible();
+    expect(screen.getByText('$35.00 / scoop')).toBeVisible();
+
+    // Left-click on card tile increments quantity
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Proteína Whey (Vainilla)' }));
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onQuantityChange).toHaveBeenCalledWith(2);
+
+    // Right-click on card article decrements quantity
+    fireEvent.contextMenu(container.querySelector('article')!);
+    expect(onQuantityChange).toHaveBeenCalledWith(0);
+  });
 });
