@@ -77,7 +77,7 @@ SAMPLE-1 implementado: PlanVersion y OrderItem conservan kind=membership y expon
 ## Siguiente paso
 SAMPLE-2 online consumption is complete for this task. Next: revisar y planear STAFF-1; la cola/sincronización offline sigue diferida y depende de BK-064.
 
-## Evidencia SAMPLE-2 (2026-10-21)
+## Evidencia SAMPLE-2 (2026-10-22)
 - Implemented branch-scoped paid sample check-in with atomic retained one-use consumption, append-only history, purchase branch/payment validation, warning snapshots, and idempotent replay. A new idempotency key after use is denied; no exit/re-entry path exists.
 - Migration `0029_class_sample_check_ins` creates the unique event record. Focused test observed RED (404 unmatched route) before implementation.
 - Verificación final: suite enfocada de SAMPLE-2 `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_class_sample_check_ins.py api/tests/test_member_check_ins.py api/tests/test_migrations.py` — 38 passed, 17 warnings (50.68s); suite API completa `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` — 248 passed, 17 skipped, 18 warnings (275.87s). El coordinador repitió un spot-check independiente: 38 passed, 17 warnings. Los 17 skips son PostgreSQL opt-in; no hay target PostgreSQL local configurado.
