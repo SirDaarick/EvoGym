@@ -55,6 +55,17 @@ Exclusions: no data migration/backfill, new DB constraint, editable member numbe
 Dirty RED: selected route regressions → 9 failed/3 passed, with 21 existing tests deselected.
 Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_members.py` → 33 passed, 1 existing warning.
 Proof scope: rejection causes no row/count changes, formatting/aliases are preserved, and birth-date omission/update/clear behavior passes on synthetic SQLite in the dirty tree.
-Clean-prefix verification: PENDING against the owned R1–R4 tree; these observations are not a clean-prefix result.
+Clean-prefix verification: `6b16bab093a151ba4ff9aa81af36195e3838a1b6` — 33 passed in 49.97s; existing Starlette warning; isolated imports.
 Rollback: only R4 validators in `api/app/members/schemas.py`, validated-text/date-presence hunks in `api/app/members/queries.py`, and its added member tests.
-Commit identity: PENDING; record the actual identity and prefix checks only after they occur.
+Commit identity: `6b16bab093a151ba4ff9aa81af36195e3838a1b6`; results above identify this exact clean prefix.
+
+## R5
+
+Outcome: explicitly select current migration/sale/shift PG modules in ephemeral CI and derive four post-head expected revisions from Alembic's graph.
+Exclusions: no PostgreSQL/Docker/hosted run, new migration, changed isolation guard or comprehensive append-only/H01/H02 proof.
+Dirty structural proof: installed-PyYAML/AST checks pass; unchanged test logic apart from the helper/import and four expected-head comparisons is verified, not database behavior.
+Dirty collection command: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_migrations_postgres.py` with database URLs absent → 4 skipped, exit 0.
+Proof scope: dirty graph resolved `0030_staff_schedules`; 30-minute job/15-minute step bounds and three module paths were checked structurally only.
+Clean-prefix verification: PENDING against the owned R1–R5 tree; an absent PG target yields skips, never a migration PASS.
+Rollback: R5 additions in `.github/workflows/api.yml` and helper/import/four comparison hunks in `api/tests/test_migrations_postgres.py`; preserve historical migration targets and fixture guards.
+Commit identity: PENDING; CI execution and clean-prefix proof remain separately unverified.

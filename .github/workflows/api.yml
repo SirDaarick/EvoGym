@@ -20,6 +20,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18
@@ -60,6 +61,13 @@ jobs:
         run: python -m pytest -q api/tests/test_observability_postgres.py
       - name: Exercise current authorization on the migrated PostgreSQL database
         run: python -m pytest -q api/tests/test_authorization_postgres.py
+      - name: Verify current migrations, financial locking, and opening snapshots on isolated schemas
+        timeout-minutes: 15
+        run: >-
+          python -m pytest -q
+          api/tests/test_migrations_postgres.py
+          api/tests/test_sales_postgres.py
+          api/tests/test_shifts_postgres.py
       - name: Reset the synthetic test database for the legacy credential migration fixture
         run: |
           python - <<'PY'
