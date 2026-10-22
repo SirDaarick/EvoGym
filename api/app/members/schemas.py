@@ -127,6 +127,11 @@ class CreateMemberDTO(BaseModel):
     joined_on: date | None = None
     initial_notes: str | None = Field(None, max_length=5000)
 
+    @field_validator("member_number", "full_name", "phone", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
 
 class UpdateMemberDTO(BaseModel):
     """Payload to update member demographic and operational information."""
@@ -140,5 +145,12 @@ class UpdateMemberDTO(BaseModel):
     emergency_contact_phone: str | None = Field(None, max_length=32)
     photo_url: str | None = Field(None, max_length=512)
     status: str | None = Field(None, pattern=r"^(active|inactive|expired|suspended|pending)$")
+
+    @field_validator("full_name", "phone", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Required member text cannot be cleared.")
+        return value.strip() if isinstance(value, str) else value
 
 

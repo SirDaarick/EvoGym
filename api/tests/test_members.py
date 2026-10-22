@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.admin import authenticate_admin
@@ -1176,5 +1176,88 @@ def test_member_queries_create_and_update_unit(tmp_path):
             assert update_member(session, "not-a-valid-uuid", up_dto) is None
     finally:
         engine.dispose()
+
+
+@pytest.fixture
+def member_mutation_case(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        _, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="NORMALIZATION-BASE", full_name="Original Person", phone="555-0100",
+                            preferred_name="Original Alias", birth_date=date(2000, 1, 2))
+            session.add(member)
+            session.flush()
+            member_id = member.id
+        with TestClient(create_app(configured_settings(url))) as client:
+            yield client, factory, {"Authorization": f"Bearer {token}"}, member_id
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("field", ["member_number", "full_name", "phone"])
+@pytest.mark.parametrize("value", [" \t\n ", None])
+def test_member_required_text_create_rejects_blank_or_null_without_writes(member_mutation_case, field, value):
+    client, factory, headers, _ = member_mutation_case
+    payload = {"member_number": "NEW-MEMBER", "full_name": "New Person", "phone": "555-0200", field: value}
+    response = client.post("/api/v1/members", headers=headers, json=payload)
+    assert response.status_code == 422, response.text
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(Member)) == 1
+
+
+@pytest.mark.parametrize("field", ["full_name", "phone"])
+@pytest.mark.parametrize("value", [" \t\n ", None])
+def test_member_required_text_patch_rejects_blank_or_null_without_writes(member_mutation_case, field, value):
+    client, factory, headers, member_id = member_mutation_case
+    response = client.patch(f"/api/v1/members/{member_id}", headers=headers, json={field: value})
+    assert response.status_code == 422, response.text
+    with factory() as session:
+        member = session.get(Member, member_id)
+        assert (member.member_number, member.full_name, member.phone, member.preferred_name, member.birth_date) == (
+            "NORMALIZATION-BASE", "Original Person", "555-0100", "Original Alias", date(2000, 1, 2),
+        )
+
+
+def test_member_required_text_normalization_preserves_formats_and_validated_length(member_mutation_case):
+    client, factory, headers, member_id = member_mutation_case
+    payload = {"member_number": "  " + "M" * 32 + "  ", "full_name": "  New  Person  ",
+               "phone": "  +52 555-0200  ", "preferred_name": "  Alias  "}
+    response = client.post("/api/v1/members", headers=headers, json=payload)
+    assert response.status_code == 201, response.text
+    assert response.json()["member_number"] == "M" * 32
+    assert response.json()["full_name"] == "New  Person"
+    assert response.json()["phone"] == "+52 555-0200"
+    assert response.json()["preferred_name"] == "Alias"
+    updated = client.patch(f"/api/v1/members/{member_id}", headers=headers, json={
+        "full_name": "  Updated  Person  ", "phone": "  +52 555-0300  ",
+    })
+    assert updated.status_code == 200, updated.text
+    with factory() as session:
+        member = session.get(Member, member_id)
+        assert (member.member_number, member.full_name, member.phone, member.preferred_name) == (
+            "NORMALIZATION-BASE", "Updated  Person", "+52 555-0300", "Original Alias",
+        )
+
+
+def test_member_birth_date_patch_presence_preserves_updates_and_clears(member_mutation_case):
+    client, factory, headers, member_id = member_mutation_case
+    path = f"/api/v1/members/{member_id}"
+    omitted = client.patch(path, headers=headers, json={})
+    assert omitted.status_code == 200
+    assert omitted.json()["birth_date"] == "2000-01-02"
+    updated = client.patch(path, headers=headers, json={"birth_date": "2001-02-03"})
+    assert updated.status_code == 200
+    assert updated.json()["birth_date"] == "2001-02-03"
+    cleared = client.patch(path, headers=headers, json={"birth_date": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["birth_date"] is None
+    invalid = client.patch(path, headers=headers, json={"birth_date": "not-a-date"})
+    assert invalid.status_code == 422
+    with factory() as session:
+        member = session.get(Member, member_id)
+        assert member.birth_date is None
+        assert member.preferred_name == "Original Alias"
 
 

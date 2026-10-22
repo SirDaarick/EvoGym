@@ -170,7 +170,7 @@ def create_member(
     if isinstance(actor_id, str):
         actor_id = UUID(actor_id)
 
-    member_number = data.member_number.strip()
+    member_number = data.member_number
     existing = session.scalar(
         select(Member.id).where(Member.member_number == member_number)
     )
@@ -186,9 +186,9 @@ def create_member(
 
     member = Member(
         member_number=member_number,
-        full_name=data.full_name.strip(),
+        full_name=data.full_name,
         preferred_name=data.preferred_name.strip() if data.preferred_name is not None and data.preferred_name.strip() else None,
-        phone=data.phone.strip(),
+        phone=data.phone,
         email=data.email.strip() if data.email is not None and data.email.strip() else None,
         birth_date=data.birth_date,
         emergency_contact_name=(
@@ -230,7 +230,7 @@ def update_member(
     Args:
         session: Active SQLAlchemy session.
         member_id: UUID or string UUID of the member to update.
-        data: DTO containing fields to update (non-None fields will overwrite).
+        data: Validated DTO; non-None fields overwrite, while explicit null clears birth_date.
 
     Returns:
         The updated Member entity, or None if member not found.
@@ -247,14 +247,14 @@ def update_member(
         return None
 
     if data.full_name is not None:
-        member.full_name = data.full_name.strip()
+        member.full_name = data.full_name
     if data.preferred_name is not None:
         member.preferred_name = data.preferred_name.strip() if data.preferred_name.strip() else None
     if data.phone is not None:
-        member.phone = data.phone.strip()
+        member.phone = data.phone
     if data.email is not None:
         member.email = data.email.strip() if data.email.strip() else None
-    if data.birth_date is not None:
+    if "birth_date" in data.model_fields_set:
         member.birth_date = data.birth_date
     if data.emergency_contact_name is not None:
         member.emergency_contact_name = (

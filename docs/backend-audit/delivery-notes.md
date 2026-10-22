@@ -44,6 +44,17 @@ Exclusions: no service-wide database policy, blanket SQLAlchemy catch, new auth 
 Dirty RED: corrected fault regressions → 42 failed/6 passed before the source fix; an earlier fixture-only pagination mistake was corrected first.
 Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_authentication_failures.py api/tests/test_members.py api/tests/test_catalog.py api/tests/test_shifts.py` → 104 passed, 1 existing warning.
 Proof scope: exact validator calls, no unintended fallback, real revoked-token rejection and valid staff handler reads were checked on the dirty tree.
-Clean-prefix verification: PENDING against the owned R1–R3 tree; no clean-prefix PASS is claimed.
+Clean-prefix verification: `26a845eadc91ce1a5b81d443e8f5d520139d5f95` — 104 passed in 58.91s; existing Starlette warning; isolated imports.
 Rollback: only R3 resolver/import hunks in the three API modules and new `api/tests/test_authentication_failures.py`, not whole shared files.
-Commit identity: PENDING; prior dirty success does not establish an observed local commit.
+Commit identity: `26a845eadc91ce1a5b81d443e8f5d520139d5f95`; results above identify this exact clean prefix.
+
+## R4
+
+Outcome: normalize required member text before length checks, reject blank/null required PATCH values, and distinguish omitted from explicitly null birth dates.
+Exclusions: no data migration/backfill, new DB constraint, editable member number, eligibility/status policy or other nullable-field change.
+Dirty RED: selected route regressions → 9 failed/3 passed, with 21 existing tests deselected.
+Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_members.py` → 33 passed, 1 existing warning.
+Proof scope: rejection causes no row/count changes, formatting/aliases are preserved, and birth-date omission/update/clear behavior passes on synthetic SQLite in the dirty tree.
+Clean-prefix verification: PENDING against the owned R1–R4 tree; these observations are not a clean-prefix result.
+Rollback: only R4 validators in `api/app/members/schemas.py`, validated-text/date-presence hunks in `api/app/members/queries.py`, and its added member tests.
+Commit identity: PENDING; record the actual identity and prefix checks only after they occur.
