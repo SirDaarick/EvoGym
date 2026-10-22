@@ -20,6 +20,11 @@ def upgrade() -> None:
     op.create_index("ix_member_check_in_visits_member_started", "member_check_in_visits", ["member_id", "started_at"])
     op.add_column("member_check_ins", sa.Column("visit_id", sa.Uuid(), nullable=True))
     connection = op.get_bind()
+    if connection.dialect.name == "sqlite":
+        op.execute("DROP TRIGGER trg_member_check_ins_no_update")
+        op.execute("DROP TRIGGER trg_member_check_ins_no_delete")
+    elif connection.dialect.name == "postgresql":
+        op.execute("DROP TRIGGER trg_member_check_ins_no_update_delete ON member_check_ins")
     connection.execute(sa.text(
         "INSERT INTO member_check_in_visits (id, member_id, started_at) "
         "SELECT id, member_id, occurred_at FROM member_check_ins"
@@ -36,6 +41,7 @@ def upgrade() -> None:
         op.execute("CREATE TRIGGER trg_member_check_in_visits_no_update BEFORE UPDATE ON member_check_in_visits BEGIN SELECT RAISE(ABORT, 'member_check_in_visits are append-only'); END")
         op.execute("CREATE TRIGGER trg_member_check_in_visits_no_delete BEFORE DELETE ON member_check_in_visits BEGIN SELECT RAISE(ABORT, 'member_check_in_visits are append-only'); END")
     elif connection.dialect.name == "postgresql":
+        op.execute("CREATE TRIGGER trg_member_check_ins_no_update_delete BEFORE UPDATE OR DELETE ON member_check_ins FOR EACH ROW EXECUTE FUNCTION reject_member_check_ins_mutation()")
         op.execute("CREATE FUNCTION reject_member_check_in_visits_mutation() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'member_check_in_visits are append-only'; END; $$ LANGUAGE plpgsql")
         op.execute("CREATE TRIGGER trg_member_check_in_visits_no_update_delete BEFORE UPDATE OR DELETE ON member_check_in_visits FOR EACH ROW EXECUTE FUNCTION reject_member_check_in_visits_mutation()")
 

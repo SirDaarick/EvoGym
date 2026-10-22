@@ -250,6 +250,73 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
     finally:
         engine.dispose()
 
+
+def test_member_checkin_visit_migration_backfills_populated_0026_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'populated-checkins.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0026_member_check_ins")
+    engine = create_engine(database_url)
+    member_id = uuid4().hex
+    events = [(uuid4().hex, f"history-{index}") for index in range(2)]
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO members (id, member_number, full_name, phone) "
+                "VALUES (:id, 'HIST-1', 'Historical Member', '5550100')"
+            ), {"id": member_id})
+            for event_id, key in events:
+                connection.execute(text(
+                    "INSERT INTO member_check_ins "
+                    "(id, member_id, period_id, branch_id, recorded_by, idempotency_key, "
+                    "request_fingerprint, access_reason, access_warnings, occurred_at) "
+                    "VALUES (:id, :member, :period, :branch, :actor, :key, :fingerprint, "
+                    "'allowed', '[]', '2026-10-20T12:00:00+00:00')"
+                ), {
+                    "id": event_id,
+                    "member": member_id,
+                    "period": uuid4().hex,
+                    "branch": uuid4().hex,
+                    "actor": uuid4().hex,
+                    "key": key,
+                    "fingerprint": "a" * 64,
+                })
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            mappings = connection.execute(text(
+                "SELECT id, visit_id FROM member_check_ins ORDER BY id"
+            )).all()
+            assert mappings == [(event_id, event_id) for event_id, _key in sorted(events)]
+            assert connection.execute(text("SELECT count(*) FROM member_check_in_visits")).scalar_one() == 2
+            visit_triggers = {
+                row[0] for row in connection.execute(text(
+                    "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='member_check_in_visits'"
+                ))
+            }
+            assert visit_triggers == {
+                "trg_member_check_in_visits_no_update",
+                "trg_member_check_in_visits_no_delete",
+            }
+        with engine.begin() as connection:
+            with pytest.raises(IntegrityError, match="member_check_ins are append-only"):
+                connection.execute(text("UPDATE member_check_ins SET visit_id=visit_id"))
+            with pytest.raises(IntegrityError, match="member_check_in_visits are append-only"):
+                connection.execute(text("UPDATE member_check_in_visits SET started_at=started_at"))
+            with pytest.raises(IntegrityError, match="member_check_in_visits are append-only"):
+                connection.execute(text("DELETE FROM member_check_in_visits"))
+        with pytest.raises(RuntimeError, match="Cannot downgrade while member check-in events exist"):
+            command.downgrade(config, "0026_member_check_ins")
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("SELECT count(*) FROM member_check_ins")).scalar_one() == 2
+            assert connection.execute(text("SELECT count(*) FROM member_check_in_visits")).scalar_one() == 2
+    finally:
+        engine.dispose()
+
 def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'legacy-version-width.db').as_posix()}"
