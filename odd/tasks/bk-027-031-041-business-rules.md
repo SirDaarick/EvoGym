@@ -45,6 +45,7 @@ BK-027, BK-031 y BK-041 requerían reglas de negocio consistentes antes de imple
 ## Progreso y evidencia
 - Completo: `RULES-1` documentó BK-027/BK-031/BK-041; commit `33a8766e2680af4c664622865e9a1e883246df51`.
 - Completo: `RULES-2` documentó D-019 y D-032/D-033 en el ledger, fases y resumen maestro; implementación de colas offline, idempotencia, revalidación, agenda laboral y flujo de revisión sigue pendiente.
+- Commit RULES-2: `204662ebf3fedbbd6a4280e585306c981f73bd3b` (`docs(backend): definir clase muestra y agenda laboral`).
 
 ## Siguiente paso
 - Ninguno para esta tarea documental. La implementación permanece pendiente de cola/idempotencia, revalidación al reconectar, agenda laboral y resolución de conflictos de horario.
@@ -53,5 +54,5 @@ BK-027, BK-031 y BK-041 requerían reglas de negocio consistentes antes de imple
 - `git diff --check -- docs/backend-plan/02-business-rules-and-decisions.md docs/backend-plan/04-implementation-phases.md odd/tasks/backend-implementation.md odd/tasks/bk-027-031-041-business-rules.md`: pasó.
 - Relectura estructural de las cuatro superficies: pasó.
 - Pruebas/builds: N/A por documentación pasiva.
-- Commit convencional: `docs(backend): definir acceso pendiente y asistencia offline`.
-- Identidad del commit de reglas: `33a8766e2680af4c664622865e9a1e883246df51`.
+- Commit RULES-1: `docs(backend): definir acceso pendiente y asistencia offline` (`33a8766e2680af4c664622865e9a1e883246df51`).
+- Commit RULES-2: `docs(backend): definir clase muestra y agenda laboral` (`204662ebf3fedbbd6a4280e585306c981f73bd3b`).
