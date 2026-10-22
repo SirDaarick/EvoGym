@@ -71,6 +71,9 @@ SAMPLE-1 implementado: PlanVersion y OrderItem conservan kind=membership y expon
 - Siguiente: revisar y planear STAFF-1; STAFF-1..3 siguen abiertos. SAMPLE-2 online está cerrado; la sincronización offline permanece diferida y depende de BK-064.
 - Revision independiente P2 y correccion: SQL CHECK puede producir UNKNOWN para un plan periodico con duracion NULL, lo cual se acepta; ambas ramas period ahora requieren `duration_value IS NOT NULL AND duration_unit IS NOT NULL` antes de validar valores. Las pruebas negativas de modelo para cada columna primero fallaron (no se elevo IntegrityError) y luego pasaron; los casos single_entry NULL siguen validos. Verificacion P2: `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_catalog.py api/tests/test_sales.py api/tests/test_migrations.py` ? 50 passed, 17 warnings (95.93s); PostgreSQL opt-in skips siguen sin destino configurado. `git diff --check` en las superficies P2 autorizadas paso (solo avisos LF/CRLF).
 
+## Commit SAMPLE-2
+- Commit de tarea: `df8ad0b` (`feat(api): registrar check-in de clase muestra de un solo uso`) en `codex/backend-foundation`.
+
 ## Siguiente paso
 SAMPLE-2 online consumption is complete for this task. Next: revisar y planear STAFF-1; la cola/sincronización offline sigue diferida y depende de BK-064.
 
