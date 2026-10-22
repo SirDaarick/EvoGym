@@ -107,8 +107,8 @@ The standard frontend registration and checkout read and write demo state, while
 - **Finding:** A POST 409 followed by an absent, incomplete, or failed search cannot prove that the earlier create failed; clearing the UI intent could allow a second member number while the first profile already exists.
 - **Correction:** Only an exact-number/name/phone match resolves success; only a verified same-number/different-identity row is a definite collision. All other reconciliation outcomes remain unknown, keep the original payload/number locked, and retry that same request. A new number is offered only after the UI receives the definite collision result and the operator explicitly selects recovery.
 - **RED/GREEN:** RED was observed in three new API regressions (wrong prior 409 contract, empty search, and failed search). Final focused command `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMemberRegistration.test.tsx` — 23 passed, including incomplete search response, parent flow lock, exact retry, and explicit collision recovery.
-- **Scoped `git diff --check`:** pending.
-- **Correction work-unit commit:** pending.
+- **Scoped `git diff --check`:** passed for the nine authorized paths.
+- **Correction work-unit commit:** `6b84bdf1153009eff42c1db67a681251bdcd407a` (`fix(frontend): preservar alta ante reconciliacion incierta`).
 
 ## Next step
 
