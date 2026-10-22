@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.members import MemberActorPrincipal, get_member_actor_principal
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
-from app.db.models import Branch, MemberCheckIn, MembershipPeriod
+from app.db.models import Branch, Member, MemberCheckIn, MembershipPeriod
+from app.db.models.member_check_ins import MemberCheckInVisit
 from app.memberships.eligibility import evaluate_membership_access
 
 router = APIRouter(prefix="/api/v1/member-check-ins", tags=["member-check-ins"])
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/api/v1/member-check-ins", tags=["member-check-ins"])
 
 class MemberCheckInResponse(BaseModel):
     id: UUID
+    visit_id: UUID
     member_id: UUID
     period_id: UUID
     branch_id: UUID
@@ -39,6 +41,7 @@ def _response(event: MemberCheckIn, *, replayed: bool) -> MemberCheckInResponse:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
     return MemberCheckInResponse(
         id=event.id,
+        visit_id=event.visit_id,
         member_id=event.member_id,
         period_id=event.period_id,
         branch_id=event.branch_id,
@@ -106,7 +109,21 @@ def record_member_check_in(
                 "reason": access.reason,
             })
 
+        # Lock the member row so PostgreSQL serializes competing first visits.
+        session.scalar(select(Member.id).where(Member.id == period.member_id).with_for_update())
+        visit = session.scalar(
+            select(MemberCheckInVisit)
+            .where(MemberCheckInVisit.member_id == period.member_id)
+            .order_by(MemberCheckInVisit.started_at.desc())
+            .limit(1)
+        )
+        if visit is None or (occurred_at - _aware_utc(visit.started_at)).total_seconds() >= 300:
+            visit = MemberCheckInVisit(member_id=period.member_id, started_at=occurred_at)
+            session.add(visit)
+            session.flush()
+
         event = MemberCheckIn(
+            visit_id=visit.id,
             member_id=period.member_id,
             period_id=period.id,
             branch_id=branch_id,
@@ -130,3 +147,9 @@ def record_member_check_in(
             response.status_code = 200
             return _response(existing, replayed=True)
         return _response(event, replayed=False)
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

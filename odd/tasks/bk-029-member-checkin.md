@@ -94,3 +94,36 @@ Implement one bounded online API slice for membership check-in. This is partial 
 
 - Verification: structural readback confirmed the four authorized documents align; `git diff --check` passed. Tests N/A because no executable behavior changed.
 - Outcome: BK-029 remains Partial; only documentation was reconciled.
+
+## BK-029-T4 - Online fixed-window visit deduplication
+
+### Objective and acceptance
+
+Implement the already-approved five-minute visit rule for the online check-in endpoint only. Keep the existing exact idempotency-key replay behavior distinct from visit deduplication.
+
+- [x] A valid online check-in with a new idempotency key for the same member inside the five-minute window from the first valid access creates its own immutable audit event and links it to the original visit.
+- [x] The first valid access starts the fixed window; duplicate events do not extend it. A check-in at exactly five minutes is outside the window and starts a new visit.
+- [x] An exact same-key retry returns its original event and does not create another audit event.
+- [x] PostgreSQL requests serialize on the member row before selecting or creating a visit root; SQLite tests do not prove this lock behavior.
+- [x] Persist and return the visit relationship without weakening branch authorization, the membership access evaluator, or event immutability. Historical events migrate as distinct roots.
+- [ ] Update API tests and canonical implementation status; preserve BK-029 as Partial while offline queue/sync and reconnect-time entitlement revalidation remain unfinished.
+
+### Scope and route
+
+- **Route:** Delegated direct; one Luna writer implements code, tests, and documentation together.
+- **Allowed edit surfaces:** `api/app/api/member_check_ins.py`; `api/app/db/models/member_check_ins.py`; new migration file under `api/migrations/versions/`; `api/tests/test_member_check_ins.py`; `api/tests/test_migrations.py`; `api/tests/test_contract_smoke.py`; `docs/backend-plan/04-implementation-phases.md`; `odd/tasks/backend-implementation.md`; and this task file.
+- **Explicitly excluded:** root `backend/` notebooks, spreadsheets, exports, and virtual environment; offline queue/sync; frontend; Mercado Pago; unrelated dirty worktree files.
+- **Expected checks:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_member_check_ins.py api/tests/test_migrations.py api/tests/test_contract_smoke.py`; scoped `git diff --check`.
+- **Runtime harness:** N/A; online route behavior is verified with deterministic API/database tests, with no live provider or production service calls.
+- **Rollback boundary:** revert the T4 work-unit commit to remove visit-link persistence and fixed-window online deduplication while retaining the existing S1 endpoint and its exact idempotency behavior.
+
+### Progress
+
+- [ ] Record commit hash and parent review notes after implementation.
+- [ ] Update and read back the complete Engram mirror at `odd/bk-029-member-checkin/tasks` after the task closes.
+- **Implementation:** Added durable `member_check_in_visits` roots; each event stores and returns `visit_id`. Migration 0027 gives every historical event its own root. For valid new requests, the member row is locked, then the latest visit is reused only when elapsed time is strictly less than 300 seconds. Denied access exits before root creation. Both event and visit records remain append-only.
+- **Test-first RED:** The first pre-implementation run of `pytest -q api/tests/test_member_check_ins.py -k fixed_five_minute` failed before exercising visit-link assertions because the fixture's January timestamp denied access against the current entitlement date; the fixture was corrected to server-current UTC before focused GREEN. The initial failure is recorded accurately, not presented as proof of the desired behavior.
+- **Focused GREEN:** `pytest -q api/tests/test_member_check_ins.py -k 'fixed_five_minute or denies_expired'` -> 2 passed, 1 deselected, 1 existing Starlette/httpx deprecation warning.
+- **Full planned verification:** `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_member_check_ins.py api/tests/test_migrations.py api/tests/test_contract_smoke.py` -> 34 passed, 16 warnings (15 existing expression-index reflection warnings and one Starlette/httpx deprecation warning) in 58.83s. Scoped `git diff --check` passed.
+- **Offline queue/sync and reconnect-time entitlement revalidation remain pending; BK-029 remains Partial.**
+- **Next step:** Finish full planned verification, commit this work unit, then synchronize the full Engram task mirror.

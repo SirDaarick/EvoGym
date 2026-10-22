@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+import app.api.member_check_ins as check_in_api
 
 from app.db.models import Member, MembershipPeriod, MemberCheckIn, Plan, PlanVersion
 from app.main import create_app
@@ -99,5 +100,46 @@ def test_member_checkin_denies_expired_membership_and_records_no_event(tmp_path)
             assert response.status_code == 409
             with factory() as session:
                 assert session.scalar(select(MemberCheckIn.id).where(MemberCheckIn.period_id == period_id)) is None
+                from app.db.models.member_check_ins import MemberCheckInVisit
+                assert session.scalar(select(MemberCheckInVisit.id).where(MemberCheckInVisit.member_id == member_id)) is None
+    finally:
+        engine.dispose()
+
+
+def test_distinct_checkins_link_to_fixed_five_minute_visit_root(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "member-checkin-window", "Window Checkin")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "WINDOW")
+        base = datetime.now(timezone.utc)
+        instants = iter([base, base + timedelta(minutes=4), base + timedelta(minutes=5), base + timedelta(minutes=9)])
+        monkeypatch.setattr(check_in_api, "utc_now", lambda: next(instants))
+        with TestClient(create_app(configured_settings(url))) as client:
+            sale = client.post(f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "window-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)})
+            period_id = UUID(sale.json()["membership"]["id"])
+            path = f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}"
+
+            def post(key):
+                return client.post(path, headers={"Authorization": f"Bearer {token}", "Idempotency-Key": key})
+
+            root = post("window-root")
+            duplicate = post("window-duplicate")
+            exact_edge = post("window-edge")
+            next_visit = post("window-next")
+            assert root.status_code == duplicate.status_code == exact_edge.status_code == next_visit.status_code == 201
+            assert root.json()["visit_id"] == duplicate.json()["visit_id"]
+            assert exact_edge.json()["visit_id"] != root.json()["visit_id"]
+            assert next_visit.json()["visit_id"] == exact_edge.json()["visit_id"]
+            replay = post("window-duplicate")
+            assert replay.status_code == 200 and replay.json()["id"] == duplicate.json()["id"]
+            assert replay.json()["visit_id"] == root.json()["visit_id"]
+            with factory() as session:
+                events = session.scalars(select(MemberCheckIn).where(MemberCheckIn.member_id == member_id)).all()
+                assert len(events) == 4
     finally:
         engine.dispose()

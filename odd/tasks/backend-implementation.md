@@ -921,3 +921,9 @@ TRANSFER-01 remains historical evidence for the original pending-only D-006 poli
 - **Migration:** `0023_staff_sched_checkout`; old S2 marks retain null classification and no fabricated schedule. SQLite/PostgreSQL checkout triggers plus ORM immutability guards.
 - **Boundary:** present/late and entry/exit are implemented; absence and calendar/agenda are not. Absence finalization remains unresolved, not inferred.
 - **Checks:** RED observed in new schedule classification and missing-schedule API tests before implementation. Required focused/full commands and commit SHA pending final verification.
+
+#### BK-029-T4 online fixed-window visit deduplication
+
+- **Behavior:** Exact idempotency-key replay returns its original event. Distinct valid online check-ins link to the first visit root while server-recorded UTC elapsed time is strictly less than 300 seconds; duplicates do not extend the window, and exactly 300 seconds opens a new root.
+- **Persistence:** Migration `0027_member_checkin_visits` creates durable roots and backfills each historical check-in as an independent root. Event and visit records are append-only. PostgreSQL member-row locking serializes concurrent root selection/creation; SQLite tests do not prove row-lock concurrency.
+- **Status:** Online T4 only; BK-029 remains Partial. BK-031/BK-064 offline queue/sync and reconnect-time entitlement revalidation remain pending. Work-unit commit identity will be added after commit.
