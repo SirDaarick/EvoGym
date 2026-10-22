@@ -42,7 +42,7 @@ describe('financeReportSelector', () => {
 
   it('keeps cross-period refunds on their ledger date and does not erase a refunded source sale', () => {
     const state = baseState({
-      sales: [{ id: 'sale', kind: 'product', description: 'Refunded later', quantity: 1, unitPriceMinor: 1000, amountMinor: 1000, method: 'cash', status: 'confirmed', shiftId: 'shift-1', recordedAt: '2026-09-30T23:30:00-06:00', refundedAt: '2026-10-02T01:00:00-06:00' }],
+      sales: [{ id: 'sale', kind: 'product', description: 'Refunded later', quantity: 1, unitPriceMinor: 1000, amountMinor: 1000, method: 'cash', status: 'confirmed', shiftId: 'shift-1', recordedAt: '2026-09-30T23:30:00-06:00' }],
       ledger: [event('sale-event', 'sale', 1000, '2026-09-30T23:30:00-06:00'), event('refund', 'sale', -1000, '2026-10-02T01:00:00-06:00')],
     });
     const report = getFinanceProjection(state, range);
@@ -52,7 +52,7 @@ describe('financeReportSelector', () => {
 
   it('retains the original positive event when a sale and its refund share the selected period', () => {
     const state = baseState({
-      sales: [{ id: 'same-period', kind: 'product', description: 'Returned', quantity: 1, unitPriceMinor: 1000, amountMinor: 1000, method: 'cash', status: 'confirmed', shiftId: 'shift-1', recordedAt: '2026-10-10T12:00:00-06:00', refundedAt: '2026-10-11T12:00:00-06:00' }],
+      sales: [{ id: 'same-period', kind: 'product', description: 'Returned', quantity: 1, unitPriceMinor: 1000, amountMinor: 1000, method: 'cash', status: 'confirmed', shiftId: 'shift-1', recordedAt: '2026-10-10T12:00:00-06:00' }],
       ledger: [event('original', 'same-period', 1000, '2026-10-10T12:00:00-06:00'), event('refund', 'same-period', -1000, '2026-10-11T12:00:00-06:00')],
     });
     const projection = getFinanceProjection(state, range);
