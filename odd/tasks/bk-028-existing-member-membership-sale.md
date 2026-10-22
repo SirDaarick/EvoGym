@@ -100,7 +100,7 @@ The standard frontend registration and checkout read and write demo state, while
 - **Whitespace:** `git diff --check` scoped to the seven T4 paths passed.
 - **Behavior:** Unknown create outcome locks edits and prevents leaving the live registration flow until retry resolves the original request; successful creation remains visible if checkout closes and supports later lookup. Cash/transfer remain the existing checkout's distinct paths.
 - **Exclusions:** No demo registration/provider, normal members pages, or Mercado Pago code changed. Mercado Pago remains the final integration step.
-- **Work-unit commit:** `PENDING`.
+- **Work-unit commit:** `30518dc2b341d078d158e4afc8445fc90d35c2d3` (`feat(frontend): registrar socios en recepcion operativa`).
 
 ## Next step
 
