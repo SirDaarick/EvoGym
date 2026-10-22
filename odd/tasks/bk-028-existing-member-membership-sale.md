@@ -1,20 +1,20 @@
-# BK-028 - Existing-member membership purchase through the live API
+# BK-028 - Live API membership registration and checkout
 
-Connect one complete existing-member membership purchase flow to the authenticated backend, beginning in the live reception path. Keep demo-backed screens and new-member registration separate until their own slices are ready.
+Connect new-member registration and existing-member membership purchase through the authenticated backend, beginning in the live reception path. Keep demo-backed screens separate. Complete these membership flows before Mercado Pago, which remains the final integration in this sequence.
 
 ## Problem and outcome
 
-The standard frontend checkout reads and writes demo state, while the backend already exposes authenticated member, plan, register/shift, and membership-sale APIs. This slice uses backend UUIDs and server payment/entitlement outcomes end to end for an existing member; it must not mix demo records with API records.
+The standard frontend registration and checkout read and write demo state, while the backend exposes authenticated member, plan, register/shift, and membership-sale APIs. This feature keeps the live API flow separate from demo records and uses backend UUIDs and server payment/entitlement outcomes.
 
 ## Scope and constraints
 
-- **Included:** live operational member selection; active published membership plan and open register/shift data; cash and bank-transfer membership sale; API-owned idempotency; distinct payment and membership status presentation; unknown-result retry using the same idempotency key.
-- **Excluded:** new-member signup, DemoProvider-backed pages, external Mercado Pago/card payments, offline queue/sync, and changing backend business rules.
+- **Included:** live operational member lookup; new-member registration with an automatically generated unique member number; active published membership plan and open register/shift data; cash and bank-transfer membership sale; exact retry/reconciliation; distinct payment and membership status presentation.
+- **Excluded for this sequence:** DemoProvider-backed pages, Mercado Pago/card-provider integration until the final step, offline queue/sync, and changing backend membership business rules.
 - Transfer sales must use the transfer endpoint and remain pending review until an authorized Admin decision. Cash and transfer outcomes must not be conflated.
 - Use the authenticated `/reception/live` path and its configured branch/session. Never substitute demo IDs for backend UUIDs.
-- Preserve all pre-existing dirty frontend files. Do not edit `MemberDetail`, `Members`, `NewMemberRegistration`, `ReceptionHome`, `CurrentPurchaseCard`, `DemoProvider`, or demo operations in this feature.
+- Preserve all pre-existing dirty frontend files. Do not edit `MemberDetail`, `Members`, `NewMemberRegistration`, `ReceptionHome`, `CurrentPurchaseCard`, `DemoProvider`, or demo operations in this feature. New registration belongs only in the authenticated live reception flow.
 - Delivery strategy: `single-pr` on the existing `codex/backend-foundation` branch, matching the user's existing-branch preference. Commits remain task-sized; no push or PR creation is authorized.
-- Forecast: approximately 520 authored changed lines across API client/tests, live checkout UI/tests, and task/plan docs; generated files excluded. Work-unit commits remain separate and reviewable.
+- Forecast: approximately 900 authored changed lines across member API, live registration/checkout UI/tests, and task/plan docs; generated files excluded. Work-unit commits remain separate and reviewable.
 
 ## Tasks
 
@@ -41,27 +41,54 @@ The standard frontend checkout reads and writes demo state, while the backend al
 - **Rollback:** revert only the live checkout UI and T2 documentation; T1 API client may remain independently useful.
 - **Route:** Delegated direct. Trigger evidence: reading that prepared a 4-file UI/test change across multiple non-trivial components, plus focused command verification. Implementation was confined to the listed T2 paths; no excluded demo/new-member screen was edited.
 
+### BK-028-T3 - Authenticated member creation and generated identifier
+
+- [ ] Extend the authenticated frontend API boundary to create a member using the backend `POST /api/v1/members` contract.
+- [ ] Generate a stable unique member number for each registration intent; keep it and the request payload unchanged on uncertain retry. Reconcile an exact duplicate response by searching for that exact number and verifying the returned member identity before treating creation as successful.
+- [ ] Preserve the backend's existing field validation, duplicate-number response, and permission behavior; do not add phone-based member-number assumptions.
+- [ ] Update backend plan/task documentation with the actual generated-number and retry contract.
+- **Authorized surfaces:** `frontend/src/api/membershipCheckoutApi.ts`, `frontend/src/api/membershipCheckoutApi.test.ts`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
+- **Checks:** focused API client tests with mocked responses; applicable member API tests only if the backend contract changes; scoped `git diff --check`.
+- **Runtime harness:** Mocked API responses only; no live backend or payment calls.
+- **Rollback:** revert only the member-create API addition and T3 documentation.
+- **Route:** Delegated direct. Trigger evidence: API client, tests, and plan updates span multiple files; preparation requires reading backend DTO/auth/duplicate behavior.
+
+### BK-028-T4 - New-member live registration and checkout handoff
+
+- [ ] Add a new-member form to authenticated live reception using backend-required full name and phone, optional email, and a system-generated member number; do not change demo registration.
+- [ ] On successful member creation, use the returned backend member UUID to open the existing live membership checkout; do not create a sale before a member exists.
+- [ ] Clearly preserve the partial outcome: member creation is a separate API transaction from sale. If checkout is cancelled or fails, show the created member number and allow lookup/checkout later; never imply the account was rolled back.
+- [ ] Cover validation, duplicate/retried creation, response uncertainty, cash/transfer handoff, and ensure no DemoProvider operation runs.
+- [ ] Update the task ledger and phase card. Mercado Pago remains explicitly last and is not implemented in T3/T4.
+- **Authorized surfaces:** `frontend/src/features/reception/LiveMemberLookup.tsx`, `frontend/src/features/reception/LiveMemberLookup.test.tsx`, `frontend/src/features/reception/LiveMemberRegistration.tsx`, `frontend/src/features/reception/LiveMemberRegistration.test.tsx`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
+- **Checks:** focused API and live registration/checkout tests; scoped `git diff --check`.
+- **Runtime harness:** Component tests with mocked API calls; no live backend/payment request.
+- **Rollback:** revert only the live new-member form/handoff and T4 documentation; T3 API client may remain independently useful.
+- **Route:** Delegated direct. Trigger evidence: multi-component, API-integrated behavior with tests and docs.
+
 ## Acceptance criteria
 
 - A selected member, membership plan version, register, and shift all come from the authenticated backend; no demo IDs cross the API boundary.
+- New live registrations get a system-generated unique member number and backend UUID; a repeated/uncertain request does not create a second member.
+- Member creation and sale are separate backend transactions. If sale does not complete, the member remains registered and the UI exposes a safe path to find and continue checkout.
 - Cash and bank transfer use their distinct backend endpoints. Pending transfer is never shown as confirmed or settled; payment status and membership period are shown separately.
 - Repeated submission or retry cannot create a second order: an exact retry uses the original idempotency key and request payload; a changed payload requires a new intent.
 - Unknown network outcome is visible and retryable without blind creation. The screen does not report success until a server response is received.
-- The standard demo UI and new-member signup remain unchanged; no offline or Mercado Pago support is claimed.
+- The standard demo UI remains unchanged; no offline support or Mercado Pago integration is claimed before the final sequence step.
 
 ## Progress
 
 - Read-only mapping confirmed the backend routes and live authentication path; the normal demo checkout is not an API client. The existing-member scope was explicitly approved by the user.
-- The live path already supports authenticated member search. Frontend checkout still needs backend plan-version and open register/shift reads plus sale API calls.
-- BK-028 is Partial after T2: the existing-member authenticated checkout UI is integrated and acceptance-tested; new-member registration and Mercado Pago remain deferred.
+- T1 supplies the authenticated plans/registers/shifts and sale API calls; T2 uses those in the live existing-member checkout.
+- BK-028 T1/T2 existing-member checkout is complete. New-member registration T3/T4 is authorized but not yet implemented; Mercado Pago is reserved as the final sequence step.
 - T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); initial GREEN had 4 tests, then parent review found backend `membership` is nullable and correction `e5e1fa5` added a null pass-through case. Final focused suite: `npm test -- --run src/api/membershipCheckoutApi.test.ts` (5 passed). Scoped `git diff --check` passed for implementation commits. The whole-worktree check reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. The writer's `npm run typecheck` attempt reported an unrelated `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`; not re-run in this task. No live backend/payment request was made.
 - T1 work-unit commit: `183a79b` (`feat(frontend): agregar cliente de API para ventas de membresía`).
 - T1 contract correction: `e5e1fa5` (`fix(frontend): admitir membresía nula en DTO de venta`).
 - T2 RED/GREEN proof: RED `npm test -- --run src/features/reception/LiveMembershipCheckout.test.tsx` failed because the component did not yet exist. GREEN `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMembershipCheckout.test.tsx` (3 files, 14 tests passed). Tests use mocked API calls; no live backend/payment request was made. `git diff --check` is scoped to the staged T2 paths. Full build/typecheck were not run by instruction.
-- T2 outcome: existing-member live checkout acceptance is complete. BK-028 remains Partial overall; new-member signup and Mercado Pago are explicitly deferred. No demo operation is wired into this flow.
+- T2 outcome at that task boundary: existing-member live checkout acceptance is complete. No demo operation is wired into the live checkout. The user later authorized T3/T4 and requested Mercado Pago last.
 - T2 work-unit commit: `34aa27a` (`feat(frontend): integrar venta de membresías en recepción operativa`).
-- New-member registration, DemoProvider-backed screens, and Mercado Pago remain explicitly deferred.
+- New-member registration is now the next authorized work; DemoProvider screens remain out of scope and Mercado Pago remains last.
 
 ## Next step
 
-Next: BK-028's approved existing-member live checkout slice is complete. New-member signup and Mercado Pago remain separate deferred scopes; define and authorize either follow-up before implementation.
+Next: implement BK-028-T3 then BK-028-T4. Only after those are complete, plan the Mercado Pago integration as the final sequence step.
