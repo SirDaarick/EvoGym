@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    Branch, CashRegister, Member, MembershipPeriod, Order, OrderItem, Payment,
+    Branch, CashRegister, ClassSampleEntitlement, Member, MembershipPeriod, Order, OrderItem, Payment,
     MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
 )
 
@@ -39,6 +39,7 @@ class CashMembershipSaleResult:
     item: OrderItem
     payment: Payment
     membership: MembershipPeriod | None
+    sample_entitlement: ClassSampleEntitlement | None
     replayed: bool
 
 
@@ -101,11 +102,14 @@ def _load_result(session: Session, order: Order, replayed: bool) -> CashMembersh
         raise RuntimeError("Persisted membership cash sale is incomplete.")
     item = items[0]
     membership = session.scalar(select(MembershipPeriod).where(MembershipPeriod.order_item_id == item.id))
-    if order.payment.method == "cash" and membership is None:
+    sample_entitlement = session.scalar(select(ClassSampleEntitlement).where(ClassSampleEntitlement.order_item_id == item.id))
+    if item.entitlement_mode == "period" and order.payment.method == "cash" and membership is None:
         raise RuntimeError("Persisted membership cash sale has no activation period.")
-    if order.payment.method == "transfer" and order.payment.status in {"under_review", "confirmed"} and membership is None:
+    if item.entitlement_mode == "period" and order.payment.method == "transfer" and order.payment.status in {"under_review", "confirmed"} and membership is None:
         raise RuntimeError("Voucher-backed membership transfer has no membership period.")
-    return CashMembershipSaleResult(order, item, order.payment, membership, replayed)
+    if item.entitlement_mode == "single_entry" and sample_entitlement is None:
+        raise RuntimeError("Persisted class sample sale has no retained entitlement.")
+    return CashMembershipSaleResult(order, item, order.payment, membership, sample_entitlement, replayed)
 
 
 def post_membership_cash_sale(
@@ -228,6 +232,10 @@ def post_membership_cash_sale(
     received_minor = version.price_minor if not cash_amount_provided else cash_amount_minor
     if type(received_minor) is not int or received_minor < 0 or received_minor > version.price_minor:
         raise ValueError("Cash amount must not exceed the published membership price.")
+    if version.entitlement_mode == "single_entry" and session.scalar(
+        select(ClassSampleEntitlement.id).where(ClassSampleEntitlement.member_id == member_id).with_for_update()
+    ) is not None:
+        raise CashSaleConflictError("Member already has a class-sample entitlement.")
 
     branch = session.scalar(
         select(Branch).where(Branch.id == register.branch_id)
@@ -236,7 +244,7 @@ def post_membership_cash_sale(
     if branch is None:
         raise CashSaleNotFoundError("Branch not found.")
     starts_on = ends_on = None
-    if payment_method in {"cash", "transfer"}:
+    if version.entitlement_mode == "period" and payment_method in {"cash", "transfer"}:
         try:
             branch_zone = ZoneInfo(branch.timezone)
         except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
@@ -264,7 +272,8 @@ def post_membership_cash_sale(
     item = OrderItem(
         id=uuid4(), order_id=order.id, plan_version_id=version.id, line_number=1,
         item_kind="membership", description_snapshot=version.name, duration_value=version.duration_value,
-        duration_unit=version.duration_unit, quantity=1, unit_amount_minor=version.price_minor,
+        duration_unit=version.duration_unit, entitlement_mode=version.entitlement_mode,
+        quantity=1, unit_amount_minor=version.price_minor,
         line_total_minor=version.price_minor,
     )
     payment = Payment(
@@ -273,7 +282,8 @@ def post_membership_cash_sale(
         amount_minor=received_minor, received_by=actor_id,
     )
     membership = None
-    if payment_method in {"cash", "transfer"}:
+    sample_entitlement = None
+    if version.entitlement_mode == "period" and payment_method in {"cash", "transfer"}:
         membership = MembershipPeriod(
             id=uuid4(), member_id=member.id, order_item_id=item.id, plan_version_id=version.id,
             starts_on=starts_on, ends_on=ends_on, activated_by=actor_id,
@@ -282,6 +292,12 @@ def post_membership_cash_sale(
     session.flush()
     session.add_all([item, payment])
     session.flush()
+    if version.entitlement_mode == "single_entry":
+        sample_entitlement = ClassSampleEntitlement(
+            id=uuid4(), member_id=member.id, order_item_id=item.id, plan_version_id=version.id,
+        )
+        session.add(sample_entitlement)
+        session.flush()
     if membership is not None:
         session.add(membership)
         session.flush()
@@ -298,7 +314,7 @@ def post_membership_cash_sale(
             initial_outstanding_minor=version.price_minor - received_minor,
         ))
         session.flush()
-    return CashMembershipSaleResult(order, item, payment, membership, replayed=False)
+    return CashMembershipSaleResult(order, item, payment, membership, sample_entitlement, replayed=False)
 
 
 @dataclass(frozen=True)
@@ -306,7 +322,8 @@ class TransferReviewResult:
     order: Order
     item: OrderItem
     payment: Payment
-    membership: MembershipPeriod
+    membership: MembershipPeriod | None
+    sample_entitlement: ClassSampleEntitlement | None
     replayed: bool
 
 
@@ -359,8 +376,14 @@ def review_membership_transfer(
         select(MembershipPeriod).where(MembershipPeriod.order_item_id == item.id)
         .execution_options(populate_existing=True).with_for_update()
     )
-    if membership is None:
+    sample_entitlement = session.scalar(
+        select(ClassSampleEntitlement).where(ClassSampleEntitlement.order_item_id == item.id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
+    if item.entitlement_mode == "period" and membership is None:
         raise CashSaleConflictError("Legacy transfer has no voucher-backed membership period.")
+    if item.entitlement_mode == "single_entry" and sample_entitlement is None:
+        raise CashSaleConflictError("Class-sample transfer has no retained entitlement.")
     initial_event = session.scalar(select(PaymentReviewEvent).where(
         PaymentReviewEvent.payment_id == payment.id,
         PaymentReviewEvent.from_status.is_(None),
@@ -377,7 +400,7 @@ def review_membership_transfer(
     if prior is not None:
         if prior.request_fingerprint != fingerprint:
             raise CashSaleConflictError("Review idempotency key was already used for a different decision.")
-        return TransferReviewResult(order, item, payment, membership, replayed=True)
+        return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=True)
 
     if payment.status not in {"under_review", "pending", "confirmed"}:
         raise CashSaleConflictError("Transfer payment cannot be reviewed from its current state.")
@@ -387,7 +410,7 @@ def review_membership_transfer(
     ))
     payment.status = status
     session.flush()
-    return TransferReviewResult(order, item, payment, membership, replayed=False)
+    return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=False)
 
 
 def _debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int) -> str:

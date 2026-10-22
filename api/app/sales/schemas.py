@@ -61,8 +61,9 @@ class CashSaleItemDTO(BaseModel):
     id: UUID
     plan_version_id: UUID
     description: str = Field(validation_alias="description_snapshot")
-    duration_value: int
-    duration_unit: str
+    duration_value: int | None
+    duration_unit: str | None
+    entitlement_mode: Literal["period", "single_entry"] = "period"
     quantity: int
     unit_amount_minor: int
     line_total_minor: int
@@ -87,8 +88,17 @@ class MembershipPeriodDTO(BaseModel):
     created_at: datetime
 
 
+class ClassSampleEntitlementDTO(BaseModel):
+    id: UUID
+    member_id: UUID
+    order_item_id: UUID
+    plan_version_id: UUID
+    created_at: datetime
+
+
 class CashMembershipSaleDTO(BaseModel):
     order: CashSaleOrderDTO
     item: CashSaleItemDTO
     payment: CashSalePaymentDTO
     membership: MembershipPeriodDTO | None
+    sample_entitlement: ClassSampleEntitlementDTO | None = None

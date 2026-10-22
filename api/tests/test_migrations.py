@@ -52,6 +52,25 @@ def test_new_head_migration_revision_fits_alembic_version_column():
     assert scripts.get_revision("0010_registers_terminals_and_shifts").revision == "0010_registers_terminals_and_shifts"
 
 
+def test_class_sample_downgrade_refuses_to_discard_entitlements(tmp_path, monkeypatch):
+    migration_path = API_DIR / "migrations" / "versions" / "0028_class_sample_entitlements.py"
+    spec = importlib.util.spec_from_file_location("class_sample_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_engine(f"sqlite+pysqlite:///{(tmp_path / 'sample-downgrade.db').as_posix()}")
+    with engine.begin() as connection:
+        connection.execute(text("create table class_sample_entitlements (id text primary key)"))
+        connection.execute(text("create table plan_versions (entitlement_mode text)"))
+        connection.execute(text("create table order_items (entitlement_mode text)"))
+        connection.execute(text("insert into class_sample_entitlements (id) values ('sample-1')"))
+    with engine.connect() as connection:
+        monkeypatch.setattr(migration, "op", SimpleNamespace(get_bind=lambda: connection))
+        with pytest.raises(RuntimeError, match="Cannot downgrade while single-entry"):
+            migration.downgrade()
+        assert connection.execute(text("select count(*) from class_sample_entitlements")).scalar_one() == 1
+    engine.dispose()
+
+
 def test_access_decision_order_migration_backfills_populated_append_only_rows(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'populated-access-decisions.db').as_posix()}"
@@ -211,8 +230,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "shift_closing_denomination_counts",
                 "member_check_ins",
                 "member_check_in_visits",
+                "class_sample_entitlements",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
             checkin_triggers = {
                 row[0]
                 for row in connection.execute(
@@ -374,7 +394,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
     finally:
         engine.dispose()
 
@@ -460,7 +480,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
     finally:
         engine.dispose()
 
@@ -486,7 +506,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
     finally:
         engine.dispose()
 
@@ -570,7 +590,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -603,7 +623,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -675,7 +695,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -766,7 +786,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -850,7 +870,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0028_class_sample_entitlements"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:

@@ -1,6 +1,6 @@
 """Catalog DTOs and API schemas."""
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ServiceDTO(BaseModel):
@@ -64,8 +64,9 @@ class PlanVersionDTO(BaseModel):
     price_minor: int
     currency: str = "MXN"
     reference_amount_minor: int | None = None
-    duration_value: int
-    duration_unit: str
+    duration_value: int | None
+    duration_unit: str | None
+    entitlement_mode: str = "period"
     eligibility_type: str | None = None
     restriction_notes: str | None = None
     is_active: bool = True
@@ -85,11 +86,20 @@ class PublishPlanVersionDTO(BaseModel):
     price_minor: int = Field(..., ge=0, description="Commercial price in minor units (centavos MXN).")
     currency: str = Field("MXN", min_length=3, max_length=3, description="ISO-4217 currency code.")
     reference_amount_minor: int | None = Field(None, ge=0, description="Optional regular/strikethrough price.")
-    duration_value: int = Field(..., gt=0, description="Duration value in duration_unit units.")
-    duration_unit: str = Field(..., pattern="^(day|month|year)$", description="Duration time unit.")
+    duration_value: int | None = Field(None, gt=0, description="Duration value for period entitlements.")
+    duration_unit: str | None = Field(None, pattern="^(day|month|year)$", description="Duration time unit for period entitlements.")
+    entitlement_mode: str = Field("period", pattern="^(period|single_entry)$")
     eligibility_type: str | None = Field(None, max_length=64, description="Optional special program eligibility tag.")
     restriction_notes: str | None = Field(None, description="Operational notes or schedule restrictions.")
     services: list[PlanVersionServiceCreateDTO] = Field(default_factory=list, description="Included service compositions.")
+
+    @model_validator(mode="after")
+    def validate_entitlement_duration(self):
+        if self.entitlement_mode == "period" and (self.duration_value is None or self.duration_unit is None):
+            raise ValueError("Period entitlements require a duration and unit.")
+        if self.entitlement_mode == "single_entry" and (self.duration_value is not None or self.duration_unit is not None):
+            raise ValueError("Single-entry entitlements cannot have a period duration.")
+        return self
 
 
 class PlanDTO(BaseModel):

@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -203,6 +203,31 @@ def test_publish_incremental_plan_versions(tmp_path):
             assert [v.version_number for v in refreshed.versions] == [1, 2]
             assert refreshed.current_version.version_number == 2
             assert refreshed.current_version.price_minor == 55000
+    finally:
+        engine.dispose()
+
+
+def test_single_entry_plan_version_has_no_period_duration(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        with factory.begin() as session:
+            plan = create_plan(session, code="class-sample", name="Class Sample", kind="membership")
+            version = publish_plan_version(session, plan.id, PublishPlanVersionDTO(
+                name="Class Sample", price_minor=25000, entitlement_mode="single_entry",
+            ))
+            assert version.entitlement_mode == "single_entry"
+            assert version.duration_value is None
+            assert version.duration_unit is None
+        for version_number, (duration_value, duration_unit) in enumerate(((None, "month"), (1, None)), start=2):
+            with factory() as session:
+                plan = session.scalar(select(Plan).where(Plan.code == "class-sample"))
+                with pytest.raises(IntegrityError):
+                    session.add(PlanVersion(
+                        plan_id=plan.id, version_number=version_number, name="Invalid Period", price_minor=25000,
+                        entitlement_mode="period", duration_value=duration_value, duration_unit=duration_unit,
+                    ))
+                    session.flush()
+                session.rollback()
     finally:
         engine.dispose()
 

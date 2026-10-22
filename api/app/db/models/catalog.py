@@ -108,11 +108,13 @@ class PlanVersion(Base):
             "reference_amount_minor IS NULL OR reference_amount_minor >= 0",
             name="ck_plan_versions_ref_amount",
         ),
-        CheckConstraint("duration_value > 0", name="ck_plan_versions_duration_val"),
         CheckConstraint(
-            "duration_unit IN ('day', 'month', 'year')",
-            name="ck_plan_versions_duration_unit",
+            "(entitlement_mode = 'period' AND duration_value IS NOT NULL AND duration_value > 0 "
+            "AND duration_unit IS NOT NULL AND duration_unit IN ('day', 'month', 'year')) OR "
+            "(entitlement_mode = 'single_entry' AND duration_value IS NULL AND duration_unit IS NULL)",
+            name="ck_plan_versions_duration_val",
         ),
+        CheckConstraint("entitlement_mode IN ('period', 'single_entry')", name="ck_plan_versions_entitlement_mode"),
         UniqueConstraint("plan_id", "version_number", name="uq_plan_versions_plan_version"),
         Index("ix_plan_versions_plan_id", "plan_id"),
         Index("ix_plan_versions_eligibility_type", "eligibility_type"),
@@ -130,8 +132,9 @@ class PlanVersion(Base):
         String(3), nullable=False, default="MXN", server_default="MXN"
     )
     reference_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    duration_value: Mapped[int] = mapped_column(Integer, nullable=False)
-    duration_unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    duration_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    entitlement_mode: Mapped[str] = mapped_column(String(24), nullable=False, default="period", server_default="period")
     eligibility_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     restriction_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(

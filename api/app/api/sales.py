@@ -25,6 +25,7 @@ from app.sales.schemas import (
     CashSaleItemDTO,
     CashSaleOrderDTO,
     CashSalePaymentDTO,
+    ClassSampleEntitlementDTO,
     MembershipDebtPaymentDTO,
     MembershipDebtPaymentRequest,
     MembershipPeriodDTO,
@@ -34,7 +35,8 @@ from app.sales.schemas import (
 router = APIRouter(prefix="/api/v1/registers", tags=["sales"])
 
 
-def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: MembershipPeriod | None) -> CashMembershipSaleDTO:
+def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: MembershipPeriod | None,
+              sample_entitlement=None) -> CashMembershipSaleDTO:
     return CashMembershipSaleDTO(
         order=CashSaleOrderDTO(
             id=order.id, branch_id=order.branch_id, register_id=order.register_id,
@@ -45,7 +47,8 @@ def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: Membe
         ),
         item=CashSaleItemDTO(
             id=item.id, plan_version_id=item.plan_version_id, description_snapshot=item.description_snapshot,
-            duration_value=item.duration_value, duration_unit=item.duration_unit, quantity=item.quantity,
+            duration_value=item.duration_value, duration_unit=item.duration_unit,
+            entitlement_mode=item.entitlement_mode, quantity=item.quantity,
             unit_amount_minor=item.unit_amount_minor, line_total_minor=item.line_total_minor,
         ),
         payment=CashSalePaymentDTO(
@@ -57,6 +60,11 @@ def _sale_dto(order: Order, item: OrderItem, payment: Payment, membership: Membe
             starts_on=membership.starts_on, ends_on=membership.ends_on, activated_by=membership.activated_by,
             created_at=membership.created_at,
         ) if membership is not None else None,
+        sample_entitlement=ClassSampleEntitlementDTO(
+            id=sample_entitlement.id, member_id=sample_entitlement.member_id,
+            order_item_id=sample_entitlement.order_item_id, plan_version_id=sample_entitlement.plan_version_id,
+            created_at=sample_entitlement.created_at,
+        ) if sample_entitlement is not None else None,
     )
 
 
@@ -119,7 +127,7 @@ def post_cash_membership_sale_endpoint(
             session.commit()
             if result.replayed:
                 response.status_code = 200
-            return _sale_dto(result.order, result.item, result.payment, result.membership)
+            return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
 
 
     except HTTPException:
@@ -158,7 +166,7 @@ def post_cash_membership_sale_endpoint(
                 raise HTTPException(409, "Idempotency key was already used for a different request.") from exc
             result = _load_result(session, existing, replayed=True)
             response.status_code = 200
-            return _sale_dto(result.order, result.item, result.payment, result.membership)
+            return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
 
 
 @router.post("/{register_id}/membership-debt-payments", response_model=MembershipDebtPaymentDTO, status_code=201)
@@ -262,7 +270,7 @@ def post_membership_transfer_endpoint(
             session.commit()
             if result.replayed:
                 response.status_code = 200
-            return _sale_dto(result.order, result.item, result.payment, result.membership)
+            return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
     except HTTPException:
         raise
     except CashSaleNotFoundError as exc:
@@ -296,7 +304,7 @@ def post_membership_transfer_endpoint(
             if result.payment.method != "transfer":
                 raise HTTPException(409, "Idempotency key was already used for a different request.") from exc
             response.status_code = 200
-            return _sale_dto(result.order, result.item, result.payment, result.membership)
+            return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
 
 
 @router.post("/transfer-payments/{payment_id}/review", response_model=CashMembershipSaleDTO)
@@ -341,7 +349,7 @@ def review_membership_transfer_endpoint(
                 status=payload.status, idempotency_key=idempotency_key,
             )
             session.commit()
-            return _sale_dto(result.order, result.item, result.payment, result.membership)
+            return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
     except HTTPException:
         raise
     except CashSaleNotFoundError as exc:

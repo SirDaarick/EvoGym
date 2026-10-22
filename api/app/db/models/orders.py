@@ -58,7 +58,13 @@ class OrderItem(Base):
         CheckConstraint("item_kind = 'membership'", name="ck_order_items_membership_kind"),
         CheckConstraint("quantity = 1", name="ck_order_items_quantity_one"),
         CheckConstraint("unit_amount_minor >= 0 AND line_total_minor = unit_amount_minor", name="ck_order_items_amounts_match"),
-        CheckConstraint("duration_value > 0 AND duration_unit IN ('day', 'month', 'year')", name="ck_order_items_duration"),
+        CheckConstraint(
+            "(entitlement_mode = 'period' AND duration_value IS NOT NULL AND duration_value > 0 "
+            "AND duration_unit IS NOT NULL AND duration_unit IN ('day', 'month', 'year')) OR "
+            "(entitlement_mode = 'single_entry' AND duration_value IS NULL AND duration_unit IS NULL)",
+            name="ck_order_items_duration",
+        ),
+        CheckConstraint("entitlement_mode IN ('period', 'single_entry')", name="ck_order_items_entitlement_mode"),
         UniqueConstraint("order_id", "line_number", name="uq_order_items_order_line"),
     )
 
@@ -68,8 +74,9 @@ class OrderItem(Base):
     line_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     item_kind: Mapped[str] = mapped_column(String(24), nullable=False, default="membership", server_default="membership")
     description_snapshot: Mapped[str] = mapped_column(String(160), nullable=False)
-    duration_value: Mapped[int] = mapped_column(Integer, nullable=False)
-    duration_unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    duration_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    entitlement_mode: Mapped[str] = mapped_column(String(24), nullable=False, default="period", server_default="period")
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")
     unit_amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     line_total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)

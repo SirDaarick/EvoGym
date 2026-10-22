@@ -115,6 +115,68 @@ def test_cash_membership_sale_activates_once_on_an_authorized_open_shift(tmp_pat
         engine.dispose()
 
 
+def test_paid_class_sample_records_one_durable_entitlement_and_rejects_second_sale(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            member = Member(member_number="SOC-SAMPLE", full_name="Sample Member", phone="5550101")
+            transfer_member = Member(member_number="SOC-SAMPLE-X", full_name="Transfer Sample", phone="5550102")
+            plan = Plan(code="class-sample", name="Class Sample", kind="membership", status="active")
+            session.add_all([member, transfer_member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id, version_number=1, name="Class Sample", price_minor=25000,
+                currency="MXN", duration_value=None, duration_unit=None,
+                entitlement_mode="single_entry", is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            register = create_cash_register(session, branch_id, "sample-register", "Sample Register")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            member_id, transfer_member_id, version_id, register_id = member.id, transfer_member.id, version.id, register.id
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            path = f"/api/v1/registers/{register_id}/membership-sales"
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "sample-sale-1"}
+            payload = {"member_id": str(member_id), "plan_version_id": str(version_id)}
+            response = client.post(path, headers=headers, json=payload)
+            assert response.status_code == 201, response.text
+            first = response.json()
+            assert first["item"]["entitlement_mode"] == "single_entry"
+            assert first["item"]["duration_value"] is None
+            assert first["membership"] is None
+            assert first["sample_entitlement"]["member_id"] == str(member_id)
+            assert first["payment"]["status"] == "confirmed"
+            for line_number, (duration_value, duration_unit) in enumerate(((None, "month"), (1, None)), start=2):
+                with factory() as session:
+                    with pytest.raises(IntegrityError):
+                        session.add(OrderItem(
+                            order_id=UUID(first["order"]["id"]), plan_version_id=version_id,
+                            line_number=line_number, item_kind="membership", description_snapshot="Invalid period",
+                            entitlement_mode="period", duration_value=duration_value, duration_unit=duration_unit,
+                            quantity=1, unit_amount_minor=0, line_total_minor=0,
+                        ))
+                        session.flush()
+                    session.rollback()
+            assert client.post(path, headers=headers, json=payload).json() == first
+            duplicate = client.post(path, headers={**headers, "Idempotency-Key": "sample-sale-2"}, json=payload)
+            assert duplicate.status_code == 409
+            transfer = client.post(
+                f"/api/v1/registers/{register_id}/membership-transfer-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "sample-transfer-1"},
+                json={"member_id": str(transfer_member_id), "plan_version_id": str(version_id)},
+            )
+            assert transfer.status_code == 201, transfer.text
+            assert transfer.json()["payment"]["status"] == "under_review"
+            assert transfer.json()["sample_entitlement"]["member_id"] == str(transfer_member_id)
+    finally:
+        engine.dispose()
+
+
 def test_partial_membership_cash_sale_records_received_cash_and_operational_warning(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -212,7 +274,7 @@ def test_partial_membership_cash_sale_records_received_cash_and_operational_warn
                 period_id = UUID(sale["membership"]["id"])
                 session.add(MemberAccessDecision(
                     period_id=period_id, actor_id=staff_id, action="restrict", reason="Admin review",
-                    idempotency_key="partial-admin-restrict", request_fingerprint="a" * 64,
+                    idempotency_key="partial-admin-restrict", request_fingerprint="a" * 64, decision_order=1,
                 ))
                 session.commit()
                 restricted = evaluate_membership_access(session, period_id,
