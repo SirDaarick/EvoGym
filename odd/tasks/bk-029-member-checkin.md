@@ -130,5 +130,6 @@ Implement the already-approved five-minute visit rule for the online check-in en
 - **Correction verification:** Exact required command -> 35 passed, 17 warnings in 64.25s; exact-path `git diff --check` passed. The downgrade refusal preserved both rows and the 0027 schema head. PostgreSQL migration/runtime validation was unavailable because the opt-in database is not configured; the PostgreSQL DDL branch is not runtime-proven.
 - **Correction commit:** `2d626f8` — `fix(check-in): restaurar protección tras migrar visitas`.
 - **Orphan-root downgrade safeguard:** Added a separate regression that creates a visit root with an empty event table. RED: downgrade unexpectedly dropped the root; GREEN: downgrade now refuses and preserves the root and 0027 head. Exact required command -> 36 passed, 18 warnings in 58.65s; scoped `git diff --check` passed. PostgreSQL runtime remains unavailable.
+- **Orphan-root fix commit:** `9910886` — `fix(check-in): proteger raíces al revertir migración`.
 - **Offline queue/sync and reconnect-time entitlement revalidation remain pending; BK-029 remains Partial.**
 - **Next step:** Synchronize the full Engram task mirror; PostgreSQL row-lock concurrency remains unverified without its opt-in database.
