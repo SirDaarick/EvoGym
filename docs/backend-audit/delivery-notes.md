@@ -11,9 +11,9 @@ Exclusions: no broader frontend/auth rewrite, historical plan fallback, schedule
 Dirty API proof: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_app.py api/tests/test_settings.py` → 30 passed; preceding app RED had 5 failed/11 passed.
 Dirty frontend proof, `frontend/`: `.\node_modules\.bin\vitest.cmd run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMembershipCheckout.test.tsx src/features/checkIns/offlineClock.test.ts src/api/receptionApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMemberRegistration.test.tsx --maxWorkers=2 --reporter=dot` → 64 passed; two-file preceding RED had 24 failed/16 passed.
 Dirty compiler command: `frontend/` `npm.cmd run typecheck` → exit 0; these results do not establish a clean R1 commit prefix.
-Clean R1 proof is PARTIAL: API 30 passed and frontend 64 passed; compiler reported two baseline TS2353 errors in unchanged finance fixtures. R1 acceptance is blocked pending R1a and a clean compiler rerun.
+Historical R1-only proof: API 30/FE 64 passed but compiler failed on unchanged baseline fixtures; after R1a, the clean R1 family passes API 30, finance/checkout FE 73 and typecheck.
 Rollback: only R1 CORS hunks in `api/app/main.py`, `api/tests/test_app.py`, checkout API/component/test hunks and `frontend/src/features/checkIns/offlineClock.test.ts`; preserve unrelated dirty wiring.
-Commit identity: `a58113e394cbf3230c114968c6b7777b6eb67e2f`; this observed R1 commit does not close the blocked compiler acceptance.
+Commit identity: `a58113e394cbf3230c114968c6b7777b6eb67e2f`; R1a below closes the previously blocked compiler acceptance.
 
 ## R1a
 
@@ -22,6 +22,17 @@ Outcome: remove only two unsupported `refundedAt` fixture properties in `fronten
 Invariant: test names/assertions, sale facts and negative ledger events with their `recordedAt` refund dates remain byte-for-byte unchanged apart from those two property removals.
 Observed RED: parent clean-R1 compiler result failed on those two TS2353 errors; no new behavioral RED is invented for a fixture/compiler correction.
 Primary fixture check: `frontend/` `.\node_modules\.bin\vitest.cmd run src/demo/financeReportSelector.test.ts --maxWorkers=2 --reporter=dot` → 9 passed (2.22s); dirty-worktree success cannot substitute for a clean compiler result.
-Clean GREEN: PENDING after parent commits R1a and independently checks compiler, finance fixtures and checkout against the clean owned prefix.
+Clean GREEN: `09e616b019b2e98397a86d18ccac66965067cf5c` — API 30 passed; frontend 73 passed in 7 files; typecheck exit 0.
 Rollback: restore only the two removed finance-fixture properties; no domain/selector/source or unrelated dirty-file rollback is authorized.
-Commit identity: PENDING; proposed message `test(finance): remove unsupported refund fixture metadata`.
+Commit identity: `09e616b019b2e98397a86d18ccac66965067cf5c`; results above identify this exact clean prefix.
+
+## R2
+
+Outcome: add a closed trusted public-error boundary, period/sample denial wiring, safe bounded validation diagnostics and their check-in OpenAPI schemas.
+Exclusions: other domain/idempotency mappings, non-check-in OpenAPI overrides and typed frontend transport remain follow-ups.
+Dirty RED: error/period/sample regressions → 15 failed/15 passed before implementation.
+Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_errors.py api/tests/test_member_check_ins.py api/tests/test_class_sample_check_ins.py` → 32 passed, 1 existing warning.
+Proof scope: malicious metadata/detail redaction, actual expired-period/sample denials and schema checks passed only on the dirty snapshot.
+Clean-prefix verification: PENDING against the exact owned R1+R1a+R2 tree; dirty-worktree results are not clean-prefix proof.
+Rollback: R2 hunks in `api/app/errors.py`, `api/app/api/member_check_ins.py` and the three named test modules, preserving other check-in work.
+Commit identity: PENDING; independent prefix verification and observed commit identity must be added later.

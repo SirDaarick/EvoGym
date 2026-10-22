@@ -98,6 +98,9 @@ def test_member_checkin_denies_expired_membership_and_records_no_event(tmp_path)
             response = client.post(f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}",
                 headers={"Authorization": f"Bearer {receptionist_token}", "Idempotency-Key": "expired-checkin"})
             assert response.status_code == 409
+            assert response.json()["error"]["code"] == "membership_access_denied"
+            assert response.json()["error"]["metadata"] == {"status": "expired", "reason": "period_expired"}
+            assert response.json()["error"]["request_id"] == response.headers["x-request-id"]
             with factory() as session:
                 assert session.scalar(select(MemberCheckIn.id).where(MemberCheckIn.period_id == period_id)) is None
                 from app.db.models.member_check_ins import MemberCheckInVisit

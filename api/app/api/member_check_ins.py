@@ -15,6 +15,7 @@ from app.db.models import (Branch, ClassSampleCheckIn, ClassSampleEntitlement, M
                            MembershipDebt, MembershipDebtPayment, MembershipPeriod, Order, OrderItem, Payment,
                            PaymentReviewEvent)
 from app.db.models.member_check_ins import MemberCheckInVisit
+from app.errors import CheckInConflictResponse, PublicDomainError, ValidationErrorResponse
 from app.memberships.eligibility import evaluate_membership_access
 
 router = APIRouter(prefix="/api/v1/member-check-ins", tags=["member-check-ins"])
@@ -99,11 +100,12 @@ def _resolve_sample_checkin_conflict(*, key_event, entitlement_event, fingerprin
             raise HTTPException(409, "Idempotency key was already used for a different check-in.")
         return key_event, True
     if entitlement_event is not None:
-        raise HTTPException(409, {"code": "class_sample_already_used"})
+        raise PublicDomainError("class_sample_already_used")
     return None, False
 
 
-@router.post("/branches/{branch_id}/samples/{entitlement_id}", response_model=ClassSampleCheckInResponse, status_code=201)
+@router.post("/branches/{branch_id}/samples/{entitlement_id}", response_model=ClassSampleCheckInResponse, status_code=201,
+             responses={409: {"model": CheckInConflictResponse}, 422: {"model": ValidationErrorResponse}})
 def record_class_sample_check_in(
     branch_id: UUID,
     entitlement_id: UUID,
@@ -151,10 +153,10 @@ def record_class_sample_check_in(
             OrderItem, OrderItem.order_id == Order.id).join(
             Payment, Payment.order_id == Order.id).where(OrderItem.id == entitlement.order_item_id)).one_or_none()
         if purchase is None:
-            raise HTTPException(409, {"code": "class_sample_payment_unavailable"})
+            raise PublicDomainError("class_sample_payment_unavailable")
         order, payment = purchase
         if order.branch_id != branch_id:
-            raise HTTPException(409, {"code": "wrong_branch"})
+            raise PublicDomainError("wrong_branch")
         if payment.method == "transfer":
             voucher = session.scalar(select(PaymentReviewEvent.id).where(
                 PaymentReviewEvent.payment_id == payment.id,
@@ -162,9 +164,9 @@ def record_class_sample_check_in(
                 PaymentReviewEvent.to_status == "under_review",
             ).limit(1)) is not None
             if payment.status not in {"under_review", "confirmed"} or (payment.status == "under_review" and not voucher):
-                raise HTTPException(409, {"code": "class_sample_payment_not_received"})
+                raise PublicDomainError("class_sample_payment_not_received")
         elif payment.status != "confirmed":
-            raise HTTPException(409, {"code": "class_sample_payment_not_received"})
+            raise PublicDomainError("class_sample_payment_not_received")
         debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == order.id))
         warnings: list[str] = []
         if debt is not None:
@@ -202,7 +204,8 @@ def record_class_sample_check_in(
         return _sample_response(event, replayed=False)
 
 
-@router.post("/branches/{branch_id}/periods/{period_id}", response_model=MemberCheckInResponse, status_code=201)
+@router.post("/branches/{branch_id}/periods/{period_id}", response_model=MemberCheckInResponse, status_code=201,
+             responses={409: {"model": CheckInConflictResponse}, 422: {"model": ValidationErrorResponse}})
 def record_member_check_in(
     branch_id: UUID,
     period_id: UUID,
@@ -244,8 +247,7 @@ def record_member_check_in(
         on_date = occurred_at.astimezone(ZoneInfo(branch.timezone)).date()
         access = evaluate_membership_access(session, period.id, on_date, branch_id)
         if not access.allowed:
-            raise HTTPException(409, {
-                "code": "membership_access_denied",
+            raise PublicDomainError("membership_access_denied", metadata={
                 "status": access.status.value,
                 "reason": access.reason,
             })

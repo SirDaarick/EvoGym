@@ -65,6 +65,8 @@ def test_sample_checkin_consumes_once_and_retry_returns_original_event(tmp_path)
             assert replay.status_code == 200 and replay.json()["id"] == first.json()["id"]
             denied_reentry = client.post(path, headers={**headers, "Idempotency-Key": "sample-ci-again"})
             assert denied_reentry.status_code == 409
+            assert denied_reentry.json()["error"]["code"] == "class_sample_already_used"
+            assert denied_reentry.json()["error"]["request_id"] == denied_reentry.headers["x-request-id"]
             with factory() as session:
                 assert session.scalar(select(ClassSampleEntitlement.id).where(
                     ClassSampleEntitlement.id == UUID(entitlement["id"]))) is not None

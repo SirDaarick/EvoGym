@@ -65,6 +65,124 @@ def test_validation_does_not_echo_submitted_secret():
     assert response.json()["error"]["code"] == "validation_error"
 
 
+@pytest.mark.parametrize(("code", "metadata"), [
+    ("membership_access_denied", {"status": "expired", "reason": "period_expired"}),
+    ("class_sample_already_used", None),
+    ("class_sample_payment_unavailable", None),
+    ("class_sample_payment_not_received", None),
+    ("wrong_branch", None),
+])
+def test_trusted_domain_errors_preserve_only_declared_codes_and_metadata(code, metadata):
+    from app.errors import PublicDomainError
+
+    app = app_with_routes()
+
+    @app.get("/domain")
+    def domain():
+        raise PublicDomainError(code, metadata=metadata)
+
+    response = run(app, path="/domain")
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == code
+    assert error["request_id"] == response.headers["x-request-id"]
+    assert error.get("metadata") == metadata
+
+
+@pytest.mark.parametrize(("code", "metadata"), [
+    ("password=secret", None),
+    ("membership_access_denied", {"status": "expired", "reason": "Bearer raw-token"}),
+    ("membership_access_denied", {"status": "expired", "reason": "period_expired", "password": "secret"}),
+    ("membership_access_denied", {"status": "expired", "reason": "transfer_missing_funds"}),
+    ("membership_access_denied", None),
+    ("class_sample_already_used", {"dsn": "postgresql://secret"}),
+])
+def test_trusted_domain_boundary_rejects_undeclared_values(code, metadata):
+    from app.errors import PublicDomainError
+
+    with pytest.raises(ValueError):
+        PublicDomainError(code, metadata=metadata)
+
+
+@pytest.mark.parametrize("detail", [
+    {"code": "class_sample_already_used"},
+    {"code": "membership_access_denied", "status": "expired", "reason": "period_expired"},
+    {"code": "unknown", "password": "secret", "dsn": "postgresql://secret"},
+    "Bearer raw-token password=secret",
+])
+def test_arbitrary_http_details_never_become_trusted_domain_errors(detail):
+    app = app_with_routes()
+
+    @app.get("/untrusted")
+    def untrusted():
+        raise HTTPException(409, detail)
+
+    response = run(app, path="/untrusted")
+    assert response.json()["error"]["code"] == "http_error"
+    assert "metadata" not in response.json()["error"]
+    assert "secret" not in response.text and "raw-token" not in response.text
+
+
+def test_validation_exposes_only_closed_types_and_coarse_locations():
+    response = run(app_with_routes(), "POST", "/payload", json={"value": "pin-777"})
+    assert response.json()["error"]["issues"] == [{"location": ["body"], "type": "int_parsing"}]
+    assert response.json()["error"]["request_id"] == response.headers["x-request-id"]
+
+
+def test_validation_never_reflects_user_dictionary_keys_context_or_unknown_types():
+    from fastapi.exceptions import RequestValidationError
+
+    app = app_with_routes()
+
+    @app.get("/validation-secrets")
+    def validation_secrets():
+        raise RequestValidationError([
+            {"type": "int_parsing", "loc": ("body", "values", "Bearer raw-token"), "input": "password=secret", "ctx": {"dsn": "postgresql://secret"}},
+            {"type": "extra_forbidden", "loc": ("body", "password=secret"), "input": "secret"},
+            {"type": "password=secret", "loc": ("Bearer raw-token",), "input": "secret"},
+        ])
+
+    response = run(app, path="/validation-secrets")
+    assert response.status_code == 422
+    assert response.json()["error"]["issues"] == [
+        {"location": ["body"], "type": "int_parsing"},
+        {"location": ["body"], "type": "extra_forbidden"},
+        {"location": [], "type": "invalid"},
+    ]
+    assert all(secret not in response.text for secret in ("password", "secret", "raw-token", "postgresql"))
+
+
+def test_validation_issue_output_is_bounded():
+    from fastapi.exceptions import RequestValidationError
+
+    app = app_with_routes()
+
+    @app.get("/many-errors")
+    def many_errors():
+        raise RequestValidationError([{"type": "missing", "loc": ("body", "private-field")} for _ in range(100)])
+
+    response = run(app, path="/many-errors")
+    assert len(response.json()["error"]["issues"]) == 20
+    assert "private-field" not in response.text
+
+
+def test_checkin_openapi_declares_domain_conflicts_and_safe_validation_responses():
+    from app.main import create_app
+    from app.settings import Settings
+
+    schema = create_app(Settings(environment="test", _env_file=None)).openapi()
+    for suffix in ("periods/{period_id}", "samples/{entitlement_id}"):
+        responses = schema["paths"][f"/api/v1/member-check-ins/branches/{{branch_id}}/{suffix}"]["post"]["responses"]
+        assert responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith("/CheckInConflictResponse")
+        assert responses["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ValidationErrorResponse")
+    definitions = schema["components"]["schemas"]
+    assert set(definitions["PublicDomainErrorBody"]["properties"]["code"]["enum"]) == {
+        "membership_access_denied", "class_sample_already_used", "class_sample_payment_unavailable",
+        "class_sample_payment_not_received", "wrong_branch",
+    }
+    assert definitions["ValidationIssue"]["properties"]["location"]["maxItems"] == 1
+
+
 def test_unhandled_error_is_generic_even_when_test_client_does_not_raise(caplog):
     caplog.set_level(logging.INFO, logger="evogym.api")
     response = run(app_with_routes(), path="/crash", raise_server_exceptions=False)
