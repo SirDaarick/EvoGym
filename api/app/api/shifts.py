@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError, TimeoutError
 
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied, Permission
@@ -74,10 +74,10 @@ def get_shift_actor_principal(
     try:
         staff_id, _session_id = validate_admin_session(factory, token)
         return ShiftActorPrincipal(staff_id=staff_id, is_admin=True, branch_id=None)
-    except (AuthorizationDenied, ValueError):
+    except AuthorizationDenied:
         pass
-    except Exception:
-        pass
+    except (OperationalError, InterfaceError, TimeoutError):
+        raise HTTPException(503, "Authentication service unavailable.") from None
 
     # 2. Staff Bearer with operational permission
     try:
@@ -87,10 +87,10 @@ def get_shift_actor_principal(
             is_admin=False,
             branch_id=principal.branch_id,
         )
-    except (AuthorizationDenied, ValueError):
+    except AuthorizationDenied:
         pass
-    except Exception:
-        pass
+    except (OperationalError, InterfaceError, TimeoutError):
+        raise HTTPException(503, "Authentication service unavailable.") from None
 
     raise HTTPException(401, "Authentication failed.")
 

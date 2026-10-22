@@ -33,6 +33,17 @@ Exclusions: other domain/idempotency mappings, non-check-in OpenAPI overrides an
 Dirty RED: error/period/sample regressions → 15 failed/15 passed before implementation.
 Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_errors.py api/tests/test_member_check_ins.py api/tests/test_class_sample_check_ins.py` → 32 passed, 1 existing warning.
 Proof scope: malicious metadata/detail redaction, actual expired-period/sample denials and schema checks passed only on the dirty snapshot.
-Clean-prefix verification: PENDING against the exact owned R1+R1a+R2 tree; dirty-worktree results are not clean-prefix proof.
+Clean-prefix verification: `e53eddf2f48e0d44c32d0e288b3658e89e453046` — 32 passed; existing Starlette warning; clean imports verified.
 Rollback: R2 hunks in `api/app/errors.py`, `api/app/api/member_check_ins.py` and the three named test modules, preserving other check-in work.
-Commit identity: PENDING; independent prefix verification and observed commit identity must be added later.
+Commit identity: `e53eddf2f48e0d44c32d0e288b3658e89e453046`; results above identify this exact clean prefix.
+
+## R3
+
+Outcome: member/catalog/shift principal resolution falls back only on `AuthorizationDenied`; classified driver/pool failures return generic 503 and unexpected failures reach generic 500.
+Exclusions: no service-wide database policy, blanket SQLAlchemy catch, new auth abstraction or weakened role/branch checks.
+Dirty RED: corrected fault regressions → 42 failed/6 passed before the source fix; an earlier fixture-only pagination mistake was corrected first.
+Dirty GREEN: root `.\api\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider api/tests/test_authentication_failures.py api/tests/test_members.py api/tests/test_catalog.py api/tests/test_shifts.py` → 104 passed, 1 existing warning.
+Proof scope: exact validator calls, no unintended fallback, real revoked-token rejection and valid staff handler reads were checked on the dirty tree.
+Clean-prefix verification: PENDING against the owned R1–R3 tree; no clean-prefix PASS is claimed.
+Rollback: only R3 resolver/import hunks in the three API modules and new `api/tests/test_authentication_failures.py`, not whole shared files.
+Commit identity: PENDING; prior dirty success does not establish an observed local commit.
