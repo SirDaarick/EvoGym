@@ -1,6 +1,6 @@
 import type { DemoState, PaymentMethod, Sale, VisitArea } from '../domain/models';
 import type { Transaction } from './operations';
-import { plans } from './plans';
+import { getPlanList, snapshotPlan } from './plans';
 import { activeShift } from './inventoryOperations';
 
 export interface RegistrationConfirmations {
@@ -26,8 +26,8 @@ export type RegistrationResult =
 
 export function registerNewMember(state: DemoState, request: NewMemberRegistrationRequest): Transaction<RegistrationResult> {
   const fail = (message: string): Transaction<RegistrationResult> => ({ state, result: { status: 'error', message } });
-  const plan = plans.find(item => item.id === request.planId);
-  if (!request.id || !plan || plan.kind !== (request.kind === 'visit' ? 'visit' : 'membership')) return fail('Tipo o plan no disponible.');
+  const plan = getPlanList().find(item => item.id === request.planId);
+  if (!request.id || !plan || plan.active === false || plan.kind !== (request.kind === 'visit' ? 'visit' : 'membership')) return fail('Tipo o plan no disponible.');
   if (!['cash', 'card', 'transfer'].includes(request.method)) return fail('Método de pago no disponible.');
   const shift = activeShift(state);
   if (!shift) return fail('Abre un turno antes de registrar la operación.');
@@ -59,7 +59,7 @@ export function registerNewMember(state: DemoState, request: NewMemberRegistrati
   if (state.members.some(member => member.id === memberId)) return fail('La referencia ya existe.');
   const pending = request.method === 'transfer';
   const member = { id: memberId, name, phone: request.phone?.trim() ?? '', ...(request.email?.trim() ? { email: request.email.trim() } : {}), creditMinor: 0, membership: null, joinedOn: state.demoClock.slice(0, 10) };
-  const payment = { id: request.id, memberId, planId: plan.id, planName: plan.name, amountMinor: plan.amountMinor,
+  const payment = { id: request.id, memberId, planId: plan.id, planName: plan.name, amountMinor: plan.amountMinor, planSnapshot: snapshotPlan(plan),
     method: request.method, status: pending ? 'pending' as const : 'paid' as const, recordedAt: new Date().toISOString(), shiftId: shift.id, effectiveDates: null };
   const ledger = pending ? state.ledger : [...state.ledger, { id: `event-${request.id}`, paymentId: request.id,
     memberId, shiftId: shift.id, kind: 'membership' as const, amountMinor: plan.amountMinor, method: request.method as 'cash' | 'card', recordedAt: payment.recordedAt }];

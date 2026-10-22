@@ -14,17 +14,37 @@ export interface Member {
 }
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer';
+export type PlanService = 'gym' | 'box' | 'box-kids';
+export interface PlanComposition {
+  services: PlanService[];
+  serviceStatus: 'confirmed' | 'pending';
+  period: { value: number; unit: 'day' | 'week' | 'month' | 'year' | 'session'; expiryRule: 'calendar' | 'pending' };
+  conditions: { eligibility: 'general' | 'student' | 'kids' | 'legacy' | 'custom'; notes: string };
+}
+export interface PurchasedPlanSnapshot {
+  planId: string;
+  revision: number;
+  name: string;
+  amountMinor: Money;
+  referenceAmountMinor?: Money;
+  applicability: string;
+  restriction?: string;
+  composition?: PlanComposition;
+}
 export interface MembershipPayment {
   id: string;
   memberId: string;
   planId: string;
   planName: string;
   amountMinor: Money;
+  planSnapshot?: PurchasedPlanSnapshot;
   method: PaymentMethod;
   status: 'paid' | 'pending';
   recordedAt: string;
   shiftId: string;
   effectiveDates: null;
+  refundedAt?: string;
+  refundReason?: string;
 }
 export interface MemberNote {
   id: string; memberId: string; body: string; authorId: string; authorName: string; createdAt: string;
@@ -53,6 +73,9 @@ export interface Shift {
   expectedCashAtCloseMinor?: Money;
   cashDifferenceMinor?: Money;
   cashDenominations?: CashDenominationCount[];
+  openingCashDenominations?: CashDenominationCount[];
+  responsibleStaffId?: string;
+  responsibleStaffName?: string;
   closingNotes?: string;
 }
 export interface Product {
@@ -71,6 +94,7 @@ export interface StockMovement {
   shiftId: string;
   kind: 'restock' | 'sale' | 'waste';
   quantity: number;
+  reason?: string;
   recordedAt: string;
 }
 export interface PhysicalCount {
@@ -99,6 +123,10 @@ export interface Sale {
   recordedAt: string;
   memberId?: string | null;
   memberName?: string | null;
+  refundedAt?: string;
+  refundReason?: string;
+  isOvertime?: boolean;
+  is_overtime?: boolean;
 }
 
 export interface DemoState {
@@ -124,6 +152,7 @@ export interface DemoState {
   supplementSales?: SupplementSale[];
   expenses?: ExpenseRecord[];
   extras?: ExtraRecord[];
+  staffAttendance?: StaffAttendanceRecord[];
 }
 
 export interface GloveItem {
@@ -205,6 +234,8 @@ export interface SupplementSale {
   status: 'confirmed' | 'pending';
   shiftId: string;
   recordedAt: string;
+  refundedAt?: string;
+  refundReason?: string;
 }
 
 export interface ExpenseRecord {
@@ -233,3 +264,19 @@ export interface AttendanceVisit {
   autoClosedAt: string | null;
   illustrativeSeed?: true;
 }
+
+export interface StaffAttendanceRecord {
+  id: string;
+  staffId: string;
+  staffName: string;
+  roleOrDepartment?: string;
+  clockInAt: string;
+  clock_in_at?: string;
+  clockOutAt?: string | null;
+  clock_out_at?: string | null;
+  recordedBy: string;
+  recorded_by?: string;
+  notes?: string;
+  shiftId?: string;
+}
+

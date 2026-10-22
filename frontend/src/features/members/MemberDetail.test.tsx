@@ -52,6 +52,7 @@ describe('member detail presentation', () => {
   it('places membership and rentals down the left, attendance and notes down the right, then purchases full width', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
     await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
+    await userEvent.click(screen.getByRole('tab', { name: /Expediente/i }));
     const layout = screen.getByRole('main').querySelector('.member-detail-sections') as HTMLElement;
     const left = layout.querySelector('.member-detail-left-column') as HTMLElement;
     const right = layout.querySelector('.member-detail-right-column') as HTMLElement;
@@ -76,6 +77,7 @@ describe('member detail presentation', () => {
     const main = screen.getByRole('main');
     expect(within(main).getByRole('heading', { level: 1, name: 'Alex Morgan' })).toBeVisible();
     expect(within(main).getByRole('button', { name: 'Registrar entrada' })).toBeVisible();
+    await userEvent.click(screen.getByRole('tab', { name: /Expediente/i }));
     const sections = main.querySelector('.member-detail-sections');
     const sectionHeadings = Array.from(sections?.querySelectorAll('h2') ?? []).map(node => node.textContent);
     expect(sectionHeadings[0]).toBe('Membresía');
@@ -248,4 +250,30 @@ describe('member detail presentation', () => {
     expect(screen.getByText('Gasto total en mostrador')).toBeVisible();
     expect(screen.getByRole('note', { name: 'Estrategia de retención' })).toBeVisible();
   });
+
+  it('renders front-desk bento by default and switches between Mostrador and Expediente tabs', async () => {
+    render(<MemoryRouter initialEntries={['/reception/members/demo-active']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
+
+    const mostradorTab = screen.getByRole('tab', { name: 'Mostrador' });
+    const expedienteTab = screen.getByRole('tab', { name: 'Expediente' });
+    expect(mostradorTab).toHaveAttribute('aria-selected', 'true');
+    expect(expedienteTab).toHaveAttribute('aria-selected', 'false');
+
+    expect(screen.getByRole('heading', { name: 'Membresía' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Rentas actuales' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Atención al socio' })).toBeVisible();
+
+    await userEvent.click(expedienteTab);
+    expect(expedienteTab).toHaveAttribute('aria-selected', 'true');
+    expect(mostradorTab).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('region', { name: 'Historial de membresías' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Historial de compras' })).toBeVisible();
+
+    await userEvent.click(mostradorTab);
+    expect(mostradorTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Atención al socio' })).toBeVisible();
+  });
 });
+

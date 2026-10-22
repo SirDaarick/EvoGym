@@ -98,6 +98,35 @@ export function createBaselineDemoState(): DemoState {
     extras: [
       { id: 'extra-seed-01', concept: 'Cambio de billete $500 para cliente', staffName: 'Mariana López', amountMinor: 5000, shiftId: 'demo-shift-01', recordedAt: '2026-10-08T10:15:00-06:00' },
     ],
+    staffAttendance: [
+      {
+        id: 'staff-att-seed-01',
+        staffId: 'staff-mikel',
+        staffName: 'Mikel',
+        roleOrDepartment: 'Entrenador',
+        clockInAt: '2026-10-08T07:00:00-06:00',
+        clock_in_at: '2026-10-08T07:00:00-06:00',
+        clockOutAt: null,
+        clock_out_at: null,
+        recordedBy: 'Sheila',
+        recorded_by: 'Sheila',
+        notes: 'Turno matutino de box',
+        shiftId: 'demo-shift-01',
+      },
+      {
+        id: 'staff-att-seed-02',
+        staffId: 'staff-silvia',
+        staffName: 'Silvia',
+        roleOrDepartment: 'Mantenimiento',
+        clockInAt: '2026-10-08T06:30:00-06:00',
+        clock_in_at: '2026-10-08T06:30:00-06:00',
+        clockOutAt: null,
+        clock_out_at: null,
+        recordedBy: 'Emigdio',
+        recorded_by: 'Emigdio',
+        shiftId: 'demo-shift-01',
+      },
+    ],
   };
 }
 

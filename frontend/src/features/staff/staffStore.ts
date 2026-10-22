@@ -11,6 +11,7 @@ export interface StaffProfile {
   pin?: string;
   active: boolean;
   avatarInitials: string;
+  department?: 'Entrenador' | 'Mantenimiento' | 'Staff' | 'Recepción' | string;
 }
 
 let selectedStaff: Pick<StaffProfile, 'id' | 'name'> | null = null;
@@ -28,6 +29,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'A',
+    department: 'Staff',
   },
   {
     id: 'staff-emigdio',
@@ -39,6 +41,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'E',
+    department: 'Entrenador',
   },
   {
     id: 'staff-sheila',
@@ -50,6 +53,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'S',
+    department: 'Staff',
   },
   {
     id: 'staff-mikel',
@@ -60,6 +64,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     hasPin: false,
     active: true,
     avatarInitials: 'M',
+    department: 'Entrenador',
   },
   {
     id: 'staff-charly',
@@ -70,6 +75,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     hasPin: false,
     active: true,
     avatarInitials: 'C',
+    department: 'Entrenador',
   },
   {
     id: 'staff-tadeo',
@@ -81,6 +87,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'T',
+    department: 'Entrenador',
   },
   {
     id: 'staff-silvia',
@@ -92,6 +99,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'S',
+    department: 'Mantenimiento',
   },
   {
     id: 'staff-alan',
@@ -102,6 +110,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     hasPin: false,
     active: true,
     avatarInitials: 'A',
+    department: 'Mantenimiento',
   },
   {
     id: 'staff-maho',
@@ -113,6 +122,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     pin: '1234',
     active: true,
     avatarInitials: 'M',
+    department: 'Staff',
   },
   {
     id: 'staff-inaky',
@@ -123,6 +133,7 @@ export const INITIAL_STAFF: StaffProfile[] = [
     hasPin: false,
     active: true,
     avatarInitials: 'I',
+    department: 'Entrenador',
   },
 ];
 

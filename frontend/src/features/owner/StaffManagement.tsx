@@ -14,6 +14,7 @@ import SquishSwitch from '../catalog/react-bits/SquishSwitch';
 import CodeSlots, { type CodeSlotsStatus } from '../catalog/react-bits/CodeSlots';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import JellyRadio from '../catalog/react-bits/JellyRadio';
+import { DevicePairingModal } from '../staff/DevicePairingModal';
 
 export function StaffManagement() {
   const staffList = useStaff();
@@ -23,6 +24,7 @@ export function StaffManagement() {
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [pairingStaff, setPairingStaff] = useState<StaffProfile | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [shift, setShift] = useState('Matutino');
@@ -215,6 +217,13 @@ export function StaffManagement() {
         enableSorting: false,
         cell: ({ row }) => (
           <div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end', width: '100%' }}>
+            <Button
+              variant="secondary"
+              onClick={() => setPairingStaff(row.original)}
+              title="Vincular teléfono del empleado sin contraseñas"
+            >
+              Vincular Dispositivo
+            </Button>
             <Button variant="secondary" onClick={() => openEditModal(row.original)}>
               Editar
             </Button>
@@ -560,6 +569,15 @@ export function StaffManagement() {
             onClose={() => setToast(null)}
           />
         </div>
+      )}
+
+      {/* Device Pairing Modal */}
+      {pairingStaff && (
+        <DevicePairingModal
+          isOpen={Boolean(pairingStaff)}
+          staff={pairingStaff}
+          onClose={() => setPairingStaff(null)}
+        />
       )}
     </div>
   );

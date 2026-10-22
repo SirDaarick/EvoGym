@@ -1,0 +1,264 @@
+/* Device Pairing Modal Styles */
+.device-pairing-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  animation: pairingFadeIn 150ms ease-out;
+}
+
+@keyframes pairingFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.device-pairing-card {
+  background: var(--color-surface, #FFFFFF);
+  border: 1px solid var(--color-boundary, #E5E7EB);
+  border-radius: 24px;
+  padding: 24px 28px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: pairingCardIn 180ms ease-out;
+  color: var(--color-text, #111827);
+}
+
+@keyframes pairingCardIn {
+  from {
+    transform: scale(0.96) translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.device-pairing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-boundary, #E5E7EB);
+  padding-bottom: 14px;
+}
+
+.device-pairing-title-group h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-pairing-staff-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--color-muted, #6B7280);
+}
+
+.device-pairing-staff-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #FC6C06;
+  color: #FFFFFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.device-pairing-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-muted, #6B7280);
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.device-pairing-close-btn:hover {
+  color: var(--color-text, #111827);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Code box section */
+.device-pairing-code-section {
+  background: var(--color-surface-soft, rgba(0, 0, 0, 0.02));
+  border: 1px dashed var(--color-boundary, #D1D5DB);
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.device-pairing-code-label {
+  font-size: 0.825rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted, #6B7280);
+}
+
+.device-pairing-code-digits {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: #FC6C06;
+  background: rgba(252, 108, 6, 0.08);
+  padding: 6px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(252, 108, 6, 0.25);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.device-pairing-timer-badge {
+  font-size: 0.825rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.device-pairing-timer-badge.is-valid {
+  background: rgba(23, 93, 59, 0.1);
+  color: #175D3B;
+  border: 1px solid rgba(23, 93, 59, 0.2);
+}
+
+.device-pairing-timer-badge.is-warning {
+  background: rgba(194, 65, 12, 0.1);
+  color: #C2410C;
+  border: 1px solid rgba(194, 65, 12, 0.2);
+}
+
+.device-pairing-timer-badge.is-expired {
+  background: rgba(185, 28, 28, 0.1);
+  color: #B91C1C;
+  border: 1px solid rgba(185, 28, 28, 0.2);
+}
+
+.device-pairing-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+}
+
+.device-pairing-btn-wa {
+  background: #25D366 !important;
+  color: #FFFFFF !important;
+  border-color: #25D366 !important;
+}
+
+.device-pairing-btn-wa:hover {
+  background: #20BD5A !important;
+}
+
+/* Devices section */
+.device-pairing-devices-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device-pairing-devices-heading {
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+
+.device-pairing-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.device-pairing-device-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--color-boundary, #E5E7EB);
+  border-radius: 12px;
+  background: var(--color-surface, #FFFFFF);
+}
+
+.device-pairing-device-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-pairing-device-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text, #111827);
+  flex-shrink: 0;
+}
+
+.device-pairing-device-meta {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.device-pairing-device-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.device-pairing-device-date {
+  font-size: 0.75rem;
+  color: var(--color-muted, #6B7280);
+}
+
+.device-pairing-empty-devices {
+  font-size: 0.85rem;
+  color: var(--color-muted, #6B7280);
+  background: var(--color-surface-soft, rgba(0, 0, 0, 0.02));
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+}
+
+.device-pairing-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-boundary, #E5E7EB);
+  padding-top: 14px;
+}

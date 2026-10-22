@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import type { Role } from '../../domain/models';
 import { homePath } from '../../app/navigation';
 import { Button, Panel } from '../../shared/ui';
@@ -185,6 +185,11 @@ export function StaffProfileSelection() {
           <div className="staff-selection-heading">
             <h1>Elige tu perfil</h1>
             <p className="muted">Selecciona tu cuenta de personal para comenzar el turno u operaciones</p>
+            <div className="staff-login-link-container">
+              <Link to="/login" className="staff-login-link">
+                Iniciar sesión con usuario y contraseña →
+              </Link>
+            </div>
           </div>
 
           {/* Admin apex card */}

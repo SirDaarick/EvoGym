@@ -16,38 +16,19 @@ import type { Tone } from '../../shared/ui';
 import { NotebookNotice } from '../../shared/operationPresentation';
 import { memberStatus } from '../../demo/memberStatus';
 import { enterMember, exitMember, openAttendance } from '../../demo/attendanceOperations';
-import { MemberDetailSections } from './MemberDetail';
-import { formatAttendanceError } from './memberDetailUtils';
+import { membershipRenewalStreak } from '../../demo/memberNotes';
+import { MemberCounterView, MemberDetailSections } from './MemberDetail';
+import { formatAttendanceError, getMemberStatusInfo } from './memberDetailUtils';
 import { NewMemberRegistration } from './NewMemberRegistration';
 import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
+
+export { getMemberStatusInfo };
 
 function getMemberInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '—';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-function getMemberStatusInfo(member: Member, referenceDate?: string) {
-  const st = memberStatus(member, referenceDate);
-  let badgeLabel = 'Sin confirmar';
-  let tone: Tone = 'neutral';
-  if (st.status === 'active') {
-    if (st.provisional || member.demoScenario === 'expiry-today') {
-      badgeLabel = 'Vence hoy';
-      tone = 'warning';
-    } else {
-      badgeLabel = 'Activa';
-      tone = 'success';
-    }
-  } else if (st.status === 'expired' || st.status === 'inactive') {
-    badgeLabel = 'Vencida';
-    tone = 'error';
-  } else {
-    badgeLabel = 'Sin confirmar';
-    tone = 'neutral';
-  }
-  return { badgeLabel, tone, status: st.status, provisional: st.provisional };
 }
 
 export function Members({ role }: { role: Role }) {
@@ -288,24 +269,115 @@ export function NewMember({ role }: { role: Role }) {
 export function MemberDetail({ role }: { role: Role }) {
   const { memberId } = useParams();
   const { state, resetVersion } = useDemo();
+  const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
+
   const member = state.members.find(item => item.id === memberId);
-  if (!member) return <Panel><EmptyState title="Socio no disponible">No se encontró el perfil solicitado. <Link to={rolePath(role, 'members')}>Volver a socios</Link></EmptyState></Panel>;
+  if (!member) {
+    return (
+      <Panel>
+        <EmptyState title="Socio no disponible">
+          No se encontró el perfil solicitado.{' '}
+          <Link to={rolePath(role, 'members')}>Volver a socios</Link>
+        </EmptyState>
+      </Panel>
+    );
+  }
+
   const payments = state.payments.filter(payment => payment.memberId === member.id);
-  return <><PageHeader eyebrow="Socio" title={member.name} description={member.phone || 'Teléfono no capturado'} action={<MemberAttendance key={`${member.id}-${resetVersion}`} memberId={member.id} />} />
-    <MemberDetailSections
-      member={member}
-      now={state.demoClock}
-      visits={state.attendance.filter(visit => visit.memberId === member.id)}
-      gloves={state.gloves ?? []}
-      gloveRentals={state.gloveRentals ?? []}
-      lockers={state.lockers ?? []}
-      lockerRentals={state.lockerRentals ?? []}
-      payments={payments}
-      supplementSales={state.supplementSales ?? []}
-      sales={state.sales ?? []}
-      role={role}
-    />
-    <div className="flow"><Link to={rolePath(role, 'members')}>Volver a socios</Link></div></>;
+  const statusInfo = getMemberStatusInfo(member, state.demoClock);
+
+  return (
+    <>
+      <div className="member-hero-banner">
+        <div className="member-hero-avatar-wrap">
+          <div className="member-hero-avatar" aria-hidden="true">
+            {getMemberInitials(member.name)}
+          </div>
+        </div>
+        <div className="member-hero-details">
+          <PageHeader
+            eyebrow="Socio"
+            title={member.name}
+            description={member.phone || 'Teléfono no capturado'}
+            action={
+              <div className="member-hero-actions">
+                <Badge tone={statusInfo.tone}>{statusInfo.badgeLabel}</Badge>
+                <MemberAttendance key={`${member.id}-${resetVersion}`} memberId={member.id} />
+              </div>
+            }
+          />
+        </div>
+      </div>
+
+      <div className="member-tabs-container">
+        <div className="member-tabs-nav" role="tablist" aria-label="Secciones del socio">
+          <button
+            type="button"
+            role="tab"
+            id="member-tab-counter"
+            aria-selected={activeTab === 'counter'}
+            aria-controls="member-tabpanel-counter"
+            className={`member-tab-btn ${activeTab === 'counter' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('counter')}
+          >
+            Mostrador
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="member-tab-record"
+            aria-selected={activeTab === 'record'}
+            aria-controls="member-tabpanel-record"
+            className={`member-tab-btn ${activeTab === 'record' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('record')}
+          >
+            Expediente
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'counter' ? (
+        <div id="member-tabpanel-counter" role="tabpanel" aria-labelledby="member-tab-counter">
+          <MemberCounterView
+            member={member}
+            now={state.demoClock}
+            visits={state.attendance.filter(visit => visit.memberId === member.id)}
+            gloves={state.gloves ?? []}
+            gloveRentals={state.gloveRentals ?? []}
+            lockers={state.lockers ?? []}
+            lockerRentals={state.lockerRentals ?? []}
+            payments={payments}
+            supplementSales={state.supplementSales ?? []}
+            sales={state.sales ?? []}
+            role={role}
+            onSwitchToRecord={() => setActiveTab('record')}
+          />
+        </div>
+      ) : (
+        <div id="member-tabpanel-record" role="tabpanel" aria-labelledby="member-tab-record">
+          <MemberDetailSections
+            member={member}
+            now={state.demoClock}
+            visits={state.attendance.filter(visit => visit.memberId === member.id)}
+            gloves={state.gloves ?? []}
+            gloveRentals={state.gloveRentals ?? []}
+            lockers={state.lockers ?? []}
+            lockerRentals={state.lockerRentals ?? []}
+            payments={payments}
+            supplementSales={state.supplementSales ?? []}
+            sales={state.sales ?? []}
+            role={role}
+          />
+        </div>
+      )}
+
+      <div className="flow member-detail-back-flow">
+        <Link to={rolePath(role, 'members')} className="member-back-link">
+          Volver a socios
+        </Link>
+      </div>
+    </>
+  );
 }
 
 function MemberAttendance({ memberId }: { memberId: string }) {

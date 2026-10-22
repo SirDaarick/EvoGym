@@ -47,7 +47,7 @@ describe('owner views', () => {
     await userEvent.tab();
     expect(screen.getByRole('link', { name: 'Ir al contenido' })).toHaveFocus();
     const from = screen.getByLabelText('Desde');
-    for (let index = 0; index < 20 && document.activeElement !== from; index++) await userEvent.tab();
+    for (let index = 0; index < 30 && document.activeElement !== from; index++) await userEvent.tab();
     expect(from).toHaveFocus();
     await userEvent.tab();
     expect(screen.getByLabelText('Hasta')).toHaveFocus();

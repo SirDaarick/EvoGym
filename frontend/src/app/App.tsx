@@ -8,6 +8,10 @@ import { Button } from '../shared/ui';
 import { PwaInstallPrompt } from '../shared/PwaInstallPrompt';
 import { homePath, navigation, rolePath } from './navigation';
 import logo from '../assets/evogym-logo-128.webp';
+import { activeShift } from '../demo/inventoryOperations';
+import { openShift, shiftSummary } from '../demo/shiftOperations';
+import { ShiftOpenModal } from '../features/shifts/ShiftOpenModal';
+import { ShiftCloseDialog } from '../features/shifts/ShiftCloseDialog';
 
 import { RouteBoundary } from './RouteBoundary';
 
@@ -24,8 +28,11 @@ const History = lazy(() => import('../features/owner/History').then(module => ({
 const PlanCatalog = lazy(() => import('../features/owner/PlanCatalog').then(module => ({ default: module.PlanCatalog })));
 const ReceptionHome = lazy(() => import('../features/reception/ReceptionHome').then(module => ({ default: module.ReceptionHome })));
 const StaffProfileSelection = lazy(() => import('../features/staff/StaffProfileSelection').then(module => ({ default: module.StaffProfileSelection })));
+const Login = lazy(() => import('../features/auth/Login').then(module => ({ default: module.Login })));
 const OperationalLogin = lazy(() => import('../features/reception/LiveMemberLookup').then(module => ({ default: module.LiveMemberLookup })));
+const DevicePairingView = lazy(() => import('../features/staff/DevicePairingView').then(module => ({ default: module.DevicePairingView })));
 const StaffManagement = lazy(() => import('../features/owner/StaffManagement').then(module => ({ default: module.StaffManagement })));
+const StaffAttendanceView = lazy(() => import('../features/reception/StaffAttendanceView').then(module => ({ default: module.StaffAttendanceView })));
 const GimiDashboard = lazy(() => import('../features/gimi/GimiDashboard').then(module => ({ default: module.GimiDashboard })));
 const Members = lazy(() => import('../features/members/Members').then(module => ({ default: module.Members })));
 const MemberDetail = lazy(() => import('../features/members/Members').then(module => ({ default: module.MemberDetail })));
@@ -92,7 +99,19 @@ function readPerformanceDebugFlag() {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { reset, resetVersion } = useDemo();
+  const { reset, resetVersion, state, transact } = useDemo();
+  const [globalOpeningOpen, setGlobalOpeningOpen] = useState(false);
+  const [globalClosingOpen, setGlobalClosingOpen] = useState(false);
+  const currentActiveShift = activeShift(state);
+  const hasActiveShift = Boolean(currentActiveShift);
+  const activeShiftName = currentActiveShift?.window.startsWith('06:00') ? 'Matutino' : 'Vespertino';
+  const shiftSummaryData = currentActiveShift ? shiftSummary(state, currentActiveShift.id) : null;
+  const globalExpectedCashBreakdown = currentActiveShift ? {
+    openingMinor: currentActiveShift.openingCashMinor ?? 0,
+    receiptsMinor: state.ledger.filter(item => item.shiftId === currentActiveShift.id && item.method === 'cash').reduce((total, item) => total + item.amountMinor, 0),
+    extrasMinor: (state.extras ?? []).filter(item => item.shiftId === currentActiveShift.id).reduce((total, item) => total + item.amountMinor, 0),
+    expensesMinor: (state.expenses ?? []).filter(item => item.shiftId === currentActiveShift.id).reduce((total, item) => total + item.amountMinor, 0),
+  } : undefined;
   const [debugPerformance] = useState(readPerformanceDebugFlag);
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
@@ -121,7 +140,12 @@ export function App() {
     queueMicrotask(() => focusTarget?.focus());
   }
   const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
-  const items = navigation.filter(item => item.roles.includes(role));
+  const items = navigation
+    .filter(item => item.roles.includes(role))
+    .map(item => ({
+      ...item,
+      label: item.roleLabels?.[role] ?? item.label,
+    }));
 
   useEffect(() => {
     // Reset transient expansion on route transitions
@@ -220,8 +244,10 @@ export function App() {
       ? rolePath(next, slug) : homePath(next));
   }
 
-  if (location.pathname === '/') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
+  if (location.pathname === '/' || location.pathname === '/login') return <RouteBoundary key="login"><Login /></RouteBoundary>;
   if (location.pathname === '/reception/live') return <RouteBoundary key="operational-reception"><OperationalLogin /></RouteBoundary>;
+  if (location.pathname === '/profiles') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
+  if (location.pathname === '/pair') return <RouteBoundary key="pair"><DevicePairingView /></RouteBoundary>;
 
   return <div className="app-shell" onTouchStart={event => {
     touchStart.current = null;
@@ -290,7 +316,7 @@ export function App() {
         <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
       <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
       <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}{role === 'RECEPTION' && <NavLink to="/reception/live" aria-label="Recepción operativa" title="Recepción operativa"><NavIcon name="members" /><span className="sidebar-label" aria-hidden="true">Recepción operativa</span></NavLink>}</nav>
-      <div className="sidebar-bottom"><Link to="/" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
+      <div className="sidebar-bottom"><Link to="/profiles" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
     </aside>
     <div className="workspace" inert={mobileNavOpen}>
       <header className="demo-bar">
@@ -312,16 +338,34 @@ export function App() {
           </Link>
         </div>
         <div className="header-actions">
-          <div className="header-clock" aria-label="Hora actual" title="Hora actual">
+          <Button
+            id="global-shift-button"
+            variant="secondary"
+            className={`header-action-control header-shift-control ${hasActiveShift ? 'is-shift-open' : 'is-shift-closed'}`}
+            onClick={() => {
+              if (hasActiveShift) {
+                setGlobalClosingOpen(true);
+              } else {
+                setGlobalOpeningOpen(true);
+              }
+            }}
+            title={hasActiveShift ? 'Cerrar turno activo' : 'Abrir nuevo turno'}
+          >
+            <span className="header-shift-dot" aria-hidden="true" />
+            <span>{hasActiveShift ? 'Cerrar' : 'Abrir'}</span>
+          </Button>
+
+          <div className="header-action-control header-clock-control" aria-label="Hora actual" title="Hora actual">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="9" />
               <path d="M12 7v5l3 2" />
             </svg>
             <span>{clockStr}</span>
           </div>
+
           <Button
             variant="secondary"
-            className="theme-toggle"
+            className="header-action-control header-icon-control theme-toggle"
             aria-pressed={dark}
             onClick={toggleTheme}
             aria-label={dark ? 'Usar tema claro' : 'Usar tema oscuro'}
@@ -331,9 +375,50 @@ export function App() {
               {dark ? <SunIcon /> : <MoonIcon />}
             </span>
           </Button>
-          <Link to="/" tabIndex={-1} className="button button-secondary header-profile-btn">Perfil</Link>
+
+          <Link to="/profiles" tabIndex={-1} className="header-action-control header-profile-btn" title="Cambiar perfil">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21a8 8 0 0 1 16 0" />
+            </svg>
+            <span>Perfil</span>
+          </Link>
         </div>
       </header>
+      {globalOpeningOpen && (
+        <ShiftOpenModal
+          isOpen={globalOpeningOpen}
+          state={state}
+          onClose={() => setGlobalOpeningOpen(false)}
+          onConfirm={data => {
+            const id = `shift-${crypto.randomUUID()}`;
+            transact(currentState => openShift(currentState, {
+              id,
+              window: data.window,
+              openingCashMinor: data.openingCashMinor,
+              cashDenominations: data.cashDenominations,
+              openingCashDenominations: data.cashDenominations,
+              responsibleStaffId: data.responsibleStaffId,
+              responsibleStaffName: data.responsibleStaffName,
+              stockAdjustments: data.stockAdjustments,
+              counts: data.counts,
+            }));
+            setGlobalOpeningOpen(false);
+          }}
+        />
+      )}
+      {globalClosingOpen && currentActiveShift && shiftSummaryData && (
+        <ShiftCloseDialog
+          key={currentActiveShift.id}
+          isOpen={globalClosingOpen}
+          shiftId={currentActiveShift.id}
+          shiftName={activeShiftName}
+          expectedCashMinor={shiftSummaryData.expectedCashMinor}
+          expectedCashBreakdown={globalExpectedCashBreakdown}
+          onClose={() => setGlobalClosingOpen(false)}
+          onSuccess={() => setGlobalClosingOpen(false)}
+        />
+      )}
       <PwaInstallPrompt />
       <main id="main-content" tabIndex={-1}>
         <Profiler id="route-content" onRender={(id, phase, actualDuration, baseDuration) => {
@@ -349,6 +434,8 @@ export function App() {
         <RouteBoundary key={location.pathname}>
         <Routes>
           <Route path="/reception/home" element={<ReceptionHome key={resetVersion} />} />
+          <Route path="/reception/staff" element={<StaffAttendanceView key={resetVersion} />} />
+          <Route path="/pair" element={<DevicePairingView />} />
           <Route path="/components" element={<ComponentCatalog />} />
           <Route path={rolePath(role, 'members')} element={<Members key={resetVersion} role={role} />} />
           <Route path={rolePath(role, 'members/new')} element={<NewMember key={resetVersion} role={role} />} />

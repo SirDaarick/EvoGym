@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createDemoState } from './adapter';
 import { registerNewMember } from './newMemberRegistration';
+import { resetPlans, updatePlan, reloadPlans } from './plans';
 
 describe('new member registration', () => {
+  beforeEach(resetPlans);
   it('records an anonymous visit with the catalog rate without a confirmation gate', () => {
     const state = createDemoState();
     const transaction = registerNewMember(state, {
@@ -70,4 +72,37 @@ describe('new member registration', () => {
     expect(transaction.state).toBe(closedState);
     expect(closedState.members).toHaveLength(state.members.length);
   });
+});
+
+
+it('registration snapshots keep earlier name, price and nested terms after edit and reload', () => {
+  resetPlans();
+  const first = registerNewMember(createDemoState(), { id: 'snapshot-registration-1', kind: 'membership', planId: 'gym-month', method: 'cash', name: 'Persona de prueba' });
+  expect(first.result.status).toBe('confirmed');
+  const snapshot = first.state.payments.at(-1)?.planSnapshot;
+  expect(snapshot).toMatchObject({ revision: 1, name: 'Gym mensual', amountMinor: 50000, composition: { services: ['gym'], period: { value: 1 } } });
+  updatePlan('gym-month', { name: 'Gym actualizado', amountMinor: 58000, composition: { services: ['gym', 'box'], serviceStatus: 'confirmed', period: { value: 3, unit: 'month', expiryRule: 'calendar' }, conditions: { eligibility: 'general', notes: 'Nuevas condiciones' } } });
+  reloadPlans();
+  const restoredState = JSON.parse(JSON.stringify(first.state));
+  expect(restoredState.payments.at(-1).planSnapshot).toEqual(snapshot);
+  const second = registerNewMember(restoredState, { id: 'snapshot-registration-2', kind: 'membership', planId: 'gym-month', method: 'cash', name: 'Otra persona' });
+  expect(second.state.payments.at(-1)?.planSnapshot).toMatchObject({ revision: 2, name: 'Gym actualizado', amountMinor: 58000, composition: { services: ['gym', 'box'], period: { value: 3 } } });
+  expect(second.state.payments[0].amountMinor).toBe(50000);
+  expect(second.state.members.at(-1)?.membership).toBeNull();
+  resetPlans();
+});
+
+it('keeps reference and actual prices immutable for registrations after catalog repricing', () => {
+  resetPlans();
+  updatePlan('gym-month', { referenceAmountMinor: 50000, amountMinor: 40000 });
+  const request = { id: 'reference-registration-1', kind: 'membership' as const, planId: 'gym-month', method: 'cash' as const, name: 'Persona de prueba' };
+  const first = registerNewMember(createDemoState(), request);
+  expect(first.state.payments.at(-1)?.planSnapshot).toMatchObject({ referenceAmountMinor: 50000, amountMinor: 40000 });
+  updatePlan('gym-month', { referenceAmountMinor: 100000, amountMinor: 80000 });
+  reloadPlans();
+  const state = JSON.parse(JSON.stringify(first.state));
+  const second = registerNewMember(state, { ...request, id: 'reference-registration-2' });
+  expect(second.state.payments[0]).toMatchObject({ amountMinor: 40000, planSnapshot: { referenceAmountMinor: 50000, amountMinor: 40000 } });
+  expect(second.state.payments[1]).toMatchObject({ amountMinor: 80000, planSnapshot: { referenceAmountMinor: 100000, amountMinor: 80000 } });
+  resetPlans();
 });

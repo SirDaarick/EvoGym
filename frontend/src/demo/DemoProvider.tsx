@@ -24,6 +24,7 @@ interface DemoContextValue {
   saveDraft: (shiftId: string, draft: Record<string, string>) => boolean;
   getDraft: (shiftId: string) => Record<string, string> | undefined;
   commitShiftClose: (request: { shiftId: string; expectedRevision: number; countedCashMinor: number; denominations?: readonly CashDenominationCount[]; closingNotes?: string }) => { status: 'ok' | 'error'; message?: string };
+  retryPersistence: (options?: { force?: boolean }) => Promise<boolean>;
 }
 const DemoContext = createContext<DemoContextValue | null>(null);
 
@@ -54,15 +55,30 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     if (!persist(next)) return false;
     current.current = next; setState(next); return true;
   }
-  useEffect(() => {
-    let active = true;
-    void acquireExclusiveWriter().then(lock => {
-      if (!active) { if (lock.status === 'acquired') lock.release(); return; }
-      if (lock.status !== 'acquired') { setPersistenceStatus(lock.status); return; }
+  const acquireAndHydrate = async (force = false): Promise<boolean> => {
+    if (releaseWriter.current && persistenceStatus === 'ready' && !force) {
+      return true;
+    }
+    if (force && releaseWriter.current) {
+      try { releaseWriter.current(); } catch { /* ignore */ }
+      releaseWriter.current = null;
+    }
+    try {
+      const lock = await acquireExclusiveWriter(force ? 1 : 3, 30, { steal: force });
+      if (lock.status !== 'acquired') {
+        setPersistenceStatus(lock.status);
+        if (lock.status === 'blocked') {
+          setPersistenceError('Another tab has the operational writer lock');
+        }
+        return false;
+      }
       releaseWriter.current = lock.release;
       try {
         const hydrated = hydratePersistence(localStorage);
-        if (hydrated.status === 'unsupported' || hydrated.status === 'corrupt') { setPersistenceStatus('recovery-required'); return; }
+        if (hydrated.status === 'unsupported' || hydrated.status === 'corrupt') {
+          setPersistenceStatus('recovery-required');
+          return false;
+        }
         const richEnabled = isRichDemoEnabled();
         if (hydrated.status === 'ready') {
           if (richEnabled && hydrated.record.datasetId !== RICH_DATASET_ID) {
@@ -102,10 +118,48 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         }
         hydratedForWrites.current = true;
         setPersistenceStatus('ready');
-      } catch (error) { setPersistenceError(error instanceof Error ? error.message : 'Unable to read local data'); setPersistenceStatus('error'); }
-    }).catch(error => { if (active) { setPersistenceError(error instanceof Error ? error.message : 'Unable to acquire writer lock'); setPersistenceStatus('unavailable'); } });
-    return () => { active = false; releaseWriter.current?.(); releaseWriter.current = null; };
+        setPersistenceError(null);
+        return true;
+      } catch (error) {
+        setPersistenceError(error instanceof Error ? error.message : 'Unable to read local data');
+        setPersistenceStatus('error');
+        return false;
+      }
+    } catch (error) {
+      setPersistenceError(error instanceof Error ? error.message : 'Unable to acquire writer lock');
+      setPersistenceStatus('unavailable');
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void acquireAndHydrate(false).then(() => {
+      if (!active && releaseWriter.current) {
+        releaseWriter.current();
+        releaseWriter.current = null;
+      }
+    });
+    return () => {
+      active = false;
+      releaseWriter.current?.();
+      releaseWriter.current = null;
+    };
   }, []);
+
+  useEffect(() => {
+    function handleVisibilityOrFocus() {
+      if (document.visibilityState === 'visible' && (persistenceStatus === 'blocked' || persistenceStatus === 'error')) {
+        void acquireAndHydrate(false);
+      }
+    }
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [persistenceStatus]);
   function saveDraft(shiftId: string, draft: Record<string, string>): boolean {
     const nextDrafts = { ...draftsRef.current, [shiftId]: { ...draft } };
     const next = { ...record.current, drafts: nextDrafts };
@@ -146,6 +200,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     return transaction.result;
   }
   return <DemoContext.Provider value={{ state, transact, resetVersion, persistenceStatus, persistenceError, drafts, saveDraft, getDraft, commitShiftClose,
+    retryPersistence: (options?: { force?: boolean }) => acquireAndHydrate(options?.force ?? false),
     update: operation => replace(operation(current.current)),
     reset: () => {
       const richEnabled = isRichDemoEnabled();

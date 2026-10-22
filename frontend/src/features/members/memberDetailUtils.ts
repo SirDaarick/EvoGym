@@ -1,3 +1,29 @@
+import type { Member } from '../../domain/models';
+import type { Tone } from '../../shared/ui';
+import { memberStatus } from '../../demo/memberStatus';
+
+export function getMemberStatusInfo(member: Member, referenceDate?: string) {
+  const st = memberStatus(member, referenceDate);
+  let badgeLabel = 'Sin confirmar';
+  let tone: Tone = 'neutral';
+  if (st.status === 'active') {
+    if (st.provisional || member.demoScenario === 'expiry-today') {
+      badgeLabel = 'Vence hoy';
+      tone = 'warning';
+    } else {
+      badgeLabel = 'Activa';
+      tone = 'success';
+    }
+  } else if (st.status === 'expired' || st.status === 'inactive') {
+    badgeLabel = 'Vencida';
+    tone = 'error';
+  } else {
+    badgeLabel = 'Sin confirmar';
+    tone = 'neutral';
+  }
+  return { badgeLabel, tone, status: st.status, provisional: st.provisional };
+}
+
 export function rentalStatus(expiresAt: string | null | undefined, now: string): 'none' | 'active' | 'overdue' | 'eviction-status' {
   if (!expiresAt) return 'none';
   const expiry = Date.parse(expiresAt), current = Date.parse(now);
@@ -14,3 +40,4 @@ export function formatAttendanceError(message: string): string {
   if (/demo|demostración|prueba|escenario|provisional|Q-\d+/i.test(message)) return 'No se pudo registrar la asistencia. Verifica las condiciones de acceso vigentes.';
   return message;
 }
+

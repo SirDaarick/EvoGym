@@ -1,5 +1,5 @@
 import type { DemoState, MembershipPayment, PaymentMethod } from '../domain/models';
-import { plans } from './plans';
+import { getPlanList, snapshotPlan } from './plans';
 
 export interface PaymentRequest { id: string; memberId: string; planId: string; method: PaymentMethod }
 export type PaymentResult = { status: 'paid' | 'pending'; payment: MembershipPayment } | { status: 'error'; message: string };
@@ -13,13 +13,13 @@ export function collectMembership(state: DemoState, request: PaymentRequest): Tr
     return { state, result: { status: existing.status, payment: existing } };
   }
   const member = state.members.find(item => item.id === request.memberId);
-  const plan = plans.find(item => item.id === request.planId);
-  if (!request.id || !member || !plan || plan.kind !== 'membership') return fail('Socio o plan no disponible. Revisa los datos.');
+  const plan = getPlanList().find(item => item.id === request.planId);
+  if (!request.id || !member || !plan || plan.active === false || plan.kind !== 'membership') return fail('Socio o plan no disponible. Revisa los datos.');
   if (plan.restriction) return fail(plan.restriction);
   if (!['cash', 'card', 'transfer'].includes(request.method)) return fail('Método no disponible.');
   if (!state.shifts.some(shift => shift.id === state.currentShiftId && shift.status === 'open')) return fail('Abre un turno antes de registrar el cobro.');
   const status = request.method === 'transfer' ? 'pending' : 'paid';
-  const payment: MembershipPayment = { ...request, planName: plan.name, amountMinor: plan.amountMinor, status,
+  const payment: MembershipPayment = { ...request, planName: plan.name, amountMinor: plan.amountMinor, planSnapshot: snapshotPlan(plan), status,
     recordedAt: new Date().toISOString(), shiftId: state.currentShiftId, effectiveDates: null };
   const ledger = status === 'paid' ? [...state.ledger, { id: `event-${request.id}`, paymentId: request.id,
     memberId: member.id, shiftId: state.currentShiftId, kind: 'membership' as const,

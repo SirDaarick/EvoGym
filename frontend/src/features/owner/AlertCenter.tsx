@@ -38,6 +38,7 @@ function categoryTone(category: AlertCategory): 'error' | 'warning' | 'neutral' 
       return 'error';
     case 'waste':
     case 'pending_transfer':
+    case 'return':
       return 'warning';
     case 'expense':
       return 'neutral';

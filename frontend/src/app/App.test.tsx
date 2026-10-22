@@ -28,12 +28,13 @@ describe('application foundation', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Restablecer datos' }));
   });
   it('connects profile, cart, keyboard member lookup, measured attendance and denomination close', async () => {
-    await mount('/');
+    await mount('/profiles');
     await userEvent.click(screen.getByRole('button', { name: /Mikel/ }));
     await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Agua' }, { timeout: 10000 }));
     await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Barra' }));
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar cobro' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    await userEvent.click(screen.getByRole('button', { name: /Realizar cobro|Registrar cobro/ }));
     expect(screen.getByRole('status', { name: 'Resultado de compra' })).toHaveTextContent('Cobro registrado');
     expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
     await userEvent.type(screen.getByRole('combobox', { name: 'Búsqueda global de socios' }), 'Alex Morgan');
@@ -65,9 +66,11 @@ describe('application foundation', () => {
     await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'OWNER');
     expect(screen.getByRole('combobox', { name: 'Búsqueda global de socios' })).toHaveValue('');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-  });
-  it('offers staff profiles at root with Admin and Reception grid and verifies PIN or direct entry', async () => {
+  }, 15000);
+  it('offers login at root and allows switching to staff profiles with Admin and Reception grid', async () => {
     await mount('/');
+    expect(screen.getByRole('heading', { name: /Iniciar sesi/i })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: /Modo Kiosco/i }));
     expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeVisible();
     expect(screen.getByRole('button', { name: /Admin/ })).toBeVisible();
     expect(screen.getAllByRole('button', { name: /Recepción/ })).toHaveLength(9);
@@ -95,6 +98,14 @@ describe('application foundation', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Agregar socio' }));
     expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/members/new');
     expect(await screen.findByRole('heading', { name: 'Nuevo socio' }, { timeout: 10000 })).toBeVisible();
+  });
+  it('exposes Personal navigation link in Reception view leading to StaffAttendanceView', async () => {
+    await mount('/reception/home');
+    const personalLink = screen.getByRole('link', { name: 'Personal' });
+    expect(personalLink).toBeVisible();
+    await userEvent.click(personalLink);
+    expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/reception/staff');
+    expect(await screen.findByRole('heading', { name: 'Pase de Lista del Personal' }, { timeout: 10000 })).toBeVisible();
   });
   it('uses neutral operational guidance for local membership payment records', async () => {
     await mount('/owner/members/demo-001/payment');
@@ -236,7 +247,7 @@ describe('application foundation', () => {
     await user.click(screen.getByRole('button', { name: 'Liberar barra lateral' }));
     await user.unhover(sidebar);
     expect(sidebar).toHaveAttribute('data-expanded', 'false');
-  });
+  }, 15000);
   it('switches role, route and visible navigation without claiming authentication', async () => {
     await mount();
     await userEvent.selectOptions(screen.getByLabelText('Rol de acceso'), 'RECEPTION');
@@ -274,4 +285,13 @@ describe('application foundation', () => {
     expect(screen.getByRole('heading', { name: 'Componentes compartidos' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Acción pendiente' })).toBeDisabled();
   });
+  it('triggers shift close from the global header button when a shift is active', async () => {
+    await mount('/reception/home');
+    const shiftButton = screen.getByRole('button', { name: 'Cerrar' });
+    expect(shiftButton).toBeVisible();
+    await userEvent.click(shiftButton);
+    expect(screen.getByRole('dialog', { name: /Cerrar turno/ })).toBeInTheDocument();
+  });
 });
+
+

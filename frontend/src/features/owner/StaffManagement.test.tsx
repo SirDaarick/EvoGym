@@ -167,4 +167,28 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
     expect(rowsSalaryAsc[1]).toHaveTextContent('Iñaky');
     expect(rowsSalaryAsc[1]).toHaveTextContent('$4,000.00');
   });
+
+  it('opens DevicePairingModal when clicking Vincular Dispositivo button', async () => {
+    await mount('/owner/staff');
+
+    // Find "Vincular Dispositivo" buttons
+    const pairButtons = screen.getAllByRole('button', { name: /vincular dispositivo/i });
+    expect(pairButtons.length).toBeGreaterThan(0);
+
+    // Click on the first one (Emigdio)
+    await userEvent.click(pairButtons[0]);
+
+    // Modal opens with employee info and 6-digit code
+    expect(screen.getByRole('heading', { name: /vincular dispositivo/i })).toBeVisible();
+    expect(screen.getAllByText(/Emigdio/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('pairing-code-display')).toBeVisible();
+
+    // Close modal
+    const closeBtn = screen.getByRole('button', { name: /cerrar modal/i });
+    await userEvent.click(closeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('pairing-code-display')).not.toBeInTheDocument();
+    });
+  });
 });
