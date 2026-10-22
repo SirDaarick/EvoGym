@@ -47,6 +47,12 @@ EXPECTED_CORE_API_ENDPOINTS = {
     "/api/v1/registers/{register_id}/inventory-snapshots/{snapshot_id}": {"GET"},
     "/api/v1/registers/{register_id}/membership-sales": {"POST"},
     "/api/v1/registers/{register_id}/membership-debt-payments": {"POST"},
+    "/api/v1/staff-schedules/branches/{branch_id}/profiles/{profile_id}": {"POST"},
+    "/api/v1/staff-schedules/branches/{branch_id}": {"GET"},
+    "/api/v1/staff-schedules/{series_id}/occurrences": {"GET"},
+    "/api/v1/staff-schedules/{series_id}/occurrences/{local_date}": {"PUT"},
+    "/api/v1/staff-schedules/{series_id}/edit": {"PATCH"},
+    "/api/v1/staff-schedules/{series_id}": {"DELETE"},
     "/api/v1/shifts/current": {"GET"},
     "/api/v1/shifts/open": {"POST"},
     "/api/v1/shifts/{shift_id}/close": {"POST"},
@@ -138,6 +144,8 @@ EXPECTED_DATABASE_TABLES = {
     "staff_roster_profiles",
     "staff_attendance_records",
     "staff_attendance_checkouts",
+    "staff_schedule_series",
+    "staff_schedule_exceptions",
 }
 
 
@@ -285,7 +293,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0029_class_sample_check_ins"
+            assert head_version == "0030_staff_schedules"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

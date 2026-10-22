@@ -24,6 +24,7 @@ from app.api.members import router as members_router
 from app.api.catalog import router as catalog_router
 from app.api.staff_roster import router as staff_roster_router
 from app.api.staff_attendance import router as staff_attendance_router
+from app.api.staff_schedules import router as staff_schedules_router
 from app.api.shifts import router as shifts_router
 from app.api.inventory import router as inventory_router
 from app.api.sales import router as sales_router
@@ -180,6 +181,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(catalog_router)
     application.include_router(staff_roster_router)
     application.include_router(staff_attendance_router)
+    application.include_router(staff_schedules_router)
     application.include_router(shifts_router)
     application.include_router(inventory_router)
     application.include_router(sales_router)

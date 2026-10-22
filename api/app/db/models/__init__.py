@@ -8,6 +8,7 @@ from app.db.models.sessions import StaffSession
 from app.db.models.staff import SecurityEvent, StaffCredential, StaffUser
 from app.db.models.staff_roster import StaffRosterProfile
 from app.db.models.staff_attendance import StaffAttendanceCheckout, StaffAttendanceRecord
+from app.db.models.staff_schedules import StaffScheduleException, StaffScheduleSeries
 from app.db.models.enrollment import StaffEnrollmentCode
 from app.db.models.devices import StaffDevicePairingCode, StaffPairedDevice
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
@@ -85,5 +86,7 @@ __all__ = [
     "StaffRosterProfile",
     "StaffAttendanceRecord",
     "StaffAttendanceCheckout",
+    "StaffScheduleSeries",
+    "StaffScheduleException",
     "StaffUser",
 ]
