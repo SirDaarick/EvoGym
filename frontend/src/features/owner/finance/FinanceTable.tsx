@@ -113,3 +113,56 @@ export function FinanceTable<TData>({
     </div>
   </>;
 }
+
+export interface SimpleFinanceTableProps<TData> {
+  label: string;
+  rows: TData[];
+  columns: ColumnDef<TData, any>[];
+  className?: string;
+}
+
+export function SimpleFinanceTable<TData>({
+  label,
+  rows,
+  columns,
+  className,
+}: SimpleFinanceTableProps<TData>) {
+  const table = useReactTable({
+    data: rows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  return (
+    <div className={className}>
+      <TableRegion label={label}>
+        <table>
+          <thead>
+            {table.getHeaderGroups().map(headerGroup => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map(header => (
+                  <th key={header.id} scope="col">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map(row => (
+              <tr key={row.id}>
+                {row.getVisibleCells().map(cell => (
+                  <td key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableRegion>
+    </div>
+  );
+}

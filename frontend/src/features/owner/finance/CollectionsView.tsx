@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { formatMoney } from '../../../demo/adapter';
 import type { FinanceRow, FinanceSourceFamily, FinanceSourceTotal } from '../../../demo/financeReportSelector';
 import { Badge, EmptyState, Field, Panel } from '../../../shared/ui';
-import { FinanceRankingChart } from './FinanceCharts';
+import { FinanceRankingChart, FinanceSourcesDonutChart } from './FinanceCharts';
 import { FinanceTable } from './FinanceTable';
 import type { FinanceContextData } from './types';
 import { isCollectionRow } from './types';
@@ -191,7 +191,10 @@ export function CollectionsView({
           </select>
         </label>
       </div>
-      <FinanceRankingChart title="Cobros netos filtrados por origen" totals={sourceTotals} />
+      <div className="finance-sources-overview">
+        <FinanceSourcesDonutChart totals={sourceTotals} />
+        <FinanceRankingChart title="Cobros netos filtrados por origen" totals={sourceTotals} />
+      </div>
       {filteredRows.length ? (
         <FinanceTable
           label="Movimientos de cobros filtrados"

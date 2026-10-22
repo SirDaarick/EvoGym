@@ -101,6 +101,10 @@ describe('finance tabs', () => {
     mount();
     expect(screen.getByLabelText('Entradas y salidas diarias')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Valores exactos del flujo diario' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Conciliación del periodo en cascada')).toBeInTheDocument();
+    expect(screen.getByLabelText('Comparación de periodos')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Desglose de conciliación del periodo' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Datos de comparación entre periodos' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Cobros netos confirmados por origen' })).not.toBeInTheDocument();
   });
 
@@ -108,6 +112,9 @@ describe('finance tabs', () => {
     const user = userEvent.setup();
     render(<CollectionsHarness />);
     expect(screen.getByRole('heading', { name: 'Cobros netos filtrados por origen' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Distribución por origen' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Distribución de cobros por origen')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Desglose porcentual por origen' })).toBeInTheDocument();
     const rankingHeading = screen.getByRole('heading', { name: 'Cobros netos filtrados por origen' });
     const ranking = within(rankingHeading.closest('section')!);
     expect(ranking.getAllByText('Origen desconocido').length).toBeGreaterThan(0);
@@ -166,5 +173,17 @@ describe('finance tabs', () => {
     expect(screen.getByText(/Método: Tarjeta/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Exportar / imprimir' }));
     expect(print).toHaveBeenCalledOnce();
+  });
+
+  it('renders structured 2-column SimpleFinanceTable for configured monthly budget without stretching', () => {
+    const { container } = mount('/owner/expenses?tab=presupuesto');
+    const constrained = container.querySelector('.finance-constrained-table');
+    expect(constrained).toBeInTheDocument();
+    const table = within(constrained as HTMLElement).getByRole('table');
+    expect(table).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Concepto' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Importe mensual (MXN)' })).toBeInTheDocument();
+    expect(within(table).getByText('Renta')).toBeInTheDocument();
+    expect(within(table).getByText('Total mensual de referencia')).toBeInTheDocument();
   });
 });

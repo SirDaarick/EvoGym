@@ -1,8 +1,15 @@
+import { useMemo } from 'react';
+import type { ColumnDef } from '@tanstack/react-table';
 import { formatMoney } from '../../../demo/adapter';
 import { getFinanceComparison, getFinanceTimeBins, getPreviousComparableRange, type FinanceProjection } from '../../../demo/financeReportSelector';
 import type { FinanceDateRange } from '../../../demo/financeReportSelector';
 import { Badge, Panel } from '../../../shared/ui';
-import { FinanceFlowChart } from './FinanceCharts';
+import {
+  FinanceFlowChart,
+  FinancePeriodComparisonChart,
+  FinanceReconciliationWaterfall,
+} from './FinanceCharts';
+import { SimpleFinanceTable } from './FinanceTable';
 import type { FlowGranularity } from './types';
 
 interface BalanceViewProps {
@@ -30,6 +37,36 @@ export function BalanceView({ projection, previous, range, granularity, onGranul
     { inflows: 0, outflows: 0 },
   );
   const { inflows, outflows } = flowTotals;
+  const previousFlowTotals = getFinanceTimeBins(previous.rows, previousRange).reduce(
+    (total, bin) => ({
+      inflows: total.inflows + bin.inflowMinor,
+      outflows: total.outflows + bin.outflowMinor,
+    }),
+    { inflows: 0, outflows: 0 },
+  );
+  const { inflows: previousInflows, outflows: previousOutflows } = previousFlowTotals;
+
+  const breakdownRows = useMemo(() => [
+    { concept: 'Cobros brutos confirmados', amount: mxn(totals.grossMinor) },
+    { concept: 'Reembolsos registrados', amount: `−${mxn(totals.refundsMinor)}` },
+    { concept: 'Neto de cobros', amount: mxn(totals.netMinor) },
+    { concept: 'Extras registrados', amount: mxn(totals.extrasMinor) },
+    { concept: 'Gastos registrados', amount: `−${mxn(totals.expensesMinor)}` },
+    { concept: 'Transferencias pendientes', amount: mxn(totals.pendingMinor) },
+  ], [totals.grossMinor, totals.refundsMinor, totals.netMinor, totals.extrasMinor, totals.expensesMinor, totals.pendingMinor]);
+
+  const breakdownColumns = useMemo<ColumnDef<{ concept: string; amount: string }, unknown>[]>(() => [
+    {
+      accessorKey: 'concept',
+      header: 'Concepto',
+    },
+    {
+      accessorKey: 'amount',
+      header: 'Importe (MXN)',
+      cell: info => <span className="numeric">{String(info.getValue())}</span>,
+    },
+  ], []);
+
   return <div className="finance-view finance-balance-view">
       <section className="finance-kpis" aria-label="Indicadores del balance registrado">
       <Panel className="finance-kpi finance-kpi-inflow">
@@ -62,15 +99,32 @@ export function BalanceView({ projection, previous, range, granularity, onGranul
     <FinanceFlowChart rows={projection.rows} range={range} granularity={granularity} onGranularityChange={onGranularityChange} />
     </Panel>
     <div className="finance-balance-details">
-      <Panel><h2>Conciliación del periodo</h2><dl className="finance-breakdown">
-        <dt>Cobros brutos confirmados</dt><dd>{mxn(totals.grossMinor)}</dd>
-        <dt>Reembolsos registrados</dt><dd>−{mxn(totals.refundsMinor)}</dd>
-        <dt>Neto de cobros</dt><dd>{mxn(totals.netMinor)}</dd>
-        <dt>Extras registrados</dt><dd>{mxn(totals.extrasMinor)}</dd>
-        <dt>Gastos registrados</dt><dd>−{mxn(totals.expensesMinor)}</dd>
-        <dt>Transferencias pendientes</dt><dd>{mxn(totals.pendingMinor)}</dd>
-      </dl><p className="muted">Lo pendiente se muestra aparte y no se incorpora al balance confirmado.</p></Panel>
-      <Panel><h2>Comparación de periodos</h2>
+      <Panel>
+        <h2>Conciliación del periodo</h2>
+        <FinanceReconciliationWaterfall totals={totals} />
+        <div className="finance-constrained-table">
+          <SimpleFinanceTable
+            label="Conciliación del periodo"
+            rows={breakdownRows}
+            columns={breakdownColumns}
+          />
+        </div>
+        <p className="muted">Lo pendiente se muestra aparte y no se incorpora al balance confirmado.</p>
+      </Panel>
+      <Panel>
+        <h2>Comparación de periodos</h2>
+        <FinancePeriodComparisonChart
+          current={{
+            inflowsMinor: inflows,
+            outflowsMinor: outflows,
+            balanceMinor: totals.balanceMinor,
+          }}
+          previous={{
+            inflowsMinor: previousInflows,
+            outflowsMinor: previousOutflows,
+            balanceMinor: previous.totals.balanceMinor,
+          }}
+        />
         <p>Periodo seleccionado: <strong>{range.from}–{range.to}</strong> ({currentDays} días).</p>
         <p>Periodo inmediatamente anterior de igual duración: <strong>{previousRange.from}–{previousRange.to}</strong> ({previousDays} días).</p>
         <p>

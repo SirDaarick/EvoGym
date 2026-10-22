@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
+import type { ColumnDef } from '@tanstack/react-table';
 import { formatMoney } from '../../../demo/adapter';
 import { computeFixedCostsSummary } from '../../../demo/expenseReportSelector';
 import { saveFixedCosts, type FixedCostsConfig } from '../../../demo/fixedCostsStore';
 import type { StaffProfile } from '../../staff/staffStore';
 import { Button, Field, Notice, Panel, TableRegion } from '../../../shared/ui';
+import { SimpleFinanceTable } from './FinanceTable';
 
 const mxn = (minor: number) => `${formatMoney(minor)} MXN`;
 type CostKey = keyof FixedCostsConfig;
@@ -36,6 +38,40 @@ export function BudgetView({ costs, staff }: BudgetViewProps) {
   const [draft, setDraft] = useState<Record<CostKey, string>>(() => toDraft(costs));
   const [budgetError, setBudgetError] = useState('');
   const summary = computeFixedCostsSummary(costs, staff);
+
+  const breakdownRows = useMemo(() => [
+    { concept: 'Renta', amount: mxn(costs.rentMinor), isTotal: false },
+    { concept: 'Agua', amount: mxn(costs.aguaMinor), isTotal: false },
+    { concept: 'Luz', amount: mxn(costs.luzMinor), isTotal: false },
+    { concept: 'Internet / teléfono', amount: mxn(costs.internetMinor), isTotal: false },
+    { concept: 'Basura', amount: mxn(costs.basuraMinor), isTotal: false },
+    { concept: 'Personal activo', amount: mxn(summary.payrollMinor), isTotal: false },
+    { concept: 'Total mensual de referencia', amount: mxn(summary.totalFixedMonthlyMinor), isTotal: true },
+  ], [costs, summary.payrollMinor, summary.totalFixedMonthlyMinor]);
+
+  const breakdownColumns = useMemo<ColumnDef<{ concept: string; amount: string; isTotal: boolean }, unknown>[]>(() => [
+    {
+      accessorKey: 'concept',
+      header: 'Concepto',
+      cell: info => {
+        const item = info.row.original;
+        return item.isTotal ? <strong>{item.concept}</strong> : item.concept;
+      },
+    },
+    {
+      accessorKey: 'amount',
+      header: 'Importe mensual (MXN)',
+      cell: info => {
+        const item = info.row.original;
+        return (
+          <span className="numeric">
+            {item.isTotal ? <strong>{item.amount}</strong> : item.amount}
+          </span>
+        );
+      },
+    },
+  ], []);
+
   useEffect(() => {
     setDraft(toDraft(costs));
     setBudgetError('');
@@ -93,16 +129,13 @@ export function BudgetView({ costs, staff }: BudgetViewProps) {
 
     <Panel>
       <h2>Desglose mensual configurado</h2>
-      <dl className="finance-breakdown">
-        <dt>Renta</dt><dd>{mxn(costs.rentMinor)}</dd>
-        <dt>Agua</dt><dd>{mxn(costs.aguaMinor)}</dd>
-        <dt>Luz</dt><dd>{mxn(costs.luzMinor)}</dd>
-        <dt>Internet / teléfono</dt><dd>{mxn(costs.internetMinor)}</dd>
-        <dt>Basura</dt><dd>{mxn(costs.basuraMinor)}</dd>
-        <dt>Personal activo</dt><dd>{mxn(summary.payrollMinor)}</dd>
-        <dt>Total mensual de referencia</dt>
-        <dd><strong>{mxn(summary.totalFixedMonthlyMinor)}</strong></dd>
-      </dl>
+      <div className="finance-constrained-table">
+        <SimpleFinanceTable
+          label="Desglose mensual configurado"
+          rows={breakdownRows}
+          columns={breakdownColumns}
+        />
+      </div>
     </Panel>
 
     {editing && (
