@@ -27,6 +27,7 @@ The standard frontend checkout reads and writes demo state, while the backend al
 - **Checks:** `npm test -- --run src/api/membershipCheckoutApi.test.ts` from `frontend`; `git diff --check`.
 - **Runtime harness:** Mocked `fetch` tests cover auth, lookups, distinct sale routes, exact idempotency header, server DTO passthrough including a nullable membership period, HTTP errors, and network uncertainty; no live backend credentials or network calls.
 - **Rollback:** revert only the API client, its focused tests, and T1 documentation.
+- **Route:** Delegated direct. Trigger evidence: multi-file API boundary, mocked tests, and synchronized backend/task documentation required reading that prepared the implementation.
 
 ### BK-028-T2 - Existing-member live checkout UI
 
@@ -53,8 +54,9 @@ The standard frontend checkout reads and writes demo state, while the backend al
 - Read-only mapping confirmed the backend routes and live authentication path; the normal demo checkout is not an API client. The existing-member scope was explicitly approved by the user.
 - The live path already supports authenticated member search. Frontend checkout still needs backend plan-version and open register/shift reads plus sale API calls.
 - BK-028 is Partial after T2: the existing-member authenticated checkout UI is integrated and acceptance-tested; new-member registration and Mercado Pago remain deferred.
-- T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); GREEN is `npm test -- --run src/api/membershipCheckoutApi.test.ts` (4 tests passed). `git diff --cached --check` passed for the staged T1 files. The whole-worktree `git diff --check` reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. `npm run typecheck` is blocked by an unrelated existing `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`. No live backend/payment request was made.
+- T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); initial GREEN had 4 tests, then parent review found backend `membership` is nullable and correction `e5e1fa5` added a null pass-through case. Final focused suite: `npm test -- --run src/api/membershipCheckoutApi.test.ts` (5 passed). Scoped `git diff --check` passed for implementation commits. The whole-worktree check reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. The writer's `npm run typecheck` attempt reported an unrelated `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`; not re-run in this task. No live backend/payment request was made.
 - T1 work-unit commit: `183a79b` (`feat(frontend): agregar cliente de API para ventas de membresía`).
+- T1 contract correction: `e5e1fa5` (`fix(frontend): admitir membresía nula en DTO de venta`).
 - T2 RED/GREEN proof: RED `npm test -- --run src/features/reception/LiveMembershipCheckout.test.tsx` failed because the component did not yet exist. GREEN `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMembershipCheckout.test.tsx` (3 files, 14 tests passed). Tests use mocked API calls; no live backend/payment request was made. `git diff --check` is scoped to the staged T2 paths. Full build/typecheck were not run by instruction.
 - T2 outcome: existing-member live checkout acceptance is complete. BK-028 remains Partial overall; new-member signup and Mercado Pago are explicitly deferred. No demo operation is wired into this flow.
 - T2 work-unit commit: `34aa27a` (`feat(frontend): integrar venta de membresías en recepción operativa`).
@@ -62,4 +64,4 @@ The standard frontend checkout reads and writes demo state, while the backend al
 
 ## Next step
 
-Next follow-up: new-member registration and Mercado Pago are separate deferred scopes; no work on them is authorized by this T2 slice.
+Next: BK-028's approved existing-member live checkout slice is complete. New-member signup and Mercado Pago remain separate deferred scopes; define and authorize either follow-up before implementation.
