@@ -33,7 +33,7 @@ El backend actual procesa ventas como membresías por periodo y check-ins ligado
 
 ## Tareas
 - [x] `SAMPLE-1` — Crear/registrar la venta pagada de clase muestra con perfil normal y una concesión persistente de una sola entrada, ligada a pago/orden e idempotencia.
-- [ ] `SAMPLE-2` — Incorporar el check-in de clase muestra: permitir solo antes del primer uso, consumir atómicamente al aceptar, conservar historial, negar repetición/salida-reingreso y no consumir en intentos denegados o replays.
+- [x] `SAMPLE-2` — Incorporar el check-in de clase muestra: permitir solo antes del primer uso, consumir atómicamente al aceptar, conservar historial, negar repetición/salida-reingreso y no consumir en intentos denegados o replays.
 - [ ] `STAFF-1` — Modelar turnos recurrentes, ocurrencias/excepciones y edición acotada a ocurrencias futuras, incluyendo validación de traslape multi-sucursal.
 - [ ] `STAFF-2` — Vincular asistencia con ocurrencia/turno, entrada y salida independientes, estado presente/retardo, corrección auditada y permisos por sucursal.
 - [ ] `STAFF-3` — Integrar captura offline de asistencia y revisión de conflicto/reloj usando la cola/idempotencia de BK-064; no duplicar dicha infraestructura.
@@ -57,7 +57,7 @@ El backend actual procesa ventas como membresías por periodo y check-ins ligado
 ## Progreso
 - Mapeo inicial: check-in de socios requiere `MembershipPeriod`; `OrderItem` está limitado a membership con duración; roster guarda un solo horario/tolerancia; asistencia actual es una marca por perfil/fecha.
 - Recomendación técnica: separar concesión/uso de clase muestra del periodo de membresía; el flujo offline integral de personal depende de BK-064, pero el modelo y rutas online de turnos pueden avanzar aparte.
-SAMPLE-1 implementado: PlanVersion y OrderItem conservan kind=membership y exponen entitlement_mode; single_entry no guarda duracion, y la concesion por perfil se vincula a order item y plan version. La venta usa el flujo autenticado normal, precio del servidor, idempotencia y autorizacion; transferencias mantienen under_review. SAMPLE-2 y STAFF-1..3 siguen pendientes. No se integro Mercado Pago ni se tocaron frontend/demo/backend raiz.
+SAMPLE-1 implementado: PlanVersion y OrderItem conservan kind=membership y exponen entitlement_mode; single_entry no guarda duracion, y la concesion por perfil se vincula a order item y plan version. La venta usa el flujo autenticado normal, precio del servidor, idempotencia y autorizacion; transferencias mantienen under_review. SAMPLE-2 está implementado y verificado en los límites documentados abajo; STAFF-1..3 siguen pendientes. No se integró Mercado Pago ni se tocaron frontend/demo/backend raíz.
 
 ## Evidencia de implementacion SAMPLE-1 (2026-10-21)
 - Migracion `0028_class_sample_entitlements` sucede a `0027_member_checkin_visits`; versiones existentes reciben `period` sin modificar duraciones. Single-entry permite valores de duracion nulos; downgrade se rehusa si hay planes, ventas o concesiones single-entry.
@@ -68,8 +68,18 @@ SAMPLE-1 implementado: PlanVersion y OrderItem conservan kind=membership y expon
 - Revisión independiente encontró que los `CHECK` de SQL podían aceptar una duración `NULL` para modo `period` porque el resultado `UNKNOWN` no falla; se añadieron guardas `IS NOT NULL` y pruebas negativas.
 - Verificación posterior a la corrección: 50 pruebas enfocadas de catálogo/ventas/migraciones pasaron; revisión independiente anterior a la corrección: 54 pruebas enfocadas pasaron; spot-check del coordinador posterior: 2 pruebas dirigidas pasaron. Suite API completa anterior a la corrección: 243 pasaron, 17 omitidas (PostgreSQL sin destino configurado).
 - Ruta: delegated direct, por escritura multiarchivo no trivial. Commit de tarea: `1b3d307` (`feat(api): registrar ventas de clase muestra de entrada única`) en `codex/backend-foundation`; 402 inserciones y 51 eliminaciones en 18 archivos.
-- Siguiente: SAMPLE-2 consume con check-in sin borrar la concesion ni alterar historial; STAFF-1..3 quedan abiertos. No cambiar conteos de otras tareas.
+- Siguiente: revisar y planear STAFF-1; STAFF-1..3 siguen abiertos. SAMPLE-2 online está cerrado; la sincronización offline permanece diferida y depende de BK-064.
 - Revision independiente P2 y correccion: SQL CHECK puede producir UNKNOWN para un plan periodico con duracion NULL, lo cual se acepta; ambas ramas period ahora requieren `duration_value IS NOT NULL AND duration_unit IS NOT NULL` antes de validar valores. Las pruebas negativas de modelo para cada columna primero fallaron (no se elevo IntegrityError) y luego pasaron; los casos single_entry NULL siguen validos. Verificacion P2: `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_catalog.py api/tests/test_sales.py api/tests/test_migrations.py` ? 50 passed, 17 warnings (95.93s); PostgreSQL opt-in skips siguen sin destino configurado. `git diff --check` en las superficies P2 autorizadas paso (solo avisos LF/CRLF).
 
 ## Siguiente paso
-Implementar `SAMPLE-2` como slice separado de consumo por check-in; luego revisar tareas STAFF antes de entrar en BK-031.
+SAMPLE-2 online consumption is complete for this task. Next: revisar y planear STAFF-1; la cola/sincronización offline sigue diferida y depende de BK-064.
+
+## Evidencia SAMPLE-2 (2026-10-21)
+- Implemented branch-scoped paid sample check-in with atomic retained one-use consumption, append-only history, purchase branch/payment validation, warning snapshots, and idempotent replay. A new idempotency key after use is denied; no exit/re-entry path exists.
+- Migration `0029_class_sample_check_ins` creates the unique event record. Focused test observed RED (404 unmatched route) before implementation.
+- Verificación final: suite enfocada de SAMPLE-2 `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests/test_class_sample_check_ins.py api/tests/test_member_check_ins.py api/tests/test_migrations.py` — 38 passed, 17 warnings (50.68s); suite API completa `& .\api\.venv\Scripts\python.exe -m pytest -q api/tests` — 248 passed, 17 skipped, 18 warnings (275.87s). El coordinador repitió un spot-check independiente: 38 passed, 17 warnings. Los 17 skips son PostgreSQL opt-in; no hay target PostgreSQL local configurado.
+- Alcance de concurrencia: la cobertura de la carrera es helper-level y determinística; no es una prueba de solicitudes concurrentes contra una base de datos. El locking PostgreSQL y la ejecución de triggers PostgreSQL siguen sin verificarse en runtime hasta contar con un target local.
+- Review correction: after locking an entitlement, the API now rechecks the actor/branch/idempotency key; integrity-conflict recovery checks an exact matching key/fingerprint before treating the entitlement as consumed. A deterministic helper regression covers recovery precedence; the true concurrent race is not exercised by the SQLite test fixture.
+- Migration 0029 now rejects direct SQL UPDATE/DELETE via SQLite triggers and PostgreSQL triggers/function. SQLite migration-level tests cover both mutations and verify downgrade refuses to discard retained check-in history. PostgreSQL trigger execution remains unverified without a local PostgreSQL target.
+- Seguimiento documentado: el override manual de acceso existente usa IDs de periodos y no aplica a muestras de entrada única. La necesidad de un override auditado específico para muestras queda como follow-up; esta tarea no cambia pago ni overrides.
+- Estado de BK-030: SAMPLE-1 y SAMPLE-2 online están completos; BK-030 permanece Partial porque cola/sincronización offline está diferida y depende de BK-064. El cierre documental aún requiere una actualización metadata-only del hash del commit de comportamiento; no registrar un hash supuesto.
