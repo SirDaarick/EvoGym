@@ -48,8 +48,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     connection = op.get_bind()
-    if connection.execute(sa.text("SELECT count(*) FROM member_check_ins")).scalar_one():
-        raise RuntimeError("Cannot downgrade while member check-in events exist.")
+    event_count = connection.execute(sa.text("SELECT count(*) FROM member_check_ins")).scalar_one()
+    visit_count = connection.execute(sa.text("SELECT count(*) FROM member_check_in_visits")).scalar_one()
+    if event_count or visit_count:
+        raise RuntimeError("Cannot downgrade while member check-in events or visit roots exist.")
     op.drop_index("ix_member_check_ins_visit", table_name="member_check_ins")
     if connection.dialect.name == "sqlite":
         op.execute("DROP TRIGGER trg_member_check_in_visits_no_delete")

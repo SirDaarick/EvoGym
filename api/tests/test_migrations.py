@@ -308,12 +308,47 @@ def test_member_checkin_visit_migration_backfills_populated_0026_rows(tmp_path, 
                 connection.execute(text("UPDATE member_check_in_visits SET started_at=started_at"))
             with pytest.raises(IntegrityError, match="member_check_in_visits are append-only"):
                 connection.execute(text("DELETE FROM member_check_in_visits"))
-        with pytest.raises(RuntimeError, match="Cannot downgrade while member check-in events exist"):
+        with pytest.raises(RuntimeError, match="Cannot downgrade while member check-in events or visit roots exist"):
             command.downgrade(config, "0026_member_check_ins")
         with engine.connect() as connection:
             assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0027_member_checkin_visits"
             assert connection.execute(text("SELECT count(*) FROM member_check_ins")).scalar_one() == 2
             assert connection.execute(text("SELECT count(*) FROM member_check_in_visits")).scalar_one() == 2
+    finally:
+        engine.dispose()
+
+
+def test_member_checkin_visit_downgrade_refuses_orphan_visit_roots(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'orphan-checkin-visit.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0026_member_check_ins")
+    engine = create_engine(database_url)
+    member_id = uuid4().hex
+    visit_id = uuid4().hex
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO members (id, member_number, full_name, phone) "
+                "VALUES (:id, 'VISIT-ONLY', 'Visit Only Member', '5550101')"
+            ), {"id": member_id})
+        command.upgrade(config, "head")
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO member_check_in_visits (id, member_id, started_at) "
+                "VALUES (:id, :member, '2026-10-20T12:00:00+00:00')"
+            ), {"id": visit_id, "member": member_id})
+
+        with pytest.raises(RuntimeError, match="Cannot downgrade while member check-in events or visit roots exist"):
+            command.downgrade(config, "0026_member_check_ins")
+
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0027_member_checkin_visits"
+            assert connection.execute(text("SELECT count(*) FROM member_check_ins")).scalar_one() == 0
+            assert connection.execute(text("SELECT id FROM member_check_in_visits")).scalar_one() == visit_id
     finally:
         engine.dispose()
 
