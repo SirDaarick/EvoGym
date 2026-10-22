@@ -24,6 +24,22 @@ export interface CurrentRegisterShift {
   [key: string]: unknown;
 }
 
+export interface CreateMemberRequest {
+  member_number: string;
+  full_name: string;
+  phone: string;
+  email?: string | null;
+}
+
+export interface CreatedMember extends CreateMemberRequest {
+  id: string;
+  [key: string]: unknown;
+}
+
+interface MemberSearchResponse {
+  items: CreatedMember[];
+}
+
 export interface MembershipSaleRequest {
   member_id: string;
   plan_version_id: string;
@@ -97,6 +113,41 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export async function getActiveMembershipPlans(): Promise<ActiveMembershipPlan[]> {
   const response = await request<{ items: ActiveMembershipPlan[] }>('/api/v1/catalog/plans?kind=membership&status=active');
   return response.items;
+}
+
+export function createMemberNumber(): string {
+  return `M${crypto.randomUUID().replaceAll('-', '').slice(0, 31)}`;
+}
+
+export async function createMember(requestBody: CreateMemberRequest): Promise<CreatedMember> {
+  try {
+    return await request<CreatedMember>('/api/v1/members', {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+    });
+  } catch (error) {
+    if (!(error instanceof CheckoutApiHttpError) || error.status !== 409) throw error;
+
+    try {
+      const query = new URLSearchParams({
+        page: '1',
+        limit: '100',
+        search: requestBody.member_number,
+        sort_by: 'member_number',
+        sort_dir: 'asc',
+      });
+      const { items } = await request<MemberSearchResponse>(`/api/v1/members?${query}`);
+      const match = items.find(member =>
+        member.member_number === requestBody.member_number
+        && member.full_name === requestBody.full_name
+        && member.phone === requestBody.phone,
+      );
+      if (match) return match;
+    } catch {
+      // A failed reconciliation cannot establish that the original request created this member.
+    }
+    throw error;
+  }
 }
 
 export async function getRegisters(): Promise<CheckoutRegister[]> {

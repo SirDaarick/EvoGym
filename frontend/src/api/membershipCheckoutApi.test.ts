@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getActiveMembershipPlans, getCurrentRegisterShift, getRegisters, submitMembershipCashSale, submitMembershipTransferSale, type MembershipSaleRequest } from './membershipCheckoutApi';
+import { createMember, createMemberNumber, getActiveMembershipPlans, getCurrentRegisterShift, getRegisters, submitMembershipCashSale, submitMembershipTransferSale, type CreateMemberRequest, type MembershipSaleRequest } from './membershipCheckoutApi';
 
 const branchId = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
@@ -12,6 +12,38 @@ beforeEach(() => {
 });
 
 describe('membership checkout API', () => {
+  it('generates a compact unique member number within the backend limit', () => {
+    const number = createMemberNumber();
+    expect(number).toMatch(/^M[a-f0-9]{31}$/);
+    expect(number).toHaveLength(32);
+  });
+
+  it('creates members with the operational token and returns the backend record', async () => {
+    const member: CreateMemberRequest & { id: string } = { id: 'member-1', member_number: 'M123', full_name: 'A Person', phone: '555', email: 'a@example.test' };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(member), { status: 201 }));
+    await expect(createMember(member)).resolves.toEqual(member);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://gym.example/api/v1/members');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer opaque-token', 'Content-Type': 'application/json' }, body: JSON.stringify(member) });
+  });
+
+  it('reconciles duplicate number only when exact number and identity match', async () => {
+    const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
+    const existing = { id: 'member-1', member_number: 'M123', full_name: 'A Person', phone: '555' };
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [existing], total: 1, page: 1, limit: 100, pages: 1 }), { status: 200 }));
+    await expect(createMember(request)).resolves.toEqual(existing);
+    expect(fetchMock.mock.calls[1][0]).toBe('https://gym.example/api/v1/members?page=1&limit=100&search=M123&sort_by=member_number&sort_dir=asc');
+  });
+
+  it('preserves 409 when duplicate lookup does not verify the submitted identity', async () => {
+    const request: CreateMemberRequest = { member_number: 'M123', full_name: 'A Person', phone: '555' };
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Member number already exists.' }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: 'member-1', member_number: 'M123', full_name: 'Someone Else', phone: '555' }] }), { status: 200 }));
+    await expect(createMember(request)).rejects.toMatchObject({ status: 409, message: 'Member number already exists.' });
+  });
+
   it('loads active membership plans and registers with the operational bearer token', async () => {
     const plans = [{ id: 'plan-1', current_version: { id: 'published-version' }, versions: [] }];
     const registers = [{ id: 'register-1', has_open_shift: true }];

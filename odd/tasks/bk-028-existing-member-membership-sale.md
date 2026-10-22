@@ -43,15 +43,16 @@ The standard frontend registration and checkout read and write demo state, while
 
 ### BK-028-T3 - Authenticated member creation and generated identifier
 
-- [ ] Extend the authenticated frontend API boundary to create a member using the backend `POST /api/v1/members` contract.
-- [ ] Generate a stable unique member number for each registration intent; keep it and the request payload unchanged on uncertain retry. Reconcile an exact duplicate response by searching for that exact number and verifying the returned member identity before treating creation as successful.
-- [ ] Preserve the backend's existing field validation, duplicate-number response, and permission behavior; do not add phone-based member-number assumptions.
-- [ ] Update backend plan/task documentation with the actual generated-number and retry contract.
+- [x] Extend the authenticated frontend API boundary to create a member using the backend `POST /api/v1/members` contract.
+- [x] Generate a stable unique member number for each registration intent; the caller retains it and the exact request body across uncertain retries. On 409, search by that exact number and reconcile only when member number, full name, and phone match.
+- [x] Preserve backend field validation, duplicate-number response, and permission behavior; phone is not treated as unique.
+- [x] Update backend plan/task documentation with the actual generated-number and retry contract.
 - **Authorized surfaces:** `frontend/src/api/membershipCheckoutApi.ts`, `frontend/src/api/membershipCheckoutApi.test.ts`, `odd/tasks/backend-implementation.md`, `docs/backend-plan/04-implementation-phases.md`, and this file.
 - **Checks:** focused API client tests with mocked responses; applicable member API tests only if the backend contract changes; scoped `git diff --check`.
 - **Runtime harness:** Mocked API responses only; no live backend or payment calls.
 - **Rollback:** revert only the member-create API addition and T3 documentation.
 - **Route:** Delegated direct. Trigger evidence: API client, tests, and plan updates span multiple files; preparation requires reading backend DTO/auth/duplicate behavior.
+- **T3 route evidence:** Implemented as the single authorized bounded T3 work unit on the existing feature branch; inspected `CreateMemberDTO` (32-character member number, required full name/phone, optional email), `POST /api/v1/members` (201; duplicate number returns 409), authenticated `GET /api/v1/members` search, and the unique member-number index. No backend or demo files changed.
 
 ### BK-028-T4 - New-member live registration and checkout handoff
 
@@ -80,15 +81,17 @@ The standard frontend registration and checkout read and write demo state, while
 
 - Read-only mapping confirmed the backend routes and live authentication path; the normal demo checkout is not an API client. The existing-member scope was explicitly approved by the user.
 - T1 supplies the authenticated plans/registers/shifts and sale API calls; T2 uses those in the live existing-member checkout.
-- BK-028 T1/T2 existing-member checkout is complete. New-member registration T3/T4 is authorized but not yet implemented; Mercado Pago is reserved as the final sequence step.
+- BK-028 T1/T2 existing-member checkout is complete. T3 member API boundary is ready: generated numbers use `M` plus 31 UUID hexadecimal characters, and 409 reconciliation requires exact member number, full name, and phone. T4 live registration UI remains open; Mercado Pago is reserved as the final sequence step.
 - T1 proof: RED was observed before the client existed (Vitest could not resolve `./membershipCheckoutApi`); initial GREEN had 4 tests, then parent review found backend `membership` is nullable and correction `e5e1fa5` added a null pass-through case. Final focused suite: `npm test -- --run src/api/membershipCheckoutApi.test.ts` (5 passed). Scoped `git diff --check` passed for implementation commits. The whole-worktree check reports pre-existing whitespace in unrelated dirty files, including `frontend/src/features/reception/ReceptionHome.test.tsx:282`. The writer's `npm run typecheck` attempt reported an unrelated `offlineClock.test.ts` fixture missing `sameMonotonicOrigin`; not re-run in this task. No live backend/payment request was made.
 - T1 work-unit commit: `183a79b` (`feat(frontend): agregar cliente de API para ventas de membresía`).
 - T1 contract correction: `e5e1fa5` (`fix(frontend): admitir membresía nula en DTO de venta`).
 - T2 RED/GREEN proof: RED `npm test -- --run src/features/reception/LiveMembershipCheckout.test.tsx` failed because the component did not yet exist. GREEN `npm test -- --run src/api/membershipCheckoutApi.test.ts src/features/reception/LiveMemberLookup.test.tsx src/features/reception/LiveMembershipCheckout.test.tsx` (3 files, 14 tests passed). Tests use mocked API calls; no live backend/payment request was made. `git diff --check` is scoped to the staged T2 paths. Full build/typecheck were not run by instruction.
 - T2 outcome at that task boundary: existing-member live checkout acceptance is complete. No demo operation is wired into the live checkout. The user later authorized T3/T4 and requested Mercado Pago last.
 - T2 work-unit commit: `34aa27a` (`feat(frontend): integrar venta de membresías en recepción operativa`).
-- New-member registration is now the next authorized work; DemoProvider screens remain out of scope and Mercado Pago remains last.
+- T3 RED: `npm test -- --run src/api/membershipCheckoutApi.test.ts` failed on the four new member API/generator cases because `createMember` and `createMemberNumber` were not implemented; five existing API tests passed. T3 GREEN: the same focused command passed (1 file, 9 tests). Mocked cases cover member number length, authenticated POST body, verified 409 reconciliation, and preserving 409 for identity mismatch.
+- T3 work-unit commit: pending.
+- New-member registration UI T4 is next; DemoProvider screens remain out of scope and Mercado Pago remains last.
 
 ## Next step
 
-Next: implement BK-028-T3 then BK-028-T4. Only after those are complete, plan the Mercado Pago integration as the final sequence step.
+Next: implement BK-028-T4 live registration UI using the T3 API boundary. Only after T4 is complete, plan the Mercado Pago integration as the final sequence step.
