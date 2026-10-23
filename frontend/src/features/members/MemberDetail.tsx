@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, Role, Sale, SupplementSale } from '../../domain/models';
+import type { MemberReloadResponse } from '../../api/memberReadsApi';
 import { formatMoney } from '../../demo/adapter';
 import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
 import { getMemberHabits } from '../../demo/memberAnalyticsSelector';
@@ -124,6 +125,169 @@ function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; 
   );
 }
 
+export function MemberReloadSection({
+  reloadState,
+  role = 'RECEPTION',
+}: {
+  reloadState: MemberReloadResponse;
+  role?: Role | 'ADMIN';
+}) {
+  const isAdmin = role === 'OWNER' || role === 'ADMIN';
+  const showAdminFinances = isAdmin && reloadState.financial.total_pending_balance_minor !== null;
+
+  return (
+    <div className="member-reload-state" data-testid="member-reload-state">
+      <Panel>
+        <div className="member-reload-header">
+          <div className="member-reload-title-wrap">
+            <h2>Estado sincronizado del socio</h2>
+            <span className="muted member-reload-sync-time">
+              Sincronizado: {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadState.server_time))}
+            </span>
+          </div>
+          <Badge tone={reloadState.profile.status === 'active' ? 'success' : 'warning'}>
+            {reloadState.profile.status.toUpperCase()}
+          </Badge>
+        </div>
+
+        <div className="member-reload-financial-section" data-testid="reload-financial-section">
+          {reloadState.financial.has_pending_balance ? (
+            <div className="reload-balance-alert is-warning" role="alert" data-testid="balance-warning-alert">
+              <strong>⚠️ Saldo pendiente registrado</strong>
+              {showAdminFinances ? (
+                <div className="admin-debt-details" data-testid="admin-debt-details">
+                  <p>
+                    Adeudo total:{' '}
+                    <strong>{formatMoney(reloadState.financial.total_pending_balance_minor ?? 0)} MXN</strong>
+                  </p>
+                  {reloadState.financial.debts.length > 0 ? (
+                    <div className="admin-debt-items" data-testid="admin-debts-list">
+                      <h4>Desglose de adeudos por orden</h4>
+                      <ul className="admin-debts-ul">
+                        {reloadState.financial.debts.map(debt => (
+                          <li key={debt.debt_id} className="admin-debt-item">
+                            <span>Orden: <code>{debt.order_id}</code></span>
+                            <span>Inicial: {formatMoney(debt.initial_outstanding_minor)} MXN</span>
+                            <span>Pendiente: <strong>{formatMoney(debt.remaining_balance_minor)} MXN</strong></span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="reception-balance-notice" data-testid="reception-balance-notice">
+                  El socio tiene un adeudo pendiente. Gestión requerida en recepción.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="reload-balance-status is-settled" data-testid="balance-settled">
+              <span>✓ Al corriente en pagos</span>
+            </div>
+          )}
+        </div>
+
+        <div className="member-reload-periods" data-testid="reload-active-periods">
+          <h3>Períodos de membresía vigentes ({reloadState.active_periods.length})</h3>
+          {reloadState.active_periods.length > 0 ? (
+            <ul className="reload-periods-list">
+              {reloadState.active_periods.map(period => (
+                <li key={period.id} className="reload-period-item">
+                  <div className="reload-period-info">
+                    <strong>{period.plan_name}</strong>
+                    <span className="muted">
+                      {period.starts_on} al {period.ends_on}
+                    </span>
+                    {period.branch_id === null ? (
+                      <Badge tone="neutral">Multisucursal</Badge>
+                    ) : (
+                      <span className="muted">Sucursal específica</span>
+                    )}
+                  </div>
+                  <Badge
+                    tone={
+                      period.access_status === 'eligible'
+                        ? 'success'
+                        : period.access_status === 'branch_restricted'
+                          ? 'warning'
+                          : 'error'
+                    }
+                  >
+                    {period.access_status === 'eligible'
+                      ? 'Elegible'
+                      : period.access_status === 'branch_restricted'
+                        ? 'Restringido a otra sucursal'
+                        : period.access_status === 'restricted_unpaid'
+                          ? 'Restringido por adeudo'
+                          : period.access_status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">Sin períodos vigentes.</p>
+          )}
+        </div>
+
+        <div className="member-reload-samples" data-testid="reload-class-samples">
+          <h3>Clases muestra disponibles ({reloadState.class_samples.length})</h3>
+          {reloadState.class_samples.length > 0 ? (
+            <ul className="reload-samples-list">
+              {reloadState.class_samples.map(sample => (
+                <li key={sample.id} className="reload-sample-item">
+                  <div className="reload-sample-info">
+                    <strong>{sample.plan_name}</strong>
+                    {sample.is_consumed ? (
+                      <span className="muted">
+                        Consumida {sample.consumed_at ? `el ${new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(sample.consumed_at))}` : ''}
+                      </span>
+                    ) : (
+                      <span className="sample-available-text">Disponible para check-in</span>
+                    )}
+                  </div>
+                  <Badge tone={sample.is_consumed ? 'neutral' : 'success'}>
+                    {sample.is_consumed ? 'Consumida' : 'Disponible'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">Sin clases muestra registradas.</p>
+          )}
+        </div>
+
+        <div className="member-reload-visits" data-testid="reload-recent-visits">
+          <h3>Visitas recientes en sucursal ({reloadState.recent_visits.length})</h3>
+          {reloadState.recent_visits.length > 0 ? (
+            <ul className="reload-visits-list">
+              {reloadState.recent_visits.map(visit => (
+                <li key={visit.id} className="reload-visit-item">
+                  <div className="reload-visit-info">
+                    <time dateTime={visit.occurred_at}>
+                      {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(visit.occurred_at))}
+                    </time>
+                    <span className="reload-visit-reason">Acceso: {visit.access_reason}</span>
+                  </div>
+                  {visit.access_warnings.length > 0 ? (
+                    <div className="reload-visit-warnings">
+                      {visit.access_warnings.map((w, i) => (
+                        <Badge key={i} tone="warning">{w}</Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">Sin visitas recientes en esta sucursal.</p>
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 export function MemberDetailSections({
   member,
   now,
@@ -136,6 +300,7 @@ export function MemberDetailSections({
   supplementSales,
   sales = [],
   role = 'RECEPTION',
+  reloadState,
 }: {
   member: Member;
   now: string;
@@ -147,7 +312,8 @@ export function MemberDetailSections({
   payments: MembershipPayment[];
   supplementSales: SupplementSale[];
   sales?: Sale[];
-  role?: Role;
+  role?: Role | 'ADMIN';
+  reloadState?: MemberReloadResponse;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
   const streak = membershipRenewalStreak(payments, member.id);
@@ -225,6 +391,7 @@ export function MemberDetailSections({
   );
 
   return <section className="member-detail-sections">
+    {reloadState ? <MemberReloadSection reloadState={reloadState} role={role} /> : null}
     <div className="member-detail-columns">
       <div className="member-detail-left-column">
         <div className="member-detail-membership">
@@ -475,6 +642,7 @@ export function MemberCounterView({
   supplementSales = [],
   sales = [],
   role = 'RECEPTION',
+  reloadState,
   onSwitchToRecord,
 }: {
   member: Member;
@@ -487,7 +655,8 @@ export function MemberCounterView({
   payments?: MembershipPayment[];
   supplementSales?: SupplementSale[];
   sales?: Sale[];
-  role?: Role;
+  role?: Role | 'ADMIN';
+  reloadState?: MemberReloadResponse;
   onSwitchToRecord?: () => void;
 }) {
   const { state, update } = useDemo();
@@ -579,6 +748,7 @@ export function MemberCounterView({
 
   return (
     <section className="member-counter-view" aria-label="Vista operativa de mostrador">
+      {reloadState ? <MemberReloadSection reloadState={reloadState} role={role} /> : null}
       <div className="member-counter-grid">
         {/* Card 1: Membresía & Cobranza */}
         <div className="counter-card counter-card-membership">
