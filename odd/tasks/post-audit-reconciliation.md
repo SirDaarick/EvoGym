@@ -50,6 +50,12 @@ Keep the change set limited to claims that are actually stale. Preserve audit re
 - REC-1 observed 199 authored additions/deletions. REC-2 documentation work is 114 authored additions/deletions; cumulative before the final receipt metadata is 313, generated files excluded. Delivery strategy: `ask-on-risk`; the parent approved the exact REC-2 work-unit commit and one follow-up receipt commit. No additional metadata chain is authorized; no push, PR, or publication is authorized.
 - Each task closes with a local Conventional Commit after explicit parent review/approval of exact staged paths. Never stage the whole repository; no attribution trailers. REC-1 and REC-2 work-unit commits are complete; exact identities are recorded below after commit.
 
+### Work-unit receipts
+
+- **REC-1:** `c97a190fb0fd548070c5fd60a8cd969ec36a703f`, tree `813b2ab668ed194b47bf2e8d896ea566adabe16a` — `docs(audit): reconcile post-audit task and policy baseline`.
+- **REC-2:** `fc9319453acdf590ad730d7a70ec5867bb148924`, tree `798a2dd70499467e4cd7b43be46aca09f7af6169` — `docs(audit): record current baseline verification`.
+- The one final receipt-metadata commit is held in the parent mirror to avoid self-reference; no further metadata chain is authorized.
+
 ## Progress and next step
 
 **REC-1 is committed locally as `c97a190fb0fd548070c5fd60a8cd969ec36a703f`; REC-2 verification and documentation reconciliation are complete and parent-approved.** The valid isolated API rerun superseded one rejected in-memory-SQLite harness attempt; its harness errors are not application regressions. REC-2 source-baseline results and limits are in the [reconciliation report](../../docs/backend-audit/post-audit-reconciliation.md). Risk assessment was initially unavailable while private/untracked inventory remained in scope; after the parent excluded that inventory, D-032 executable-change assessed medium. RDD remained off; no native review was approved or started and no authority was granted. Preserve the unrelated pre-existing unresolved commit reference at `odd/tasks/backend-implementation.md:895` without inventing a replacement. The next business action is to refine and assign parallel work packages; implementation still requires separate authorization.
