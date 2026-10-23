@@ -1,17 +1,17 @@
 # Route from the current backend to completion
 
-**Next bounded work:** first collect the pending current-HEAD local verification in the [post-audit reconciliation](post-audit-reconciliation.md). The clean R5 receipt remains historical: **335 API passed/17 PG skips**, typecheck/build passed, and full frontend **2 failed/471 passed**. Later source commits are outside that receipt; current failures, if any, must be observed before selecting a fix. D1–D3 documentation closure is recorded by `cbe4d8a`; no PostgreSQL/hosted proof, push/PR, or production certificate is implied.
+**Current evidence:** REC-2 verified the source baseline `3996c62` locally: 367 API passed/17 skipped, focused Owner/Members 24 passed, full frontend 578 passed, typecheck/build passed, and Alembic head is `0030_staff_schedules`. The clean R5 receipt remains historical: **335 API passed/17 PG skips**, typecheck/build passed, and full frontend **2 failed/471 passed**. See the [post-audit reconciliation](post-audit-reconciliation.md) for the invalid first API harness, exact commands, and limits. **Next bounded work:** use the verified baseline and remaining integration/PG acceptance gates to select a separately authorized slice; this note does not start P1–P12 or imply PostgreSQL/hosted proof, push/PR, or production certification. D1–D3 closure is recorded by `cbe4d8a`.
 
 ## Current scoped capability versus completion
 
 | Capability | Current evidence | Still needed |
 |---|---|---|
-| API/environment/session foundation | Historical R5 API suite 335 passed/17 PG skips; bounded check-in errors and three principal fallbacks repaired | Current HEAD verification pending; broader B05 mapping/typed frontend errors, deeper auth audit, PG/production operations |
+| API/environment/session foundation | Historical R5 API suite 335 passed/17 PG skips; source-baseline API suite 367 passed/17 skipped; bounded check-in errors and three principal fallbacks repaired | Broader B05 mapping/typed frontend errors, deeper auth audit, PG/production operations |
 | Member/catalog/eligibility | Reads/mutations and immutable versions exist; later commits expand member and catalog UI | H02/H03, proposed member reload/history/itemized read contracts, verified live owner UI |
 | Membership sale/debt/transfer | Server-priced minor units, idempotency and B01/FE01/FE02 live contract repairs exist | Real browser integration, PostgreSQL concurrency proof, broader policy/domains |
 | Shift cash/opening inventory review | Snapshot/count/review, overtime handoff and frozen cut exist | Live frontend flow, current PG proof, non-membership ledger/reporting |
 | Online access/sample | Period access, fixed-window duplicate visits and unique sample consumption exist | Reload DTOs, offline queue/revalidation, policy boundary |
-| Roster/attendance | Current HEAD includes STAFF-1 weekly schedule series/occurrences/exceptions and BK040-S3 schedule classification/checkout; current HEAD test proof pending | Same-profile/branch recurrence acceptance and PG proof, STAFF-2 occurrence attendance, STAFF-3 offline |
+| Roster/attendance | Source baseline includes STAFF-1 weekly schedule series/occurrences/exceptions and BK040-S3 schedule classification/checkout; current local API/frontend suites pass | Same-profile/branch recurrence acceptance and PG proof, STAFF-2 occurrence attendance, STAFF-3 offline |
 | Inventory/POS/expenses/rentals/payroll | Piece-only stock/catalog foundations plus later committed demo/UI changes; UI presence is not live API integration | Remaining transactional domains and verified operational UI |
 | Local-first/providers/notifications/Gimi/import/operations | Designs and partial prerequisites | End-to-end implementation, decisions and production exit evidence |
 

@@ -1,6 +1,6 @@
 # Backend audit: verified remediation and remaining work
 
-**2026-10-22, post-audit reconciliation:** the R5 receipt remains historical; current source HEAD is `3996c62acfeac8c7f367032a61bf95f331ccf1b8` (tree `7d44e28bbbaf9ed0db54d732a3821f1a16604427`). No application suite has been run at that HEAD yet. See the [post-audit reconciliation](post-audit-reconciliation.md) for later source changes, corrected status counts, and pending checks. Historical R5 recorded API/typecheck/build passes and a partial frontend result (**2 failed, 471 passed**); it does not establish current HEAD results or PostgreSQL/hosted proof, complete backend, or production certification.
+**2026-10-22, post-audit reconciliation:** the R5 receipt remains historical. The current source baseline is `3996c62acfeac8c7f367032a61bf95f331ccf1b8` (tree `7d44e28bbbaf9ed0db54d732a3821f1a16604427`); REC-2 later verified that source with 367 API passes/17 skips, 578 frontend passes, focused Owner/Members 24 passes, typecheck/build and local migration-graph checks. The exact commands, warning, invalid API harness attempt, and scope limits are in the [post-audit reconciliation](post-audit-reconciliation.md). The later `c97a190` commit changes documentation only. Historical R5's 2 failed/471 passed frontend result remains intact; neither local verification nor the historical receipt establishes PostgreSQL/hosted proof, complete backend, or production certification.
 
 ## Reading order
 
@@ -54,11 +54,11 @@ try {
 } finally { Pop-Location }
 ```
 
-The snippet is a safe local command set, not a result or automatically a clean-prefix receipt. Current HEAD outputs are pending REC-2; exact historical module commands and directories are in [delivery notes](delivery-notes.md). No applications were rerun for these passive documentation edits. Recorded Python: 3.14.5.
+The snippet is a safe local command set, not a result or automatically a clean-prefix receipt. REC-2's delegated results for source baseline `3996c62` are in the [post-audit reconciliation](post-audit-reconciliation.md); exact historical module commands and directories are in [delivery notes](delivery-notes.md). No applications were rerun for the passive REC-2 documentation edits. Recorded Python: 3.14.5.
 
 ## Historical audit evidence: do not confuse with current results
 
-Before remediation, the audit recorded **252 passed/17 skipped/19 warnings** (318.50s), 24 focused frontend passes, and two compiler errors: missing `sameMonotonicOrigin` in the clock fixture and an `unknown` plan-version ID in checkout. Full frontend attempts were interrupted with **no verdict**, and build was then deliberately not run. The historical R5 results above superseded those limitations for the R5 candidate; current HEAD verification is separately pending and recorded in the reconciliation report.
+Before remediation, the audit recorded **252 passed/17 skipped/19 warnings** (318.50s), 24 focused frontend passes, and two compiler errors: missing `sameMonotonicOrigin` in the clock fixture and an `unknown` plan-version ID in checkout. Full frontend attempts were interrupted with **no verdict**, and build was then deliberately not run. The historical R5 results above superseded those limitations for the R5 candidate; REC-2 separately verified the later source baseline, with exact results in the reconciliation report.
 
 During that earlier audit-document finalization, fingerprints changed in six pre-existing files: `api/app/main.py`, `api/tests/test_contract_smoke.py`, `api/tests/test_migrations.py`, `api/tests/test_staff_schedules.py`, `docs/backend-plan/04-implementation-phases.md`, and `odd/tasks/backend-implementation.md`. Cause/semantic differences were unestablished and files were left untouched. That **historical** caveat limited the old 252-test snapshot; it is not drift during the later stable 202-path independent verification.
 
@@ -66,7 +66,7 @@ During that earlier audit-document finalization, fingerprints changed in six pre
 
 - Runtime API: [api/](../../api/README.md). `backend/` remains the notebook/private-data workspace; no tracked files existed there at the original audit baseline. Never move private data into API artifacts.
 - [Backend plan navigation](../backend-plan/README.md) preserves design/history. The original [audit-document task](../../odd/tasks/backend-audit-documentation.md) records the completed D1–D3 documentation unit; implementation evidence belongs in [remediation tracking](../../odd/tasks/backend-audit-remediation.md).
-- RDD remains off. User-approved `auto-chain` / `feature-branch-chain` was local only; six source commits and D1–D3 documentation closure are historical completed work units. Current HEAD verification is pending in the [reconciliation report](post-audit-reconciliation.md). No PR, push, publication or approved PR-size exception is claimed.
+- RDD remains off. User-approved `auto-chain` / `feature-branch-chain` was local only; six source commits and D1–D3 documentation closure are historical completed work units. REC-2 local source-baseline verification is recorded in the [reconciliation report](post-audit-reconciliation.md). No PR, push, publication or approved PR-size exception is claimed.
 - Private/generated/source file classification, ignore rules and destructive cleanup were **not** performed. Preserve `tmp/`, `output/`, editor configuration and private workspaces until separately classified/authorized; do not publish private filenames.
 
 Next: authorized member reload/history/itemized-debt read contracts and typed frontend error integration, or isolated PostgreSQL proof once a disposable target is authorized. See the [roadmap](roadmap.md); the broader backend remains incomplete.
