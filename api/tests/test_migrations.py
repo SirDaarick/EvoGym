@@ -1095,3 +1095,60 @@ def test_staff_schedule_weekday_check_compiles_portably_for_sqlite_and_postgresq
     for dialect in (sqlite.dialect(), postgresql.dialect()):
         ddl = str(sa.schema.CreateTable(StaffScheduleSeries.__table__).compile(dialect=dialect))
         assert "json_array_length(weekdays) > 0" in ddl
+
+
+def test_staff_occurrence_attendance_migration_creates_columns_and_refuses_history_loss(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'staff-occurrence-att.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    branch_id, staff_id, profile_id, series_id, att_id, corr_id = (uuid4().hex for _ in range(6))
+    try:
+        with engine.connect() as connection:
+            columns = {col["name"] for col in inspect(connection).get_columns("staff_attendance_records")}
+            assert {
+                "series_id", "occurrence_date", "device_captured_at", "server_received_at",
+                "idempotency_key", "scheduled_start_time", "scheduled_end_time", "clock_skew_seconds",
+                "clock_validation_status", "review_required", "schedule_conflict"
+            }.issubset(columns)
+            assert "staff_attendance_corrections" in inspect(connection).get_table_names()
+
+        with engine.begin() as connection:
+            connection.execute(text("insert into branches (id, code, name) values (:id, 'att-test', 'Attendance Test')"), {"id": branch_id})
+            connection.execute(text("insert into staff_users (id, login_identifier) values (:id, 'att-test@example.invalid')"), {"id": staff_id})
+            connection.execute(text("insert into staff_roster_profiles (id, branch_id, full_name, position) values (:id, :branch, 'Att Worker', 'Reception')"),
+                               {"id": profile_id, "branch": branch_id})
+            connection.execute(text(
+                "insert into staff_schedule_series (id, profile_id, branch_id, start_date, weekdays, start_time, end_time, created_by) "
+                "values (:id, :profile, :branch, '2026-10-26', '[0]', '09:00:00', '10:00:00', :staff)"
+            ), {"id": series_id, "profile": profile_id, "branch": branch_id, "staff": staff_id})
+            connection.execute(text(
+                "insert into staff_attendance_records "
+                "(id, branch_id, profile_id, recorded_by, occurred_at, business_date, series_id, occurrence_date, clock_validation_status) "
+                "values (:id, :branch, :profile, :staff, '2026-10-26T09:00:00+00:00', '2026-10-26', :series, '2026-10-26', 'trusted')"
+            ), {"id": att_id, "branch": branch_id, "profile": profile_id, "staff": staff_id, "series": series_id})
+            connection.execute(text(
+                "insert into staff_attendance_corrections "
+                "(id, attendance_id, corrected_by, field_name, original_value, corrected_value, reason) "
+                "values (:id, :att_id, :staff, 'status', 'late', 'present', 'Traffic justified')"
+            ), {"id": corr_id, "att_id": att_id, "staff": staff_id})
+
+        # Test trigger: corrections are append-only
+        with engine.begin() as connection:
+            with pytest.raises(IntegrityError):
+                connection.execute(text("update staff_attendance_corrections set reason='Mutated' where id=:id"), {"id": corr_id})
+            with pytest.raises(IntegrityError):
+                connection.execute(text("delete from staff_attendance_corrections where id=:id"), {"id": corr_id})
+
+        # Test downgrade refusal while corrections exist
+        with pytest.raises(RuntimeError, match="staff attendance corrections exist"):
+            command.downgrade(config, "0030_staff_schedules")
+
+        with engine.connect() as connection:
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0031_staff_occurrence_attendance"
+    finally:
+        engine.dispose()
