@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.api.member_reads import router as member_reads_router
+from app.main import create_app
 from app.auth.admin import authenticate_admin
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
@@ -793,3 +794,23 @@ def test_t11_read_mutation_independence(tmp_path):
             assert debts_count is None
     finally:
         engine.dispose()
+
+
+def test_create_app_includes_member_reads_router():
+    """Verify create_app registers member reads router exposing reload endpoint."""
+    app = create_app()
+    route_paths = {
+        r.path
+        for r in app.routes
+        if getattr(r, "path", None)
+    } | {
+        sr.path
+        for r in app.routes
+        if hasattr(r, "original_router")
+        for sr in r.original_router.routes
+        if getattr(sr, "path", None)
+    }
+    assert "/api/v1/members/{member_id}/reload" in route_paths
+    assert "/api/v1/members/{member_id}/reload" in app.openapi()["paths"]
+
+

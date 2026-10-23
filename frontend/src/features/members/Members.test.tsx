@@ -1,7 +1,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as memberReadsApi from '../../api/memberReadsApi';
 import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 
@@ -222,5 +223,62 @@ describe('member workflow', () => {
     expect(screen.queryByRole('heading', { name: 'Registro guardado' })).not.toBeInTheDocument();
     await userEvent.click(document.querySelector('.mobile-detail-close')!);
     expect(screen.getByLabelText('Nombre')).toHaveValue('Ana Torres');
+  });
+  it('triggers getMemberReload and passes reload data to MemberCounterView when operational token is present in sessionStorage', async () => {
+    sessionStorage.setItem('evogym:operational-session', 'test-operational-token');
+    const mockReloadData: memberReadsApi.MemberReloadResponse = {
+      profile: {
+        id: 'demo-active',
+        organization_id: 'org-1',
+        home_branch_id: 'branch-1',
+        member_number: 'SOC-ACTIVE',
+        full_name: 'Alex Morgan',
+        preferred_name: null,
+        phone: '5550000003',
+        email: 'alex@example.com',
+        birth_date: null,
+        joined_on: '2026-01-01',
+        status: 'active',
+        photo_url: null,
+        emergency_contact_name: null,
+        emergency_contact_phone: null,
+      },
+      active_periods: [
+        {
+          id: 'period-1',
+          order_item_id: 'oi-1',
+          plan_version_id: 'pv-1',
+          plan_name: 'Membresía Activa Sincronizada',
+          starts_on: '2026-10-01',
+          ends_on: '2026-11-01',
+          branch_id: null,
+          is_current: true,
+          access_status: 'eligible',
+        },
+      ],
+      class_samples: [],
+      financial: {
+        has_pending_balance: false,
+        credit_balance_minor: 0,
+        total_pending_balance_minor: null,
+        currency: 'MXN',
+        debts: [],
+      },
+      recent_visits: [],
+      server_time: '2026-10-23T12:00:00.000Z',
+    };
+
+    const reloadSpy = vi.spyOn(memberReadsApi, 'getMemberReload').mockResolvedValue(mockReloadData);
+
+    try {
+      await mount('/reception/members/demo-active');
+
+      expect(reloadSpy).toHaveBeenCalledWith('demo-active', 'test-operational-token');
+      expect(await screen.findByText('Estado sincronizado del socio')).toBeVisible();
+      expect(screen.getByText('Membresía Activa Sincronizada')).toBeVisible();
+    } finally {
+      sessionStorage.clear();
+      reloadSpy.mockRestore();
+    }
   });
 });
