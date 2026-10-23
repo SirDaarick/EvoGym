@@ -108,3 +108,6 @@ The [decision register](../backend-plan/02-business-rules-and-decisions.md) rema
 - [ ] Import, backup/recovery, retention, monitoring and incident runbooks meet owner-approved objectives with no unauthorized live operation.
 
 Documentation completion checks off none of these runtime criteria. Continue with the bounded contract unit, not a broad rewrite or automatic cleanup of the dirty tree.
+## Delegation-ready package detail
+
+For exact subdelivery ownership, shared-file reservations, proposed contracts, assignment briefs, and permission/readiness gates, see the [work-package coordination guide](../work-packages/README.md). It does not replace this historical/current roadmap or authorize implementation.

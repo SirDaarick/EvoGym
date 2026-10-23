@@ -70,3 +70,6 @@ During that earlier audit-document finalization, fingerprints changed in six pre
 - Private/generated/source file classification, ignore rules and destructive cleanup were **not** performed. Preserve `tmp/`, `output/`, editor configuration and private workspaces until separately classified/authorized; do not publish private filenames.
 
 Next: authorized member reload/history/itemized-debt read contracts and typed frontend error integration, or isolated PostgreSQL proof once a disposable target is authorized. See the [roadmap](roadmap.md); the broader backend remains incomplete.
+## Delegation-ready work-package plan
+
+The current assignable P1–P12 scope, contract handoffs, and readiness DAG are indexed in [the work-package coordination guide](../work-packages/README.md). This is a planning aid, not implementation authorization; the BK ledger and decision register remain authoritative.
