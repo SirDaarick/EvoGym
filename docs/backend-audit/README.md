@@ -1,6 +1,6 @@
 # Backend audit: verified remediation and remaining work
 
-**2026-10-22, committed source delivery:** R1/R1a–R5 fixes have observed local commits and focused clean-prefix proofs. Clean R5 full verification passed API/typecheck/build, but the frontend full suite is **partial: 2 failed, 471 passed**. Owner's keyboard failure reproduces at baseline; Members' full-run timeout did not reproduce in the focused comparison and its cause remains unresolved. No PostgreSQL/hosted proof, complete backend or production certification is claimed.
+**2026-10-22, post-audit reconciliation:** the R5 receipt remains historical; current source HEAD is `3996c62acfeac8c7f367032a61bf95f331ccf1b8` (tree `7d44e28bbbaf9ed0db54d732a3821f1a16604427`). No application suite has been run at that HEAD yet. See the [post-audit reconciliation](post-audit-reconciliation.md) for later source changes, corrected status counts, and pending checks. Historical R5 recorded API/typecheck/build passes and a partial frontend result (**2 failed, 471 passed**); it does not establish current HEAD results or PostgreSQL/hosted proof, complete backend, or production certification.
 
 ## Reading order
 
@@ -10,11 +10,11 @@
 4. [Decision register](../backend-plan/02-business-rules-and-decisions.md): authority for unresolved business policy.
 5. [Remediation evidence](../../odd/tasks/backend-audit-remediation.md): R1–R6 scope, RED/GREEN receipts and pending delivery closure.
 
-## Current committed verification — partial full frontend
+## Historical clean R5 verification — partial full frontend
 
-Branch: `codex/backend-foundation`; source prefix `f1153da6ef5718a64cd8480a69f107699ac4ebea`, tree `766529c26777de83338d394ac70c39c152a41107`, compared with baseline `709466caa545d862c6effc53a9bbaf1a8a28d65f`. See the self-contained [committed receipt](delivery-notes.md) for commands, focused commit identities and baseline comparison. D1–D3 documentation identities/closure remain pending. No unowned code was committed; dirty graph 0030 is not in this clean prefix.
+Branch: `codex/backend-foundation`; source prefix `f1153da6ef5718a64cd8480a69f107699ac4ebea`, tree `766529c26777de83338d394ac70c39c152a41107`, compared with baseline `709466caa545d862c6effc53a9bbaf1a8a28d65f`. See the self-contained [committed receipt](delivery-notes.md) for commands, focused commit identities and baseline comparison. D1–D3 documentation delivery and closure were later recorded in `cbe4d8a`; this R5 receipt remains unchanged and does not cover the later source commits.
 
-| Check | Current observed result | Boundary |
+| Check | Historical R5 observed result | Boundary |
 |---|---|---|
 | Full API suite | **335 passed, 17 skipped, 18 warnings**, 371.75s | PostgreSQL opt-ins skipped; no live PG proof |
 | Full frontend suite | **2 failed, 471 passed**, 63 files, 381.87s | Original failed result retained; no full retry |
@@ -25,7 +25,7 @@ Branch: `codex/backend-foundation`; source prefix `f1153da6ef5718a64cd8480a69f10
 | Workflow YAML/AST and scoped whitespace checks | Passed | Module paths, guards and head comparisons verified structurally, not hosted execution |
 | Browser E2E, vulnerability scan, deployment, live PG, hosted CI | Not run | No passes or production guarantees claimed |
 
-Clean API verification recorded 18 warnings; the earlier dirty receipt recorded 19 (one Starlette/httpx deprecation plus 18 SQLite expression-index reflection warnings). The clean build's 524.79kB entry exceeds Vite's 500kB advisory threshold; build/PWA still passed. No advisory is attributed to these fixes, and no Ruff/mypy/Black result is claimed. The two clean frontend failures and baseline comparison are detailed in the [frontend follow-ups](frontend-contract-gaps.md).
+The R5 clean API verification recorded 18 warnings; the earlier dirty receipt recorded 19 (one Starlette/httpx deprecation plus 18 SQLite expression-index reflection warnings). The R5 clean build's 524.79kB entry exceeds Vite's 500kB advisory threshold; build/PWA still passed. No advisory is attributed to these fixes, and no Ruff/mypy/Black result is claimed. The two R5 frontend failures and baseline comparison are detailed in the [frontend follow-ups](frontend-contract-gaps.md).
 
 ### Historical dirty verification and preserved parallel work
 
@@ -54,19 +54,19 @@ try {
 } finally { Pop-Location }
 ```
 
-The snippet reproduces local primary-worktree checks, not automatically a clean-prefix receipt. Current committed checks used the same existing shared interpreter with clean API imports explicitly verified; exact module commands and directories are in [delivery notes](delivery-notes.md). No applications were rerun for these passive documentation edits. Recorded Python: 3.14.5.
+The snippet is a safe local command set, not a result or automatically a clean-prefix receipt. Current HEAD outputs are pending REC-2; exact historical module commands and directories are in [delivery notes](delivery-notes.md). No applications were rerun for these passive documentation edits. Recorded Python: 3.14.5.
 
 ## Historical audit evidence: do not confuse with current results
 
-Before remediation, the audit recorded **252 passed/17 skipped/19 warnings** (318.50s), 24 focused frontend passes, and two compiler errors: missing `sameMonotonicOrigin` in the clock fixture and an `unknown` plan-version ID in checkout. Full frontend attempts were interrupted with **no verdict**, and build was then deliberately not run. Current full/typecheck/build results above supersede those limitations; the historical failures remain useful regression provenance.
+Before remediation, the audit recorded **252 passed/17 skipped/19 warnings** (318.50s), 24 focused frontend passes, and two compiler errors: missing `sameMonotonicOrigin` in the clock fixture and an `unknown` plan-version ID in checkout. Full frontend attempts were interrupted with **no verdict**, and build was then deliberately not run. The historical R5 results above superseded those limitations for the R5 candidate; current HEAD verification is separately pending and recorded in the reconciliation report.
 
 During that earlier audit-document finalization, fingerprints changed in six pre-existing files: `api/app/main.py`, `api/tests/test_contract_smoke.py`, `api/tests/test_migrations.py`, `api/tests/test_staff_schedules.py`, `docs/backend-plan/04-implementation-phases.md`, and `odd/tasks/backend-implementation.md`. Cause/semantic differences were unestablished and files were left untouched. That **historical** caveat limited the old 252-test snapshot; it is not drift during the later stable 202-path independent verification.
 
 ## Repository, ownership and delivery boundaries
 
 - Runtime API: [api/](../../api/README.md). `backend/` remains the notebook/private-data workspace; no tracked files existed there at the original audit baseline. Never move private data into API artifacts.
-- [Backend plan navigation](../backend-plan/README.md) preserves design/history. The original [audit-document task](../../odd/tasks/backend-audit-documentation.md) remains a separate pending delivery unit; implementation evidence belongs in [remediation tracking](../../odd/tasks/backend-audit-remediation.md).
-- RDD remains off. User-approved `auto-chain` / `feature-branch-chain` is local only; six source commits are observed, D1–D3 documentation and optional final receipt bookkeeping remain pending. No PR, push, publication or approved PR-size exception is claimed.
+- [Backend plan navigation](../backend-plan/README.md) preserves design/history. The original [audit-document task](../../odd/tasks/backend-audit-documentation.md) records the completed D1–D3 documentation unit; implementation evidence belongs in [remediation tracking](../../odd/tasks/backend-audit-remediation.md).
+- RDD remains off. User-approved `auto-chain` / `feature-branch-chain` was local only; six source commits and D1–D3 documentation closure are historical completed work units. Current HEAD verification is pending in the [reconciliation report](post-audit-reconciliation.md). No PR, push, publication or approved PR-size exception is claimed.
 - Private/generated/source file classification, ignore rules and destructive cleanup were **not** performed. Preserve `tmp/`, `output/`, editor configuration and private workspaces until separately classified/authorized; do not publish private filenames.
 
 Next: authorized member reload/history/itemized-debt read contracts and typed frontend error integration, or isolated PostgreSQL proof once a disposable target is authorized. See the [roadmap](roadmap.md); the broader backend remains incomplete.

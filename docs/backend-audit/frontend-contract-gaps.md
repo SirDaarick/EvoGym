@@ -1,6 +1,8 @@
 # Frontend/backend contract gaps
 
-**2026-10-22 committed-delivery status:** FE01/FE02 and compiler acceptance are fixed in observed R1/R1a commits; focused clean proofs pass. At clean R5, full API verification passed **335 tests/17 PG skips**, typecheck/build passed, but the full frontend suite recorded **2 failed/471 passed**. The earlier dirty 578-frontend/367-API passes are different-snapshot history, not current clean full-suite success. The live slice remains incomplete; FE03–FE12 are predominantly roadmap work. Proposed read endpoints do not already exist; browser/server E2E is unproven. See the [clean committed receipt](delivery-notes.md); original source-line annotations describe the earlier audit snapshot.
+**Historical 2026-10-22 R5 snapshot:** FE01/FE02 and compiler acceptance were fixed in observed R1/R1a commits; focused clean proofs passed. At clean R5, full API verification passed **335 tests/17 PG skips**, typecheck/build passed, but the full frontend suite recorded **2 failed/471 passed**. Earlier dirty 578-frontend/367-API passes are different-snapshot history, not clean R5 or current HEAD results. See the [R5 receipt](delivery-notes.md); original source-line annotations describe that audit snapshot.
+
+**Current source delta (baseline `3996c62acfeac8c7f367032a61bf95f331ccf1b8`, tree `7d44e28bbbaf9ed0db54d732a3821f1a16604427`):** later commits add staff scheduling (`b8c973f`), finance visuals (`2dcecfc`), a plan editor (`e76be10`), reception operations (`9cc2767`), and member/staff operational screens (`53867b5`). These commits change the source/UI inventory, not the proof boundary: application checks at this source baseline are pending; a screen or demo flow alone does not establish live API integration. FE03–FE12 below remain scoped integration gaps unless stated otherwise. See the [post-audit reconciliation](post-audit-reconciliation.md).
 
 ## Clean-suite follow-ups, not implemented in this delivery
 
@@ -18,7 +20,7 @@
 | FE06 | Repayment, voucher review and pending-money backend exist; finance UI demo | P2; FE05 order/debt identifiers |
 | FE07 | Shift API exists; opening/closing UI uses demo operations | P1; B01 + snapshot contract |
 | FE08 | Online membership/sample check-in exists; live checkout assumes period | P2; FE05 + B05 |
-| FE09 | Roster/attendance exist; new UI demo, schedules untracked draft | P2; stabilize STAFF-1 |
+| FE09 | Roster/attendance exist; weekly schedules/occurrences/exceptions are now in current backend. New staff UI exists; live binding is unverified. Occurrence-linked attendance and offline flow remain pending. | P2; STAFF-2/3 and current local verification |
 | FE10 | Stock foundations exist; product POS/refunds and other domains incomplete | Backend-first; policy D-015 |
 | FE11 | Immutable plan publication exists; owner catalog uses local plans | P2; H02 |
 | FE12 | Local-first, provider, reporting, notifications and Gimi unfinished cross-stack | Phased; owner decisions |
@@ -108,7 +110,7 @@ Evidence: [online check-ins](../../api/app/api/member_check_ins.py), lines 106/2
 
 ## FE09 — Integrate roster/attendance without assuming schedule completion
 
-Evidence: [roster](../../api/app/api/staff_roster.py), lines 114/135/156, and [attendance](../../api/app/api/staff_attendance.py), lines 107/146/207, exist. Untracked attendance UI (`frontend/src/features/reception/StaffAttendanceView.tsx`; untracked dirty-snapshot evidence), lines 2/33/113/143, uses demo operations; demo checkout (`frontend/src/demo/staffAttendanceOperations.ts`; untracked dirty-snapshot evidence), lines 124–143, is mutable. Historical B02–B04 failures were followed by corrections/tests in the evolved STAFF-1 draft through other work, included in the passing full API suite; that is not blanket STAFF-1 completion or this writer's implementation. Complex overlap/CPU acceptance and PG proof remain; STAFF-2 occurrence linking and STAFF-3 offline flow remain pending.
+Evidence at current HEAD: branch-scoped [roster](../../api/app/api/staff_roster.py), [attendance](../../api/app/api/staff_attendance.py), and weekly [schedule](../../api/app/api/staff_schedules.py) APIs are committed. The committed [staff attendance view](../../frontend/src/features/reception/StaffAttendanceView.tsx) reads `useDemo()` state and records through demo operations; it is not a live schedule/attendance adapter. STAFF-1 schedule series/occurrences/exceptions are implemented; the same branch roster profile is the overlap scope, and different-branch profiles remain independent. PostgreSQL proof, STAFF-2 occurrence-linked attendance, and STAFF-3 offline flow remain pending. Current HEAD tests have not run yet; the detailed R5 suite counts below this section remain historical.
 
 1. Map roster IDs separately from login accounts; wire server timestamps/timezones and append-only checkout evidence.
 2. Preserve nullable classification rather than inventing absence; stabilize STAFF-1 before adding occurrence-aware attendance, then queue/offline semantics.

@@ -1,21 +1,21 @@
 # Route from the current backend to completion
 
-**Next bounded work:** investigate the two clean full-frontend failures without weakening assertions, then authorized member reload/history/itemized reads and typed frontend errors (FE04–FE06), or isolated PG proof once authorized. R1/R1a–R5 have observed commits/focused proofs; clean R5 full API is **335 passed/17 PG skips**, typecheck/build pass, but full frontend is **2 failed/471 passed**. Earlier dirty 367/578 passes do not override this partial result. See [committed evidence](delivery-notes.md); D1–D3 docs remain pending, with no PR/push or production certificate.
+**Next bounded work:** first collect the pending current-HEAD local verification in the [post-audit reconciliation](post-audit-reconciliation.md). The clean R5 receipt remains historical: **335 API passed/17 PG skips**, typecheck/build passed, and full frontend **2 failed/471 passed**. Later source commits are outside that receipt; current failures, if any, must be observed before selecting a fix. D1–D3 documentation closure is recorded by `cbe4d8a`; no PostgreSQL/hosted proof, push/PR, or production certificate is implied.
 
 ## Current scoped capability versus completion
 
 | Capability | Current evidence | Still needed |
 |---|---|---|
-| API/environment/session foundation | Clean API suite 335 passed/17 PG skips; bounded check-in errors and three principal fallbacks repaired | Broader B05 mapping/typed frontend errors, deeper auth audit, PG/production operations |
-| Member/catalog/eligibility | Reads/mutations, immutable versions and B07 input/null repair exist | H02/H03, proposed member reload/history/itemized read contracts, live owner UI |
+| API/environment/session foundation | Historical R5 API suite 335 passed/17 PG skips; bounded check-in errors and three principal fallbacks repaired | Current HEAD verification pending; broader B05 mapping/typed frontend errors, deeper auth audit, PG/production operations |
+| Member/catalog/eligibility | Reads/mutations and immutable versions exist; later commits expand member and catalog UI | H02/H03, proposed member reload/history/itemized read contracts, verified live owner UI |
 | Membership sale/debt/transfer | Server-priced minor units, idempotency and B01/FE01/FE02 live contract repairs exist | Real browser integration, PostgreSQL concurrency proof, broader policy/domains |
 | Shift cash/opening inventory review | Snapshot/count/review, overtime handoff and frozen cut exist | Live frontend flow, current PG proof, non-membership ledger/reporting |
 | Online access/sample | Period access, fixed-window duplicate visits and unique sample consumption exist | Reload DTOs, offline queue/revalidation, policy boundary |
-| Roster/attendance | Base endpoints exist; unowned schedule draft passed earlier dirty tests but is outside clean 0029 prefix | STAFF-1 broader acceptance/complex overlap/PG proof, STAFF-2 occurrence attendance, STAFF-3 offline |
-| Inventory/POS/expenses/rentals/payroll | Piece-only stock/catalog foundations plus extensive demo UI/plans | Remaining transactional domains and operational UI |
+| Roster/attendance | Current HEAD includes STAFF-1 weekly schedule series/occurrences/exceptions and BK040-S3 schedule classification/checkout; current HEAD test proof pending | Same-profile/branch recurrence acceptance and PG proof, STAFF-2 occurrence attendance, STAFF-3 offline |
+| Inventory/POS/expenses/rentals/payroll | Piece-only stock/catalog foundations plus later committed demo/UI changes; UI presence is not live API integration | Remaining transactional domains and verified operational UI |
 | Local-first/providers/notifications/Gimi/import/operations | Designs and partial prerequisites | End-to-end implementation, decisions and production exit evidence |
 
-The original audit enumerated **76 historical ledger rows: 18 Done, 17 Partial, 41 Not started**, with inconsistent older summaries; the [ledger](../../odd/tasks/backend-implementation.md) has since evolved through other work and was not recounted here. Labels are not a completion percentage. BK-042-S1 pending-money read is done; its broader domain remains partial. STAFF-1 corrections are not blanket completion or this remediation writer's work; STAFF-2/3 remain pending. Do not repeat an obsolete blanket “no ready task” or debt-policy gate: ready bounded integrations coexist with scoped policy decisions.
+The current master ledger contains **76 main BK tasks: 18 Done, 18 Partial, 40 Not started**, plus the separate completed BK-042-S1 subtask. Older 18/17/41 counts remain historical. Labels are not a completion percentage. BK-042-S1 pending-money read is done; its broader domain remains partial. STAFF-1 schedules are implemented, while STAFF-2/3 remain pending. Do not repeat an obsolete blanket “no ready task” or debt-policy gate: ready bounded integrations coexist with scoped policy decisions.
 
 ## 1. Stabilize contracts, safety and PostgreSQL proof
 
@@ -32,7 +32,7 @@ The original audit enumerated **76 historical ledger rows: 18 Done, 17 Partial, 
 
 **Dependencies:** approved recurrence/timezone/scope semantics and B02–B04/E02.
 
-1. Preserve and review the **evolved** STAFF-1 cancellation/future-lookup/shared-validation corrections and tests already present; do not replay old B02–B04 failures as current proof or overwrite other work. Reconfirm first-occurrence/long-future/replay/exception/rollback acceptance and unresolved complex overlap semantics.
+1. Preserve and review the **evolved** STAFF-1 cancellation/future-lookup/shared-validation corrections and tests already present; do not replay old B02–B04 failures as current proof or overwrite other work. Reconfirm first-occurrence/long-future/replay/exception/rollback acceptance. Overlap scope is the same branch roster profile; profiles in different branches are independent under the user's confirmed policy and are not globally linked or cross-checked.
 2. Complete separately accepted recurrence CPU/query bounds and benchmarks under E02, plus any remaining listing/scope contract work; never silently truncate correctness. Current green tests do not establish all recurrence edge cases or PG behavior.
 3. Complete STAFF-2 occurrence-to-attendance mapping with server timestamps, explicit nullable classification and append-only history; connect FE09 roster/attendance contracts.
 4. Complete STAFF-3 only after the local-first queue/grant/receipt foundation below; separate “recorded locally” from accepted attendance.
