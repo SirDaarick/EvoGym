@@ -21,7 +21,16 @@ export interface OperationalMemberDetail extends OperationalMember {
 
 export class OperationalApiHttpError extends Error {
   readonly kind = 'http';
-  constructor(readonly status: number, message: string, readonly code?: string, readonly requestId?: string, readonly issues?: unknown) {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code?: string,
+    readonly requestId?: string,
+    readonly issues?: unknown
+  ) {
+    super(message);
+    this.name = 'OperationalApiHttpError';
+  }
     super(message);
     this.name = 'OperationalApiHttpError';
   }
@@ -50,18 +59,40 @@ export function getReceptionConfig(env: Partial<ImportMetaEnv> = import.meta.env
 }
 
 export function readOperationalToken(): string | null {
-  return typeof window === 'undefined' ? null : window.sessionStorage.getItem(TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    const customWindow = window as unknown as {
+      __EVOGYM_OPERATIONAL_SESSION__?: string;
+      __EVOGYM_ADMIN_SESSION__?: string;
+      __EVOGYM_TOKEN__?: string;
+    };
+    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
+    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
+    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
+    return window.sessionStorage.getItem(TOKEN_KEY);
+  }
+  return null;
 }
+
+export const resolveOperationalToken = readOperationalToken;
 
 export function clearOperationalToken(): void {
   window.sessionStorage.removeItem(TOKEN_KEY);
 }
 
-async function request<T>(config: ReceptionConfig, path: string, token?: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(config: ReceptionConfig, path: string, token?: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${config.apiOrigin}${path}`, { ...init, headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers } });
-  } catch { throw new OperationalApiNetworkError(); }
+    response = await fetch(`${config.apiOrigin}${path}`, {
+      ...init,
+      headers: {
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new OperationalApiNetworkError();
+  }
   if (!response.ok) {
     let error: Record<string, unknown> = {};
     try {
@@ -80,8 +111,20 @@ async function request<T>(config: ReceptionConfig, path: string, token?: string,
       const candidate = issue as Record<string, unknown>;
       return [{ location: Array.isArray(candidate.location) ? candidate.location.filter((value): value is string => typeof value === 'string' && allowedLocations.has(value)).slice(0, 1) : [], type: typeof candidate.type === 'string' && allowedTypes.has(candidate.type) ? candidate.type : 'invalid' }];
     }) : undefined;
-    const messages: Record<number, string> = { 401: token ? 'La sesión expiró o fue revocada. Inicia sesión nuevamente.' : 'Credenciales inválidas.', 403: 'No tienes autorización para realizar esta acción.', 409: 'La solicitud entra en conflicto con el estado actual.', 429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.', 422: 'Revisa los datos enviados e intenta nuevamente.' };
-    throw new OperationalApiHttpError(response.status, messages[response.status] ?? (response.status >= 500 ? 'El servidor no pudo completar la solicitud.' : `La solicitud falló (${response.status}).`), code, requestId, issues);
+    const messages: Record<number, string> = {
+      401: token ? 'La sesión expiró o fue revocada. Inicia sesión nuevamente.' : 'Credenciales inválidas.',
+      403: 'No tienes autorización para realizar esta acción.',
+      409: 'La solicitud entra en conflicto con el estado actual.',
+      429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.',
+      422: 'Revisa los datos enviados e intenta nuevamente.',
+    };
+    throw new OperationalApiHttpError(
+      response.status,
+      messages[response.status] ?? (response.status >= 500 ? 'El servidor no pudo completar la solicitud.' : `La solicitud falló (${response.status}).`),
+      code,
+      requestId,
+      issues
+    );
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
