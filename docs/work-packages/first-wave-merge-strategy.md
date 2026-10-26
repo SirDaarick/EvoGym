@@ -56,3 +56,7 @@ Do not use `git reset --hard` or a blanket reset: that can destroy unrelated or 
 ## Next step
 
 T3/T5 engineering acceptance is complete, but it is not owner business signoff. The next step is T6: perform the authorized local merge into primary `codex/backend-foundation` while preserving its 11 dirty, non-overlapping paths. This work unit did not perform that merge. Keep the PostgreSQL target limitation and browser pairing/temporary-PIN coverage limitation visible; no push or PR was made.
+
+
+## Completed local integration — 2026-10-26
+The primary branch codex/backend-foundation now includes the integration through merge commit 1c6fdd5a5fe443f5124248a0bd4d09d6cb5ddc47 (integration tip d125ead). Product source was verified at 96c558f; subsequent changes are documentation only. The original primary dirty status and A/B/C worktrees were preserved. Final applicable checks: API 508 passed / 18 skipped; frontend 739 passed; app/node TypeScript and production build passed. See odd/tasks/abc-integration-alignment.md for commands, historical timeout observations, browser evidence, warnings and unavailable PostgreSQL/symlink coverage. No remote publication or production database migration occurred.
