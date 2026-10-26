@@ -21,6 +21,8 @@ import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { getSelectedStaff, useStaff, type StaffProfile } from '../staff/staffStore';
 import './StaffAttendanceView.css';
 
+export type StaffAttendancePerson = Pick<StaffProfile, 'id' | 'name' | 'active' | 'avatarInitials'> & Pick<Partial<StaffProfile>, 'shift' | 'department'>;
+
 type DepartmentFilter = 'all' | 'Entrenador' | 'Mantenimiento' | 'Staff';
 type StatusFilter = 'all' | 'in-turn' | 'out';
 
@@ -55,13 +57,13 @@ interface ActiveStaffRecord {
 
 type LiveRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
-export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { liveRequest?: LiveRequest; liveStaff?: StaffProfile[]; branchId?: string } = {}) {
+export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { liveRequest?: LiveRequest; liveStaff?: StaffAttendancePerson[]; branchId?: string } = {}) {
   let demo: ReturnType<typeof useDemo> | null = null;
   try { demo = useDemo(); } catch { /* API routes do not mount demo state. */ }
   const state = demo?.state ?? createEmptyDemoState();
   const transact = demo?.transact;
   const storeStaff = useStaff();
-  const staffList = liveStaff ?? storeStaff;
+  const staffList: StaffAttendancePerson[] = liveStaff ?? storeStaff;
   const currentActiveShift = demo ? activeShift(state) : undefined;
   const loggedStaff = getSelectedStaff();
 
@@ -227,7 +229,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       if (q) {
         const matchesName = staff.name.toLowerCase().includes(q);
         const matchesDept = dept.toLowerCase().includes(q);
-        const matchesShift = staff.shift.toLowerCase().includes(q);
+        const matchesShift = staff.shift?.toLowerCase().includes(q) ?? false;
         if (!matchesName && !matchesDept && !matchesShift) return false;
       }
 
@@ -235,7 +237,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     });
   }, [activeStaff, staffStatuses, statusFilter, departmentFilter, searchQuery]);
 
-  async function handleClockIn(staff: StaffProfile) {
+  async function handleClockIn(staff: StaffAttendancePerson) {
     if (isLive) {
       try {
         const idempotencyKey =
@@ -321,7 +323,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     }
   }
 
-  async function handleClockOut(staff: StaffProfile) {
+  async function handleClockOut(staff: StaffAttendancePerson) {
     if (isLive) {
       const statusInfo = staffStatuses.get(staff.id);
       const activeRecordId = statusInfo?.activeRecord?.id;
@@ -634,7 +636,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                         <span className={`staff-dept-badge ${deptClass}`}>
                           {dept}
                         </span>
-                        <span className="staff-shift-label">· {staff.shift}</span>
+                        {staff.shift && <span className="staff-shift-label">· {staff.shift}</span>}
                       </div>
                     </div>
                   </div>

@@ -58,7 +58,13 @@ export function ApiMembers({ role, request }: { role: Role; request: Authenticat
     setLoading(true);
     setError('');
     try {
-      setPage(await readResponse<ApiMemberPage>(request, '/api/v1/members?page=1&limit=100'));
+      const firstPage = await readResponse<ApiMemberPage>(request, '/api/v1/members?page=1&limit=100');
+      const items = [...firstPage.items];
+      for (let pageNumber = 2; pageNumber <= firstPage.pages; pageNumber += 1) {
+        const nextPage = await readResponse<ApiMemberPage>(request, `/api/v1/members?page=${pageNumber}&limit=100`);
+        items.push(...nextPage.items);
+      }
+      setPage({ ...firstPage, items });
     } catch (reason) {
       setPage(null);
       setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los socios desde la API.');

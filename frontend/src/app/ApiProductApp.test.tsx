@@ -98,8 +98,10 @@ describe('API product routes', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Expediente' }));
     expect(await screen.findByText('Plan adicional')).toBeInTheDocument();
     expect(await screen.findByText('Adeudos pendientes')).toBeInTheDocument();
-    expect(screen.queryByText('debt-1')).not.toBeInTheDocument();
+    expect(screen.getByText('order-1')).toBeInTheDocument();
+    expect(screen.getByText('$150.00 MXN')).toBeInTheDocument();
     expect(screen.getByText('$125.00 MXN')).toBeInTheDocument();
+    expect(screen.queryByText(/0 meses/i)).not.toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${member.id}/reload?visit_limit=12`, expect.any(Object));
     await userEvent.click(screen.getByRole('tab', { name: 'Mostrador' }));
     expect(screen.getByText('Mostrador no disponible')).toBeInTheDocument();
@@ -112,6 +114,7 @@ describe('API product routes', () => {
     render(<MemoryRouter initialEntries={['/reception/staff']}><ProductRoutes /></MemoryRouter>);
     expect(await screen.findByText('Pase de Lista del Personal')).toBeInTheDocument();
     expect(await screen.findByText('API Employee')).toBeInTheDocument();
+    expect(screen.getByTestId('staff-card-profile-1')).not.toHaveTextContent('·');
     expect(screen.queryByText('Emigdio')).not.toBeInTheDocument();
     expect(access.request).toHaveBeenCalledWith(`/api/v1/staff-roster?branch_id=${branchId}`);
     expect(access.request).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v1\/staff-attendance\?branch_id=/));
@@ -123,7 +126,8 @@ describe('API product routes', () => {
     access.request.mockImplementation(async path => {
       if (path.endsWith('/reload?visit_limit=12')) return new Response(JSON.stringify({
         profile: {}, active_periods: [], class_samples: [], financial: { has_pending_balance: true, credit_balance_minor: 0,
-          total_pending_balance_minor: null, currency: 'MXN', debts: [] }, recent_visits: [], server_time: '2026-01-02T12:00:00Z',
+          total_pending_balance_minor: null, currency: 'MXN', debts: [{ debt_id: 'debt-1', order_id: 'order-1', branch_id: 'branch-1',
+            currency: 'MXN', initial_outstanding_minor: 15000, remaining_balance_minor: 12500, created_at: '2026-01-02T12:00:00Z' }] }, recent_visits: [], server_time: '2026-01-02T12:00:00Z',
       }));
       if (path.endsWith(`/members/${member.id}`)) return new Response(JSON.stringify({ ...member, email: null, birth_date: null, notes: null, pending_balance_minor: 12500, has_pending_balance: true }));
       return new Response('{}');
@@ -131,6 +135,7 @@ describe('API product routes', () => {
     render(<MemoryRouter initialEntries={[`/reception/members/${member.id}`]}><ProductRoutes /></MemoryRouter>);
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByText('Adeudos pendientes')).not.toBeInTheDocument();
+    expect(screen.queryByText('order-1')).not.toBeInTheDocument();
     expect(access.request).toHaveBeenCalledWith(`/api/v1/members/${member.id}/reload?visit_limit=12`, expect.any(Object));
   });
 
@@ -142,5 +147,36 @@ describe('API product routes', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('El recurso solicitado no está disponible.');
     expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
     expect(screen.queryByText('María López')).not.toBeInTheDocument();
+  });
+
+  it('loads and searches members beyond the first API page, then opens the matched DTO', async () => {
+    const laterMember = { ...member, id: '223e4567-e89b-42d3-a456-426614174099', member_number: 'M-101', full_name: 'Later Page Member' };
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      ...member,
+      id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, '0')}`,
+      member_number: `M-${String(index + 1).padStart(3, '0')}`,
+      full_name: `Member ${index + 1}`,
+    }));
+    admin.request.mockImplementation(async path => {
+      if (path.startsWith('/api/v1/members?')) {
+        const page = new URLSearchParams(path.split('?')[1]).get('page');
+        return new Response(JSON.stringify({ items: page === '2' ? [laterMember] : firstPage, total: 101, page: Number(page ?? 1), limit: 100, pages: 2 }));
+      }
+      if (path.endsWith('/reload?visit_limit=12')) return new Response(JSON.stringify({
+        profile: {}, active_periods: [], class_samples: [], financial: { has_pending_balance: false, credit_balance_minor: 0,
+          total_pending_balance_minor: 0, currency: 'MXN', debts: [] }, recent_visits: [], server_time: '2026-01-02T12:00:00Z',
+      }));
+      if (path.endsWith(`/members/${laterMember.id}`)) return new Response(JSON.stringify({ ...laterMember, email: null, birth_date: null, notes: null, pending_balance_minor: 0, has_pending_balance: false }));
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('link', { name: 'Member 1' })).toBeInTheDocument();
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/members?page=2&limit=100', expect.any(Object)));
+    const search = screen.getByRole('textbox', { name: 'Buscar socio' });
+    await userEvent.type(search, 'M-101');
+    await userEvent.click(screen.getByRole('link', { name: 'Later Page Member' }));
+    expect(await screen.findByText('Later Page Member')).toBeInTheDocument();
+    expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${laterMember.id}`, expect.any(Object));
   });
 });

@@ -161,7 +161,7 @@ export function MemberDetailSections({
   liveApi?: boolean;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
-  const streak = membershipRenewalStreak(payments, member.id);
+  const streak = liveApi ? null : membershipRenewalStreak(payments, member.id);
   const today = now.slice(0, 10);
   const membershipIsCurrent = Boolean(member.membership && member.membership.startsOn <= today && member.membership.endsOn >= today);
   const glove = gloves.find(item => item.assignedMemberId === member.id);
@@ -245,9 +245,7 @@ export function MemberDetailSections({
           <Panel>
             <div className="member-membership-heading">
               <h2>Membresía</h2>
-              <h3 className="sr-only">Racha</h3>
-              <Badge tone="warning">🔥 {streak} meses</Badge>
-              <span className="sr-only">Racha de renovaciones consecutivas: {streak} meses</span>
+              {streak !== null && <><h3 className="sr-only">Racha</h3><Badge tone="warning">🔥 {streak} meses</Badge><span className="sr-only">Racha de renovaciones consecutivas: {streak} meses</span></>}
             </div>
 
             <div className={`member-current-plan-hero ${hasActivePeriod || membershipIsCurrent ? 'is-active' : 'is-inactive'}`}>
@@ -279,11 +277,11 @@ export function MemberDetailSections({
                     ) : (
                       <span className="muted">Sucursal específica</span>
                     )
-                  ) : (
+                  ) : streak !== null ? (
                     <span className="member-plan-hero-streak">
                       🔥 Racha: <strong>{streak} {streak === 1 ? 'mes' : 'meses'}</strong>
                     </span>
-                  )}
+                  ) : null}
                 </div>
               )}
             </div>
@@ -481,7 +479,7 @@ export function MemberDetailSections({
         )}
       </Panel>
     </div>}
-    {role === 'OWNER' && reloadState?.financial.debts.length ? <Panel><h2>Adeudos pendientes</h2><TableRegion label="Adeudos pendientes"><table className="member-detail-table"><thead><tr><th scope="col">Fecha</th><th scope="col">Adeudo</th><th scope="col">Saldo restante</th></tr></thead><tbody>{reloadState.financial.debts.map(debt => <tr key={debt.debt_id}><td>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(debt.created_at))}</td><td>{formatMoney(debt.initial_outstanding_minor)} MXN</td><td>{formatMoney(debt.remaining_balance_minor)} MXN</td></tr>)}</tbody></table></TableRegion></Panel> : null}
+    {role === 'OWNER' && reloadState?.financial.debts.length ? <Panel><h2>Adeudos pendientes</h2><TableRegion label="Adeudos pendientes"><table className="member-detail-table"><thead><tr><th scope="col">Pedido</th><th scope="col">Fecha</th><th scope="col">Adeudo</th><th scope="col">Saldo restante</th></tr></thead><tbody>{reloadState.financial.debts.map(debt => <tr key={debt.debt_id}><td>{debt.order_id}</td><td>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(debt.created_at))}</td><td>{formatMoney(debt.initial_outstanding_minor)} MXN</td><td>{formatMoney(debt.remaining_balance_minor)} MXN</td></tr>)}</tbody></table></TableRegion></Panel> : null}
     <div className="member-detail-purchases">
       <Panel>
         <div className="member-purchases-header">
