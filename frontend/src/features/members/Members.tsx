@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
   flexRender,
@@ -21,6 +21,8 @@ import { MemberCounterView, MemberDetailSections } from './MemberDetail';
 import { formatAttendanceError, getMemberStatusInfo } from './memberDetailUtils';
 import { NewMemberRegistration } from './NewMemberRegistration';
 import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
+import { getMemberReload, type MemberReloadResponse } from '../../api/memberReadsApi';
+import { readOperationalToken } from '../../api/receptionApi';
 
 export { getMemberStatusInfo };
 
@@ -266,10 +268,51 @@ export function NewMember({ role }: { role: Role }) {
   return <NewMemberRegistration role={role} />;
 }
 
+function resolveOperationalToken(): string | null {
+  if (typeof window !== 'undefined') {
+    const customWindow = window as unknown as {
+      __EVOGYM_OPERATIONAL_SESSION__?: string;
+      __EVOGYM_ADMIN_SESSION__?: string;
+      __EVOGYM_TOKEN__?: string;
+    };
+    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
+    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
+    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
+  }
+  return readOperationalToken();
+}
+
 export function MemberDetail({ role }: { role: Role }) {
   const { memberId } = useParams();
   const { state, resetVersion } = useDemo();
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
+  const [reloadState, setReloadState] = useState<MemberReloadResponse | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const token = resolveOperationalToken();
+
+    if (!token || !memberId) {
+      setReloadState(null);
+      return;
+    }
+
+    getMemberReload(memberId, token)
+      .then(data => {
+        if (!isCancelled) {
+          setReloadState(data);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setReloadState(null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [memberId]);
 
   const member = state.members.find(item => item.id === memberId);
   if (!member) {
@@ -350,12 +393,14 @@ export function MemberDetail({ role }: { role: Role }) {
             supplementSales={state.supplementSales ?? []}
             sales={state.sales ?? []}
             role={role}
+            reloadState={reloadState ?? undefined}
             onSwitchToRecord={() => setActiveTab('record')}
           />
         </div>
       ) : (
         <div id="member-tabpanel-record" role="tabpanel" aria-labelledby="member-tab-record">
           <MemberDetailSections
+            reloadState={reloadState ?? undefined}
             member={member}
             now={state.demoClock}
             visits={state.attendance.filter(visit => visit.memberId === member.id)}

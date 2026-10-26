@@ -60,9 +60,13 @@ def get_member_actor_principal(
 
     token = credentials.credentials
 
-    # 1. Check if Admin Bearer only when token verification is configured.
-    settings = request.app.state.settings
-    if settings.admin_auth_configured and settings.admin_token_signing_configured:
+    # Admin sessions require the configured signed-token contract; never fall back to an unsigned admin token.
+    settings = getattr(request.app.state, "settings", None)
+    if (
+        settings
+        and getattr(settings, "admin_auth_configured", False)
+        and getattr(settings, "admin_token_signing_configured", False)
+    ):
         try:
             staff_id, _session_id = validate_admin_session(
                 factory, token, settings.admin_token_signing_secret.get_secret_value()

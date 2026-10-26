@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, Role, Sale, SupplementSale } from '../../domain/models';
+import type { MemberReloadResponse } from '../../api/memberReadsApi';
 import { formatMoney } from '../../demo/adapter';
 import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
 import { getMemberHabits } from '../../demo/memberAnalyticsSelector';
@@ -136,6 +137,7 @@ export function MemberDetailSections({
   supplementSales,
   sales = [],
   role = 'RECEPTION',
+  reloadState,
 }: {
   member: Member;
   now: string;
@@ -147,7 +149,8 @@ export function MemberDetailSections({
   payments: MembershipPayment[];
   supplementSales: SupplementSale[];
   sales?: Sale[];
-  role?: Role;
+  role?: Role | 'ADMIN';
+  reloadState?: MemberReloadResponse;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
   const streak = membershipRenewalStreak(payments, member.id);
@@ -223,9 +226,11 @@ export function MemberDetailSections({
     () => purchases.filter(p => p.status === 'Pagado').reduce((sum, p) => sum + p.amount, 0),
     [purchases]
   );
+  const activePeriod = reloadState?.active_periods?.[0];
+  const hasActivePeriod = Boolean(activePeriod);
 
   return <section className="member-detail-sections">
-    <div className="member-detail-columns">
+        <div className="member-detail-columns">
       <div className="member-detail-left-column">
         <div className="member-detail-membership">
           <Panel>
@@ -236,7 +241,7 @@ export function MemberDetailSections({
               <span className="sr-only">Racha de renovaciones consecutivas: {streak} meses</span>
             </div>
 
-            <div className={`member-current-plan-hero ${membershipIsCurrent ? 'is-active' : 'is-inactive'}`}>
+            <div className={`member-current-plan-hero ${hasActivePeriod || membershipIsCurrent ? 'is-active' : 'is-inactive'}`}>
               <div className="member-plan-hero-top">
                 <div className="member-plan-hero-icon" aria-hidden="true">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -247,21 +252,29 @@ export function MemberDetailSections({
                 <div className="member-plan-hero-info">
                   <span className="member-plan-hero-subtitle">Membresía actual</span>
                   <strong className="member-plan-hero-title">
-                    {membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa')}
+                    {activePeriod ? activePeriod.plan_name : (membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa'))}
                   </strong>
                 </div>
-                <Badge tone={membershipIsCurrent ? 'success' : 'neutral'}>
-                  {membershipIsCurrent ? 'Vigente' : 'Inactiva'}
+                <Badge tone={activePeriod ? (activePeriod.access_status === 'eligible' ? 'success' : activePeriod.access_status === 'branch_restricted' ? 'warning' : 'error') : (membershipIsCurrent ? 'success' : 'neutral')}>
+                  {activePeriod ? (activePeriod.access_status === 'eligible' ? 'Elegible' : activePeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : activePeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : activePeriod.access_status) : (membershipIsCurrent ? 'Vigente' : 'Inactiva')}
                 </Badge>
               </div>
-              {membershipIsCurrent && member.membership && (
+              {(activePeriod || (membershipIsCurrent && member.membership)) && (
                 <div className="member-plan-hero-meta">
                   <span className="member-plan-hero-date">
-                    📅 Vigencia: <strong>{member.membership.startsOn}</strong> al <strong>{member.membership.endsOn}</strong>
+                    📅 Vigencia: <strong>{activePeriod ? `${activePeriod.starts_on} al ${activePeriod.ends_on}` : `${member.membership!.startsOn} al ${member.membership!.endsOn}`}</strong>
                   </span>
-                  <span className="member-plan-hero-streak">
-                    🔥 Racha: <strong>{streak} {streak === 1 ? 'mes' : 'meses'}</strong>
-                  </span>
+                  {activePeriod ? (
+                    activePeriod.branch_id === null ? (
+                      <Badge tone="neutral">Multisucursal</Badge>
+                    ) : (
+                      <span className="muted">Sucursal específica</span>
+                    )
+                  ) : (
+                    <span className="member-plan-hero-streak">
+                      🔥 Racha: <strong>{streak} {streak === 1 ? 'mes' : 'meses'}</strong>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -301,6 +314,30 @@ export function MemberDetailSections({
                 No hay una membresía actual ni pagos atribuidos al socio.
               </EmptyState>
             )}
+            {reloadState?.class_samples?.length ? (
+              <div className="member-class-samples" style={{ marginTop: '1rem' }}>
+                <h3 className="sr-only">Clases muestra</h3>
+                <ul className="clean-list flow-gap-sm">
+                  {reloadState.class_samples.map(sample => (
+                    <li key={sample.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>{sample.plan_name}</strong>
+                        <div>
+                          {sample.is_consumed ? (
+                            <span className="muted">Consumida</span>
+                          ) : (
+                            <span className="muted">Disponible para check-in</span>
+                          )}
+                        </div>
+                      </div>
+                      <Badge tone={sample.is_consumed ? 'neutral' : 'success'}>
+                        {sample.is_consumed ? 'Consumida' : 'Disponible'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </Panel>
         </div>
         <div className="member-detail-rentals"><Panel><h2>Rentas actuales</h2><div className="member-rental-grid">
@@ -313,6 +350,26 @@ export function MemberDetailSections({
           <Panel>
             <h2>Asistencia previa</h2>
             <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />
+            {reloadState?.recent_visits?.length ? (
+              <div className="member-recent-visits" style={{ marginTop: '1rem' }}>
+                <h3 className="sr-only">Visitas recientes</h3>
+                <ul className="clean-list flow-gap-sm">
+                  {reloadState.recent_visits.map(visit => (
+                    <li key={visit.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>
+                        <time dateTime={visit.occurred_at}>
+                          {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(visit.occurred_at))}
+                        </time>
+                        {' · '}{visit.access_reason}
+                      </span>
+                      {visit.access_warnings.map((w, i) => (
+                        <Badge key={i} tone="warning">{w}</Badge>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </Panel>
         </div>
         <div className="member-detail-notes"><MemberNotes member={member} now={now} /></div>
@@ -475,6 +532,7 @@ export function MemberCounterView({
   supplementSales = [],
   sales = [],
   role = 'RECEPTION',
+  reloadState,
   onSwitchToRecord,
 }: {
   member: Member;
@@ -487,7 +545,8 @@ export function MemberCounterView({
   payments?: MembershipPayment[];
   supplementSales?: SupplementSale[];
   sales?: Sale[];
-  role?: Role;
+  role?: Role | 'ADMIN';
+  reloadState?: MemberReloadResponse;
   onSwitchToRecord?: () => void;
 }) {
   const { state, update } = useDemo();
@@ -515,6 +574,12 @@ export function MemberCounterView({
   const hasPendingBalance = pendingPayments.length > 0 || pendingRentals.length > 0;
   const isExpired = statusInfo.status === 'expired' || statusInfo.status === 'inactive';
   const isExpiryToday = statusInfo.provisional || member.demoScenario === 'expiry-today';
+
+  const activePeriod = reloadState?.active_periods?.[0];
+  const isAdmin = role === 'OWNER' || role === 'ADMIN';
+  const effectiveHasPendingBalance = reloadState ? reloadState.financial.has_pending_balance : hasPendingBalance;
+
+  const reloadLastVisit = reloadState?.recent_visits?.[0];
 
   const latestPayment = useMemo(() => {
     if (!payments.length) return null;
@@ -579,7 +644,7 @@ export function MemberCounterView({
 
   return (
     <section className="member-counter-view" aria-label="Vista operativa de mostrador">
-      <div className="member-counter-grid">
+            <div className="member-counter-grid">
         {/* Card 1: Membresía & Cobranza */}
         <div className="counter-card counter-card-membership">
           <div className="counter-card-header">
@@ -592,17 +657,19 @@ export function MemberCounterView({
               </span>
               <h2>Membresía</h2>
             </div>
-            <Badge tone={statusInfo.tone}>{statusInfo.badgeLabel}</Badge>
+            <Badge tone={activePeriod ? (activePeriod.access_status === 'eligible' ? 'success' : activePeriod.access_status === 'branch_restricted' ? 'warning' : 'error') : statusInfo.tone}>
+              {activePeriod ? (activePeriod.access_status === 'eligible' ? 'Elegible' : activePeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : activePeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : activePeriod.access_status) : statusInfo.badgeLabel}
+            </Badge>
           </div>
 
           <div className="counter-card-content">
             <div className="counter-plan-display">
               <strong className="counter-plan-title">
-                {membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa')}
+                {activePeriod ? activePeriod.plan_name : (membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa'))}
               </strong>
-              {member.membership && (
+              {(activePeriod || member.membership) && (
                 <span className="counter-plan-dates muted">
-                  📅 Vigencia: {member.membership.startsOn} al {member.membership.endsOn}
+                  📅 Vigencia: {activePeriod ? `${activePeriod.starts_on} al ${activePeriod.ends_on}` : `${member.membership!.startsOn} al ${member.membership!.endsOn}`}
                 </span>
               )}
             </div>
@@ -621,17 +688,22 @@ export function MemberCounterView({
             )}
 
             <div className="counter-billing-section">
-              {isExpired ? (
+              {isExpired && !activePeriod ? (
                 <div className="counter-billing-alert is-overdue" role="alert">
                   ⚠️ Membresía vencida — Requiere renovación
                 </div>
-              ) : isExpiryToday ? (
+              ) : isExpiryToday && !activePeriod ? (
                 <div className="counter-billing-alert is-warning" role="alert">
                   ⏳ Vence hoy — Ofrecer renovación
                 </div>
-              ) : hasPendingBalance ? (
-                <div className="counter-billing-alert is-warning" role="alert">
-                  ⚠️ Pago pendiente registrado
+              ) : effectiveHasPendingBalance ? (
+                <div className="counter-billing-alert is-warning" role="alert" data-testid="balance-warning-alert">
+                  ⚠️ Saldo pendiente registrado
+                  {isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
+                    <span className="counter-debt-amount" data-testid="admin-debt-amount">
+                      {' · '}Adeudo: {formatMoney(reloadState.financial.total_pending_balance_minor)} MXN
+                    </span>
+                  ) : null}
                 </div>
               ) : (
                 <div className="counter-billing-status is-settled">
@@ -681,7 +753,11 @@ export function MemberCounterView({
               <div className="counter-metric-row">
                 <span className="counter-metric-label muted">Última visita:</span>
                 <span className="counter-metric-val">
-                  {lastVisit
+                  {reloadLastVisit
+                    ? (reloadLastVisit.occurred_at.slice(0, 10) === today
+                        ? `Hoy, ${new Intl.DateTimeFormat('es-MX', { timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadLastVisit.occurred_at))}`
+                        : new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadLastVisit.occurred_at)))
+                    : lastVisit
                     ? (lastVisit.observedCheckIn.slice(0, 10) === today
                         ? `Hoy, ${new Intl.DateTimeFormat('es-MX', { timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(lastVisit.observedCheckIn))}`
                         : new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(lastVisit.observedCheckIn)))
