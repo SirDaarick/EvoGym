@@ -17,7 +17,7 @@ Capture only intended product source/tests/migrations/contract docs and named ta
 - [x] T1 Preserve selected package snapshots and reconcile A/B/C into this integration checkout, recording source SHAs, selected paths, conflicts and preservation checks.
 - [x] T2 Reconcile signed-admin/staff authentication contracts and C migration lineage with meaningful regression tests; classify and fix the twelve current C failures against approved contracts, not by weakening assertions.
 - [x] T3 Wire existing B/C frontend views to actual A session providers and authenticated routes without demo leakage or design changes; restore existing admin itemized debt visibility where supported.
-- [ ] T4 Correct merge/closure documentation, safe rollback and executable verification commands to describe observed integrated behavior.
+- [x] T4 Correct merge/closure documentation, safe rollback and executable verification commands to describe observed integrated behavior.
 - [ ] T5 Run applicable complete API/frontend/type/build/migration checks and independent review; preserve failed/unavailable proof and perform a parent spot check and browser workflow validation where runtime is available.
 - [ ] T6 Complete local integration merge only after verified acceptance; preserve dirty primary files and report branch/commit boundaries and remaining limitations.
 
@@ -30,7 +30,7 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - Source refs currently detached; B/C committed history plus dirty deltas must both be included.
 - Independent read-only review baseline: API A79 pass, B12 pass, C66 pass/12 fail; frontend A18/B45/C20 pass; actual TS app/node projects pass. These are NOT integrated acceptance evidence.
 - T1: selected A/B/C source snapshots are integrated with source HEAD ancestry and dirty deltas; mirror synchronization is being recorded.
-- Next: T4 correct merge/closure documentation and safe verification instructions; T5 run full integrated checks and record any environmental limitations.
+- T4: documentation rewritten to use actual source/snapshot SHAs and integration commits; one-head migration lineage and semantic conflict resolutions recorded; bad `front-a/front-b/front-c` merge refs and `git reset --hard` rollback advice removed; safe, explicit API test invocation documented. Applied-change docs now distinguish historical package results from integrated acceptance and correct live auth/session, read-only reload, and unavailable Mostrador behavior.
 
 
 ### T1 snapshot/integration evidence (2026-10-26)
@@ -41,7 +41,7 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - Snapshot path scope excluded `frontend/UsersedaniAppDataLocalTempevogym-pfi-s01`, `work/`, and `odd/tasks/archive/`; source worktrees retained their original HEADs and unstaged/untracked state; alternate Git indexes used for snapshot commits.
 - Semantic conflict resolutions: `api/app/api/members.py` and `api/app/api/staff_roster.py` retain A's configured signed-admin-session verification and deliberately omit B/C unsigned-admin fallback; `frontend/src/api/receptionApi.ts` keeps A typed/sanitized HTTP/network errors and C's exported shared request helper.
 - No Git conflict paths remain. `git diff --check` reports imported Markdown hard-break trailing spaces in P2/P6 documents and one blank-at-EOF in `api/tests/test_member_reads.py`; content preserved for T4 cleanup. No functional suites were run in T1.
-- Explicit T2 follow-up: both `api/migrations/versions/0031_admin_session_policy.py` and `api/migrations/versions/0031_staff_occurrence_attendance.py` are present with colliding Alembic revision IDs; migration graph reconciliation and tests remain pending. Snapshot provenance is not proof of runtime correctness or product readiness.
+- Explicit T2 follow-up (resolved): A and C had separate migration identities; integration retains A revision `0031_admin_session_policy` and re-chains C as `0038_staff_occurrence_attendance` after `0037_paired_profile_access`. The graph now has one head. Snapshot provenance is not proof of runtime correctness or product readiness.
 
 ### T2 authentication and migration reconciliation (2026-10-26)
 - Route: delegated direct, one writer; edits stayed within the T2 allowlist. RDD remained off.
@@ -63,3 +63,12 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - Verification after correction: focused Vitest suites passed 7 files / 92 tests (ApiProductApp, ProductRoutes, Members, MemberDetail, ProductAccessProvider, AdminSessionProvider, StaffProfileSelection). App and node TypeScript projects passed using the explicitly installed primary frontend toolchain; `git diff --check` passed. The route tests mock only chart/analytics leaf components because those do not participate in the authenticated member flow. No build/full frontend suite run; reserved for T5.
 - Dependency resolution: integration root `node_modules` is an ignored junction to the verified primary frontend dependency directory; the source A frontend directory itself was not replaced. Vitest `cacheDir` is external under Temp. Existing accidental nested `frontend/frontend/node_modules` junction remains untouched; no install was run.
 - Relevant changed paths: `frontend/src/app/ApiProductApp.tsx`; `frontend/src/app/ApiMembers.tsx`; `frontend/src/app/ApiStaffAttendance.tsx`; `frontend/src/app/ApiProductApp.test.tsx`; `frontend/src/features/auth/ProductAccessProvider.tsx`; `frontend/src/features/members/Members.tsx`; `frontend/src/features/members/MemberDetail.tsx`; `frontend/src/features/reception/StaffAttendanceView.tsx`; `frontend/src/api/receptionApi.ts`.
+
+### T4 documentation and contract-smoke correction (2026-10-26)
+- Route: delegated direct; scope limited to the listed smoke test, integration/package docs, and this tracker. RDD remained off; no native review was started.
+- TDD: before edits, `tests/test_contract_smoke.py` was 3 passed / 1 failed because the expected schema omitted `staff_attendance_corrections`. After adding that migration-created table, the test exposed a second stale assertion expecting head `0037_paired_profile_access`; the integrated graph correctly has one head at `0038_staff_occurrence_attendance`. Updated the exact head assertion rather than weakening the schema check.
+- Verification: same smoke file passed 4 tests with 2 existing warnings. `tests/test_migrations.py` had already passed 37 tests during T2; PostgreSQL migration coverage remains 4 skipped due to no disposable PostgreSQL target. Full API had previously collected 526: 507 passed, 18 skipped, 1 failed at the now-corrected smoke assertion; full suite was not rerun.
+- Docs now identify the actual `codex/abc-integration-alignment` branch, source/snapshot SHAs and integration commits, semantic conflict resolutions, corrected A/B/C migration lineage, signed-session/provider behavior, read-only reload, unavailable Mostrador action, and safe non-destructive rollback. No owner acceptance is claimed.
+- `git diff --check` was clean for the T4 test/docs after removing imported hard-break trailing whitespace; original T1 notes about old whitespace and the test EOF are historical and should not be mistaken for current worktree status.
+- T5 remains pending: full integrated frontend suite, build, browser workflows, and any remaining full API verification; PostgreSQL-specific checks remain unavailable. T6 primary merge remains unperformed and depends on T5 plus owner acceptance.
+- Relevant paths: `api/tests/test_contract_smoke.py`; `docs/work-packages/first-wave-merge-strategy.md`; `docs/work-packages/P1-applied-changes.md`; `docs/work-packages/P2-applied-changes.md`; `docs/work-packages/P6-applied-changes.md`.

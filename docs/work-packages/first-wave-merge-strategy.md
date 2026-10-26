@@ -1,159 +1,55 @@
-# First-Wave Merge Strategy: Packages P1, P2, and P6
+# First-wave integration: current branch record
 
-## 1. Executive Summary & Objective
+The A/B/C packages are integrated locally on `codex/abc-integration-alignment`; this is **not** a completed merge into `codex/backend-foundation` or another primary branch. Keep the original A/B/C worktrees and primary worktree unchanged. The user approved a local size exception for this integration on 2026-10-26; it does not authorize push, PR, production access, or destructive cleanup.
 
-This document defines the exact, dependency-aware integration sequence to merge the three completed first-wave worktrees into trunk (`codex/backend-foundation`):
-- **Worktree A (`front-a-contracts`)**: Package P1 — Identity, Sessions, Devices & Transport
-- **Worktree B (`front-b-contracts`)**: Package P2 — Member Read Contracts & FE05 Reload
-- **Worktree C (`front-c-contracts`)**: Package P6 — Staff Occurrence Attendance & Roster Residuals
+## Provenance and branch boundaries
 
-All three packages have been aligned and verified locally under **Ponytail** (leanest diff, zero visual redesign) and **ODD** principles. This strategy ensures zero migration conflicts, no signature mismatches, and complete contract compatibility.
-
----
-
-## 2. Integration Dependency Architecture
-
-```
-                    [ Trunk: codex/backend-foundation ]
-                     (Alembic baseline: 0030_staff_schedules)
-                                    │
-                                    ▼
-       ┌────────────────────────────────────────────────────────┐
-       │ Step 1: Merge Worktree A (Package P1)                  │
-       │ - Migrations: 0031_admin_session_policy ->             │
-       │               0037_paired_profile_access               │
-       │ - Auth providers, in-memory tokens, session lifecycle  │
-       └────────────────────────────┬───────────────────────────┘
-                                    │
-                                    ▼
-       ┌────────────────────────────────────────────────────────┐
-       │ Step 2: Merge Worktree B (Package P2)                  │
-       │ - Zero new migrations                                  │
-       │ - Member read contracts & FE05 reload endpoint         │
-       │ - Consumes P1 in-memory tokens & adaptive auth         │
-       └────────────────────────────┬───────────────────────────┘
-                                    │
-                                    ▼
-       ┌────────────────────────────────────────────────────────┐
-       │ Step 3: Re-chain & Merge Worktree C (Package P6)       │
-       │ - Re-chain migration: 0031 -> 0038                     │
-       │   (down_revision = '0037_paired_profile_access')       │
-       │ - Staff attendance endpoints & roster alignment        │
-       └────────────────────────────┬───────────────────────────┘
-                                    │
-                                    ▼
-       ┌────────────────────────────────────────────────────────┐
-       │ Step 4: Consolidated Trunk Verification Gate          │
-       │ - alembic heads (1 single head: 0038)                  │
-       │ - Full backend pytest suite                            │
-       │ - Full frontend vitest suite & tsc --noEmit            │
-       └────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Pre-Resolved Shared Surface Analysis
-
-During alignment, cross-package collisions were pre-emptively reconciled:
-
-| Shared Surface | Packages Involved | Conflict Risk | Pre-Resolved Status |
+| Source | Original HEAD | Snapshot ref/commit | Integration result |
 |---|---|---|---|
-| `api/migrations/versions/` | P1 vs P6 | Collision on revision ID `0031` | **Resolved by spec**: P6 renumbers `0031_staff_occurrence_attendance.py` to `0038` chaining onto P1's `0037_paired_profile_access`. |
-| `api/app/auth/admin.py` vs `staff_roster.py` | P1 vs C | `validate_admin_session` signature difference (`signing_secret`) | **Resolved in C**: `_principal` in `staff_roster.py` inspects `admin_token_signing_secret` adaptively. |
-| `api/app/api/members.py` | P1 vs B | Route authority vs reload endpoint FE05 | **Resolved in B**: `get_member_actor_principal` supports signing secret adaptively; FE05 cleanly isolated. |
-| In-Memory Session Tokens | P1 vs B / C | Frontend views falling back to Demo mode if tokens only in memory | **Resolved in B & C**: `resolveOperationalToken()` and `receptionApi.ts` read `__EVOGYM_*__` runtime providers with zero visual JSX modifications. |
+| A — identity/access | `82fc09b7b88be783ec978da2407a32bad48045c3` | `refs/abc-snapshots/a` / `8e9cf7393d149d8a15067e5dbb85b3ea6d107cb7` | selected source snapshot |
+| B — member read/reload | `f279ec87c2e4c62cb65e7066aff1c47a11454498` | `refs/abc-snapshots/b` / `de26cd081ca09d8fd54b7d4badac514cd72301b1` | HEAD ancestry plus captured dirty delta |
+| C — staff attendance | `67046388d7c46a4c300a305e1a6983585468fed0` | `refs/abc-snapshots/c` / `12702cfcb7229fe72871c9b281a817372ea69c4a` | HEAD ancestry plus captured dirty delta |
 
----
+The integration commits are `8e9cf73` (A snapshot), `5761d02` (B integration), and `c033032` (C integration); T2 is `a637518`, T3's initial route work is `941f846`, and its correction is `fa32256`. The current task checkout was observed at `ae7bf33decc421c3d3b2799127ea5b084b06202e`. The initial A/B/C migration files had separate revision identities; the integration keeps A's `0031` through `0037` lineage and assigns C's occurrence migration `0038_staff_occurrence_attendance` after `0037_paired_profile_access`. `alembic heads` was observed as one head, `0038_staff_occurrence_attendance`; this was a lineage conflict, not two migrations with an identical revision ID.
 
-## 4. Step-by-Step Execution Protocol
+The snapshot is 185 selected paths and 24,559 authored changed lines relative to `82fc09b` (23,506 additions and 1,053 deletions). Private spreadsheets/notebooks, generated output, temporary databases, build artifacts, secrets, and environment files were excluded. Snapshot provenance is not product acceptance. No primary-branch merge has been performed.
 
-### Step 1: Merge Worktree A (Package P1) into Trunk
+## Integration decisions and actual behavior
 
-1. **Staging & Commit on Worktree A**:
-   - Ensure all work in `front-a-contracts` is committed using standard conventional commits.
-2. **Fast-forward / Merge into Trunk**:
-   ```powershell
-   git checkout codex/backend-foundation
-   git merge front-a-contracts --no-ff -m "feat(auth): integrate package p1 identity, session lifecycle and devices"
-   ```
-3. **Verification**:
-   ```powershell
-   cd api
-   ..\.venv\Scripts\python.exe -m pytest tests/test_admin_auth.py tests/test_devices.py tests/test_migrations.py
-   cd ..\frontend
-   npm test -- --run src/features/auth/AdminSessionProvider.test.tsx
-   npx tsc --noEmit
-   ```
+- A's configured signed Admin-session validation remains authoritative. The B/C unsigned-admin fallback was removed; tests use the approved signed-session flow. Staff sessions retain their separately tested behavior when Admin signing is not configured.
+- B's API-backed member list/detail/reload use the existing member screens and session providers. Existing read/reload operations are read-only. The existing `Mostrador` action is unavailable in API mode because this backend integration has no operational member-counter action contract; it is not implemented by a fixture fallback.
+- C's roster/attendance views use the existing authenticated API client and real endpoints. Empty/error states do not fall back to demo fixtures. Unsupported actions are not represented as implemented.
+- The initial T3 implementation was rejected in parent spot-check because it replaced existing member screens; `fa32256` restored the existing list/detail layouts and their search, sorting, tabs, and Admin-only debt display. Do not replace those screens again.
+- The integration has semantic conflict resolutions; do not describe it as conflict-free. No unresolved Git conflict paths were reported after T1.
 
-### Step 2: Merge Worktree B (Package P2) into Trunk
+## Verification record
 
-1. **Merge Worktree B into Trunk**:
-   ```powershell
-   git merge front-b-contracts --no-ff -m "feat(members): integrate package p2 member-read contracts and reload endpoint"
-   ```
-2. **Verification**:
-   ```powershell
-   cd api
-   ..\.venv\Scripts\python.exe -m pytest tests/test_member_reads.py
-   cd ..\frontend
-   npm test -- --run src/features/members/MemberDetail.test.tsx src/features/members/Members.test.tsx
-   npx tsc --noEmit
-   ```
+| Check | Observed result | Status |
+|---|---|---|
+| Integrated migration graph | one head: `0038_staff_occurrence_attendance` | passed |
+| T2 focused API suite | 184 passed | passed |
+| `api/tests/test_migrations.py` | 37 passed | passed |
+| `api/tests/test_staff_schedules.py` | 30 passed | passed |
+| PostgreSQL migration checks | 4 skipped; no disposable PostgreSQL target configured | unverified |
+| T3 focused Vitest suites | 7 files / 92 tests passed | passed |
+| App and node TypeScript projects | both passed using the installed primary frontend toolchain | passed |
+| Full integrated API suite before this smoke correction | 526 collected; 507 passed, 18 skipped, 1 failed at `api/tests/test_contract_smoke.py:100` because the schema inventory omitted migration-created `staff_attendance_corrections`; the same smoke test also expected the old `0037` head | underlying omissions corrected; focused smoke now 4 passed |
+| Full frontend suite, frontend build, browser workflows | not run | pending |
 
-### Step 3: Re-Chain & Merge Worktree C (Package P6) into Trunk
+For the focused smoke test, use the installed API interpreter explicitly and keep the integration tree as the source/import root. From the integration `api` directory in PowerShell:
 
-1. **Re-chain Alembic Migration in Worktree C before merge**:
-   - Rename:
-     `api/migrations/versions/0031_staff_occurrence_attendance.py` $\rightarrow$ `api/migrations/versions/0038_staff_occurrence_attendance.py`
-   - Inside `0038_staff_occurrence_attendance.py`, update:
-     ```python
-     revision: str = '0038_staff_occurrence_attendance'
-     down_revision: Union[str, None] = '0037_paired_profile_access'
-     ```
-   - Commit the renumbering in Worktree C.
-2. **Merge Worktree C into Trunk**:
-   ```powershell
-   git merge front-c-contracts --no-ff -m "feat(staff): integrate package p6 staff attendance and occurrence scheduling"
-   ```
-3. **Verification**:
-   ```powershell
-   cd api
-   alembic heads # Verify single head 0038_staff_occurrence_attendance
-   ..\.venv\Scripts\python.exe -m pytest tests/test_staff_attendance.py tests/test_migrations.py
-   cd ..\frontend
-   npm test -- --run src/features/reception/StaffAttendanceView.test.tsx src/api/staffAttendanceApi.test.ts
-   npx tsc --noEmit
-   ```
+```powershell
+$env:PYTHONPATH = (Resolve-Path .).Path
+$env:PYTHONDONTWRITEBYTECODE = '1'
+& 'C:\Users\edani\OneDrive\Documents\Proyectos\Daidev\EvoGym\api\.venv\Scripts\python.exe' -m pytest -c pyproject.toml -p no:cacheprovider tests/test_contract_smoke.py
+```
 
----
+Use the same interpreter and environment for `tests/test_migrations.py`. The integration checkout does not contain its own `.venv`; do not use `..\.venv`, a bare `pytest`, root-level TypeScript commands, or install dependencies as a substitute. Full frontend/type/build/browser verification remains T5 and must use the already-installed frontend toolchain without editing frontend files in this task.
 
-## 5. Consolidated Post-Merge Verification Gate
+## Rollback and preservation
 
-Run from repository root after completing Steps 1–3:
+Do not use `git reset --hard` or a blanket reset: that can destroy unrelated or dirty worktree state. Before any future rollback, inspect `git status` and use a new branch/ref or a narrowly scoped revert of the exact integration commit after confirming its parent and affected paths. Keep the original A/B/C and primary worktrees untouched. No merge to the primary branch is authorized or performed here.
 
-1. **Alembic Migration Integrity**:
-   ```powershell
-   cd api
-   alembic check
-   alembic heads # Exactly one head: 0038_staff_occurrence_attendance
-   ```
-2. **Full Backend Test Suite**:
-   ```powershell
-   cd api
-   ..\.venv\Scripts\pytest.exe -q
-   ```
-3. **Full Frontend Test Suite & Typecheck**:
-   ```powershell
-   cd frontend
-   npm test -- --run
-   npx tsc --noEmit
-   ```
+## Next step
 
----
-
-## 6. Rollback & Recovery Boundary
-
-If any integration step fails:
-- **Phase 1 failure**: Revert merge commit via `git reset --hard ORIG_HEAD`. Worktree A remains isolated.
-- **Phase 2 failure**: Revert to post-P1 commit. Worktree B remains isolated.
-- **Phase 3 failure**: Revert to post-P2 commit. Worktree C remains isolated and can adjust migration sequencing without affecting P1 or P2.
+T4 documentation and the focused smoke proof are complete. Owner acceptance remains pending. `tests/test_migrations.py` previously passed 37 tests during T2; PostgreSQL-specific checks remain skipped without a disposable target. T5 still requires complete integrated verification; T6 remains blocked on T5 and owner acceptance. Do not mark the integration verified or merge it to the primary branch until those checks and owner acceptance are complete.
