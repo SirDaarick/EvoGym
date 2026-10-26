@@ -15,6 +15,7 @@ import {
   type StaffAttendanceItem,
 } from '../../api/staffAttendanceApi';
 import { readOperationalToken } from '../../api/receptionApi';
+import { createEmptyDemoState } from '../../demo/adapter';
 import { Button, EmptyState, PageHeader } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { getSelectedStaff, useStaff, type StaffProfile } from '../staff/staffStore';
@@ -52,14 +53,20 @@ interface ActiveStaffRecord {
   clock_validation_status?: string;
 }
 
-export function StaffAttendanceView() {
-  const { state, transact } = useDemo();
-  const staffList = useStaff();
-  const currentActiveShift = activeShift(state);
+type LiveRequest = (path: string, init?: RequestInit) => Promise<Response>;
+
+export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { liveRequest?: LiveRequest; liveStaff?: StaffProfile[]; branchId?: string } = {}) {
+  let demo: ReturnType<typeof useDemo> | null = null;
+  try { demo = useDemo(); } catch { /* API routes do not mount demo state. */ }
+  const state = demo?.state ?? createEmptyDemoState();
+  const transact = demo?.transact;
+  const storeStaff = useStaff();
+  const staffList = liveStaff ?? storeStaff;
+  const currentActiveShift = demo ? activeShift(state) : undefined;
   const loggedStaff = getSelectedStaff();
 
-  const operationalToken = readOperationalToken();
-  const isLive = Boolean(operationalToken);
+  const operationalToken = liveRequest ? null : readOperationalToken();
+  const isLive = Boolean(liveRequest || operationalToken);
 
   const [liveRecords, setLiveRecords] = useState<StaffAttendanceItem[]>([]);
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -86,11 +93,18 @@ export function StaffAttendanceView() {
   } | null>(null);
 
   const fetchLiveAttendance = useCallback(async () => {
-    if (!operationalToken) return;
+    if (!operationalToken && !liveRequest) return;
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const result = await listStaffAttendance(today, operationalToken);
-      setLiveRecords(result.items);
+      let records: StaffAttendanceItem[];
+      if (liveRequest) {
+        const response = await liveRequest(`/api/v1/staff-attendance?branch_id=${encodeURIComponent(branchId ?? '')}&business_date=${today}`);
+        if (!response.ok) throw new Error('No se pudo sincronizar la asistencia desde la API.');
+        records = (await response.json() as { items: StaffAttendanceItem[] }).items;
+      } else {
+        records = (await listStaffAttendance(today, operationalToken!)).items;
+      }
+      setLiveRecords(records);
       setLiveError(null);
     } catch (err) {
       if (err instanceof OperationalApiHttpError || err instanceof OperationalApiNetworkError) {
@@ -99,7 +113,7 @@ export function StaffAttendanceView() {
         setLiveError('Error al sincronizar asistencia.');
       }
     }
-  }, [operationalToken]);
+  }, [branchId, liveRequest, operationalToken]);
 
   useEffect(() => {
     if (isLive) {
@@ -231,13 +245,19 @@ export function StaffAttendanceView() {
         const deviceCapturedAt = new Date().toISOString();
         const today = deviceCapturedAt.slice(0, 10);
 
-        const record = await recordStaffAttendance(
+        const payload = {
+          occurrence_date: today,
+          device_captured_at: deviceCapturedAt,
+          idempotency_key: idempotencyKey,
+        };
+        const record = liveRequest
+          ? await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/profiles/${encodeURIComponent(staff.id)}`, { method: 'POST', body: JSON.stringify(payload) }).then(async response => {
+              if (!response.ok) throw new Error('No se pudo registrar la entrada desde la API.');
+              return response.json() as Promise<StaffAttendanceItem>;
+            })
+          : await recordStaffAttendance(
           staff.id,
-          {
-            occurrence_date: today,
-            device_captured_at: deviceCapturedAt,
-            idempotency_key: idempotencyKey,
-          },
+          payload,
           operationalToken ?? undefined
         );
 
@@ -271,6 +291,7 @@ export function StaffAttendanceView() {
 
     const note = notesByStaffId[staff.id]?.trim() || '';
 
+    if (!transact) return;
     const transactionResult = transact(currentState =>
       recordStaffClockIn(currentState, {
         staffId: staff.id,
@@ -315,7 +336,12 @@ export function StaffAttendanceView() {
       }
 
       try {
-        const checkout = await recordStaffCheckout(activeRecordId, operationalToken ?? undefined);
+        const checkout = liveRequest
+          ? await liveRequest(`/api/v1/staff-attendance/${encodeURIComponent(activeRecordId)}/checkout`, { method: 'POST', body: '{}' }).then(async response => {
+              if (!response.ok) throw new Error('No se pudo registrar la salida desde la API.');
+              return response.json() as Promise<{ occurred_at: string; recorded_by: string }>;
+            })
+          : await recordStaffCheckout(activeRecordId, operationalToken ?? undefined);
         setLiveRecords(prev =>
           prev.map(r =>
             r.id === activeRecordId
@@ -353,6 +379,7 @@ export function StaffAttendanceView() {
       return;
     }
 
+    if (!transact) return;
     const transactionResult = transact(currentState =>
       recordStaffClockOut(currentState, {
         staffId: staff.id,

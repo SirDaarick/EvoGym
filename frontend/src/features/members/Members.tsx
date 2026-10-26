@@ -269,16 +269,6 @@ export function NewMember({ role }: { role: Role }) {
 }
 
 function resolveOperationalToken(): string | null {
-  if (typeof window !== 'undefined') {
-    const customWindow = window as unknown as {
-      __EVOGYM_OPERATIONAL_SESSION__?: string;
-      __EVOGYM_ADMIN_SESSION__?: string;
-      __EVOGYM_TOKEN__?: string;
-    };
-    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
-    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
-    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
-  }
   return readOperationalToken();
 }
 

@@ -5,6 +5,7 @@ import {
   pairWithCode, type ProfileEntryOutcome, type ProfileEntrySession, type ProfileIdentityChoice,
 } from '../../api/profileAccessApi';
 import { AdminSessionProvider, useAdminSession } from './AdminSessionProvider';
+import { getReceptionConfig } from '../../api/receptionApi';
 
 export type OperatingPrincipal =
   | { kind: 'admin'; identity: ProfileIdentityChoice }
@@ -17,6 +18,7 @@ interface ProductAccessValue {
   principal: OperatingPrincipal | null;
   canUnlinkPairedDevice: boolean;
   error: string;
+  request(path: string, init?: RequestInit): Promise<Response>;
   reload(): Promise<void>;
   pair(code: string): Promise<void>;
   enter(identity: ProfileIdentityChoice, branch: ProfileIdentityChoice['branch_profiles'][number], pin: string): Promise<ProfileEntryOutcome | undefined>;
@@ -99,6 +101,24 @@ function ProductAccessState({ children, apiOrigin, fetchImpl }: { children: Reac
       if (mounted.current && generation.current === current) setLoading(false);
     }
   }, [admin.request, admin.status, apiOrigin, fetchImpl]);
+
+  const request = useCallback(async (path: string, init?: RequestInit) => {
+    if (!principal) throw new Error('An operating profile is required for this request.');
+    if (principal.kind === 'admin') return admin.request(path, init);
+    const { apiOrigin: origin } = getReceptionConfig();
+    try {
+      return await (fetchImpl ?? globalThis.fetch.bind(globalThis))(`${origin}${path}`, {
+        ...init,
+        headers: {
+          ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+          Authorization: `Bearer ${principal.session.accessToken}`,
+          ...init?.headers,
+        },
+      });
+    } catch {
+      throw new Error('The API request could not be completed. Check your connection and try again.');
+    }
+  }, [admin.request, fetchImpl, principal]);
 
   useEffect(() => {
     const previous = previousAdminStatus.current;
@@ -295,8 +315,8 @@ function ProductAccessState({ children, apiOrigin, fetchImpl }: { children: Reac
     return flight;
   }, [admin, apiOrigin, cleanupPendingSessions, fetchImpl]);
 
-  const value = useMemo(() => ({ loading, identities, currentIdentityId, principal, canUnlinkPairedDevice, error, reload, pair, enter, changeInitialPin, enterAdmin, leaveProfile, unlinkPairedDevice, exit }),
-    [loading, identities, currentIdentityId, principal, canUnlinkPairedDevice, error, reload, pair, enter, changeInitialPin, enterAdmin, leaveProfile, unlinkPairedDevice, exit]);
+  const value = useMemo(() => ({ loading, identities, currentIdentityId, principal, canUnlinkPairedDevice, error, request, reload, pair, enter, changeInitialPin, enterAdmin, leaveProfile, unlinkPairedDevice, exit }),
+    [loading, identities, currentIdentityId, principal, canUnlinkPairedDevice, error, request, reload, pair, enter, changeInitialPin, enterAdmin, leaveProfile, unlinkPairedDevice, exit]);
   return <ProductAccessContext.Provider value={value}>{children}</ProductAccessContext.Provider>;
 }
 

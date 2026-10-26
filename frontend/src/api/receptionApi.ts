@@ -31,9 +31,6 @@ export class OperationalApiHttpError extends Error {
     super(message);
     this.name = 'OperationalApiHttpError';
   }
-    super(message);
-    this.name = 'OperationalApiHttpError';
-  }
 }
 
 export class OperationalApiNetworkError extends Error {
@@ -60,14 +57,6 @@ export function getReceptionConfig(env: Partial<ImportMetaEnv> = import.meta.env
 
 export function readOperationalToken(): string | null {
   if (typeof window !== 'undefined') {
-    const customWindow = window as unknown as {
-      __EVOGYM_OPERATIONAL_SESSION__?: string;
-      __EVOGYM_ADMIN_SESSION__?: string;
-      __EVOGYM_TOKEN__?: string;
-    };
-    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
-    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
-    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
     return window.sessionStorage.getItem(TOKEN_KEY);
   }
   return null;
