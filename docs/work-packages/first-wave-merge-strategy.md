@@ -60,3 +60,5 @@ T3/T5 engineering acceptance is complete, but it is not owner business signoff. 
 
 ## Completed local integration — 2026-10-26
 The primary branch codex/backend-foundation now includes the integration through merge commit 1c6fdd5a5fe443f5124248a0bd4d09d6cb5ddc47 (integration tip d125ead). Product source was verified at 96c558f; subsequent changes are documentation only. The original primary dirty status and A/B/C worktrees were preserved. Final applicable checks: API 508 passed / 18 skipped; frontend 739 passed; app/node TypeScript and production build passed. See odd/tasks/abc-integration-alignment.md for commands, historical timeout observations, browser evidence, warnings and unavailable PostgreSQL/symlink coverage. No remote publication or production database migration occurred.
+
+B content was audited as already incorporated; its source ancestry was explicitly joined in 6b24edd32583063fa6243fc5cb0629c74f05e703 after discovering the original B integration commit was single-parent. This provenance-only merge changed no tree bytes. All A/B/C snapshot refs are now ancestors of the primary branch. See the tracker correction for evidence.

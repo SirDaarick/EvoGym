@@ -29,7 +29,7 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - New integration checkout created safely; primary and A/B/C remain untouched.
 - Source refs currently detached; B/C committed history plus dirty deltas must both be included.
 - Independent read-only review baseline: API A79 pass, B12 pass, C66 pass/12 fail; frontend A18/B45/C20 pass; actual TS app/node projects pass. These are NOT integrated acceptance evidence.
-- T1: selected A/B/C source snapshots are integrated with source HEAD ancestry and dirty deltas; mirror synchronization is being recorded.
+- T1: selected A/B/C content and dirty deltas are integrated; snapshot refs preserve source history, with B ancestry corrected during T6; mirror synchronization is being recorded.
 - T4: documentation rewritten to use actual source/snapshot SHAs and integration commits; one-head migration lineage and semantic conflict resolutions recorded; bad `front-a/front-b/front-c` merge refs and `git reset --hard` rollback advice removed; safe, explicit API test invocation documented. Applied-change docs now distinguish historical package results from integrated acceptance and correct live auth/session, read-only reload, and unavailable Mostrador behavior.
 
 
@@ -104,5 +104,10 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 ### T6 completed local merge (2026-10-26)
 - Local primary branch: codex/backend-foundation. Merge commit: 1c6fdd5a5fe443f5124248a0bd4d09d6cb5ddc47; integrated tip: d125eadfea695463398f75f3ea63529630c64094; verified product candidate: 96c558f7605629cac2e04348e0a41d8bf49c6e02.
 - The merge completed without conflicts. The primary committed tree equals the integration tip; all later commits are documentation only. The original primary dirty status was compared before/after and preserved exactly (11 collapsed status entries). Original A/B/C worktrees remain unchanged with 257/7/4 expanded dirty entries.
-- No remote operations, publishing, production database upgrades, dependency installation, reset or stash were performed. Original A/B/C snapshots and source history are ancestors of the merged branch.
+- No remote operations, publishing, production database upgrades, dependency installation, reset or stash were performed. Original A/B/C snapshots and source history are now ancestors of the merged branch, confirmed after provenance commit 6b24edd32583063fa6243fc5cb0629c74f05e703.
 - Engineering integration is complete with the T5 limitations above. Owner daily-workflow signoff and PostgreSQL validation remain separate; this is not a production-deployment claim. Engram mirror is pending after repeated timeouts; local evidence is complete.
+
+### Final provenance correction
+- A post-merge audit found that B content was semantically imported by 5761d02 but that commit had one parent, despite its merge message. All 16 B changed paths were audited: only the intentional A auth/main wiring differed, and all seven B dirty-delta paths were retained. Source snapshot de26cd0 remained preserved throughout.
+- An ancestry-only merge, 6b24edd32583063fa6243fc5cb0629c74f05e703, records that already-incorporated B snapshot. The committed tree hash and original primary dirty status were compared before/after and were identical; no product source or assertion changed. All three snapshot refs now pass merge-base --is-ancestor against primary HEAD.
+- The earlier T1 ancestry claim was inaccurate for B until this correction; it must not be read as proof that 5761d02 itself was a two-parent merge.
