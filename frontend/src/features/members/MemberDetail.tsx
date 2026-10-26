@@ -125,169 +125,6 @@ function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; 
   );
 }
 
-export function MemberReloadSection({
-  reloadState,
-  role = 'RECEPTION',
-}: {
-  reloadState: MemberReloadResponse;
-  role?: Role | 'ADMIN';
-}) {
-  const isAdmin = role === 'OWNER' || role === 'ADMIN';
-  const showAdminFinances = isAdmin && reloadState.financial.total_pending_balance_minor !== null;
-
-  return (
-    <div className="member-reload-state" data-testid="member-reload-state">
-      <Panel>
-        <div className="member-reload-header">
-          <div className="member-reload-title-wrap">
-            <h2>Estado sincronizado del socio</h2>
-            <span className="muted member-reload-sync-time">
-              Sincronizado: {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadState.server_time))}
-            </span>
-          </div>
-          <Badge tone={reloadState.profile.status === 'active' ? 'success' : 'warning'}>
-            {reloadState.profile.status.toUpperCase()}
-          </Badge>
-        </div>
-
-        <div className="member-reload-financial-section" data-testid="reload-financial-section">
-          {reloadState.financial.has_pending_balance ? (
-            <div className="reload-balance-alert is-warning" role="alert" data-testid="balance-warning-alert">
-              <strong>⚠️ Saldo pendiente registrado</strong>
-              {showAdminFinances ? (
-                <div className="admin-debt-details" data-testid="admin-debt-details">
-                  <p>
-                    Adeudo total:{' '}
-                    <strong>{formatMoney(reloadState.financial.total_pending_balance_minor ?? 0)} MXN</strong>
-                  </p>
-                  {reloadState.financial.debts.length > 0 ? (
-                    <div className="admin-debt-items" data-testid="admin-debts-list">
-                      <h4>Desglose de adeudos por orden</h4>
-                      <ul className="admin-debts-ul">
-                        {reloadState.financial.debts.map(debt => (
-                          <li key={debt.debt_id} className="admin-debt-item">
-                            <span>Orden: <code>{debt.order_id}</code></span>
-                            <span>Inicial: {formatMoney(debt.initial_outstanding_minor)} MXN</span>
-                            <span>Pendiente: <strong>{formatMoney(debt.remaining_balance_minor)} MXN</strong></span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="reception-balance-notice" data-testid="reception-balance-notice">
-                  El socio tiene un adeudo pendiente. Gestión requerida en recepción.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="reload-balance-status is-settled" data-testid="balance-settled">
-              <span>✓ Al corriente en pagos</span>
-            </div>
-          )}
-        </div>
-
-        <div className="member-reload-periods" data-testid="reload-active-periods">
-          <h3>Períodos de membresía vigentes ({reloadState.active_periods.length})</h3>
-          {reloadState.active_periods.length > 0 ? (
-            <ul className="reload-periods-list">
-              {reloadState.active_periods.map(period => (
-                <li key={period.id} className="reload-period-item">
-                  <div className="reload-period-info">
-                    <strong>{period.plan_name}</strong>
-                    <span className="muted">
-                      {period.starts_on} al {period.ends_on}
-                    </span>
-                    {period.branch_id === null ? (
-                      <Badge tone="neutral">Multisucursal</Badge>
-                    ) : (
-                      <span className="muted">Sucursal específica</span>
-                    )}
-                  </div>
-                  <Badge
-                    tone={
-                      period.access_status === 'eligible'
-                        ? 'success'
-                        : period.access_status === 'branch_restricted'
-                          ? 'warning'
-                          : 'error'
-                    }
-                  >
-                    {period.access_status === 'eligible'
-                      ? 'Elegible'
-                      : period.access_status === 'branch_restricted'
-                        ? 'Restringido a otra sucursal'
-                        : period.access_status === 'restricted_unpaid'
-                          ? 'Restringido por adeudo'
-                          : period.access_status}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Sin períodos vigentes.</p>
-          )}
-        </div>
-
-        <div className="member-reload-samples" data-testid="reload-class-samples">
-          <h3>Clases muestra disponibles ({reloadState.class_samples.length})</h3>
-          {reloadState.class_samples.length > 0 ? (
-            <ul className="reload-samples-list">
-              {reloadState.class_samples.map(sample => (
-                <li key={sample.id} className="reload-sample-item">
-                  <div className="reload-sample-info">
-                    <strong>{sample.plan_name}</strong>
-                    {sample.is_consumed ? (
-                      <span className="muted">
-                        Consumida {sample.consumed_at ? `el ${new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(sample.consumed_at))}` : ''}
-                      </span>
-                    ) : (
-                      <span className="sample-available-text">Disponible para check-in</span>
-                    )}
-                  </div>
-                  <Badge tone={sample.is_consumed ? 'neutral' : 'success'}>
-                    {sample.is_consumed ? 'Consumida' : 'Disponible'}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Sin clases muestra registradas.</p>
-          )}
-        </div>
-
-        <div className="member-reload-visits" data-testid="reload-recent-visits">
-          <h3>Visitas recientes en sucursal ({reloadState.recent_visits.length})</h3>
-          {reloadState.recent_visits.length > 0 ? (
-            <ul className="reload-visits-list">
-              {reloadState.recent_visits.map(visit => (
-                <li key={visit.id} className="reload-visit-item">
-                  <div className="reload-visit-info">
-                    <time dateTime={visit.occurred_at}>
-                      {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(visit.occurred_at))}
-                    </time>
-                    <span className="reload-visit-reason">Acceso: {visit.access_reason}</span>
-                  </div>
-                  {visit.access_warnings.length > 0 ? (
-                    <div className="reload-visit-warnings">
-                      {visit.access_warnings.map((w, i) => (
-                        <Badge key={i} tone="warning">{w}</Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Sin visitas recientes en esta sucursal.</p>
-          )}
-        </div>
-      </Panel>
-    </div>
-  );
-}
-
 export function MemberDetailSections({
   member,
   now,
@@ -389,10 +226,11 @@ export function MemberDetailSections({
     () => purchases.filter(p => p.status === 'Pagado').reduce((sum, p) => sum + p.amount, 0),
     [purchases]
   );
+  const activePeriod = reloadState?.active_periods?.[0];
+  const hasActivePeriod = Boolean(activePeriod);
 
   return <section className="member-detail-sections">
-    {reloadState ? <MemberReloadSection reloadState={reloadState} role={role} /> : null}
-    <div className="member-detail-columns">
+        <div className="member-detail-columns">
       <div className="member-detail-left-column">
         <div className="member-detail-membership">
           <Panel>
@@ -403,7 +241,7 @@ export function MemberDetailSections({
               <span className="sr-only">Racha de renovaciones consecutivas: {streak} meses</span>
             </div>
 
-            <div className={`member-current-plan-hero ${membershipIsCurrent ? 'is-active' : 'is-inactive'}`}>
+            <div className={`member-current-plan-hero ${hasActivePeriod || membershipIsCurrent ? 'is-active' : 'is-inactive'}`}>
               <div className="member-plan-hero-top">
                 <div className="member-plan-hero-icon" aria-hidden="true">
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -414,21 +252,29 @@ export function MemberDetailSections({
                 <div className="member-plan-hero-info">
                   <span className="member-plan-hero-subtitle">Membresía actual</span>
                   <strong className="member-plan-hero-title">
-                    {membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa')}
+                    {activePeriod ? activePeriod.plan_name : (membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa'))}
                   </strong>
                 </div>
-                <Badge tone={membershipIsCurrent ? 'success' : 'neutral'}>
-                  {membershipIsCurrent ? 'Vigente' : 'Inactiva'}
+                <Badge tone={activePeriod ? (activePeriod.access_status === 'eligible' ? 'success' : activePeriod.access_status === 'branch_restricted' ? 'warning' : 'error') : (membershipIsCurrent ? 'success' : 'neutral')}>
+                  {activePeriod ? (activePeriod.access_status === 'eligible' ? 'Elegible' : activePeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : activePeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : activePeriod.access_status) : (membershipIsCurrent ? 'Vigente' : 'Inactiva')}
                 </Badge>
               </div>
-              {membershipIsCurrent && member.membership && (
+              {(activePeriod || (membershipIsCurrent && member.membership)) && (
                 <div className="member-plan-hero-meta">
                   <span className="member-plan-hero-date">
-                    📅 Vigencia: <strong>{member.membership.startsOn}</strong> al <strong>{member.membership.endsOn}</strong>
+                    📅 Vigencia: <strong>{activePeriod ? `${activePeriod.starts_on} al ${activePeriod.ends_on}` : `${member.membership!.startsOn} al ${member.membership!.endsOn}`}</strong>
                   </span>
-                  <span className="member-plan-hero-streak">
-                    🔥 Racha: <strong>{streak} {streak === 1 ? 'mes' : 'meses'}</strong>
-                  </span>
+                  {activePeriod ? (
+                    activePeriod.branch_id === null ? (
+                      <Badge tone="neutral">Multisucursal</Badge>
+                    ) : (
+                      <span className="muted">Sucursal específica</span>
+                    )
+                  ) : (
+                    <span className="member-plan-hero-streak">
+                      🔥 Racha: <strong>{streak} {streak === 1 ? 'mes' : 'meses'}</strong>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -468,6 +314,30 @@ export function MemberDetailSections({
                 No hay una membresía actual ni pagos atribuidos al socio.
               </EmptyState>
             )}
+            {reloadState?.class_samples?.length ? (
+              <div className="member-class-samples" style={{ marginTop: '1rem' }}>
+                <h3 className="sr-only">Clases muestra</h3>
+                <ul className="clean-list flow-gap-sm">
+                  {reloadState.class_samples.map(sample => (
+                    <li key={sample.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>{sample.plan_name}</strong>
+                        <div>
+                          {sample.is_consumed ? (
+                            <span className="muted">Consumida</span>
+                          ) : (
+                            <span className="muted">Disponible para check-in</span>
+                          )}
+                        </div>
+                      </div>
+                      <Badge tone={sample.is_consumed ? 'neutral' : 'success'}>
+                        {sample.is_consumed ? 'Consumida' : 'Disponible'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </Panel>
         </div>
         <div className="member-detail-rentals"><Panel><h2>Rentas actuales</h2><div className="member-rental-grid">
@@ -480,6 +350,26 @@ export function MemberDetailSections({
           <Panel>
             <h2>Asistencia previa</h2>
             <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />
+            {reloadState?.recent_visits?.length ? (
+              <div className="member-recent-visits" style={{ marginTop: '1rem' }}>
+                <h3 className="sr-only">Visitas recientes</h3>
+                <ul className="clean-list flow-gap-sm">
+                  {reloadState.recent_visits.map(visit => (
+                    <li key={visit.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>
+                        <time dateTime={visit.occurred_at}>
+                          {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(visit.occurred_at))}
+                        </time>
+                        {' · '}{visit.access_reason}
+                      </span>
+                      {visit.access_warnings.map((w, i) => (
+                        <Badge key={i} tone="warning">{w}</Badge>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </Panel>
         </div>
         <div className="member-detail-notes"><MemberNotes member={member} now={now} /></div>
@@ -685,6 +575,12 @@ export function MemberCounterView({
   const isExpired = statusInfo.status === 'expired' || statusInfo.status === 'inactive';
   const isExpiryToday = statusInfo.provisional || member.demoScenario === 'expiry-today';
 
+  const activePeriod = reloadState?.active_periods?.[0];
+  const isAdmin = role === 'OWNER' || role === 'ADMIN';
+  const effectiveHasPendingBalance = reloadState ? reloadState.financial.has_pending_balance : hasPendingBalance;
+
+  const reloadLastVisit = reloadState?.recent_visits?.[0];
+
   const latestPayment = useMemo(() => {
     if (!payments.length) return null;
     return [...payments].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
@@ -748,8 +644,7 @@ export function MemberCounterView({
 
   return (
     <section className="member-counter-view" aria-label="Vista operativa de mostrador">
-      {reloadState ? <MemberReloadSection reloadState={reloadState} role={role} /> : null}
-      <div className="member-counter-grid">
+            <div className="member-counter-grid">
         {/* Card 1: Membresía & Cobranza */}
         <div className="counter-card counter-card-membership">
           <div className="counter-card-header">
@@ -762,17 +657,19 @@ export function MemberCounterView({
               </span>
               <h2>Membresía</h2>
             </div>
-            <Badge tone={statusInfo.tone}>{statusInfo.badgeLabel}</Badge>
+            <Badge tone={activePeriod ? (activePeriod.access_status === 'eligible' ? 'success' : activePeriod.access_status === 'branch_restricted' ? 'warning' : 'error') : statusInfo.tone}>
+              {activePeriod ? (activePeriod.access_status === 'eligible' ? 'Elegible' : activePeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : activePeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : activePeriod.access_status) : statusInfo.badgeLabel}
+            </Badge>
           </div>
 
           <div className="counter-card-content">
             <div className="counter-plan-display">
               <strong className="counter-plan-title">
-                {membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa')}
+                {activePeriod ? activePeriod.plan_name : (membershipIsCurrent && member.membership ? member.membership.planName : (member.membership?.planName ?? 'Sin membresía activa'))}
               </strong>
-              {member.membership && (
+              {(activePeriod || member.membership) && (
                 <span className="counter-plan-dates muted">
-                  📅 Vigencia: {member.membership.startsOn} al {member.membership.endsOn}
+                  📅 Vigencia: {activePeriod ? `${activePeriod.starts_on} al ${activePeriod.ends_on}` : `${member.membership!.startsOn} al ${member.membership!.endsOn}`}
                 </span>
               )}
             </div>
@@ -791,17 +688,22 @@ export function MemberCounterView({
             )}
 
             <div className="counter-billing-section">
-              {isExpired ? (
+              {isExpired && !activePeriod ? (
                 <div className="counter-billing-alert is-overdue" role="alert">
                   ⚠️ Membresía vencida — Requiere renovación
                 </div>
-              ) : isExpiryToday ? (
+              ) : isExpiryToday && !activePeriod ? (
                 <div className="counter-billing-alert is-warning" role="alert">
                   ⏳ Vence hoy — Ofrecer renovación
                 </div>
-              ) : hasPendingBalance ? (
-                <div className="counter-billing-alert is-warning" role="alert">
-                  ⚠️ Pago pendiente registrado
+              ) : effectiveHasPendingBalance ? (
+                <div className="counter-billing-alert is-warning" role="alert" data-testid="balance-warning-alert">
+                  ⚠️ Saldo pendiente registrado
+                  {isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
+                    <span className="counter-debt-amount" data-testid="admin-debt-amount">
+                      {' · '}Adeudo: {formatMoney(reloadState.financial.total_pending_balance_minor)} MXN
+                    </span>
+                  ) : null}
                 </div>
               ) : (
                 <div className="counter-billing-status is-settled">
@@ -851,7 +753,11 @@ export function MemberCounterView({
               <div className="counter-metric-row">
                 <span className="counter-metric-label muted">Última visita:</span>
                 <span className="counter-metric-val">
-                  {lastVisit
+                  {reloadLastVisit
+                    ? (reloadLastVisit.occurred_at.slice(0, 10) === today
+                        ? `Hoy, ${new Intl.DateTimeFormat('es-MX', { timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadLastVisit.occurred_at))}`
+                        : new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(reloadLastVisit.occurred_at)))
+                    : lastVisit
                     ? (lastVisit.observedCheckIn.slice(0, 10) === today
                         ? `Hoy, ${new Intl.DateTimeFormat('es-MX', { timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(lastVisit.observedCheckIn))}`
                         : new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(lastVisit.observedCheckIn)))

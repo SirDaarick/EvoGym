@@ -274,8 +274,8 @@ describe('member workflow', () => {
       await mount('/reception/members/demo-active');
 
       expect(reloadSpy).toHaveBeenCalledWith('demo-active', 'test-operational-token');
-      expect(await screen.findByText('Estado sincronizado del socio')).toBeVisible();
-      expect(screen.getByText('Membresía Activa Sincronizada')).toBeVisible();
+      expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+      expect(await screen.findByText('Membresía Activa Sincronizada')).toBeVisible();
     } finally {
       sessionStorage.clear();
       reloadSpy.mockRestore();

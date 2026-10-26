@@ -268,6 +268,20 @@ export function NewMember({ role }: { role: Role }) {
   return <NewMemberRegistration role={role} />;
 }
 
+function resolveOperationalToken(): string | null {
+  if (typeof window !== 'undefined') {
+    const customWindow = window as unknown as {
+      __EVOGYM_OPERATIONAL_SESSION__?: string;
+      __EVOGYM_ADMIN_SESSION__?: string;
+      __EVOGYM_TOKEN__?: string;
+    };
+    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
+    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
+    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
+  }
+  return readOperationalToken();
+}
+
 export function MemberDetail({ role }: { role: Role }) {
   const { memberId } = useParams();
   const { state, resetVersion } = useDemo();
@@ -276,7 +290,7 @@ export function MemberDetail({ role }: { role: Role }) {
 
   useEffect(() => {
     let isCancelled = false;
-    const token = readOperationalToken();
+    const token = resolveOperationalToken();
 
     if (!token || !memberId) {
       setReloadState(null);

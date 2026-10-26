@@ -62,7 +62,17 @@ def get_member_actor_principal(
 
     # 1. Check if Admin Bearer
     try:
-        staff_id, _session_id = validate_admin_session(factory, token)
+        settings = getattr(request.app.state, "settings", None)
+        if (
+            settings
+            and getattr(settings, "admin_auth_configured", False)
+            and getattr(settings, "admin_token_signing_configured", False)
+        ):
+            staff_id, _session_id = validate_admin_session(
+                factory, token, settings.admin_token_signing_secret.get_secret_value()
+            )
+        else:
+            staff_id, _session_id = validate_admin_session(factory, token)
         return MemberActorPrincipal(staff_id=staff_id, is_admin=True, branch_id=None)
     except AuthorizationDenied:
         pass

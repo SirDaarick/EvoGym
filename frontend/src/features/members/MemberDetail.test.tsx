@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-table', async importOriginal => {
   };
 });
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
-import { MemberDetailSections } from './MemberDetail';
+import { MemberCounterView, MemberDetailSections } from './MemberDetail';
 import type { MemberReloadResponse } from '../../api/memberReadsApi';
 import { rentalStatus } from './memberDetailUtils';
 import { App } from '../../app/App';
@@ -352,8 +352,8 @@ describe('member reload contract consumption (P2.4)', () => {
     membership: null,
   };
 
-  it('renders reloadable membership periods and class sample entitlements from MemberReloadResponse', () => {
-    render(
+  it('renders reloadable membership periods and class sample entitlements in native views', () => {
+    const { unmount } = render(
       <DemoProvider>
         <MemberDetailSections
           member={dummyMember}
@@ -369,17 +369,32 @@ describe('member reload contract consumption (P2.4)', () => {
       </DemoProvider>
     );
 
-    expect(screen.getByText('Estado sincronizado del socio')).toBeVisible();
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
     expect(screen.getByText('Membresía Semestral Élite')).toBeVisible();
-    expect(screen.getByText('2026-10-01 al 2027-04-01')).toBeVisible();
+    expect(screen.getByText(/2026-10-01 al 2027-04-01/)).toBeVisible();
     expect(screen.getByText('Elegible')).toBeVisible();
     expect(screen.getByText('Multisucursal')).toBeVisible();
 
     expect(screen.getByText('Muestra Muay Thai')).toBeVisible();
     expect(screen.getByText('Disponible para check-in')).toBeVisible();
+    unmount();
+
+    render(
+      <DemoProvider>
+        <MemberCounterView
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          reloadState={baseReloadResponse}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+    expect(screen.getByText('Membresía Semestral Élite')).toBeVisible();
+    expect(screen.getByText(/2026-10-01 al 2027-04-01/)).toBeVisible();
   });
 
-  it('shows boolean balance warning for receptionist role without exposing debt centavos', () => {
+  it('shows boolean balance warning for receptionist role in native card without leaking centavos', () => {
     const receptionistReloadResponse: MemberReloadResponse = {
       ...baseReloadResponse,
       financial: {
@@ -393,29 +408,23 @@ describe('member reload contract consumption (P2.4)', () => {
 
     render(
       <DemoProvider>
-        <MemberDetailSections
+        <MemberCounterView
           member={dummyMember}
           now="2026-10-23T12:00:00-06:00"
-          gloves={[]}
-          gloveRentals={[]}
-          lockers={[]}
-          lockerRentals={[]}
-          payments={[]}
-          supplementSales={[]}
           role="RECEPTION"
           reloadState={receptionistReloadResponse}
         />
       </DemoProvider>
     );
 
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Saldo pendiente registrado');
-    expect(screen.getByText(/El socio tiene un adeudo pendiente. Gestión requerida en recepción./)).toBeVisible();
+    expect(screen.queryByText(/Adeudo/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-debt-details')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-debts-list')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Adeudo total:/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-debt-amount')).not.toBeInTheDocument();
   });
 
-  it('shows itemized debts when viewing as admin or when financial details are present', () => {
+  it('shows debt amount in native card when viewing as Admin/Owner', () => {
     const adminReloadResponse: MemberReloadResponse = {
       ...baseReloadResponse,
       financial: {
@@ -439,25 +448,17 @@ describe('member reload contract consumption (P2.4)', () => {
 
     render(
       <DemoProvider>
-        <MemberDetailSections
+        <MemberCounterView
           member={dummyMember}
           now="2026-10-23T12:00:00-06:00"
-          gloves={[]}
-          gloveRentals={[]}
-          lockers={[]}
-          lockerRentals={[]}
-          payments={[]}
-          supplementSales={[]}
           role="OWNER"
           reloadState={adminReloadResponse}
         />
       </DemoProvider>
     );
 
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Saldo pendiente registrado');
-    expect(screen.getByTestId('admin-debt-details')).toBeVisible();
-    expect(screen.getByText('Adeudo total:')).toBeVisible();
-    expect(screen.getByText('018f3b10-0000-7000-8000-000000000001')).toBeVisible();
-    expect(screen.getByText(/Desglose de adeudos por orden/)).toBeVisible();
+    expect(screen.getByText(/350\.00/)).toBeVisible();
   });
 });
