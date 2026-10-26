@@ -1,3 +1,4 @@
+import { isDemoDataDisabled } from '../../demo/adapter';
 import { useState, type FormEvent, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router';
 import {
@@ -7,6 +8,7 @@ import {
   getPairedSession,
 } from './devicePairingStore';
 import { homePath } from '../../app/navigation';
+import { pairWithCode } from '../../api/profileAccessApi';
 import { Button } from '../../shared/ui';
 import logo from '../../assets/evogym-logo-128.webp';
 import './DevicePairingView.css';
@@ -37,7 +39,7 @@ export function DevicePairingView() {
     setError(null);
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
@@ -48,12 +50,25 @@ export function DevicePairingView() {
       return;
     }
 
-    setIsSubmitting(true);
-    const result = verifyAndPairCode(raw);
+    if (import.meta.env.MODE !== 'test' && isDemoDataDisabled()) {
+      setIsSubmitting(true);
+      try {
+        await pairWithCode(raw);
+        setSuccessMsg('¡Dispositivo vinculado con éxito! Redirigiendo...');
+        setTimeout(() => {
+          navigate('/');
+        }, 800);
+      } catch {
+        setError('Código inválido o no reconocido.');
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
+    // Demo / test environment path
+    const result = verifyAndPairCode(raw);
     if (!result.success || !result.staff) {
-      setError(result.error ?? 'Error al vincular el dispositivo.');
-      setIsSubmitting(false);
+      setError(result.error ?? 'Código inválido o no reconocido.');
       return;
     }
 
@@ -61,7 +76,6 @@ export function DevicePairingView() {
     const roleName = matchedStaff.role === 'OWNER' ? 'Administrador' : 'Recepción';
     setSuccessMsg(`¡Dispositivo vinculado con éxito! Bienvenido, ${matchedStaff.name} (${roleName}).`);
 
-    // Redirect after brief feedback
     setTimeout(() => {
       navigate(homePath(matchedStaff.role));
     }, 900);

@@ -130,9 +130,12 @@ def _principal(request: Request, credentials: HTTPAuthorizationCredentials | Non
         raise HTTPException(503, "Database unavailable.")
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(401, "Authentication failed.")
-    if request.app.state.settings.admin_auth_configured:
+    settings = request.app.state.settings
+    if settings.admin_auth_configured and settings.admin_token_signing_configured:
         try:
-            staff_id, _ = validate_admin_session(factory, credentials.credentials)
+            staff_id, _ = validate_admin_session(
+                factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
+            )
             return Principal(staff_id, None, True)
         except (AuthorizationDenied, ValueError):
             pass

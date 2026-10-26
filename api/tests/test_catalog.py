@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from app.auth.admin import authenticate_admin
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
 from app.db.base import Base
@@ -36,7 +35,8 @@ from app.catalog.schemas import (
     PublishPlanVersionDTO,
 )
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 
 
 def _setup_db(tmp_path):
@@ -345,15 +345,13 @@ def test_catalog_rbac_receptionist_vs_admin(tmp_path):
         branch_id = _seed_branch(factory)
         _staff_id, recep_token = _seed_receptionist(factory, branch_id)
         seed_admin(factory, "owner@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "owner@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         recep_headers = {"Authorization": f"Bearer {recep_token}"}
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
             # 1. Unauthenticated gets 401
             assert client.get("/api/v1/catalog/services").status_code == 401
             assert client.get("/api/v1/catalog/plans").status_code == 401

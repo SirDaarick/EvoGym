@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base
@@ -39,6 +39,7 @@ class StaffCredential(Base):
         CheckConstraint("method = 'pin'", name="ck_staff_credentials_supported_method"),
         CheckConstraint("failed_attempts >= 0 AND failed_attempts <= 5", name="ck_staff_credentials_failed_attempts"),
         CheckConstraint("length(secret_hash) >= 50", name="ck_staff_credentials_hash_nonempty"),
+        CheckConstraint("pin_change_required = false OR initial_pin_expires_at IS NOT NULL", name="ck_staff_credentials_initial_pin_expiry"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -47,6 +48,8 @@ class StaffCredential(Base):
     secret_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     failed_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pin_change_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    initial_pin_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     staff: Mapped[StaffUser] = relationship(back_populates="credentials")
 
 
@@ -55,6 +58,12 @@ class SecurityEvent(Base):
     __table_args__ = (
         CheckConstraint("reason = 'staff_pin_lockout'", name="ck_security_events_reason"),
         CheckConstraint("delivery_status = 'pending'", name="ck_security_events_pending_delivery"),
+        CheckConstraint(
+            "(acknowledged_at IS NULL AND acknowledged_by IS NULL) OR "
+            "(acknowledged_at IS NOT NULL AND acknowledged_by IS NOT NULL)",
+            name="ck_security_events_acknowledgement_pair",
+        ),
+        Index("ix_security_events_pending_order", "acknowledged_at", "occurred_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -63,3 +72,7 @@ class SecurityEvent(Base):
     locked_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str] = mapped_column(String(32), nullable=False, default="staff_pin_lockout", server_default="staff_pin_lockout")
     delivery_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT")
+    )

@@ -4,9 +4,11 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from app.db.models import Branch, RoleGrant, StaffUser
+from app.db.models import (
+    Branch, OrganizationOwner, RoleBundle, RoleBundleAssignment, RoleBundlePermission, RoleGrant, StaffUser,
+)
 
 
 class Permission(StrEnum):
@@ -19,6 +21,7 @@ class Permission(StrEnum):
     STAFF_ROSTER_MANAGE = "staff_roster_manage"
     STAFF_ATTENDANCE_RECORD = "staff_attendance_record"
     MEMBERSHIP_ACCESS_MANAGE = "membership_access_manage"
+    STAFF_EMPLOYEE_MANAGE = "staff_employee_manage"
 
 
 class AuthorizationDenied(Exception):
@@ -40,6 +43,49 @@ def _permits(staff, branch, grants, permission: Permission | str, branch_id: UUI
     except (TypeError, ValueError):
         return False
     if staff is None or not staff.is_active or branch is None or not branch.is_active:
+        return False
+    owner_record = None
+    # A missing row is the pre-migration/legacy fixture mode. The installed migration
+    # always creates the singleton row, and new permission semantics apply after claim.
+    current_session = object_session(staff)
+    if current_session is not None:
+        owner_record = current_session.scalar(
+            select(OrganizationOwner).where(OrganizationOwner.id == 1).execution_options(populate_existing=True)
+        )
+    owner_staff_id = owner_record.staff_id if owner_record is not None else None
+    if owner_staff_id is not None:
+        if staff.id == owner_staff_id:
+            return True
+        # Reception remains a separate, branch-scoped identity role. An Admin role
+        # grant alone is only a login identity after ownership has been claimed.
+        if requested in {Permission.MEMBER_OPERATIONAL_READ, Permission.STAFF_ROSTER_READ,
+                         Permission.STAFF_ATTENDANCE_RECORD} and any(
+            grant.is_active and grant.role == "receptionist" and grant.scope_kind == "branch"
+            and grant.branch_id == branch_id for grant in grants
+        ):
+            return True
+        assignments = current_session.scalars(
+            select(RoleBundleAssignment).where(
+                RoleBundleAssignment.staff_id == staff.id,
+                RoleBundleAssignment.is_active.is_(True),
+                ((RoleBundleAssignment.scope_kind == "organization") & RoleBundleAssignment.branch_id.is_(None))
+                | ((RoleBundleAssignment.scope_kind == "branch") & (RoleBundleAssignment.branch_id == branch_id)),
+            ).execution_options(populate_existing=True).with_for_update()
+        ).all()
+        for assignment in assignments:
+            bundle = current_session.scalar(
+                select(RoleBundle).where(RoleBundle.id == assignment.bundle_id)
+                .execution_options(populate_existing=True)
+            )
+            if bundle is None or not bundle.is_active:
+                continue
+            if requested is Permission.STAFF_EMPLOYEE_MANAGE and assignment.scope_kind != "organization":
+                continue
+            if current_session.scalar(select(RoleBundlePermission.id).where(
+                RoleBundlePermission.bundle_id == bundle.id,
+                RoleBundlePermission.permission == requested.value,
+            )) is not None:
+                return True
         return False
     for grant in grants:
         if not grant.is_active:

@@ -48,7 +48,7 @@ def _setup(tmp_path, **settings_overrides):
     return engine, factory, app, identifiers
 
 
-def test_staff_pin_session_uses_server_ttl_and_returns_no_store(tmp_path):
+def test_staff_pin_session_uses_server_policy_and_returns_no_store(tmp_path):
     engine, factory, app, ids = _setup(tmp_path, staff_session_ttl_seconds=720)
     try:
         with TestClient(app) as client:
@@ -61,7 +61,7 @@ def test_staff_pin_session_uses_server_ttl_and_returns_no_store(tmp_path):
         assert result["token_type"] == "bearer"
         assert len(result["access_token"]) == 43
         expiry = datetime.fromisoformat(result["expires_at"])
-        assert 715 <= (expiry - datetime.now(timezone.utc)).total_seconds() <= 725
+        assert 90 * 24 * 60 * 60 - 5 <= (expiry - datetime.now(timezone.utc)).total_seconds() <= 90 * 24 * 60 * 60 + 5
         with factory() as session:
             stored = session.scalar(select(StaffSession).where(StaffSession.staff_id == ids["staff"]))
             assert stored.branch_id == ids["branch"]
@@ -70,7 +70,7 @@ def test_staff_pin_session_uses_server_ttl_and_returns_no_store(tmp_path):
         engine.dispose()
 
 
-def test_staff_login_fails_closed_without_ttl_or_session_factory(tmp_path):
+def test_staff_login_ignores_legacy_ttl_and_fails_closed_without_session_factory(tmp_path):
     engine, factory, app, ids = _setup(tmp_path, staff_session_ttl_seconds=None)
     try:
         app.state.session_factory = factory
@@ -78,7 +78,11 @@ def test_staff_login_fails_closed_without_ttl_or_session_factory(tmp_path):
             missing_ttl = client.post("/api/v1/auth/staff/sessions", json={
                 "login_identifier": "desk@example.invalid", "pin": "2468", "branch_id": str(ids["branch"]),
             })
-        assert missing_ttl.status_code == 503
+        assert missing_ttl.status_code == 201
+        assert missing_ttl.headers["cache-control"] == "no-store"
+        assert 90 * 24 * 60 * 60 - 5 <= (
+            datetime.fromisoformat(missing_ttl.json()["expires_at"]) - datetime.now(timezone.utc)
+        ).total_seconds() <= 90 * 24 * 60 * 60 + 5
         with TestClient(app) as client:
             app.state.settings = _settings("sqlite+pysqlite://", staff_session_ttl_seconds=900)
             app.state.session_factory = None

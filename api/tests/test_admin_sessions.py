@@ -11,7 +11,7 @@ from app.auth.sessions import issue_session
 from app.db.base import Base
 from app.db.models import AdminPasswordCredential, Branch, RoleGrant, StaffCredential, StaffSession, StaffUser
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings, seed_admin
 
 
 def test_admin_lists_only_owned_session_metadata_and_revokes_idempotently(tmp_path):
@@ -21,11 +21,12 @@ def test_admin_lists_only_owned_session_metadata_and_revokes_idempotently(tmp_pa
     factory = sessionmaker(engine)
     admin_id = seed_admin(factory)
     other_id = seed_admin(factory, "other@example.invalid", "other-admin-password")
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            own_login = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"}).json()
-            other_login = client.post("/api/v1/auth/sessions", json={"login_identifier": "other@example.invalid", "password": "other-admin-password"}).json()
+            own_login = complete_device_login(client, delivery, "owner@example.invalid", "synthetic-admin-password").json()
+            other_login = complete_device_login(client, delivery, "other@example.invalid", "other-admin-password").json()
             headers = {"Authorization": f"Bearer {own_login['access_token']}"}
             listing = client.get("/api/v1/admin/sessions", headers=headers)
             assert listing.status_code == 200
@@ -72,5 +73,34 @@ def test_branch_pin_session_cannot_authenticate_admin_route(tmp_path):
         with TestClient(app) as client:
             response = client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {issued.token}"})
             assert response.status_code == 401
+    finally:
+        engine.dispose()
+
+
+def test_trusted_device_revocation_is_self_service_or_owner_only(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'admin-device-revocation.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    owner_id = seed_admin(factory)
+    other_id = seed_admin(factory, "other@example.invalid", "other-admin-password")
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    try:
+        with TestClient(app) as client:
+            owner_login = complete_device_login(client, delivery, "owner@example.invalid", "synthetic-admin-password").json()
+            other_login = complete_device_login(client, delivery, "other@example.invalid", "other-admin-password").json()
+            own_headers = {"Authorization": f"Bearer {owner_login['access_token']}"}
+            other_headers = {"Authorization": f"Bearer {other_login['access_token']}"}
+            other_devices = client.get("/api/v1/admin/sessions/devices", headers=other_headers).json()["devices"]
+            assert len(other_devices) == 1
+            target = other_devices[0]["id"]
+            assert client.post(f"/api/v1/admin/sessions/devices/{target}/revoke", headers=own_headers).status_code == 404
+            with factory.begin() as session:
+                session.scalar(select(AdminPasswordCredential).where(AdminPasswordCredential.staff_id == owner_id)).is_owner = True
+            assert client.post(f"/api/v1/admin/sessions/devices/{target}/revoke", headers=own_headers).json() == {"revoked": True}
+            assert client.get("/api/v1/admin/sessions", headers=other_headers).status_code == 401
+        with factory() as session:
+            assert session.scalar(select(StaffSession).where(StaffSession.staff_id == other_id)).revoked_at is not None
     finally:
         engine.dispose()

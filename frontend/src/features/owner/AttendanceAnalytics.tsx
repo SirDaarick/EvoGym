@@ -27,6 +27,7 @@ import {
 } from '@hugeicons/core-free-icons';
 
 import { useDemo } from '../../demo/DemoProvider';
+import { isDemoDataDisabled } from '../../demo/adapter';
 import {
   getAttendanceAnalytics,
   type AttendancePeriod,
@@ -53,7 +54,13 @@ export function AttendanceAnalytics() {
 
   // Compute analytics using pure selector
   const analytics = useMemo(() => {
-    return getAttendanceAnalytics(state.attendance, state.members, state.demoClock, period);
+    return getAttendanceAnalytics(
+      state.attendance,
+      state.members,
+      state.demoClock,
+      period,
+      { includeBaseline: !isDemoDataDisabled() }
+    );
   }, [state.attendance, state.members, state.demoClock, period]);
 
   // Chart 1: Hourly Traffic (06:00 - 22:00, 16 operating hours)
@@ -310,12 +317,14 @@ export function AttendanceAnalytics() {
           <div className="att-kpi-body">
             <p className="att-kpi-value text-accent">{analytics.peakHour.label}</p>
             <p className="att-kpi-subtext">
-              {analytics.peakHour.visits} visitas registradas ({analytics.peakHour.occupancyPercent}% aforo)
+              {analytics.peakHour.visits > 0
+                ? `${analytics.peakHour.visits} visitas registradas (${analytics.peakHour.occupancyPercent}% aforo)`
+                : 'Sin visitas registradas'}
             </p>
           </div>
           <div className="att-kpi-footer">
             <HugeiconsIcon icon={Clock01Icon} size={16} aria-hidden="true" />
-            <span>Turno Nocturno habitual</span>
+            <span>{analytics.peakHour.visits > 0 ? 'Turno habitual' : 'Sin datos en el período'}</span>
           </div>
         </article>
 
@@ -331,12 +340,14 @@ export function AttendanceAnalytics() {
           <div className="att-kpi-body">
             <p className="att-kpi-value text-sky">{analytics.valleyHour.label}</p>
             <p className="att-kpi-subtext">
-              {analytics.valleyHour.visits} visitas ({analytics.valleyHour.occupancyPercent}% aforo)
+              {analytics.valleyHour.visits > 0
+                ? `${analytics.valleyHour.visits} visitas (${analytics.valleyHour.occupancyPercent}% aforo)`
+                : 'Sin visitas registradas'}
             </p>
           </div>
           <div className="att-kpi-footer">
             <HugeiconsIcon icon={SparklesIcon} size={16} aria-hidden="true" />
-            <span>Oportunidad off-peak</span>
+            <span>{analytics.valleyHour.visits > 0 ? 'Oportunidad off-peak' : 'Sin datos en el período'}</span>
           </div>
         </article>
 
@@ -344,17 +355,19 @@ export function AttendanceAnalytics() {
         <article className="att-kpi-card clay-card">
           <div className="att-kpi-header">
             <span className="att-kpi-title">Día más concurrido</span>
-            <Badge tone="neutral">{analytics.busiestDay.percent}% tráfico</Badge>
+            <Badge tone="neutral">{analytics.busiestDay.percent > 0 ? `${analytics.busiestDay.percent}% tráfico` : '0%'}</Badge>
           </div>
           <div className="att-kpi-body">
             <p className="att-kpi-value">{analytics.busiestDay.dayName}</p>
             <p className="att-kpi-subtext">
-              {analytics.busiestDay.visits} visitas en la semana
+              {analytics.busiestDay.percent > 0
+                ? `${analytics.busiestDay.percent}% del volumen total del período`
+                : 'Sin visitas registradas'}
             </p>
           </div>
           <div className="att-kpi-footer">
             <HugeiconsIcon icon={Calendar01Icon} size={16} aria-hidden="true" />
-            <span>Mayor disciplina de inicio</span>
+            <span>{analytics.busiestDay.percent > 0 ? 'Mayor disciplina de inicio' : 'Sin datos en el período'}</span>
           </div>
         </article>
 

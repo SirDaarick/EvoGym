@@ -107,6 +107,13 @@ EXPECTED_DATABASE_TABLES = {
     "admin_password_credentials",
     "admin_recovery_tokens",
     "admin_auth_events",
+    "admin_trusted_devices",
+    "admin_login_approvals",
+    "admin_role_bundles",
+    "admin_role_bundle_permissions",
+    "admin_role_bundle_assignments",
+    "organization_owners",
+    "reception_stations",
     "audit_events",
     "staff_enrollment_codes",
     "staff_device_pairing_codes",
@@ -293,7 +300,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0030_staff_schedules"
+            assert head_version == "0037_paired_profile_access"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

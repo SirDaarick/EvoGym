@@ -141,4 +141,37 @@ describe('DevicePairingModal', () => {
     const newCode = screen.getByTestId('pairing-code-display').textContent;
     expect(newCode).toMatch(/^\d{3}-\d{3}$/);
   });
+
+  it('fails closed for API identity without Admin authority and never creates local pairing state', async () => {
+    render(
+      <DevicePairingModal
+        isOpen
+        staff={null}
+        serverIdentity={{ staffId: '323e4567-e89b-42d3-a456-426614174000', staffName: 'Ana Pérez', contextId: 'branch-a' }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/sesión Admin no está disponible/i);
+    expect(screen.getByTestId('pairing-code-display')).not.toHaveTextContent(/\d{3}-\d{3}/);
+    expect(screen.getByRole('button', { name: /generar nuevo/i })).toBeDisabled();
+    expect(screen.getByText(/No hay teléfonos vinculados activos/i)).toBeInTheDocument();
+    expect(localStorage.getItem('evogym:pairing_codes')).toBeNull();
+    expect(localStorage.getItem('evogym:paired_devices')).toBeNull();
+  });
+
+  it('rejects an invalid explicit API staff identity without using demo pairing', async () => {
+    render(
+      <DevicePairingModal
+        isOpen
+        staff={null}
+        serverIdentity={{ staffId: 'staff-sheila', staffName: 'Ana Pérez', contextId: 'branch-a' }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/identificador válido/i);
+    expect(screen.getByTestId('pairing-code-display')).not.toHaveTextContent(/\d{3}-\d{3}/);
+    expect(localStorage.getItem('evogym:pairing_codes')).toBeNull();
+  });
 });

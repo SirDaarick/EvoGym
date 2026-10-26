@@ -161,9 +161,19 @@ describe('membership checkout API', () => {
   });
 
   it('exposes HTTP status/message separately from an unknown network outcome', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Shift is closed' }), { status: 409 }));
-    await expect(getRegisters()).rejects.toMatchObject({ status: 409, message: 'Shift is closed' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'http_error', message: 'Shift is closed', request_id: 'conflict-id' } }), { status: 409 }));
+    await expect(getRegisters()).rejects.toMatchObject({ kind: 'http', status: 409, requestId: 'conflict-id', message: 'La solicitud entra en conflicto con el estado actual.' });
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('network unavailable'));
-    await expect(getRegisters()).rejects.toMatchObject({ kind: 'network', message: 'network unavailable' });
+    await expect(getRegisters()).rejects.toMatchObject({ kind: 'network', message: 'No se pudo conectar con el servidor. Intenta nuevamente.' });
+  });
+
+  it('preserves typed metadata and safe mapped messages for checkout HTTP failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'SHIFT_CLOSED', message: 'internal database secret', request_id: 'body-id' } }), { status: 403, headers: { 'X-Request-ID': 'header-id' } }));
+    await expect(getRegisters()).rejects.toMatchObject({
+      kind: 'http', status: 403, code: 'SHIFT_CLOSED', requestId: 'header-id',
+      message: expect.not.stringContaining('internal database secret'),
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { request_id: 'retry-id' } }), { status: 429 }));
+    await expect(getRegisters()).rejects.toMatchObject({ status: 429, requestId: 'retry-id' });
   });
 });

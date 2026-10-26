@@ -66,9 +66,12 @@ def _principal(request: Request, credentials: HTTPAuthorizationCredentials | Non
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(401, "Authentication failed.")
     token = credentials.credentials
-    if request.app.state.settings.admin_auth_configured:
+    settings = request.app.state.settings
+    if settings.admin_auth_configured and settings.admin_token_signing_configured:
         try:
-            staff_id, _session_id = validate_admin_session(factory, token)
+            staff_id, _session_id = validate_admin_session(
+                factory, token, settings.admin_token_signing_secret.get_secret_value()
+            )
             return RosterPrincipal(staff_id, True, None)
         except (AuthorizationDenied, ValueError):
             pass

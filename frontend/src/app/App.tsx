@@ -1,5 +1,5 @@
-import { Profiler, lazy, useEffect, useRef, useState } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Profiler, lazy, useEffect, useState } from 'react';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
 import type { Role } from '../domain/models';
 import { useDemo } from '../demo/DemoProvider';
 import { MemberSearch } from '../features/members/MemberSearch';
@@ -7,13 +7,15 @@ import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button } from '../shared/ui';
 import { PwaInstallPrompt } from '../shared/PwaInstallPrompt';
 import { homePath, navigation, rolePath } from './navigation';
-import logo from '../assets/evogym-logo-128.webp';
 import { activeShift } from '../demo/inventoryOperations';
 import { openShift, shiftSummary } from '../demo/shiftOperations';
 import { ShiftOpenModal } from '../features/shifts/ShiftOpenModal';
 import { ShiftCloseDialog } from '../features/shifts/ShiftCloseDialog';
 
 import { RouteBoundary } from './RouteBoundary';
+import { ApplicationShell, type ShellIconName } from './ApplicationShell';
+import { useProductAccess } from '../features/auth/ProductAccessProvider';
+import { useAdminSession } from '../features/auth/AdminSessionProvider';
 
 const ComponentCatalog = lazy(() => import('../features/catalog/ComponentCatalog').then(module => ({ default: module.ComponentCatalog })));
 const MembershipPayment = lazy(() => import('../features/payments/MembershipPayment').then(module => ({ default: module.MembershipPayment })));
@@ -27,61 +29,34 @@ const ExpenseReport = lazy(() => import('../features/owner/ExpenseReport').then(
 const History = lazy(() => import('../features/owner/History').then(module => ({ default: module.History })));
 const PlanCatalog = lazy(() => import('../features/owner/PlanCatalog').then(module => ({ default: module.PlanCatalog })));
 const ReceptionHome = lazy(() => import('../features/reception/ReceptionHome').then(module => ({ default: module.ReceptionHome })));
-const StaffProfileSelection = lazy(() => import('../features/staff/StaffProfileSelection').then(module => ({ default: module.StaffProfileSelection })));
+const StaffProfileSelection = lazy(() => import('../features/staff/StaffProfileSelection').then(module => ({ default: module.LegacyDemoStaffProfileSelection })));
 const Login = lazy(() => import('../features/auth/Login').then(module => ({ default: module.Login })));
 const OperationalLogin = lazy(() => import('../features/reception/LiveMemberLookup').then(module => ({ default: module.LiveMemberLookup })));
 const DevicePairingView = lazy(() => import('../features/staff/DevicePairingView').then(module => ({ default: module.DevicePairingView })));
 const StaffManagement = lazy(() => import('../features/owner/StaffManagement').then(module => ({ default: module.StaffManagement })));
+const LiveStaffManagement = lazy(() => import('../features/owner/StaffManagement').then(module => ({ default: module.LiveStaffManagement })));
+const AdminSecurityAlerts = lazy(() => import('../features/auth/AdminSecurityAlerts').then(module => ({ default: module.AdminSecurityAlerts })));
+const OwnerManagementPage = lazy(() => import('../features/auth/OwnerManagementPage').then(module => ({ default: module.OwnerManagementPage })));
 const StaffAttendanceView = lazy(() => import('../features/reception/StaffAttendanceView').then(module => ({ default: module.StaffAttendanceView })));
 const GimiDashboard = lazy(() => import('../features/gimi/GimiDashboard').then(module => ({ default: module.GimiDashboard })));
 const Members = lazy(() => import('../features/members/Members').then(module => ({ default: module.Members })));
 const MemberDetail = lazy(() => import('../features/members/Members').then(module => ({ default: module.MemberDetail })));
 const NewMember = lazy(() => import('../features/members/Members').then(module => ({ default: module.NewMember })));
 
-const navIcons: Record<string, React.ReactNode> = {
-  home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" /></>,
-  overview: <><rect x="3" y="12" width="4" height="9" rx="1" /><rect x="10" y="7" width="4" height="14" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" /></>,
-  alerts: <><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></>,
-  attendance: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11l-3-3-3 3" /></>,
-  expenses: <><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" /><path d="M14 8H8" /><path d="M16 12H8" /><path d="M13 16H8" /></>,
-  members: <><circle cx="9" cy="8" r="3" /><path d="M2 20v-2a6 6 0 0 1 12 0v2zM16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 4 5" /></>,
-  sales: <><path d="M3 7h18l-2 13H5zM8 7V5a4 4 0 0 1 8 0v2" /></>,
-  shifts: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-  inventory: <><path d="m3 7 9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10" /></>,
-  staff: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
-  history: <><path d="M3 12a9 9 0 1 1 3 6.7M3 17v-5h5M12 7v5l4 2" /></>,
-  plans: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
-  gimi: <><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM4 11a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-7z" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /><path d="M9 18h6" /></>,
-  profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-  components: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-};
-
-function NavIcon({ name }: { name: string }) {
-  return <svg className="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{navIcons[name]}</svg>;
+function useOptionalProductAccess() {
+  try {
+    return useProductAccess();
+  } catch {
+    return null;
+  }
 }
 
-function SunIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-    </svg>
-  );
-}
-
-function formatCurrentTime(): string {
-  const d = new Date();
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm} hrs`;
+function useOptionalAdminSession() {
+  try {
+    return useAdminSession();
+  } catch {
+    return null;
+  }
 }
 
 function readPerformanceDebugFlag() {
@@ -99,6 +74,10 @@ function readPerformanceDebugFlag() {
 export function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const access = useOptionalProductAccess();
+  const adminSession = useOptionalAdminSession();
+  const principal = access?.principal ?? null;
+
   const { reset, resetVersion, state, transact } = useDemo();
   const [globalOpeningOpen, setGlobalOpeningOpen] = useState(false);
   const [globalClosingOpen, setGlobalClosingOpen] = useState(false);
@@ -115,103 +94,51 @@ export function App() {
   const [debugPerformance] = useState(readPerformanceDebugFlag);
   const [catalogRole, setCatalogRole] = useState<Role>(location.pathname.startsWith('/reception/') ? 'RECEPTION' : 'OWNER');
   const [message, setMessage] = useState('');
-  const [clockStr, setClockStr] = useState<string>(formatCurrentTime);
-  const [dark, setDark] = useState(() => {
-    if (typeof document === 'undefined') return false;
-    const theme = document.documentElement.dataset.theme;
-    return theme ? theme === 'dark' : (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
-  });
-  const isPointerRef = useRef(false);
-  const [sidebarPinned, setSidebarPinned] = useState(false);
-  const [sidebarHovered, setSidebarHovered] = useState(false);
-  const [sidebarFocused, setSidebarFocused] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const mobileNavOpener = useRef<HTMLButtonElement>(null);
-  const mobileNavClose = useRef<HTMLButtonElement>(null);
-  const sidebarElement = useRef<HTMLElement>(null);
-  const sidebarExpanded = sidebarPinned || sidebarHovered || sidebarFocused;
-  function closeMobileNav() {
-    if (!mobileNavOpen) return;
-    setMobileNavOpen(false);
-    const focusTarget = window.matchMedia?.('(min-width: 721px)').matches
-      ? document.getElementById('main-content')
-      : mobileNavOpener.current;
-    queueMicrotask(() => focusTarget?.focus());
-  }
-  const role: Role = location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole;
-  const items = navigation
+
+  const role: Role = principal
+    ? (principal.kind === 'admin' ? 'OWNER' : 'RECEPTION')
+    : (location.pathname.startsWith('/reception/') ? 'RECEPTION' : location.pathname.startsWith('/owner/') ? 'OWNER' : catalogRole);
+
+  const isAdmin = principal?.kind === 'admin';
+  const canManageEmployees = !isAdmin || Boolean(principal?.identity.can_manage_employees);
+  const isOwner = !isAdmin || Boolean(principal?.identity.is_owner);
+
+  let navItems = navigation
     .filter(item => item.roles.includes(role))
-    .map(item => ({
-      ...item,
-      label: item.roleLabels?.[role] ?? item.label,
-    }));
-
-  useEffect(() => {
-    // Reset transient expansion on route transitions
-    setSidebarHovered(false);
-    setSidebarFocused(false);
-    closeMobileNav();
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (!mobileNavOpen) return;
-    mobileNavClose.current?.focus();
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        closeMobileNav();
+    .filter(item => {
+      if (isAdmin && !canManageEmployees && (item.slug === 'staff' || item.slug === 'alerts')) {
+        return false;
       }
-    }
-    document.addEventListener('keydown', closeOnEscape);
-    function containFocus(event: FocusEvent) {
-      if (window.matchMedia?.('(min-width: 721px)').matches) return;
-      if (!sidebarElement.current?.contains(event.target as Node)) mobileNavClose.current?.focus();
-    }
-    document.addEventListener('focusin', containFocus);
-    return () => {
-      document.removeEventListener('keydown', closeOnEscape);
-      document.removeEventListener('focusin', containFocus);
-    };
-  }, [mobileNavOpen]);
-
-  useEffect(() => {
-    const desktop = window.matchMedia?.('(min-width: 721px)');
-    if (!desktop) return;
-    function resetForDesktop(event: MediaQueryListEvent | MediaQueryList) {
-      if (event.matches) closeMobileNav();
-    }
-    resetForDesktop(desktop);
-    desktop.addEventListener?.('change', resetForDesktop);
-    return () => desktop.removeEventListener?.('change', resetForDesktop);
-  }, [mobileNavOpen]);
-
-  useEffect(() => {
-    function syncTheme() {
-      const theme = document.documentElement.dataset.theme;
-      if (theme) {
-        setDark(theme === 'dark');
-      } else {
-        setDark(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
+      return true;
+    })
+    .map(item => {
+      let label = item.roleLabels?.[role] ?? item.label;
+      if (isAdmin && item.slug === 'staff') {
+        label = 'Personal';
       }
-    }
-    const observer = new MutationObserver(syncTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
+      return {
+        ...item,
+        label,
+        to: rolePath(role, item.slug),
+        icon: item.slug as ShellIconName,
+      };
+    });
 
-  function toggleTheme() {
-    const next = !dark;
-    setDark(next);
-    document.documentElement.dataset.theme = next ? 'dark' : 'light';
+  if (isAdmin && isOwner) {
+    navItems = [
+      ...navItems,
+      {
+        slug: 'permissions',
+        label: 'Permisos',
+        title: 'Gestión de permisos y roles',
+        to: '/owner/permissions',
+        icon: 'components' as ShellIconName,
+        roles: ['OWNER'],
+      },
+    ];
   }
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const next = formatCurrentTime();
-      setClockStr(prev => (prev === next ? prev : next));
-    }, 10000);
-    return () => clearInterval(timer);
-  }, []);
+  const items = navItems;
 
   useEffect(() => {
     if (!debugPerformance) return;
@@ -238,10 +165,30 @@ export function App() {
   }, [location.pathname]);
 
   function switchRole(next: Role) {
+    if (principal) return;
     setCatalogRole(next);
     const slug = location.pathname.split('/')[2];
     navigate(items.some(item => item.slug === slug) && navigation.find(item => item.slug === slug)?.roles.includes(next)
       ? rolePath(next, slug) : homePath(next));
+  }
+
+  const handleSignOut = async () => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('evogym:demo-mode');
+      }
+      if (access) {
+        await access.exit();
+      }
+    } catch {
+      // safe fallback
+    } finally {
+      navigate('/profiles');
+    }
+  };
+
+  if (principal && (location.pathname === '/' || location.pathname === '/login' || location.pathname === '/profiles')) {
+    return <Navigate to={homePath(role)} replace />;
   }
 
   if (location.pathname === '/' || location.pathname === '/login') return <RouteBoundary key="login"><Login /></RouteBoundary>;
@@ -249,189 +196,76 @@ export function App() {
   if (location.pathname === '/profiles') return <RouteBoundary key="profiles"><StaffProfileSelection /></RouteBoundary>;
   if (location.pathname === '/pair') return <RouteBoundary key="pair"><DevicePairingView /></RouteBoundary>;
 
-  return <div className="app-shell" onTouchStart={event => {
-    touchStart.current = null;
-    if (event.touches.length !== 1) return;
-    const target = event.target as HTMLElement;
-    if ((window.getSelection()?.toString().length ?? 0) > 0 || target.closest('input, textarea, select, button, a, [contenteditable="true"], [data-horizontal-scroll], .animated-list__viewport, [role="listbox"], [role="dialog"]')) return;
-    const touch = event.touches[0];
-    touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
-  }} onTouchCancel={() => { touchStart.current = null; }} onTouchEnd={event => {
-    const start = touchStart.current;
-    touchStart.current = null;
-    if (event.touches.length > 0 || event.changedTouches.length !== 1 || (window.getSelection()?.toString().length ?? 0) > 0) return;
-    const touch = event.changedTouches[0];
-    if (!start || !touch) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-    if (dx > 0 && start.x >= 24 && start.x <= 48) setMobileNavOpen(true);
-  }}>
-    <a href="#main-content" className="skip-link" inert={mobileNavOpen}>Ir al contenido</a>
-    {mobileNavOpen && <div className="mobile-nav-backdrop" aria-hidden="true" onClick={closeMobileNav} />}
-    <aside ref={sidebarElement} className="sidebar" aria-label={mobileNavOpen ? 'Navegación principal' : 'Barra lateral'} role={mobileNavOpen ? 'dialog' : undefined} aria-modal={mobileNavOpen ? true : undefined} data-mobile-open={mobileNavOpen} data-expanded={sidebarExpanded} onClickCapture={event => {
-      if (!(event.target instanceof Element)) return;
-      const link = event.target.closest('a');
-      if (debugPerformance && link) console.info('[evogym:perf] Sidebar navigation click', {
-        from: location.pathname,
-        to: link.pathname,
-        label: link.getAttribute('aria-label') ?? link.textContent?.trim(),
-      });
-      if (link) closeMobileNav();
-    }} onKeyDownCapture={event => {
-      if (mobileNavOpen && event.key === 'Tab') {
-        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
-          .filter(element => element.tabIndex >= 0);
-        if (focusable.length === 0) event.preventDefault();
-        else {
-          const first = focusable[0];
-          const last = focusable[focusable.length - 1];
-          if (event.shiftKey && (document.activeElement === first || !event.currentTarget.contains(document.activeElement))) {
-            event.preventDefault(); last.focus();
-          } else if (!event.shiftKey && (document.activeElement === last || !event.currentTarget.contains(document.activeElement))) {
-            event.preventDefault(); first.focus();
-          }
-        }
-      }
-      isPointerRef.current = false;
-      if (event.currentTarget.contains(document.activeElement)) setSidebarFocused(true);
-    }} onPointerDownCapture={() => {
-      isPointerRef.current = true;
-      setSidebarFocused(false);
-    }} onMouseEnter={() => setSidebarHovered(true)} onMouseLeave={() => {
-      setSidebarHovered(false);
-      if (isPointerRef.current) setSidebarFocused(false);
-    }} onFocus={event => {
-      if (isPointerRef.current) return;
-      if ((event.target as HTMLElement)?.matches?.(':focus-visible')) {
-        setSidebarFocused(true);
-      }
-    }} onBlur={event => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-        setSidebarFocused(false);
-      }
+  const shellItems = items.map(item => ({ label: item.label, to: item.to ?? rolePath(role, item.slug), icon: item.icon ?? item.slug as ShellIconName }));
+  const sidebarBottomItems = [
+    { label: 'Cambiar perfil', to: '/profiles', icon: 'profile' as const },
+    ...(principal ? [{ label: 'Cerrar sesión', icon: 'profile' as const, onClick: () => void handleSignOut() }] : []),
+    { label: 'Sistema de componentes', to: '/components', icon: 'components' as const },
+  ];
+  const headerContent = <>
+    <MemberSearch key={`${resetVersion}-${role}`} role={role} />
+    <Link to={rolePath(role, 'members/new')} className="button button-primary header-new-btn" aria-label="Agregar socio" title="Registrar socio">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+      <span>Nuevo</span>
+    </Link>
+  </>;
+  const headerActionsBeforeTheme = <>
+    <Button id="global-shift-button" variant="secondary" className={`header-action-control header-shift-control ${hasActiveShift ? 'is-shift-open' : 'is-shift-closed'}`}
+      onClick={() => hasActiveShift ? setGlobalClosingOpen(true) : setGlobalOpeningOpen(true)} title={hasActiveShift ? 'Cerrar turno activo' : 'Abrir nuevo turno'}>
+      <span className="header-shift-dot" aria-hidden="true" /><span>{hasActiveShift ? 'Cerrar' : 'Abrir'}</span>
+    </Button>
+    <div className="header-action-control header-clock-control" aria-label="Hora actual" title="Hora actual">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+      <span>{new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())} hrs</span>
+    </div>
+  </>;
+  const headerActionsAfterTheme = <>
+    {principal ? (
+      <div className="header-action-control header-user-info" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+        <strong>{principal.identity.display_name}</strong>
+        {principal.kind === 'employee' && <span className="muted">{principal.branch.branch_name}</span>}
+      </div>
+    ) : (
+      <Link to="/profiles" tabIndex={-1} className="header-action-control header-profile-btn" title="Cambiar perfil">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg><span>Perfil</span>
+      </Link>
+    )}
+    <Button variant="secondary" className="header-action-control header-signout-btn" onClick={() => void handleSignOut()}>
+      Cerrar sesión
+    </Button>
+  </>;
+  const beforeMain = <>
+    {globalOpeningOpen && <ShiftOpenModal isOpen={globalOpeningOpen} state={state} onClose={() => setGlobalOpeningOpen(false)} onConfirm={data => {
+      const id = `shift-${crypto.randomUUID()}`;
+      transact(currentState => openShift(currentState, { id, window: data.window, openingCashMinor: data.openingCashMinor, cashDenominations: data.cashDenominations,
+        openingCashDenominations: data.cashDenominations, responsibleStaffId: data.responsibleStaffId, responsibleStaffName: data.responsibleStaffName,
+        stockAdjustments: data.stockAdjustments, counts: data.counts }));
+      setGlobalOpeningOpen(false);
+    }} />}
+    {globalClosingOpen && currentActiveShift && shiftSummaryData && <ShiftCloseDialog key={currentActiveShift.id} isOpen={globalClosingOpen} shiftId={currentActiveShift.id}
+      shiftName={activeShiftName} expectedCashMinor={shiftSummaryData.expectedCashMinor} expectedCashBreakdown={globalExpectedCashBreakdown}
+      onClose={() => setGlobalClosingOpen(false)} onSuccess={() => setGlobalClosingOpen(false)} />}
+    <PwaInstallPrompt />
+  </>;
+  const footer = !principal ? <footer className="workspace-footer sr-only">
+    <div className="demo-footer-card"><div className="demo-bar-info"><strong>Datos locales</strong><p>El selector cambia la vista activa; la autenticación y los permisos no están implementados.</p></div>
+      <div className="demo-controls"><label htmlFor="demo-role">Rol de acceso<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
+        <Button variant="secondary" onClick={() => { reset(); setMessage('Datos locales restablecidos.'); }}>Restablecer datos</Button>
+      </div>
+    </div>
+    <p className="reset-status" role="status" aria-label="Resultado local">{message}</p>
+    <p className="workspace-footer-note">Datos en memoria · Las fechas registradas no determinan el acceso.</p>
+  </footer> : null;
+
+  return <ApplicationShell items={shellItems} brandTo={homePath(role)} caption={principal ? 'Acceso verificado' : (role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción')}
+    headerContent={headerContent} headerActionsBeforeTheme={headerActionsBeforeTheme} headerActionsAfterTheme={headerActionsAfterTheme}
+    sidebarBottomItems={sidebarBottomItems} beforeMain={beforeMain} afterMain={<GimiChatWidget role={role} />} footer={footer} debugPerformance={debugPerformance}>
+    <Profiler id="route-content" onRender={(id, phase, actualDuration, baseDuration) => {
+      if (!debugPerformance) return;
+      console.info('[evogym:perf] React route commit', { profilerId: id, route: location.pathname, phase,
+        actualDurationMs: Math.round(actualDuration * 100) / 100, baseDurationMs: Math.round(baseDuration * 100) / 100 });
     }}>
-      <div className="sidebar-head"><Link className="brand" to={homePath(role)} title="EvoGym"><img src={logo} alt="EvoGym" width={128} height={124} /><span aria-hidden="true">EvoGym</span></Link>
-        <button ref={mobileNavClose} className="mobile-nav-close" type="button" tabIndex={mobileNavOpen ? 0 : -1} aria-label="Cerrar navegación" onClick={closeMobileNav}>×</button>
-        <button className="sidebar-toggle" type="button" aria-label={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'} aria-pressed={sidebarPinned} aria-expanded={sidebarExpanded} onClick={() => setSidebarPinned(value => !value)} title={sidebarPinned ? 'Liberar barra lateral' : 'Fijar barra lateral'}><span aria-hidden="true">{sidebarPinned ? '‹' : '›'}</span></button></div>
-      <p className="sidebar-caption">{role === 'OWNER' ? 'Vista de propietario' : 'Vista de recepción'}</p>
-      <nav aria-label="Navegación principal">{items.map(item => <NavLink key={item.slug} to={rolePath(role, item.slug)} aria-label={item.label} title={item.label} onClick={() => setMobileNavOpen(false)}><NavIcon name={item.slug} /><span className="sidebar-label" aria-hidden="true">{item.label}</span></NavLink>)}{role === 'RECEPTION' && <NavLink to="/reception/live" aria-label="Recepción operativa" title="Recepción operativa"><NavIcon name="members" /><span className="sidebar-label" aria-hidden="true">Recepción operativa</span></NavLink>}</nav>
-      <div className="sidebar-bottom"><Link to="/profiles" aria-label="Cambiar perfil" title="Cambiar perfil"><NavIcon name="profile" /><span className="sidebar-label" aria-hidden="true">Cambiar perfil</span></Link><Link to="/components" aria-label="Sistema de componentes" title="Sistema de componentes"><NavIcon name="components" /><span className="sidebar-label" aria-hidden="true">Sistema de componentes</span></Link></div>
-    </aside>
-    <div className="workspace" inert={mobileNavOpen}>
-      <header className="demo-bar">
-        <button ref={mobileNavOpener} className="mobile-brand-opener" type="button" aria-label="Abrir navegación" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><img src={logo} alt="" width={32} height={32} /></button>
-        <div className="header-left-spacer" aria-hidden="true" />
-        <div className="header-search-group">
-          <MemberSearch key={`${resetVersion}-${role}`} role={role} />
-          <Link
-            to={rolePath(role, 'members/new')}
-            className="button button-primary header-new-btn"
-            aria-label="Agregar socio"
-            title="Registrar socio"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>Nuevo</span>
-          </Link>
-        </div>
-        <div className="header-actions">
-          <Button
-            id="global-shift-button"
-            variant="secondary"
-            className={`header-action-control header-shift-control ${hasActiveShift ? 'is-shift-open' : 'is-shift-closed'}`}
-            onClick={() => {
-              if (hasActiveShift) {
-                setGlobalClosingOpen(true);
-              } else {
-                setGlobalOpeningOpen(true);
-              }
-            }}
-            title={hasActiveShift ? 'Cerrar turno activo' : 'Abrir nuevo turno'}
-          >
-            <span className="header-shift-dot" aria-hidden="true" />
-            <span>{hasActiveShift ? 'Cerrar' : 'Abrir'}</span>
-          </Button>
-
-          <div className="header-action-control header-clock-control" aria-label="Hora actual" title="Hora actual">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-            <span>{clockStr}</span>
-          </div>
-
-          <Button
-            variant="secondary"
-            className="header-action-control header-icon-control theme-toggle"
-            aria-pressed={dark}
-            onClick={toggleTheme}
-            aria-label={dark ? 'Usar tema claro' : 'Usar tema oscuro'}
-            title={dark ? 'Usar tema claro' : 'Usar tema oscuro'}
-          >
-            <span className="theme-toggle-icon" aria-hidden="true">
-              {dark ? <SunIcon /> : <MoonIcon />}
-            </span>
-          </Button>
-
-          <Link to="/profiles" tabIndex={-1} className="header-action-control header-profile-btn" title="Cambiar perfil">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="8" r="4" />
-              <path d="M4 21a8 8 0 0 1 16 0" />
-            </svg>
-            <span>Perfil</span>
-          </Link>
-        </div>
-      </header>
-      {globalOpeningOpen && (
-        <ShiftOpenModal
-          isOpen={globalOpeningOpen}
-          state={state}
-          onClose={() => setGlobalOpeningOpen(false)}
-          onConfirm={data => {
-            const id = `shift-${crypto.randomUUID()}`;
-            transact(currentState => openShift(currentState, {
-              id,
-              window: data.window,
-              openingCashMinor: data.openingCashMinor,
-              cashDenominations: data.cashDenominations,
-              openingCashDenominations: data.cashDenominations,
-              responsibleStaffId: data.responsibleStaffId,
-              responsibleStaffName: data.responsibleStaffName,
-              stockAdjustments: data.stockAdjustments,
-              counts: data.counts,
-            }));
-            setGlobalOpeningOpen(false);
-          }}
-        />
-      )}
-      {globalClosingOpen && currentActiveShift && shiftSummaryData && (
-        <ShiftCloseDialog
-          key={currentActiveShift.id}
-          isOpen={globalClosingOpen}
-          shiftId={currentActiveShift.id}
-          shiftName={activeShiftName}
-          expectedCashMinor={shiftSummaryData.expectedCashMinor}
-          expectedCashBreakdown={globalExpectedCashBreakdown}
-          onClose={() => setGlobalClosingOpen(false)}
-          onSuccess={() => setGlobalClosingOpen(false)}
-        />
-      )}
-      <PwaInstallPrompt />
-      <main id="main-content" tabIndex={-1}>
-        <Profiler id="route-content" onRender={(id, phase, actualDuration, baseDuration) => {
-          if (!debugPerformance) return;
-          console.info('[evogym:perf] React route commit', {
-            profilerId: id,
-            route: location.pathname,
-            phase,
-            actualDurationMs: Math.round(actualDuration * 100) / 100,
-            baseDurationMs: Math.round(baseDuration * 100) / 100,
-          });
-        }}>
-        <RouteBoundary key={location.pathname}>
+      <RouteBoundary key={location.pathname}>
         <Routes>
           <Route path="/reception/home" element={<ReceptionHome key={resetVersion} />} />
           <Route path="/reception/staff" element={<StaffAttendanceView key={resetVersion} />} />
@@ -450,30 +284,14 @@ export function App() {
             <Route path="/owner/attendance" element={<AttendanceAnalytics key={resetVersion} />} />
             <Route path="/owner/expenses" element={<ExpenseReport key={resetVersion} />} />
             <Route path="/owner/staff" element={<StaffManagement key={resetVersion} />} />
+            <Route path="/owner/permissions" element={<OwnerManagementPage request={adminSession?.request ?? (async () => new Response('{}'))} />} />
             <Route path="/owner/history" element={<History key={resetVersion} />} />
             <Route path="/owner/plans" element={<PlanCatalog />} />
             <Route path="/owner/gimi" element={<GimiDashboard key={resetVersion} />} />
           </>}
           <Route path="*" element={<Navigate to={homePath(role)} replace />} />
         </Routes>
-        </RouteBoundary>
-        </Profiler>
-      </main>
-      <GimiChatWidget role={role} />
-      <footer className="workspace-footer sr-only">
-        <div className="demo-footer-card">
-          <div className="demo-bar-info">
-          <strong>Datos locales</strong>
-            <p>El selector cambia la vista activa; la autenticación y los permisos no están implementados.</p>
-          </div>
-          <div className="demo-controls">
-            <label htmlFor="demo-role">Rol de acceso<select id="demo-role" value={role} onChange={event => switchRole(event.target.value as Role)}><option value="OWNER">OWNER · Propietario</option><option value="RECEPTION">RECEPTION · Recepción</option></select></label>
-            <Button variant="secondary" onClick={() => { reset(); setMessage('Datos locales restablecidos.'); }}>Restablecer datos</Button>
-          </div>
-        </div>
-        <p className="reset-status" role="status" aria-label="Resultado local">{message}</p>
-        <p className="workspace-footer-note">Datos en memoria · Las fechas registradas no determinan el acceso.</p>
-      </footer>
-    </div>
-  </div>;
+      </RouteBoundary>
+    </Profiler>
+  </ApplicationShell>;
 }

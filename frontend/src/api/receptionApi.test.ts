@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearOperationalToken, getReceptionConfig, getReceptionMember, readOperationalToken, searchReceptionMembers, signInReception } from './receptionApi';
+import { clearOperationalToken, getReceptionConfig, getReceptionMember, readOperationalToken, searchReceptionMembers, signInReception, OperationalApiHttpError, OperationalApiNetworkError } from './receptionApi';
 
 const branchId = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => { sessionStorage.clear(); vi.unstubAllEnvs(); vi.stubEnv('VITE_API_BASE_URL', 'https://gym.example'); vi.stubEnv('VITE_BRANCH_ID', branchId); vi.restoreAllMocks(); });
@@ -37,5 +37,31 @@ describe('reception API', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 401 }));
     await expect(signInReception('desk', 'wrong')).rejects.toThrow(/Credenciales inválidas/);
     expect(readOperationalToken()).toBeNull();
+  });
+
+  it('exposes safe typed HTTP metadata and request IDs for reception failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: { code: 'SESSION_REVOKED', message: 'secret backend traceback', request_id: 'req-body' } }), { status: 401, headers: { 'X-Request-ID': 'req-header' } }));
+    await expect(searchReceptionMembers('A', 'opaque')).rejects.toMatchObject({
+      kind: 'http', status: 401, code: 'SESSION_REVOKED', requestId: 'req-header',
+      message: expect.not.stringContaining('secret backend traceback'),
+    });
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('socket details'));
+    await expect(searchReceptionMembers('A', 'opaque')).rejects.toBeInstanceOf(OperationalApiNetworkError);
+  });
+
+  it('maps authority, retry, server, and validation failures without leaking response details', async () => {
+    for (const status of [403, 429, 500, 422]) {
+      const issues = Array.from({ length: 21 }, (_, index) => ({ location: ['body', 'password-field'], type: index === 0 ? 'string_type' : 'unknown-internal-type', input: 'secret value', message: 'private detail' }));
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'internal database secret', issues, request_id: `req-${status}` } }), { status }));
+      const error = await searchReceptionMembers('A', 'opaque').catch((reason: unknown) => reason);
+      expect(error).toMatchObject({
+        status, requestId: `req-${status}`, message: expect.not.stringContaining('internal database secret'),
+      });
+      if (status === 422) {
+        expect(error).toMatchObject({ issues: Array.from({ length: 20 }, (_, index) => ({ location: ['body'], type: index === 0 ? 'string_type' : 'invalid' })) });
+        expect(JSON.stringify(error)).not.toContain('secret value');
+        expect(JSON.stringify(error)).not.toContain('private detail');
+      }
+    }
   });
 });

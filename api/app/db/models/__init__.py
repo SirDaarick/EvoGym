@@ -1,10 +1,13 @@
 from sqlalchemy import CheckConstraint
 
 from app.db.models.authorization import Branch, RoleGrant
+from app.db.models.role_bundle import OrganizationOwner, RoleBundle, RoleBundlePermission, RoleBundleAssignment
 from app.db.models.audit import AuditEvent
 from app.db.models.admin import AdminAuthEvent, AdminPasswordCredential
+from app.db.models.admin_devices import AdminLoginApproval, AdminTrustedDevice
 from app.db.models.recovery import AdminRecoveryToken
 from app.db.models.sessions import StaffSession
+from app.db.models.reception_stations import ReceptionStation
 from app.db.models.staff import SecurityEvent, StaffCredential, StaffUser
 from app.db.models.staff_roster import StaffRosterProfile
 from app.db.models.staff_attendance import StaffAttendanceCheckout, StaffAttendanceRecord
@@ -36,6 +39,8 @@ if _old_ck:
     AdminAuthEvent.__table__.append_constraint(
         CheckConstraint(
             "action IN ('admin_password_login_succeeded', 'admin_password_recovered', 'admin_session_revoked', "
+            "'admin_device_approval_requested', 'admin_device_approved', 'admin_trusted_device_revoked', "
+            "'admin_session_replaced', 'admin_refresh_reuse_detected', "
             "'enrollment_code_issued', 'enrollment_code_revoked', 'device_pairing_code_issued', 'device_paired', 'device_revoked')",
             name="ck_admin_auth_events_action",
         )
@@ -44,7 +49,9 @@ if _old_ck:
 __all__ = [
     "AdminAuthEvent",
     "AdminPasswordCredential",
+    "AdminLoginApproval",
     "AdminRecoveryToken",
+    "AdminTrustedDevice",
     "AuditEvent",
     "Branch",
     "CashRegister",
@@ -70,6 +77,10 @@ __all__ = [
     "PlanVersion",
     "PlanVersionService",
     "RoleGrant",
+    "OrganizationOwner",
+    "RoleBundle",
+    "RoleBundlePermission",
+    "RoleBundleAssignment",
     "SecurityEvent",
     "Service",
     "Shift",
@@ -83,6 +94,7 @@ __all__ = [
     "StaffEnrollmentCode",
     "StaffPairedDevice",
     "StaffSession",
+    "ReceptionStation",
     "StaffRosterProfile",
     "StaffAttendanceRecord",
     "StaffAttendanceCheckout",

@@ -4,7 +4,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 from app.db.models import Branch, CashRegister, Product, RegisterInventorySnapshot, RegisterInventorySnapshotItem, StockInitialization, StaffSession, StaffUser
 from app.db.models import RoleGrant, StaffCredential
 from app.auth.hashing import hash_pin
@@ -21,12 +22,12 @@ def test_admin_can_create_piece_product_without_creating_stock(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine)
     actor_id = seed_admin(factory)
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            login = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"})
-            token = login.json()["access_token"]
-            response = client.post("/api/v1/inventory/products", headers={"Authorization": f"Bearer {token}"}, json={"code": "  gloves  ", "name": "  Training gloves  ", "unit": "piece"})
+            headers = approved_admin_headers(client, delivery)
+            response = client.post("/api/v1/inventory/products", headers=headers, json={"code": "  gloves  ", "name": "  Training gloves  ", "unit": "piece"})
         assert response.status_code == 201
         product = response.json()
         assert product["code"] == "gloves" and product["unit"] == "piece"
@@ -65,12 +66,12 @@ def test_inventory_requires_admin_and_reports_missing_stock_as_null(tmp_path):
         session.add(product)
         session.flush()
         product_id = product.id
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
             assert client.get(f"/api/v1/inventory/branches/{branch_id}/stock").status_code == 401
-            token = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"}).json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = approved_admin_headers(client, delivery)
             empty = client.get(f"/api/v1/inventory/branches/{branch_id}/stock", headers=headers).json()
             assert empty["items"][0]["initialized"] is False and empty["items"][0]["quantity"] is None
             created = client.post(f"/api/v1/inventory/branches/{branch_id}/initializations", headers=headers, json={"product_id": str(product_id), "quantity": 0})
@@ -108,11 +109,11 @@ def test_product_normalization_rejects_unrepresentable_values_without_writing(tm
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine)
     seed_admin(factory)
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            token = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"}).json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = approved_admin_headers(client, delivery)
             invalid_payloads = [
                 {"code": "ß" * 64, "name": "Test"},
                 {"code": "nul\u0000code", "name": "Test"},
@@ -148,7 +149,8 @@ def test_receptionist_cannot_create_products(tmp_path):
                          StaffCredential(staff_id=staff.id, method="pin", secret_hash=hash_pin("1234"))])
     token = issue_session(factory, "reception@example.invalid", "1234", branch_id,
                           datetime.now(timezone.utc) + timedelta(hours=1)).token
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
             response = client.post("/api/v1/inventory/products", headers={"Authorization": f"Bearer {token}"},
@@ -179,16 +181,14 @@ def test_register_inventory_snapshot_capture_route_exists(tmp_path):
         session.rollback()
     with factory() as session:
         assert session.query(RegisterInventorySnapshot).count() == 0
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            token = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            ).json()["access_token"]
+            headers = approved_admin_headers(client, delivery)
             response = client.post(
                 f"/api/v1/registers/{register_id}/inventory-snapshots",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
             )
         assert response.status_code == 201
     finally:
@@ -221,14 +221,11 @@ def test_snapshot_captures_complete_catalog_and_keeps_historical_values(tmp_path
         register_id = register.id
         first_product_id, second_product_id = products[0].id, products[1].id
 
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            token = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            ).json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = approved_admin_headers(client, delivery)
             captured = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
             assert captured.status_code == 201
             first = captured.json()
@@ -287,14 +284,11 @@ def test_snapshot_empty_catalog_is_classified_without_authorizing_review(tmp_pat
         session.add(register)
         session.flush()
         register_id, branch_id = register.id, branch.id
-    app = create_app(configured_settings(url))
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            token = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            ).json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = approved_admin_headers(client, delivery)
             response = client.post(f"/api/v1/registers/{register_id}/inventory-snapshots", headers=headers)
             assert response.status_code == 201
             assert response.json()["source_state"] == "empty_catalog"

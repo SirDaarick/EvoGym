@@ -6,7 +6,8 @@ from sqlalchemy import event, select
 
 from app.db.models import StaffRosterProfile, StaffUser
 from app.main import create_app
-from test_admin_auth import configured_settings
+from test_admin_auth import FakeRecoveryDelivery, configured_settings
+from admin_session_helpers import approved_admin_headers
 from test_staff_roster import _setup
 
 
@@ -80,11 +81,9 @@ def test_attendance_authority_and_inactive_roster_protection(tmp_path):
     url, engine, factory, branch_a_id, branch_b_id, desk_token, branch_admin_token = _setup(tmp_path)
     profile_id, unmarked_id, other_profile_id, inactive_id = _create_profiles(factory, branch_a_id, branch_b_id)
     try:
-        with TestClient(create_app(configured_settings(url))) as client:
-            admin_token = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            }).json()["access_token"]
-            admin = {"Authorization": f"Bearer {admin_token}"}
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin = approved_admin_headers(client, delivery)
             branch_admin = {"Authorization": f"Bearer {branch_admin_token}"}
             desk = {"Authorization": f"Bearer {desk_token}"}
             mark = client.post(

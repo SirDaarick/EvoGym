@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from app.auth.admin import authenticate_admin
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session, revoke_session
 from app.db.base import Base
@@ -36,7 +35,8 @@ from app.members.queries import (
 )
 from app.members.schemas import CreateMemberDTO, UpdateMemberDTO
 from sqlalchemy.exc import IntegrityError
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 
 
 def _setup_db(tmp_path):
@@ -284,6 +284,25 @@ def test_members_api_unauthenticated_and_invalid_bearer(tmp_path):
         app = create_app(configured_settings(url))
 
         with TestClient(app) as client:
+            mutation_payload = {
+                "member_number": "AUTH-DENIED-01",
+                "full_name": "Unauthorized Create",
+                "phone": "555-000-0000",
+            }
+            member_path = f"/api/v1/members/{member_id}"
+
+            # Missing and invalid credentials must not create or update members.
+            for headers in (None, {"Authorization": "Bearer not-a-valid-token"}):
+                create_response = client.post("/api/v1/members", headers=headers, json=mutation_payload)
+                assert create_response.status_code == 401
+                patch_response = client.patch(member_path, headers=headers, json={"full_name": "Unauthorized Update"})
+                assert patch_response.status_code == 401
+
+            with factory() as session:
+                assert session.scalar(select(func.count()).select_from(Member)) == len(members)
+                unchanged = session.get(Member, member_id)
+                assert unchanged.full_name == "Carlos Gomez"
+
             # 1. No Authorization header -> 401
             assert client.get("/api/v1/members").status_code == 401
             assert client.get(f"/api/v1/members/{member_id}").status_code == 401
@@ -296,7 +315,18 @@ def test_members_api_unauthenticated_and_invalid_bearer(tmp_path):
 
             # 4. Revoked session token -> 401
             revoke_session(factory, token)
-            assert client.get("/api/v1/members", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+            revoked_headers = {"Authorization": f"Bearer {token}"}
+            assert client.get("/api/v1/members", headers=revoked_headers).status_code == 401
+            assert client.get(f"/api/v1/members/{member_id}", headers=revoked_headers).status_code == 401
+
+            create_response = client.post("/api/v1/members", headers=revoked_headers, json=mutation_payload)
+            assert create_response.status_code == 401
+            patch_response = client.patch(member_path, headers=revoked_headers, json={"full_name": "Revoked Update"})
+            assert patch_response.status_code == 401
+            with factory() as session:
+                assert session.scalar(select(func.count()).select_from(Member)) == len(members)
+                unchanged = session.get(Member, member_id)
+                assert unchanged.full_name == "Carlos Gomez"
     finally:
         engine.dispose()
 
@@ -420,17 +450,16 @@ def test_d012_staff_access_scope_notes_redaction_vs_admin_access(tmp_path):
         branch_id = _seed_branch(factory)
         _staff_id, recep_token = _seed_receptionist(factory, branch_id)
         admin_id = seed_admin(factory, "owner@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "owner@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
         members = _seed_sample_members(factory)
         # SOC-0002 has confidential notes: "VIP gold tier member; confidential medical note."
         vip_member = members[1]
         assert vip_member.notes is not None
 
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
             # 1. Receptionist request -> notes must be null
             recep_res = client.get(
                 f"/api/v1/members/{vip_member.id}",
@@ -445,7 +474,7 @@ def test_d012_staff_access_scope_notes_redaction_vs_admin_access(tmp_path):
             # 2. Admin request -> notes must be fully visible
             admin_res = client.get(
                 f"/api/v1/members/{vip_member.id}",
-                headers={"Authorization": f"Bearer {admin_token}"},
+                headers=admin_headers,
             )
             assert admin_res.status_code == 200
             admin_data = admin_res.json()
@@ -455,7 +484,7 @@ def test_d012_staff_access_scope_notes_redaction_vs_admin_access(tmp_path):
             # 3. Admin listing members
             admin_list = client.get(
                 "/api/v1/members",
-                headers={"Authorization": f"Bearer {admin_token}"},
+                headers=admin_headers,
             )
             assert admin_list.status_code == 200
             assert admin_list.json()["total"] == 5
@@ -577,17 +606,15 @@ def test_member_notes_api_endpoints_and_access_control(tmp_path):
         branch_id = _seed_branch(factory)
         _staff_id, recep_token = _seed_receptionist(factory, branch_id)
         seed_admin(factory, "owner@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "owner@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
         members = _seed_sample_members(factory)
         member = members[0]
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         recep_headers = {"Authorization": f"Bearer {recep_token}"}
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
             # 1. Receptionist is forbidden from accessing note endpoints (403)
             res_r_get = client.get(f"/api/v1/members/{member.id}/notes", headers=recep_headers)
             assert res_r_get.status_code == 403
@@ -731,17 +758,15 @@ def test_member_eligibility_api_endpoints_and_access_control(tmp_path):
         branch_id = _seed_branch(factory)
         _staff_id, recep_token = _seed_receptionist(factory, branch_id)
         seed_admin(factory, "owner@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "owner@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
         members = _seed_sample_members(factory)
         member = members[0]
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         recep_headers = {"Authorization": f"Bearer {recep_token}"}
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
             # 1. Receptionist cannot create eligibility records (403 Forbidden)
             res_r_create = client.post(
                 f"/api/v1/members/{member.id}/eligibility",
@@ -856,11 +881,8 @@ def test_create_member_with_full_data_and_admin_notes(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
         seed_admin(factory, "admin@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "admin@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
-        app = create_app(configured_settings(url))
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         payload = {
             "member_number": "MEM-FULL-01",
@@ -877,6 +899,7 @@ def test_create_member_with_full_data_and_admin_notes(tmp_path):
         }
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "admin@example.invalid", "super-secret-password")
             res = client.post("/api/v1/members", headers=admin_headers, json=payload)
             assert res.status_code == 201
             data = res.json()
@@ -1080,9 +1103,6 @@ def test_update_member_patch_endpoint(tmp_path):
         branch_id = _seed_branch(factory)
         _staff_id, recep_token = _seed_receptionist(factory, branch_id)
         seed_admin(factory, "admin@example.invalid", "super-secret-password")
-        admin_token_obj = authenticate_admin(factory, "admin@example.invalid", "super-secret-password", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
         m_id = uuid4()
         with factory.begin() as session:
             member = Member(
@@ -1097,11 +1117,12 @@ def test_update_member_patch_endpoint(tmp_path):
             )
             session.add(member)
 
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
         recep_headers = {"Authorization": f"Bearer {recep_token}"}
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "admin@example.invalid", "super-secret-password")
             # 1. Receptionist updates full_name, phone, and status
             patch_data = {
                 "full_name": "Updated Name",

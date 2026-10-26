@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, Uuid, event, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -15,6 +15,7 @@ class AdminPasswordCredential(Base):
         UniqueConstraint("staff_id", name="uq_admin_password_staff"),
         CheckConstraint("failed_attempts >= 0", name="ck_admin_password_failed_attempts"),
         CheckConstraint("length(password_hash) >= 50", name="ck_admin_password_hash_nonempty"),
+        Index("uq_admin_password_single_owner", "is_owner", unique=True, sqlite_where=text("is_owner = 1"), postgresql_where=text("is_owner")),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -22,6 +23,7 @@ class AdminPasswordCredential(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     recovery_email: Mapped[str] = mapped_column(String(320), nullable=False)
     recovery_email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     failed_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

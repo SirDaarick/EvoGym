@@ -1,5 +1,6 @@
 from typing import Literal
 from urllib.parse import urlsplit
+from pathlib import Path
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     )
     debug: bool = False
     database_url: SecretStr | None = None
+    admin_token_signing_secret: SecretStr | None = None
     admin_session_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
     staff_session_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
     admin_lockout_attempts: int | None = Field(default=None, ge=1, le=5)
@@ -31,9 +33,10 @@ class Settings(BaseSettings):
     auth_rate_limit_requests: int | None = Field(default=None, ge=1, le=10000)
     auth_request_max_bytes: int | None = Field(default=None, ge=256, le=65536)
     auth_max_concurrent_hashes: int | None = Field(default=None, ge=1, le=32)
-    admin_recovery_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
+    admin_recovery_ttl_seconds: int | None = Field(default=None, ge=1800, le=1800)
     admin_recovery_base_url: str | None = None
     cors_allowed_origins: str | None = Field(default=None)
+    operational_security_log_directory: Path | None = Field(default=None)
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":
@@ -53,6 +56,10 @@ class Settings(BaseSettings):
             self.auth_rate_limit_requests, self.auth_request_max_bytes,
             self.auth_max_concurrent_hashes,
         ))
+
+    @property
+    def admin_token_signing_configured(self) -> bool:
+        return self.admin_token_signing_secret is not None and len(self.admin_token_signing_secret.get_secret_value()) >= 32
 
     @property
     def admin_recovery_configured(self) -> bool:

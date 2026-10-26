@@ -11,7 +11,8 @@ from app.db.models import Member, MemberAccessDecision, MembershipPeriod, Paymen
 from app.memberships.eligibility import MembershipAccessStatus, evaluate_membership_access
 from app.main import create_app
 from app.shifts.queries import create_cash_register
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
 
 
@@ -43,12 +44,9 @@ def test_restore_binds_to_the_current_transfer_review_and_new_pending_review_res
                        denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
             member_id, version_id, register_id = member.id, version.id, register.id
 
-        with TestClient(create_app(configured_settings(url))) as client:
-            login = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            })
-            assert login.status_code == 201, login.text
-            admin_token = login.json()["access_token"]
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin_headers = approved_admin_headers(client, delivery)
             sale = client.post(f"/api/v1/registers/{register_id}/membership-transfer-sales",
                 headers={"Authorization": f"Bearer {receptionist_token}", "Idempotency-Key": "binding-sale"},
                 json={"member_id": str(member_id), "plan_version_id": str(version_id)})
@@ -59,12 +57,12 @@ def test_restore_binds_to_the_current_transfer_review_and_new_pending_review_res
             access_path = f"/api/v1/membership-access/periods/{period_id}/decisions"
             review_path = f"/api/v1/registers/transfer-payments/{payment_id}/review"
             preemptive = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "preemptive"},
+                headers={**admin_headers, "Idempotency-Key": "preemptive"},
                 json={"action": "restore", "reason": "No active restriction"})
             assert preemptive.status_code == 409
 
             pending = client.post(review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "review-pending-1"},
+                headers={**admin_headers, "Idempotency-Key": "review-pending-1"},
                 json={"status": "pending"})
             assert pending.status_code == 200, pending.text
             with factory() as session:
@@ -75,11 +73,11 @@ def test_restore_binds_to_the_current_transfer_review_and_new_pending_review_res
                 assert pending_event is not None
                 pending_event_id = pending_event.id
             restricted = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restrict-pending-1"},
+                headers={**admin_headers, "Idempotency-Key": "restrict-pending-1"},
                 json={"action": "restrict", "reason": "Review requires restriction"})
             assert restricted.status_code == 201, restricted.text
             restored = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-pending-1"},
+                headers={**admin_headers, "Idempotency-Key": "restore-pending-1"},
                 json={"action": "restore", "reason": "Admin verified the evidence"})
             assert restored.status_code == 201, restored.text
             assert restored.json()["lifted_payment_review_id"] == str(pending_event_id)
@@ -92,28 +90,28 @@ def test_restore_binds_to_the_current_transfer_review_and_new_pending_review_res
                 assert restored.json()["id"] == str(decisions[1].id)
                 assert evaluate_membership_access(session, period_id, starts_on, branch_id).allowed
             stale_restore = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-stale"},
+                headers={**admin_headers, "Idempotency-Key": "restore-stale"},
                 json={"action": "restore", "reason": "No new restriction exists"})
             assert stale_restore.status_code == 409
 
             renewed_restriction = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restrict-again"},
+                headers={**admin_headers, "Idempotency-Key": "restrict-again"},
                 json={"action": "restrict", "reason": "New restriction supersedes restoration"})
             assert renewed_restriction.status_code == 201, renewed_restriction.text
             with factory() as session:
                 decision = evaluate_membership_access(session, period_id, starts_on, branch_id)
                 assert not decision.allowed and decision.status is MembershipAccessStatus.BLOCKED_MISSING_FUNDS
             restored_again = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-again"},
+                headers={**admin_headers, "Idempotency-Key": "restore-again"},
                 json={"action": "restore", "reason": "Admin confirmed current restriction"})
             assert restored_again.status_code == 201, restored_again.text
 
             confirmed = client.post(review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "review-confirm-1"},
+                headers={**admin_headers, "Idempotency-Key": "review-confirm-1"},
                 json={"status": "confirmed"})
             assert confirmed.status_code == 200, confirmed.text
             later_pending = client.post(review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "review-pending-2"},
+                headers={**admin_headers, "Idempotency-Key": "review-pending-2"},
                 json={"status": "pending"})
             assert later_pending.status_code == 200, later_pending.text
             with factory() as session:

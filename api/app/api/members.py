@@ -60,14 +60,18 @@ def get_member_actor_principal(
 
     token = credentials.credentials
 
-    # 1. Check if Admin Bearer
-    try:
-        staff_id, _session_id = validate_admin_session(factory, token)
-        return MemberActorPrincipal(staff_id=staff_id, is_admin=True, branch_id=None)
-    except AuthorizationDenied:
-        pass
-    except (OperationalError, InterfaceError, TimeoutError):
-        raise HTTPException(503, "Authentication service unavailable.") from None
+    # 1. Check if Admin Bearer only when token verification is configured.
+    settings = request.app.state.settings
+    if settings.admin_auth_configured and settings.admin_token_signing_configured:
+        try:
+            staff_id, _session_id = validate_admin_session(
+                factory, token, settings.admin_token_signing_secret.get_secret_value()
+            )
+            return MemberActorPrincipal(staff_id=staff_id, is_admin=True, branch_id=None)
+        except AuthorizationDenied:
+            pass
+        except (OperationalError, InterfaceError, TimeoutError):
+            raise HTTPException(503, "Authentication service unavailable.") from None
 
     # 2. Check if Staff Bearer with Permission.MEMBER_OPERATIONAL_READ
     try:

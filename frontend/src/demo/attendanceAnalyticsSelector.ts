@@ -1,4 +1,5 @@
 import type { AttendanceVisit, Member } from '../domain/models';
+import { isDemoDataDisabled } from './adapter';
 import { attendanceDay, attendanceDuration, openAttendance } from './attendanceOperations';
 
 export type AttendancePeriod = 'today' | 'week' | 'month';
@@ -233,6 +234,7 @@ export function filterVisitsByPeriod(
 export function generateAttendanceRecommendations(summary: {
   liveOccupancyCount: number;
   liveOccupancyPercent: number;
+  totalVisits?: number;
   peakHour: { hour: number; label: string; visits: number; occupancyPercent: number };
   valleyHour: { hour: number; label: string; visits: number; occupancyPercent: number };
   busiestDay: { dayName: string; percent: number };
@@ -240,6 +242,21 @@ export function generateAttendanceRecommendations(summary: {
   timeSlots: OperationalTimeSlot[];
 }): BusinessInsight[] {
   const insights: BusinessInsight[] = [];
+
+  const totalEffectiveVisits = summary.totalVisits ?? summary.peakHour.visits;
+  if (totalEffectiveVisits === 0 && summary.liveOccupancyCount === 0) {
+    return [
+      {
+        id: 'no-traffic-recorded',
+        type: 'capacity',
+        title: 'Sin actividad de aforo registrada',
+        description: 'No se registran visitas ni socios en sala para el período seleccionado.',
+        recommendation: 'Conforme los socios registren sus entradas en recepción, se generarán automáticamente las métricas de horas pico, valles y recomendaciones operativas.',
+        urgency: 'info',
+        impact: 'Métricas limpias basadas exclusivamente en registros reales.',
+      },
+    ];
+  }
 
   // 1. Staffing insight for peak hours
   insights.push({
@@ -302,7 +319,7 @@ export function getAttendanceAnalytics(
   options?: AttendanceAnalyticsOptions
 ): AttendanceAnalyticsSummary {
   const capacity = options?.gymCapacity ?? GYM_CAPACITY;
-  const includeBaseline = options?.includeBaseline ?? true;
+  const includeBaseline = options?.includeBaseline ?? !isDemoDataDisabled();
 
   // 1. Live Occupants (currently inside gym: open attendance)
   const nowMs = Date.parse(currentClock);
@@ -427,11 +444,14 @@ export function getAttendanceAnalytics(
     }
   });
 
-  if (hourlyBins[peakHourIndex]) hourlyBins[peakHourIndex].isPeak = true;
-  if (hourlyBins[valleyHourIndex]) hourlyBins[valleyHourIndex].isValley = true;
+  const hasHourlyVisits = hourlyBins.some(b => b.visits > 0);
+  if (hasHourlyVisits) {
+    if (hourlyBins[peakHourIndex]) hourlyBins[peakHourIndex].isPeak = true;
+    if (hourlyBins[valleyHourIndex]) hourlyBins[valleyHourIndex].isValley = true;
+  }
 
-  const peakBin = hourlyBins[peakHourIndex] ?? hourlyBins[13];
-  const valleyBin = hourlyBins[valleyHourIndex] ?? hourlyBins[5];
+  const peakBin = hasHourlyVisits ? (hourlyBins[peakHourIndex] ?? hourlyBins[13]) : null;
+  const valleyBin = hasHourlyVisits ? (hourlyBins[valleyHourIndex] ?? hourlyBins[5]) : null;
 
   // 5. Day of week traffic bins (Lunes a Domingo)
   const rawDayCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
@@ -476,11 +496,12 @@ export function getAttendanceAnalytics(
     }
   });
 
-  if (dayOfWeekBins[busiestDayIndex]) {
+  const hasDayVisits = totalPeriodVisitsCalc > 0;
+  if (hasDayVisits && dayOfWeekBins[busiestDayIndex]) {
     dayOfWeekBins[busiestDayIndex].isBusiest = true;
   }
 
-  const busiestDayBin = dayOfWeekBins[busiestDayIndex] ?? dayOfWeekBins[0];
+  const busiestDayBin = hasDayVisits ? (dayOfWeekBins[busiestDayIndex] ?? dayOfWeekBins[0]) : null;
 
   // 6. Operational Time Slots: Matutino (06:00–12:00), Vespertino (12:00–17:00), Nocturno (17:00–22:00)
   const morningVisits = hourlyBins.filter(b => b.hour >= 6 && b.hour < 12).reduce((sum, b) => sum + b.visits, 0);
@@ -528,21 +549,35 @@ export function getAttendanceAnalytics(
   const recommendations = generateAttendanceRecommendations({
     liveOccupancyCount,
     liveOccupancyPercent,
-    peakHour: {
+    totalVisits,
+    peakHour: peakBin ? {
       hour: peakBin.hour,
       label: peakBin.timeRange,
       visits: peakBin.visits,
       occupancyPercent: peakBin.occupancyPercent,
+    } : {
+      hour: 0,
+      label: '—',
+      visits: 0,
+      occupancyPercent: 0,
     },
-    valleyHour: {
+    valleyHour: valleyBin ? {
       hour: valleyBin.hour,
       label: valleyBin.timeRange,
       visits: valleyBin.visits,
       occupancyPercent: valleyBin.occupancyPercent,
+    } : {
+      hour: 0,
+      label: '—',
+      visits: 0,
+      occupancyPercent: 0,
     },
-    busiestDay: {
+    busiestDay: busiestDayBin ? {
       dayName: busiestDayBin.dayName,
       percent: busiestDayBin.percent,
+    } : {
+      dayName: '—',
+      percent: 0,
     },
     averageDurationMinutes,
     timeSlots,
@@ -556,23 +591,38 @@ export function getAttendanceAnalytics(
     totalVisits,
     rawVisitsCount,
     averageDurationMinutes,
-    peakHour: {
+    peakHour: peakBin ? {
       hour: peakBin.hour,
       label: peakBin.timeRange,
       visits: peakBin.visits,
       occupancyPercent: peakBin.occupancyPercent,
+    } : {
+      hour: 0,
+      label: '—',
+      visits: 0,
+      occupancyPercent: 0,
     },
-    valleyHour: {
+    valleyHour: valleyBin ? {
       hour: valleyBin.hour,
       label: valleyBin.timeRange,
       visits: valleyBin.visits,
       occupancyPercent: valleyBin.occupancyPercent,
+    } : {
+      hour: 0,
+      label: '—',
+      visits: 0,
+      occupancyPercent: 0,
     },
-    busiestDay: {
+    busiestDay: busiestDayBin ? {
       dayIndex: busiestDayBin.dayIndex,
       dayName: busiestDayBin.dayName,
       visits: busiestDayBin.visits,
       percent: busiestDayBin.percent,
+    } : {
+      dayIndex: 0,
+      dayName: '—',
+      visits: 0,
+      percent: 0,
     },
     hourlyBins,
     dayOfWeekBins,

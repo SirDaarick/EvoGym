@@ -10,7 +10,8 @@ from app.db.models import (
 )
 from app.memberships.eligibility import MembershipAccessStatus, evaluate_membership_access, is_membership_period_eligible
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
 
 
@@ -40,14 +41,10 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
             )
             member_id, version_id, register_id, shift_id = member.id, version.id, register.id, shift.id
 
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
         with TestClient(app) as client:
-            login = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            )
-            assert login.status_code == 201, login.text
-            admin_token = login.json()["access_token"]
+            admin_headers = approved_admin_headers(client, delivery)
             sale_path = f"/api/v1/registers/{register_id}/membership-transfer-sales"
             receipt = client.post(
                 sale_path,
@@ -102,7 +99,7 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
 
             confirm = client.post(
                 review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "decision-confirm"},
+                headers={**admin_headers, "Idempotency-Key": "decision-confirm"},
                 json={"status": "confirmed"},
             )
             assert confirm.status_code == 200, confirm.text
@@ -121,7 +118,7 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
 
             pending = client.post(
                 review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "decision-pending"},
+                headers={**admin_headers, "Idempotency-Key": "decision-pending"},
                 json={"status": "pending"},
             )
             assert pending.status_code == 200, pending.text
@@ -140,11 +137,11 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
                 json={"action": "restore", "reason": "Not authorized"})
             assert receptionist_denied.status_code == 403
             restore = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-missing-transfer"},
+                headers={**admin_headers, "Idempotency-Key": "restore-missing-transfer"},
                 json={"action": "restore", "reason": "Admin verified the member payment evidence"})
             assert restore.status_code == 201, restore.text
             replay = client.post(access_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "restore-missing-transfer"},
+                headers={**admin_headers, "Idempotency-Key": "restore-missing-transfer"},
                 json={"action": "restore", "reason": "Admin verified the member payment evidence"})
             assert replay.status_code == 200 and replay.json()["replayed"] is True
             with factory() as session:
@@ -162,7 +159,7 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
 
             reconfirm = client.post(
                 review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "decision-reconfirm"},
+                headers={**admin_headers, "Idempotency-Key": "decision-reconfirm"},
                 json={"status": "confirmed"},
             )
             assert reconfirm.status_code == 200, reconfirm.text
@@ -174,14 +171,14 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
                 assert is_membership_period_eligible(session, UUID(membership_id), date.fromisoformat(starts_on))
             duplicate = client.post(
                 review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "decision-reconfirm"},
+                headers={**admin_headers, "Idempotency-Key": "decision-reconfirm"},
                 json={"status": "confirmed"},
             )
             assert duplicate.status_code == 200
             assert duplicate.json() == reconfirm.json()
             mismatch = client.post(
                 review_path,
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "decision-reconfirm"},
+                headers={**admin_headers, "Idempotency-Key": "decision-reconfirm"},
                 json={"status": "pending"},
             )
             assert mismatch.status_code == 409
@@ -218,7 +215,7 @@ def test_voucher_transfer_creates_under_review_period_and_admin_review_controls_
                 legacy_payment_id = legacy_payment.id
             legacy_review = client.post(
                 f"/api/v1/registers/transfer-payments/{legacy_payment_id}/review",
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "legacy-review"},
+                headers={**admin_headers, "Idempotency-Key": "legacy-review"},
                 json={"status": "confirmed"},
             )
             assert legacy_review.status_code == 409

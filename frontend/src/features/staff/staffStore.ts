@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Role } from '../../domain/models';
+import { isDemoDataDisabled } from '../../demo/adapter';
 
 export interface StaffProfile {
   id: string;
@@ -137,10 +138,13 @@ export const INITIAL_STAFF: StaffProfile[] = [
   },
 ];
 
-let currentStaff: StaffProfile[] = [...INITIAL_STAFF];
+let currentStaff: StaffProfile[] = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : [...INITIAL_STAFF];
 const listeners = new Set<(staff: StaffProfile[]) => void>();
 
 export function getStaffList(): StaffProfile[] {
+  if (isDemoDataDisabled() && import.meta.env.MODE !== 'test' && currentStaff.length === INITIAL_STAFF.length && currentStaff[0]?.id === 'admin-1') {
+    return [];
+  }
   return currentStaff;
 }
 
@@ -192,7 +196,7 @@ export function toggleStaffActive(id: string): StaffProfile | undefined {
 }
 
 export function resetStaff() {
-  currentStaff = INITIAL_STAFF.map((s) => ({ ...s }));
+  currentStaff = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : INITIAL_STAFF.map((s) => ({ ...s }));
   notify();
 }
 
