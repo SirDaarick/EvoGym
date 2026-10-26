@@ -45,6 +45,7 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 
 ### T2 authentication and migration reconciliation (2026-10-26)
 - Route: delegated direct, one writer; edits stayed within the T2 allowlist. RDD remained off.
+- Work-unit commit: `a637518` (`fix(staff): align auth and occurrence migration lineage`).
 - Migration revision IDs are distinct: A keeps `0031_admin_session_policy`; C is now `0038_staff_occurrence_attendance` with `down_revision = "0037_paired_profile_access"`. The migration graph has one head. No revision is described as an identical-ID merge.
 - Removed the duplicate signed-Admin validation attempt in `api/app/api/staff_roster.py`. Staff sessions still fall through when Admin signing is unconfigured; a regression test covers that path. Roster and attendance Admin tests use the existing approval-and-poll helper, not the pre-approval login response.
 - Member-read Admin fixture now obtains a signed access token through the approved device-login protocol. P1’s signed-session validation and authorization constraints remain unchanged.
