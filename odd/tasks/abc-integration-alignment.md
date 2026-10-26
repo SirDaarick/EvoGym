@@ -72,6 +72,14 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - Work-unit commit: `28f4c4e` (`fix(integration): close member and roster data gaps`). Verification commands: `vitest run --config C:/Users/edani/AppData/Local/Temp/abc-t3-vitest.config.mjs src/app/ApiProductApp.test.tsx --reporter=dot`; `tsc -p tsconfig.app.json --noEmit`; `tsc -p tsconfig.node.json --noEmit`; `git diff --check`.
 - Relevant changed paths: `frontend/src/app/ApiMembers.tsx`; `frontend/src/app/ApiProductApp.test.tsx`; `frontend/src/app/ApiStaffAttendance.tsx`; `frontend/src/features/members/MemberDetail.tsx`; `frontend/src/features/reception/StaffAttendanceView.tsx`.
 
+### T3 truthful-unknown and search-alias corrections (2026-10-26)
+- Parent browser validation found supported reload DTOs can include a real unpaid order/debt while the route has no supported order-history endpoint. Previously, an empty adapter array was rendered as “Sin compras registradas”; empty rental adapters similarly claimed “Sin asignación”. A 12-visit reload window was also rendered by the annual attendance calendar as all-time totals, and `active_periods` were captioned as a full payment history.
+- Live API detail now labels purchases and rentals unavailable in this integration, omits unsupported rental identifiers/expiry, describes available visit records as a maximum-12 recent window, and avoids rendering lifetime attendance totals. Active period rows are labeled as periods, with a caption that disclaims full payment history; empty period results do not claim no historical memberships.
+- API member search retains preferred name as the displayed name while indexing `full_name` as an alias; member number remains searchable. The route regression searches the preferred name, legal name, and number independently.
+- TDD: before fixes, API route tests failed on the empty purchase history claim and legal-name search. After fixes, `ApiProductApp.test.tsx` passed 9 tests; `Members.test.tsx` and `MemberDetail.test.tsx` passed 38 tests; app/node TypeScript projects passed. `git diff --check` passed. Full frontend suite and build remain T5 work; independent acceptance remains pending.
+- Work-unit commit and exact command evidence will be added after commit.
+- Relevant changed paths: `frontend/src/app/ApiMembers.tsx`; `frontend/src/app/ApiProductApp.test.tsx`; `frontend/src/features/members/Members.tsx`; `frontend/src/features/members/MemberDetail.tsx`.
+
 ### T4 documentation and contract-smoke correction (2026-10-26)
 - Work-unit commit: `0edf46f1ffb8c27dc073e661e3a3daa668fe462a` (`fix(integration): align smoke contract and merge guidance`).
 - Route: delegated direct; scope limited to the listed smoke test, integration/package docs, and this tracker. RDD remained off; no native review was started.

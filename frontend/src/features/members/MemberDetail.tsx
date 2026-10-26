@@ -86,9 +86,9 @@ function MemberNotes({ member, now }: { member: Member; now: string }) {
   );
 }
 
-function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; code?: string; expiresAt?: string | null; now: string; assigned: boolean }) {
-  const status = assigned ? (title === 'Guantes' ? 'active' : rentalStatus(expiresAt, now)) : 'none';
-  const labels = { none: 'Sin asignación', active: 'Renta activa', overdue: 'Vencida · días 1–14', 'eviction-status': 'Estado de desalojo · más de 14 días vencida' };
+function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; code?: string; expiresAt?: string | null; now: string; assigned: boolean | null }) {
+  const status = assigned === null ? 'unavailable' : assigned ? (title === 'Guantes' ? 'active' : rentalStatus(expiresAt, now)) : 'none';
+  const labels = { unavailable: 'No disponible', none: 'Sin asignación', active: 'Renta activa', overdue: 'Vencida · días 1–14', 'eviction-status': 'Estado de desalojo · más de 14 días vencida' };
   return (
     <div className={`member-rental member-rental-${status}`}>
       <div className="member-rental-header">
@@ -115,10 +115,10 @@ function RentalCard({ title, code, expiresAt, now, assigned }: { title: string; 
         </div>
       </div>
       <div className="member-rental-body">
-        <p className="member-rental-code-text">{code ? `Identificador ${code}` : 'Sin identificador asignado'}</p>
+        <p className="member-rental-code-text">{assigned === null ? 'No disponible en esta integración' : code ? `Identificador ${code}` : 'Sin identificador asignado'}</p>
         {title === 'Casillero' && (
           <p className="member-rental-expiry-text">
-            Vencimiento: {expiresAt ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(expiresAt)) : 'No registrado'}
+            Vencimiento: {assigned === null ? 'No disponible en esta integración' : expiresAt ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(expiresAt)) : 'No registrado'}
           </p>
         )}
         {status === 'eviction-status' && (
@@ -286,10 +286,10 @@ export function MemberDetailSections({
               )}
             </div>
 
-            <TableRegion label="Historial de membresías">
+            <TableRegion label={liveApi ? 'Períodos de membresía' : 'Historial de membresías'}>
               <div className="member-membership-table-scroll">
                 <table className="member-detail-table">
-                  <caption>Pago de membresías atribuidas al socio; la membresía actual muestra el período vigente registrado y las demás fechas son fechas de pago.</caption>
+                  <caption>{liveApi ? 'Períodos activos informados por la API; no representa el historial completo de pagos.' : 'Pago de membresías atribuidas al socio; la membresía actual muestra el período vigente registrado y las demás fechas son fechas de pago.'}</caption>
                   <thead>
                     {membershipTable.getHeaderGroups().map(group => (
                       <tr key={group.id}>
@@ -317,8 +317,8 @@ export function MemberDetailSections({
               </div>
             </TableRegion>
             {!membershipRows.length && (
-              <EmptyState title="Sin membresías registradas.">
-                No hay una membresía actual ni pagos atribuidos al socio.
+              <EmptyState title={liveApi ? 'Historial de pagos no disponible' : 'Sin membresías registradas.'}>
+                {liveApi ? 'La API informa períodos activos, no el historial completo de membresías.' : 'No hay una membresía actual ni pagos atribuidos al socio.'}
               </EmptyState>
             )}
             {reloadState?.class_samples?.length ? (
@@ -347,19 +347,19 @@ export function MemberDetailSections({
             ) : null}
           </Panel>
         </div>
-        <div className="member-detail-rentals"><Panel><h2>Rentas actuales</h2><div className="member-rental-grid">
-      <RentalCard title="Guantes" code={glove?.code} now={now} assigned={Boolean(glove)} />
-      <RentalCard title="Casillero" code={locker?.code} expiresAt={locker?.expiresAt} now={now} assigned={Boolean(locker)} />
+        <div className="member-detail-rentals"><Panel><h2>{liveApi ? 'Rentas' : 'Rentas actuales'}</h2><div className="member-rental-grid">
+      <RentalCard title="Guantes" code={glove?.code} now={now} assigned={liveApi ? null : Boolean(glove)} />
+      <RentalCard title="Casillero" code={locker?.code} expiresAt={locker?.expiresAt} now={now} assigned={liveApi ? null : Boolean(locker)} />
       </div></Panel></div>
       </div>
       <div className="member-detail-right-column">
         <div className="member-detail-attendance">
           <Panel>
             <h2>Asistencia previa</h2>
-            <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />
+            {liveApi ? <EmptyState title="Frecuencia histórica no disponible">La integración muestra hasta 12 visitas recientes, no el total histórico de asistencia.</EmptyState> : <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />}
             {reloadState?.recent_visits?.length ? (
               <div className="member-recent-visits" style={{ marginTop: '1rem' }}>
-                <h3 className="sr-only">Visitas recientes</h3>
+                <h3>{liveApi ? 'Últimas visitas (máximo 12)' : 'Visitas recientes'}</h3>
                 <ul className="clean-list flow-gap-sm">
                   {reloadState.recent_visits.map(visit => (
                     <li key={visit.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -520,6 +520,8 @@ export function MemberDetailSections({
               </table>
             </div>
           </TableRegion>
+        ) : liveApi ? (
+          <EmptyState title="Historial de compras no disponible">No hay un historial de compras incluido en esta integración.</EmptyState>
         ) : (
           <EmptyState title="Sin compras registradas">No hay operaciones atribuibles a este socio.</EmptyState>
         )}

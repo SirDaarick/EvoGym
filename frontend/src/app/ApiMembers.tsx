@@ -84,7 +84,7 @@ export function ApiMembers({ role, request }: { role: Role; request: Authenticat
     membership: null,
     joinedOn: item.joined_on,
   })) ?? [];
-  const statuses = Object.fromEntries((page?.items ?? []).map(item => [item.id, { status: item.status, memberNumber: item.member_number }]));
+  const statuses = Object.fromEntries((page?.items ?? []).map(item => [item.id, { status: item.status, memberNumber: item.member_number, searchAliases: item.full_name }]));
   return <Members role={role} liveData={{ members, statuses, loading, error, onRefresh: () => void load() }} />;
 }
 

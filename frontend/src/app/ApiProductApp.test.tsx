@@ -44,7 +44,8 @@ describe('API product routes', () => {
         ], class_samples: [], financial: { has_pending_balance: true, credit_balance_minor: 0,
           total_pending_balance_minor: 12500, currency: 'MXN', debts: [{ debt_id: 'debt-1', order_id: 'order-1', branch_id: 'branch-1',
             currency: 'MXN', initial_outstanding_minor: 15000, remaining_balance_minor: 12500, created_at: '2026-01-02T12:00:00Z' }] },
-        recent_visits: [], server_time: '2026-01-02T12:00:00Z',
+        recent_visits: [{ id: 'visit-log-1', visit_id: 'visit-1', branch_id: 'branch-1', period_id: 'period-1', sample_entitlement_id: null,
+          occurred_at: '2026-01-02T12:00:00Z', access_reason: 'eligible', access_warnings: [] }], server_time: '2026-01-02T12:00:00Z',
       }));
       if (path.endsWith(`/members/${member.id}`)) return new Response(JSON.stringify({ ...member, email: null, birth_date: null, notes: null, pending_balance_minor: 12500, has_pending_balance: true }));
       return new Response(JSON.stringify({}));
@@ -94,7 +95,7 @@ describe('API product routes', () => {
     expect(screen.getByRole('tab', { name: 'Mostrador' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Expediente' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Historial de membresías' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Períodos de membresía' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', { name: 'Expediente' }));
     expect(await screen.findByText('Plan adicional')).toBeInTheDocument();
     expect(await screen.findByText('Adeudos pendientes')).toBeInTheDocument();
@@ -102,6 +103,15 @@ describe('API product routes', () => {
     expect(screen.getByText('$150.00 MXN')).toBeInTheDocument();
     expect(screen.getByText('$125.00 MXN')).toBeInTheDocument();
     expect(screen.queryByText(/0 meses/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Historial de compras no disponible')).toBeInTheDocument();
+    expect(screen.getAllByText('No disponible en esta integración')).toHaveLength(2);
+    expect(screen.getByText(/Vencimiento: No disponible en esta integración/)).toBeInTheDocument();
+    expect(screen.queryByText('Sin asignación')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sin compras registradas')).not.toBeInTheDocument();
+    expect(screen.getByText('Frecuencia histórica no disponible')).toBeInTheDocument();
+    expect(screen.getByText('Últimas visitas (máximo 12)')).toBeInTheDocument();
+    expect(screen.getByText('Períodos activos informados por la API; no representa el historial completo de pagos.')).toBeInTheDocument();
+    expect(screen.queryByText(/visitas totales/i)).not.toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${member.id}/reload?visit_limit=12`, expect.any(Object));
     await userEvent.click(screen.getByRole('tab', { name: 'Mostrador' }));
     expect(screen.getByText('Mostrador no disponible')).toBeInTheDocument();
@@ -178,5 +188,18 @@ describe('API product routes', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Later Page Member' }));
     expect(await screen.findByText('Later Page Member')).toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${laterMember.id}`, expect.any(Object));
+  });
+
+  it('searches API-backed members by preferred name, legal name, and member number', async () => {
+    const namedMember = { ...member, preferred_name: 'Fixture Member', full_name: 'Synthetic Member One', member_number: 'SYN0001' };
+    admin.request.mockResolvedValueOnce(new Response(JSON.stringify({ items: [namedMember], total: 1, page: 1, limit: 100, pages: 1 })));
+    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
+    const search = screen.getByRole('textbox', { name: 'Buscar socio' });
+    for (const term of ['Synthetic Member One', 'SYN0001', 'Fixture Member']) {
+      await userEvent.clear(search);
+      await userEvent.type(search, term);
+      expect(screen.getByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
+    }
   });
 });

@@ -33,7 +33,7 @@ function getMemberInitials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-type LiveMemberStatus = { status: string; memberNumber?: string };
+type LiveMemberStatus = { status: string; memberNumber?: string; searchAliases?: string };
 
 export function Members({ role, liveData }: { role: Role; liveData?: {
   members: Member[];
@@ -70,7 +70,7 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
     const q = query.trim().toLocaleLowerCase('es-MX');
     if (!q) return members;
     return members.filter(member =>
-      `${member.name} ${member.phone} ${member.id} ${statuses?.[member.id]?.memberNumber ?? ''} ${member.membership?.planName ?? ''}`
+      `${member.name} ${member.phone} ${member.id} ${statuses?.[member.id]?.memberNumber ?? ''} ${statuses?.[member.id]?.searchAliases ?? ''} ${member.membership?.planName ?? ''}`
         .toLocaleLowerCase('es-MX')
         .includes(q)
     );
