@@ -56,8 +56,21 @@ export function getReceptionConfig(env: Partial<ImportMetaEnv> = import.meta.env
 }
 
 export function readOperationalToken(): string | null {
-  return typeof window === 'undefined' ? null : window.sessionStorage.getItem(TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    const customWindow = window as unknown as {
+      __EVOGYM_OPERATIONAL_SESSION__?: string;
+      __EVOGYM_ADMIN_SESSION__?: string;
+      __EVOGYM_TOKEN__?: string;
+    };
+    if (customWindow.__EVOGYM_OPERATIONAL_SESSION__) return customWindow.__EVOGYM_OPERATIONAL_SESSION__;
+    if (customWindow.__EVOGYM_ADMIN_SESSION__) return customWindow.__EVOGYM_ADMIN_SESSION__;
+    if (customWindow.__EVOGYM_TOKEN__) return customWindow.__EVOGYM_TOKEN__;
+    return window.sessionStorage.getItem(TOKEN_KEY);
+  }
+  return null;
 }
+
+export const resolveOperationalToken = readOperationalToken;
 
 export function clearOperationalToken(): void {
   window.sessionStorage.removeItem(TOKEN_KEY);
