@@ -15,7 +15,11 @@ import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
 import './MemberDetail.css';
 
 type Purchase = { id: string; date: string; product: string; amount: number; method: PaymentMethod; status: string };
-type MembershipRow = { id: string; planName: string; date: string; current: boolean };
+type MembershipRow = { id: string; planName: string; date: string; current: boolean; period?: boolean };
+
+function ReadOnlyMemberNotes({ note }: { note: string | null }) {
+  return <Panel><div className="member-notes-header"><div className="member-notes-title-wrap"><h2>Nota</h2></div></div>{note?.trim() ? <p className="member-note-body">{note}</p> : <EmptyState title="Sin notas registradas">Todavía no hay notas para este socio.</EmptyState>}</Panel>;
+}
 
 function MemberNotes({ member, now }: { member: Member; now: string }) {
   const { state, update } = useDemo();
@@ -138,6 +142,8 @@ export function MemberDetailSections({
   sales = [],
   role = 'RECEPTION',
   reloadState,
+  liveNotes,
+  liveApi = false,
 }: {
   member: Member;
   now: string;
@@ -151,6 +157,8 @@ export function MemberDetailSections({
   sales?: Sale[];
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
+  liveNotes?: string | null;
+  liveApi?: boolean;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
   const streak = membershipRenewalStreak(payments, member.id);
@@ -209,12 +217,13 @@ export function MemberDetailSections({
   ], []);
   const table = useReactTable({ data: purchases, columns, getCoreRowModel: getCoreRowModel() });
   const membershipRows = useMemo<MembershipRow[]>(() => [
-    ...(membershipIsCurrent && member.membership ? [{ id: `current-${member.id}`, planName: member.membership.planName, date: `${member.membership.startsOn} – ${member.membership.endsOn}`, current: true }] : []),
+    ...(liveApi ? (reloadState?.active_periods.map(period => ({ id: period.id, planName: period.plan_name, date: `${period.starts_on} – ${period.ends_on}`, current: period.is_current, period: true })) ?? []) : []),
+    ...(membershipIsCurrent && member.membership && !reloadState?.active_periods.length ? [{ id: `current-${member.id}`, planName: member.membership.planName, date: `${member.membership.startsOn} – ${member.membership.endsOn}`, current: true }] : []),
     ...memberPayments.map(payment => ({ id: payment.id, planName: payment.planName, date: payment.recordedAt, current: false })),
-  ], [membershipIsCurrent, member.id, member.membership, memberPayments]);
+  ], [membershipIsCurrent, member.id, member.membership, memberPayments, reloadState?.active_periods]);
   const membershipColumns = useMemo<ColumnDef<MembershipRow>[]>(() => [
     { accessorKey: 'planName', header: 'Membresía' },
-    { accessorKey: 'date', header: 'Vigencia / fecha de pago', cell: info => info.row.original.current ? String(info.getValue()) : new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(String(info.getValue()))) },
+    { accessorKey: 'date', header: 'Vigencia / fecha de pago', cell: info => info.row.original.current || info.row.original.period ? String(info.getValue()) : new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(String(info.getValue()))) },
   ], []);
   const membershipTable = useReactTable({ data: membershipRows, columns: membershipColumns, getCoreRowModel: getCoreRowModel() });
 
@@ -372,10 +381,10 @@ export function MemberDetailSections({
             ) : null}
           </Panel>
         </div>
-        <div className="member-detail-notes"><MemberNotes member={member} now={now} /></div>
+        <div className="member-detail-notes">{liveApi ? <ReadOnlyMemberNotes note={liveNotes ?? null} /> : <MemberNotes member={member} now={now} />}</div>
       </div>
     </div>
-    <div className="member-detail-habits">
+    {!liveApi && <div className="member-detail-habits">
       <Panel>
         <div className="member-habits-header">
           <div className="member-habits-title-wrap">
@@ -471,7 +480,8 @@ export function MemberDetailSections({
           </div>
         )}
       </Panel>
-    </div>
+    </div>}
+    {role === 'OWNER' && reloadState?.financial.debts.length ? <Panel><h2>Adeudos pendientes</h2><TableRegion label="Adeudos pendientes"><table className="member-detail-table"><thead><tr><th scope="col">Fecha</th><th scope="col">Adeudo</th><th scope="col">Saldo restante</th></tr></thead><tbody>{reloadState.financial.debts.map(debt => <tr key={debt.debt_id}><td>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(debt.created_at))}</td><td>{formatMoney(debt.initial_outstanding_minor)} MXN</td><td>{formatMoney(debt.remaining_balance_minor)} MXN</td></tr>)}</tbody></table></TableRegion></Panel> : null}
     <div className="member-detail-purchases">
       <Panel>
         <div className="member-purchases-header">

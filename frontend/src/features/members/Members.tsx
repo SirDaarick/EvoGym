@@ -7,7 +7,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { ColumnDef, SortingState } from '@tanstack/react-table';
-import type { Member, Role } from '../../domain/models';
+import type { DemoState, Member, Role } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
 import { useDemo } from '../../demo/DemoProvider';
 import { addMember } from '../../demo/operations';
@@ -33,20 +33,48 @@ function getMemberInitials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-export function Members({ role }: { role: Role }) {
+type LiveMemberStatus = { status: string; memberNumber?: string };
+
+export function Members({ role, liveData }: { role: Role; liveData?: {
+  members: Member[];
+  statuses: Record<string, LiveMemberStatus>;
+  loading: boolean;
+  error: string;
+  onRefresh: () => void;
+} }) {
+  if (liveData) return <MemberDirectory role={role} members={liveData.members} statuses={liveData.statuses} loading={liveData.loading} error={liveData.error} onRefresh={liveData.onRefresh} />;
+  return <DemoMemberDirectory role={role} />;
+}
+
+function DemoMemberDirectory({ role }: { role: Role }) {
   const { state } = useDemo();
+  return <MemberDirectory role={role} members={state.members} demoClock={state.demoClock} attendanceVisits={state.attendance} sales={state.sales} supplementSales={state.supplementSales} />;
+}
+
+function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, supplementSales, statuses, loading = false, error = '', onRefresh }: {
+  role: Role;
+  members: Member[];
+  demoClock?: string;
+  attendanceVisits?: DemoState['attendance'];
+  sales?: DemoState['sales'];
+  supplementSales?: DemoState['supplementSales'];
+  statuses?: Record<string, LiveMemberStatus>;
+  loading?: boolean;
+  error?: string;
+  onRefresh?: () => void;
+}) {
   const [query, setQuery] = useState('');
   const [sorting, setSorting] = useState<SortingState>([]);
 
   const filteredMembers = useMemo(() => {
     const q = query.trim().toLocaleLowerCase('es-MX');
-    if (!q) return state.members;
-    return state.members.filter(member =>
-      `${member.name} ${member.phone} ${member.id} ${member.membership?.planName ?? ''}`
+    if (!q) return members;
+    return members.filter(member =>
+      `${member.name} ${member.phone} ${member.id} ${statuses?.[member.id]?.memberNumber ?? ''} ${member.membership?.planName ?? ''}`
         .toLocaleLowerCase('es-MX')
         .includes(q)
     );
-  }, [state.members, query]);
+  }, [members, query, statuses]);
 
   const columns = useMemo<ColumnDef<Member>[]>(
     () => [
@@ -68,7 +96,7 @@ export function Members({ role }: { role: Role }) {
                 >
                   {member.name}
                 </Link>
-                <span className="muted member-id">{member.id}</span>
+                <span className="muted member-id">{statuses?.[member.id]?.memberNumber ?? member.id}</span>
               </div>
             </div>
           );
@@ -90,16 +118,17 @@ export function Members({ role }: { role: Role }) {
       {
         id: 'membership',
         accessorFn: member => member.membership?.planName || '',
-        header: 'Membresia',
+        header: statuses ? 'Estado' : 'Membresia',
         cell: ({ row }) => {
           const member = row.original;
-          const info = getMemberStatusInfo(member, state.demoClock);
+          const info = getMemberStatusInfo(member, demoClock ?? new Date().toISOString());
+          const apiStatus = statuses?.[member.id]?.status;
           return (
             <div className="member-plan-cell">
               <span className="member-plan-name">
-                {member.membership ? member.membership.planName : 'Sin membresía'}
+                {member.membership ? member.membership.planName : apiStatus ? 'Estado registrado' : 'Sin membresía'}
               </span>
-              <Badge tone={info.tone}>{info.badgeLabel}</Badge>
+              <Badge tone={apiStatus === 'active' ? 'success' : apiStatus ? 'neutral' : info.tone}>{apiStatus ? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[apiStatus] ?? apiStatus : info.badgeLabel}</Badge>
             </div>
           );
         },
@@ -111,7 +140,7 @@ export function Members({ role }: { role: Role }) {
         cell: ({ row }) => {
           const member = row.original;
           const endsOn = member.membership?.endsOn;
-          const info = getMemberStatusInfo(member, state.demoClock);
+          const info = getMemberStatusInfo(member, demoClock ?? new Date().toISOString());
           const isExpired = member.membership && (info.status === 'expired' || info.status === 'inactive');
           const isExpiryToday = member.membership && (info.provisional || member.demoScenario === 'expiry-today');
 
@@ -144,7 +173,7 @@ export function Members({ role }: { role: Role }) {
         },
       },
     ],
-    [role, state.demoClock]
+    [role, demoClock, statuses]
   );
 
   const table = useReactTable({
@@ -166,19 +195,15 @@ export function Members({ role }: { role: Role }) {
             ? 'Métricas de retención, distribución de membresías y antigüedad de la base activa.'
             : 'Encuentra a la persona antes de registrar una operación.'
         }
-        action={
-          <Link className="button button-primary" to={rolePath(role, 'members/new')}>
-            Nuevo socio
-          </Link>
-        }
+        action={onRefresh ? <Button variant="secondary" disabled={loading} onClick={onRefresh}>Actualizar</Button> : <Link className="button button-primary" to={rolePath(role, 'members/new')}>Nuevo socio</Link>}
       />
-      {role === 'OWNER' && (
+      {role === 'OWNER' && demoClock && (
         <OwnerMemberAnalytics
-          members={state.members}
-          referenceDate={state.demoClock.slice(0, 10)}
-          attendanceVisits={state.attendance}
-          sales={state.sales}
-          supplementSales={state.supplementSales}
+          members={members}
+          referenceDate={demoClock.slice(0, 10)}
+          attendanceVisits={attendanceVisits ?? []}
+          sales={sales ?? []}
+          supplementSales={supplementSales ?? []}
         />
       )}
       <Panel>
@@ -189,7 +214,7 @@ export function Members({ role }: { role: Role }) {
           value={query}
           onChange={event => setQuery(event.target.value)}
         />
-        {filteredMembers.length ? (
+        {error ? <Notice tone="error">{error}</Notice> : loading ? <div role="status">Cargando socios…</div> : filteredMembers.length ? (
           <div className="members-table-card">
             <div
               className="members-table-region"
@@ -255,8 +280,8 @@ export function Members({ role }: { role: Role }) {
             </div>
           </div>
         ) : (
-          <EmptyState title="Sin coincidencias">
-            Busca otro nombre o registra un socio.
+          <EmptyState title={members.length ? 'Sin coincidencias' : 'Sin socios registrados'}>
+            {members.length ? 'Busca otro nombre o registra un socio.' : 'La API no devolvió socios para esta consulta.'}
           </EmptyState>
         )}
       </Panel>
@@ -272,7 +297,42 @@ function resolveOperationalToken(): string | null {
   return readOperationalToken();
 }
 
-export function MemberDetail({ role }: { role: Role }) {
+export function MemberDetail({ role, liveData }: { role: Role; liveData?: { member: Member; reload: MemberReloadResponse; notes: string | null; status: string; isAdmin: boolean; onRefresh?: () => void } }) {
+  if (liveData) return <LiveMemberDetail role={role} {...liveData} />;
+  return <DemoMemberDetail role={role} />;
+}
+
+function LiveMemberDetail({ role, member, reload, notes, status, isAdmin, onRefresh }: { role: Role; member: Member; reload: MemberReloadResponse; notes: string | null; status: string; isAdmin: boolean; onRefresh?: () => void }) {
+  const [activeTab, setActiveTab] = useState<'counter' | 'record'>('record');
+  const visits = reload.recent_visits.map(visit => ({ id: visit.visit_id, memberId: member.id, observedCheckIn: visit.occurred_at, observedCheckOut: null, autoClosedAt: null }));
+  const currentPeriod = reload.active_periods.find(period => period.is_current) ?? reload.active_periods[0];
+  const statusTone = currentPeriod?.access_status === 'eligible' || (!currentPeriod && status === 'active') ? 'success' : currentPeriod ? 'warning' : 'neutral';
+
+  return <>
+    <div className="member-hero-banner">
+      <div className="member-hero-avatar-wrap"><div className="member-hero-avatar" aria-hidden="true">{getMemberInitials(member.name)}</div></div>
+      <div className="member-hero-details">
+        <PageHeader eyebrow="Socio" title={member.name} description={member.phone || 'Teléfono no capturado'} action={<div className="member-hero-actions"><Badge tone={statusTone}>{currentPeriod?.access_status ?? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}</Badge>{onRefresh && <Button variant="secondary" onClick={onRefresh}>Actualizar</Button>}</div>} />
+      </div>
+    </div>
+    <div className="member-tabs-container">
+      <div className="member-tabs-nav" role="tablist" aria-label="Secciones del socio">
+        <button type="button" role="tab" id="member-tab-counter" aria-selected={activeTab === 'counter'} aria-controls="member-tabpanel-counter" className={`member-tab-btn ${activeTab === 'counter' ? 'is-active' : ''}`} onClick={() => setActiveTab('counter')}>Mostrador</button>
+        <button type="button" role="tab" id="member-tab-record" aria-selected={activeTab === 'record'} aria-controls="member-tabpanel-record" className={`member-tab-btn ${activeTab === 'record' ? 'is-active' : ''}`} onClick={() => setActiveTab('record')}>Expediente</button>
+      </div>
+    </div>
+    {activeTab === 'counter' ? (
+      <div id="member-tabpanel-counter" role="tabpanel" aria-labelledby="member-tab-counter"><Panel><EmptyState title="Mostrador no disponible">Las operaciones de mostrador no están habilitadas para este perfil de API.</EmptyState></Panel></div>
+    ) : (
+      <div id="member-tabpanel-record" role="tabpanel" aria-labelledby="member-tab-record">
+        <MemberDetailSections member={member} now={reload.server_time} visits={visits} gloves={[]} gloveRentals={[]} lockers={[]} lockerRentals={[]} payments={[]} supplementSales={[]} sales={[]} role={isAdmin ? 'OWNER' : role} reloadState={reload} liveNotes={notes} liveApi />
+      </div>
+    )}
+    <div className="flow member-detail-back-flow"><Link to={rolePath(role, 'members')} className="member-back-link">Volver a socios</Link></div>
+  </>;
+}
+
+function DemoMemberDetail({ role }: { role: Role }) {
   const { memberId } = useParams();
   const { state, resetVersion } = useDemo();
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
