@@ -10,7 +10,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from app.auth.admin import authenticate_admin
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
 from app.db.base import Base
@@ -41,7 +40,8 @@ from app.shifts.queries import (
     open_shift as _open_shift,
 )
 from app.shifts.schemas import CloseShiftDTO, OpenShiftDTO
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 
 
 def open_shift(session, *, register_id, opened_by, denomination_counts, opening_cash_minor=None,
@@ -611,16 +611,14 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
         _staff2_id, recep2_token = _seed_receptionist(factory, branch2_id, "receptionist2@evogym.com", "2222")
 
         seed_admin(factory, "admin@example.invalid", "super-admin-pass")
-        admin_token_obj = authenticate_admin(factory, "admin@example.invalid", "super-admin-pass", 3600, uuid4())
-        admin_token = admin_token_obj.token
-
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         r1_headers = {"Authorization": f"Bearer {recep1_token}"}
         r2_headers = {"Authorization": f"Bearer {recep2_token}"}
-        admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "admin@example.invalid", "super-admin-pass")
             # 1. Unauthenticated gets 401
             assert client.get("/api/v1/terminals").status_code == 401
             assert client.get("/api/v1/registers").status_code == 401

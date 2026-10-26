@@ -34,9 +34,12 @@ def record_access_decision(
     if factory is None or credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(401, "Authentication failed.")
     staff_id = None
-    if request.app.state.settings.admin_auth_configured:
+    settings = request.app.state.settings
+    if settings.admin_auth_configured and settings.admin_token_signing_configured:
         try:
-            staff_id, _admin_session_id = validate_admin_session(factory, credentials.credentials)
+            staff_id, _admin_session_id = validate_admin_session(
+                factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
+            )
         except (AuthorizationDenied, ValueError):
             pass
     if staff_id is None:

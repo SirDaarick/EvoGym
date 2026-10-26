@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 import hashlib
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -10,9 +11,9 @@ from sqlalchemy.orm import sessionmaker
 from app.auth.authorization import AuthorizationDenied
 from app.auth.enrollment import issue_enrollment_code, list_enrollment_codes, revoke_enrollment_code
 from app.db.base import Base
-from app.db.models import AdminAuthEvent, Branch, RoleGrant, StaffEnrollmentCode, StaffUser
+from app.db.models import AdminAuthEvent, Branch, OrganizationOwner, RoleGrant, StaffEnrollmentCode, StaffUser
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings, seed_admin
 
 
 def _setup_db(tmp_path):
@@ -194,20 +195,33 @@ def test_issue_replaces_prior_pending_code_for_same_login(tmp_path):
         engine.dispose()
 
 
+def test_enrollment_grants_require_the_claimed_owner_after_bootstrap(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        owner_id = seed_admin(factory, "owner@example.invalid")
+        nonowner_id = seed_admin(factory, "manager@example.invalid")
+        with factory.begin() as session:
+            session.add(OrganizationOwner(id=1, staff_id=owner_id))
+        with pytest.raises(AuthorizationDenied):
+            issue_enrollment_code(factory, nonowner_id, "new@example.invalid", "admin")
+        issued = issue_enrollment_code(factory, owner_id, "new@example.invalid", "admin")
+        assert issued.login_identifier == "new@example.invalid"
+    finally:
+        engine.dispose()
+
+
 def test_admin_enrollment_api_endpoints(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
         admin_id = seed_admin(factory, "owner@example.invalid", "synthetic-admin-password")
         branch_id = _seed_branch(factory)
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         with TestClient(app) as client:
             # Login as Admin
-            login_res = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            )
-            assert login_res.status_code == 201
+            login_res = complete_device_login(client, delivery, "owner@example.invalid", "synthetic-admin-password")
+            assert login_res.status_code == 200
             token = login_res.json()["access_token"]
             headers = {"Authorization": f"Bearer {token}"}
 

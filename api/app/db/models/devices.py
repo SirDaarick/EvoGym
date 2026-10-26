@@ -20,6 +20,13 @@ class StaffDevicePairingCode(Base):
         ),
         Index("ix_staff_device_pairing_codes_staff", "staff_id"),
         Index("ix_staff_device_pairing_codes_hash", "code_hash"),
+        Index(
+            "uq_staff_active_pairing_code_hash",
+            "code_hash",
+            unique=True,
+            postgresql_where=text("used_at IS NULL AND revoked_at IS NULL"),
+            sqlite_where=text("used_at IS NULL AND revoked_at IS NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -45,6 +52,11 @@ class StaffPairedDevice(Base):
     __tablename__ = "staff_paired_devices"
     __table_args__ = (
         Index("ix_staff_paired_devices_staff", "staff_id"),
+        CheckConstraint(
+            "profile_access_digest IS NULL OR length(profile_access_digest) = 64",
+            name="ck_staff_paired_devices_profile_access_digest",
+        ),
+        Index("uq_staff_paired_devices_profile_access_digest", "profile_access_digest", unique=True),
         Index(
             "uq_staff_active_paired_device",
             "staff_id",
@@ -67,3 +79,7 @@ class StaffPairedDevice(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    profile_access_digest: Mapped[str | None] = mapped_column(String(64))
+    profile_access_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    profile_access_last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    profile_access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

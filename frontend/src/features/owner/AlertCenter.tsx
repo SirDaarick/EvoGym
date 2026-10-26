@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Chart } from '@tanstack/charts/react';
 import { defineChart } from '@tanstack/charts';
@@ -13,7 +13,7 @@ import type { ColumnDef, SortingState } from '@tanstack/react-table';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert01Icon, Cash01Icon, CreditCardIcon } from '@hugeicons/core-free-icons';
 
-import { Badge, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
+import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney } from '../../demo/adapter';
 import {
@@ -23,6 +23,13 @@ import {
   type AlertPeriod,
   type OperationalAlert,
 } from '../../demo/alertCenterSelector';
+import {
+  acknowledgeAdminSecurityAlert,
+  AdminSecurityAlertsApiError,
+  listAdminSecurityAlerts,
+  type AdminSecurityAlert,
+} from '../../api/adminSecurityAlertsApi';
+import { useAdminSession } from '../auth/AdminSessionProvider';
 import './AlertCenter.css';
 
 const PERIOD_OPTIONS: { id: 'today' | 'week' | 'month' | 'all'; label: string }[] = [
@@ -31,6 +38,14 @@ const PERIOD_OPTIONS: { id: 'today' | 'week' | 'month' | 'all'; label: string }[
   { id: 'month', label: 'Mes' },
   { id: 'all', label: 'Todo' },
 ];
+
+function useOptionalAdminSession() {
+  try {
+    return useAdminSession();
+  } catch {
+    return null;
+  }
+}
 
 function categoryTone(category: AlertCategory): 'error' | 'warning' | 'neutral' {
   switch (category) {
@@ -60,9 +75,65 @@ function formatDateTime(timestamp: string): string {
 export function AlertCenter() {
   const { state } = useDemo();
   const [period, setPeriod] = useState<AlertPeriod>('today');
-  const [selectedCategory, setSelectedCategory] = useState<AlertCategory | 'all'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<AlertCategory | 'all' | 'security'>('all');
   const [activeLegendCategory, setActiveLegendCategory] = useState<AlertCategory | null>(null);
   const [sorting, setSorting] = useState<SortingState>([{ id: 'timestamp', desc: true }]);
+
+  // Admin security alerts integration
+  const adminSession = useOptionalAdminSession();
+  const [securityAlerts, setSecurityAlerts] = useState<AdminSecurityAlert[]>([]);
+  const [securityLoading, setSecurityLoading] = useState(false);
+  const [securityMutating, setSecurityMutating] = useState(false);
+  const [securityError, setSecurityError] = useState('');
+  const operation = useRef(0);
+
+  const refreshSecurityAlerts = useCallback(async () => {
+    if (!adminSession || adminSession.status !== 'authenticated') {
+      setSecurityAlerts([]);
+      return;
+    }
+    const current = ++operation.current;
+    setSecurityLoading(true);
+    setSecurityError('');
+    try {
+      const page = await listAdminSecurityAlerts(adminSession.request);
+      if (operation.current !== current) return;
+      setSecurityAlerts(page.alerts);
+    } catch (reason) {
+      if (operation.current !== current) return;
+      setSecurityAlerts([]);
+      setSecurityError(
+        reason instanceof AdminSecurityAlertsApiError && reason.status === 403
+          ? 'Alertas de seguridad no disponibles sin permisos de gestión de personal.'
+          : 'No se pudieron cargar los bloqueos de seguridad.'
+      );
+    } finally {
+      if (operation.current === current) setSecurityLoading(false);
+    }
+  }, [adminSession]);
+
+  useEffect(() => {
+    void refreshSecurityAlerts();
+  }, [refreshSecurityAlerts]);
+
+  const acknowledgeSecurity = async (alertId: string) => {
+    if (!adminSession || securityMutating) return;
+    const current = ++operation.current;
+    setSecurityMutating(true);
+    setSecurityError('');
+    try {
+      await acknowledgeAdminSecurityAlert(adminSession.request, alertId);
+      if (operation.current !== current) return;
+      const page = await listAdminSecurityAlerts(adminSession.request);
+      if (operation.current !== current) return;
+      setSecurityAlerts(page.alerts);
+    } catch {
+      if (operation.current !== current) return;
+      setSecurityError('No se pudo confirmar la atención del bloqueo. Intenta de nuevo.');
+    } finally {
+      if (operation.current === current) setSecurityMutating(false);
+    }
+  };
 
   const result = useMemo(
     () => getOperationalAlerts(state, period),
@@ -70,7 +141,7 @@ export function AlertCenter() {
   );
 
   const tableData = useMemo(() => {
-    if (selectedCategory === 'all') return result.alerts;
+    if (selectedCategory === 'all' || selectedCategory === 'security') return result.alerts;
     return result.alerts.filter(alert => alert.category === selectedCategory);
   }, [result.alerts, selectedCategory]);
 
@@ -224,8 +295,15 @@ export function AlertCenter() {
         </div>
       </Panel>
 
-      {/* Top Bento Row: 3 KPIs + Donut Chart */}
-      <div className="alert-top-bento">
+      {/* Top Bento Row: 4 KPIs + Donut Chart */}
+      <div
+        className="alert-top-bento"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '20px',
+        }}
+      >
         {/* KPI 1: Total Alerts */}
         <Panel className="alert-kpi-card">
           <div className="alert-kpi-header">
@@ -278,6 +356,38 @@ export function AlertCenter() {
           <Link to="/owner/history" className="alert-kpi-link">
             Auditar historial →
           </Link>
+        </Panel>
+
+        {/* KPI 4: Security Lockouts */}
+        <Panel className={`alert-kpi-card ${selectedCategory === 'security' ? 'alert-kpi-active' : ''}`}>
+          <div className="alert-kpi-header">
+            <span className="alert-kpi-title">Bloqueos de seguridad</span>
+            <span className="alert-kpi-icon icon-danger">
+              <HugeiconsIcon icon={Alert01Icon} size={20} />
+            </span>
+          </div>
+          <p className="alert-kpi-value">{securityAlerts.length}</p>
+          <p className="alert-kpi-note">
+            {securityAlerts.length === 1
+              ? '1 cuenta de personal bloqueada por intentos fallidos.'
+              : `${securityAlerts.length} cuentas de personal bloqueadas por intentos fallidos.`}
+          </p>
+          <button
+            type="button"
+            className="alert-kpi-link"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              textAlign: 'left',
+              font: 'inherit',
+              color: 'var(--color-primary)',
+              cursor: 'pointer',
+            }}
+            onClick={() => setSelectedCategory('security')}
+          >
+            Ver bloqueos →
+          </button>
         </Panel>
 
         {/* Donut Chart Panel */}
@@ -381,10 +491,76 @@ export function AlertCenter() {
                 </button>
               );
             })}
+            <button
+              type="button"
+              className={`alert-filter-pill ${selectedCategory === 'security' ? 'active' : ''}`}
+              aria-pressed={selectedCategory === 'security'}
+              onClick={() => setSelectedCategory('security')}
+            >
+              <span>Seguridad / Bloqueos</span>
+              <span className="alert-pill-count">{securityAlerts.length}</span>
+            </button>
           </div>
         </div>
 
-        {tableData.length === 0 ? (
+        {selectedCategory === 'security' ? (
+          securityAlerts.length === 0 ? (
+            <EmptyState title="Sin bloqueos de seguridad">
+              No hay cuentas de personal bloqueadas en este momento.
+            </EmptyState>
+          ) : (
+            <TableRegion label="Bloqueos de seguridad">
+              {securityError && (
+                <p role="alert" style={{ color: 'var(--color-danger, #A32222)', padding: '8px 16px', margin: 0 }}>
+                  {securityError}
+                </p>
+              )}
+              <table className="alert-table">
+                <caption>
+                  Cuentas de personal bloqueadas por intentos fallidos de autenticación.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Usuario / Identificador</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Bloqueado hasta</th>
+                    <th scope="col" style={{ textAlign: 'right' }}>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {securityAlerts.map(alert => (
+                    <tr key={alert.id}>
+                      <td>
+                        <div className="alert-detail-cell">
+                          <span className="alert-detail-title">{alert.login_identifier}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--color-muted)' }}>ID: {alert.staff_id}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <Badge tone="error">Bloqueado</Badge>
+                      </td>
+                      <td>
+                        <time dateTime={alert.locked_until}>
+                          {formatDateTime(alert.locked_until)}
+                        </time>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <Button
+                          variant="secondary"
+                          disabled={securityMutating}
+                          onClick={() => void acknowledgeSecurity(alert.id)}
+                          aria-label={`Acknowledge lockout for ${alert.login_identifier}`}
+                        >
+                          {securityMutating ? 'Confirmando…' : 'Desbloquear / Reconocer'}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableRegion>
+          )
+        ) : tableData.length === 0 ? (
           <EmptyState title="Sin alertas registradas">
             No se observaron diferencias de caja, mermas, gastos no planificados ni
             transferencias pendientes para los criterios seleccionados.

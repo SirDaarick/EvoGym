@@ -5,7 +5,46 @@ export function isRichDemoEnabled(): boolean {
   return import.meta.env.VITE_USE_RICH_DEMO === 'true';
 }
 
+export function isDemoModeEnabled(): boolean {
+  return import.meta.env.VITE_DEMO_MODE === 'true';
+}
+
+export function isDemoDataDisabled(): boolean {
+  return import.meta.env.VITE_DISABLE_DEMO_DATA === 'true' || import.meta.env.VITE_ENABLE_DEMO_DATA === 'false';
+}
+
+export function createEmptyDemoState(): DemoState {
+  return {
+    demoClock: '2026-10-08T12:00:00-06:00',
+    attendancePolicy: { allowExpiryDay: true, allowRepeatVisits: true },
+    attendance: [],
+    members: [],
+    revision: 0,
+    currentShiftId: '',
+    payments: [],
+    memberNotes: [],
+    ledger: [],
+    shifts: [],
+    products: [],
+    stockMovements: [],
+    counts: [],
+    sales: [],
+    gloves: [],
+    gloveRentals: [],
+    lockers: [],
+    lockerRentals: [],
+    supplements: [],
+    supplementSales: [],
+    expenses: [],
+    extras: [],
+    staffAttendance: [],
+  };
+}
+
 export function createDemoState(): DemoState {
+  if (isDemoDataDisabled()) {
+    return createEmptyDemoState();
+  }
   if (isRichDemoEnabled()) {
     return createRichDemoState();
   }

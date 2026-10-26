@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.admin import _utc, utc_now
 from app.auth.authorization import AuthorizationDenied
+from app.auth.owner import require_owner_or_legacy_admin
 from app.db.models import AdminAuthEvent, Branch, RoleGrant, StaffEnrollmentCode, StaffUser
 
 
@@ -43,25 +44,7 @@ class EnrollmentCodeRecord:
 
 
 def _require_admin(session: Session, admin_id: UUID) -> None:
-    admin = session.scalar(
-        select(StaffUser)
-        .where(StaffUser.id == admin_id)
-        .execution_options(populate_existing=True)
-        .with_for_update()
-    )
-    if admin is None or not admin.is_active:
-        raise AuthorizationDenied("Authorization denied")
-    grants = session.scalars(
-        select(RoleGrant)
-        .where(RoleGrant.staff_id == admin_id)
-        .execution_options(populate_existing=True)
-        .with_for_update()
-    ).all()
-    if not any(
-        g.is_active and g.role == "admin" and g.scope_kind == "organization" and g.branch_id is None
-        for g in grants
-    ):
-        raise AuthorizationDenied("Authorization denied")
+    require_owner_or_legacy_admin(session, admin_id)
 
 
 def issue_enrollment_code(

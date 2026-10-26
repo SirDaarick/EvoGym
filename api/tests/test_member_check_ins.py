@@ -8,7 +8,8 @@ import app.api.member_check_ins as check_in_api
 from app.db.models import Member, MembershipPeriod, MemberCheckIn, Plan, PlanVersion
 from app.main import create_app
 from app.shifts.queries import create_cash_register
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
 
 
@@ -36,12 +37,9 @@ def test_member_checkin_is_branch_scoped_and_exact_request_replay_is_idempotent(
         receptionist_id, receptionist_token = _seed_receptionist(factory, branch_id)
         admin_id = seed_admin(factory)
         member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "CHECKIN")
-        with TestClient(create_app(configured_settings(url))) as client:
-            admin_login = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            })
-            assert admin_login.status_code == 201, admin_login.text
-            admin_token = admin_login.json()["access_token"]
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin_headers = approved_admin_headers(client, delivery)
             sale = client.post(f"/api/v1/registers/{register_id}/membership-sales",
                 headers={"Authorization": f"Bearer {receptionist_token}", "Idempotency-Key": "checkin-sale"},
                 json={"member_id": str(member_id), "plan_version_id": str(version_id)})
@@ -61,13 +59,13 @@ def test_member_checkin_is_branch_scoped_and_exact_request_replay_is_idempotent(
             assert conflicting_key_use.status_code == 409
             wrong_branch = client.post(
                 f"/api/v1/member-check-ins/branches/{other_branch_id}/periods/{period_id}",
-                headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": "wrong-branch"})
+                headers={**admin_headers, "Idempotency-Key": "wrong-branch"})
             assert wrong_branch.status_code == 409
             unauthenticated = client.post(path, headers={"Idempotency-Key": "anonymous"})
             assert unauthenticated.status_code == 401
 
             admin_checkin = client.post(path, headers={
-                "Authorization": f"Bearer {admin_token}", "Idempotency-Key": "admin-checkin",
+                **admin_headers, "Idempotency-Key": "admin-checkin",
             })
             assert admin_checkin.status_code == 201, admin_checkin.text
             with factory() as session:

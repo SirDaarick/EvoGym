@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.admin import _utc, utc_now
 from app.auth.passwords import hash_admin_password
-from app.db.models import AdminAuthEvent, AdminPasswordCredential, AdminRecoveryToken, RoleGrant, StaffSession, StaffUser
+from app.db.models import AdminAuthEvent, AdminLoginApproval, AdminPasswordCredential, AdminRecoveryToken, AdminTrustedDevice, RoleGrant, StaffSession, StaffUser
 
 
 class RecoveryUnavailable(Exception):
@@ -74,8 +74,29 @@ def complete_recovery(session_factory: sessionmaker[Session], raw: str, new_pass
                                     .execution_options(populate_existing=True).with_for_update())
         grants = session.scalars(select(RoleGrant).where(RoleGrant.staff_id == initial.staff_id)
                                  .execution_options(populate_existing=True).with_for_update()).all()
-        token = session.scalar(select(AdminRecoveryToken).where(AdminRecoveryToken.id == initial.id)
-                               .execution_options(populate_existing=True).with_for_update())
+        # Match the Admin lifecycle lock order: user, credential, grants,
+        # sessions, trusted devices, approvals, then recovery tokens.
+        admin_sessions = session.scalars(select(StaffSession).where(
+            StaffSession.staff_id == initial.staff_id,
+            StaffSession.scope_kind == "organization",
+            StaffSession.auth_method == "admin_password",
+            StaffSession.revoked_at.is_(None),
+        ).order_by(StaffSession.id).with_for_update()).all()
+        trusted_devices = session.scalars(select(AdminTrustedDevice).where(
+            AdminTrustedDevice.staff_id == initial.staff_id,
+            AdminTrustedDevice.revoked_at.is_(None),
+        ).order_by(AdminTrustedDevice.id).with_for_update()).all()
+        approvals = session.scalars(select(AdminLoginApproval).where(
+            AdminLoginApproval.staff_id == initial.staff_id,
+            AdminLoginApproval.consumed_at.is_(None),
+            AdminLoginApproval.revoked_at.is_(None),
+        ).order_by(AdminLoginApproval.id).with_for_update()).all()
+        recovery_tokens = session.scalars(select(AdminRecoveryToken).where(
+            AdminRecoveryToken.staff_id == initial.staff_id,
+            AdminRecoveryToken.used_at.is_(None),
+            AdminRecoveryToken.revoked_at.is_(None),
+        ).order_by(AdminRecoveryToken.id).with_for_update()).all()
+        token = next((row for row in recovery_tokens if row.id == initial.id), None)
         if token is None:
             return False
         now = clock().astimezone(timezone.utc)
@@ -90,9 +111,15 @@ def complete_recovery(session_factory: sessionmaker[Session], raw: str, new_pass
         credential.failed_attempts = 0
         credential.locked_until = None
         token.used_at = now
-        session.execute(update(AdminRecoveryToken).where(AdminRecoveryToken.staff_id == staff.id,
-            AdminRecoveryToken.id != token.id, AdminRecoveryToken.used_at.is_(None), AdminRecoveryToken.revoked_at.is_(None)).values(revoked_at=now))
-        session.execute(update(StaffSession).where(StaffSession.staff_id == staff.id, StaffSession.revoked_at.is_(None)).values(revoked_at=now))
+        for recovery_token in recovery_tokens:
+            if recovery_token.id != token.id:
+                recovery_token.revoked_at = now
+        for admin_session in admin_sessions:
+            admin_session.revoked_at = now
+        for device in trusted_devices:
+            device.revoked_at = now
+        for approval in approvals:
+            approval.revoked_at = now
         session.add(AdminAuthEvent(actor_id=staff.id, subject_staff_id=staff.id, action="admin_password_recovered",
                                    request_id=request_id, occurred_at=now))
         changed = True

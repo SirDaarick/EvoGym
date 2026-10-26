@@ -54,7 +54,7 @@ def test_app_stores_typed_configuration():
     assert app.state.settings.environment == "development"
 
 
-def test_cors_requires_narrow_explicit_origin_allowlist_and_never_enables_credentials():
+def test_cors_requires_narrow_explicit_allowlist_for_credentialed_origins():
     allowed_origin = "https://reception.example"
     settings = Settings(environment="test", debug=False, cors_allowed_origins=allowed_origin, _env_file=None)
     app = create_test_app(settings)
@@ -75,8 +75,9 @@ def test_cors_requires_narrow_explicit_origin_allowlist_and_never_enables_creden
     assert "authorization" in allowed.headers["access-control-allow-headers"].lower()
     assert "content-type" in allowed.headers["access-control-allow-headers"].lower()
     assert set(allowed.headers["access-control-allow-methods"].split(", ")) == {"GET", "POST", "PATCH", "PUT", "DELETE"}
-    assert "access-control-allow-credentials" not in allowed.headers
+    assert allowed.headers["access-control-allow-credentials"] == "true"
     assert "access-control-allow-origin" not in denied.headers
+    assert "access-control-allow-credentials" not in denied.headers
 
 
 def test_cors_configuration_fails_closed_for_unset_or_wildcard_allowlist():
@@ -108,7 +109,7 @@ def test_cors_allows_implemented_browser_methods_and_idempotency_header(method):
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == origin
     assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
-    assert "access-control-allow-credentials" not in response.headers
+    assert response.headers["access-control-allow-credentials"] == "true"
 
 
 @pytest.mark.parametrize(("origin", "method", "headers"), [
@@ -129,7 +130,10 @@ def test_cors_rejects_unapproved_origins_methods_and_headers(origin, method, hea
 
     response = asyncio.run(preflight())
     assert response.status_code == 400
-    assert "access-control-allow-credentials" not in response.headers
+    if origin == "https://reception.example":
+        assert response.headers["access-control-allow-credentials"] == "true"
+    else:
+        assert "access-control-allow-credentials" not in response.headers
     if origin != "https://reception.example":
         assert "access-control-allow-origin" not in response.headers
 
@@ -141,7 +145,7 @@ def test_cors_exposes_only_request_correlation_on_actual_responses():
     assert response.status_code == 200
     assert response.headers["access-control-expose-headers"] == "X-Request-ID"
     assert response.headers["x-request-id"]
-    assert "access-control-allow-credentials" not in response.headers
+    assert response.headers["access-control-allow-credentials"] == "true"
 
 
 def request_with_origin(app, path, origin):

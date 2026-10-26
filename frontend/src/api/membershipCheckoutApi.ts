@@ -1,4 +1,4 @@
-import { getReceptionConfig, readOperationalToken } from './receptionApi';
+import { getReceptionConfig, readOperationalToken, OperationalApiHttpError, OperationalApiNetworkError } from './receptionApi';
 
 export interface PublishedMembershipPlanVersion {
   id: string;
@@ -59,20 +59,17 @@ export interface MembershipSaleResponse {
   membership: Record<string, unknown> | null;
 }
 
-export class CheckoutApiHttpError extends Error {
-  readonly kind = 'http';
-
-  constructor(readonly status: number, message: string) {
-    super(message);
+export class CheckoutApiHttpError extends OperationalApiHttpError {
+  constructor(status: number, message: string, code?: string, requestId?: string, issues?: unknown) {
+    super(status, message, code, requestId, issues);
     this.name = 'CheckoutApiHttpError';
   }
 }
 
-export class CheckoutApiNetworkError extends Error {
-  readonly kind = 'network';
-
-  constructor(message: string) {
-    super(message);
+export class CheckoutApiNetworkError extends OperationalApiNetworkError {
+  constructor(message = 'No se pudo conectar con el servidor. Intenta nuevamente.') {
+    super();
+    this.message = message;
     this.name = 'CheckoutApiNetworkError';
   }
 }
@@ -101,21 +98,35 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         ...init.headers,
       },
     });
-  } catch (cause) {
-    throw new CheckoutApiNetworkError(cause instanceof Error ? cause.message : 'No se pudo confirmar la respuesta del servidor.');
+  } catch {
+    throw new CheckoutApiNetworkError();
   }
 
   if (!response.ok) {
-    let message = `La solicitud falló (${response.status}).`;
+    let error: Record<string, unknown> = {};
     try {
-      const body = await response.json() as { detail?: unknown; message?: unknown };
-      const serverMessage = body.detail ?? body.message;
-      if (typeof serverMessage === 'string' && serverMessage.trim()) message = serverMessage;
+      const parsed: unknown = await response.json();
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const envelope = (parsed as Record<string, unknown>).error;
+        if (typeof envelope === 'object' && envelope !== null && !Array.isArray(envelope)) error = envelope as Record<string, unknown>;
+      }
     } catch {
-      // Keep the status-based message when the server does not return a JSON error body.
+      // Keep safe status mapping when no JSON error body is available.
     }
-    throw new CheckoutApiHttpError(response.status, message);
+    const code = typeof error.code === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(error.code) ? error.code : undefined;
+    const requestId = response.headers.get('X-Request-ID') || (typeof error.request_id === 'string' ? error.request_id : undefined);
+    const allowedLocations = new Set(['body', 'query', 'path', 'header', 'cookie']);
+    const allowedTypes = new Set(['missing', 'int_parsing', 'int_type', 'string_type', 'bool_parsing', 'uuid_parsing', 'extra_forbidden', 'json_invalid', 'greater_than', 'greater_than_equal', 'less_than', 'less_than_equal', 'string_too_short', 'string_too_long', 'string_pattern_mismatch', 'literal_error', 'invalid']);
+    const issues = Array.isArray(error.issues) ? error.issues.slice(0, 20).flatMap((issue) => {
+      if (typeof issue !== 'object' || issue === null || Array.isArray(issue)) return [];
+      const candidate = issue as Record<string, unknown>;
+      return [{ location: Array.isArray(candidate.location) ? candidate.location.filter((value): value is string => typeof value === 'string' && allowedLocations.has(value)).slice(0, 1) : [], type: typeof candidate.type === 'string' && allowedTypes.has(candidate.type) ? candidate.type : 'invalid' }];
+    }) : undefined;
+    const messages: Record<number, string> = { 401: 'La sesión expiró o fue revocada. Inicia sesión nuevamente.', 403: 'No tienes autorización para realizar esta acción.', 409: 'La solicitud entra en conflicto con el estado actual.', 429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.', 422: 'Revisa los datos enviados e intenta nuevamente.' };
+    const message = messages[response.status] ?? (response.status >= 500 ? 'El servidor no pudo completar la solicitud.' : `La solicitud falló (${response.status}).`);
+    throw new CheckoutApiHttpError(response.status, message, code, requestId, issues);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 

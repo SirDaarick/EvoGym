@@ -17,7 +17,8 @@ vi.mock('@tanstack/react-table', async importOriginal => {
   };
 });
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
-import { MemberDetailSections } from './MemberDetail';
+import { MemberCounterView, MemberDetailSections } from './MemberDetail';
+import type { MemberReloadResponse } from '../../api/memberReadsApi';
 import { rentalStatus } from './memberDetailUtils';
 import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
@@ -37,7 +38,7 @@ describe('member detail presentation', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Volver a socios' }));
 
     expect(screen.getByTestId('current-route')).toHaveTextContent('/reception/members');
-  });
+  }, 12000);
 
   it('opens and closes the note editor from the notes section', async () => {
     render(<MemoryRouter initialEntries={['/reception/members/demo-001']}><DemoProvider><App /></DemoProvider></MemoryRouter>);
@@ -98,6 +99,7 @@ describe('member detail presentation', () => {
     expect(within(sections as HTMLElement).getByText(/Racha de renovaciones consecutivas/)).toBeVisible();
     expect(within(main).queryByText(/Los registros iniciales son ejemplos ficticios/)).not.toBeInTheDocument();
   }, 12000);
+
   it('scales attendance squares by measured gym time and keeps unknown time attended', () => {
     render(<AttendanceCalendar now="2026-10-08T12:00:00-06:00" visits={[
       { id: 'short', memberId: 'm', observedCheckIn: '2026-10-07T08:00:00-06:00', observedCheckOut: '2026-10-07T08:30:00-06:00', autoClosedAt: null },
@@ -174,6 +176,7 @@ describe('member detail presentation', () => {
       gloves={[]} gloveRentals={[]} lockers={[]} lockerRentals={[]} payments={[{ id: 'linked', memberId: 'm', planId: 'p', planName: 'Mensual', amountMinor: 100, method: 'cash', status: 'paid', recordedAt: '2026-01-01T12:00:00-06:00', shiftId: 's', effectiveDates: null }]} supplementSales={[]} /></DemoProvider>);
     expect(screen.getAllByRole('row', { name: /Mensual/ })[0]).not.toHaveClass('membership-current-row');
   });
+
   it('keeps membership history stable across parent rerenders and updates when the member changes', async () => {
     const member = { id: 'm', name: 'Member', phone: '', creditMinor: 0, membership: null };
     const payment = { id: 'paid', memberId: 'm', planId: 'p', planName: 'Mensual', amountMinor: 100, method: 'cash' as const, status: 'paid' as const, recordedAt: '2026-10-01T12:00:00-06:00', shiftId: 's', effectiveDates: null };
@@ -277,3 +280,185 @@ describe('member detail presentation', () => {
   });
 });
 
+describe('member reload contract consumption (P2.4)', () => {
+  const baseReloadResponse: MemberReloadResponse = {
+    profile: {
+      id: '018f3a20-0000-7000-8000-000000000001',
+      organization_id: '018f3a00-0000-7000-8000-000000000001',
+      home_branch_id: '00000000-0000-7000-8000-000000000001',
+      member_number: 'SOC-0001',
+      full_name: 'Synthetic Reload Member',
+      preferred_name: 'Synthetic',
+      phone: '+525555555555',
+      email: 'synthetic@example.com',
+      birth_date: '1995-05-15',
+      joined_on: '2026-01-10',
+      status: 'active',
+      photo_url: null,
+      emergency_contact_name: 'Emergency Contact',
+      emergency_contact_phone: '+525555555556',
+    },
+    active_periods: [
+      {
+        id: '018f3a30-0000-7000-8000-000000000001',
+        order_item_id: '018f3a40-0000-7000-8000-000000000001',
+        plan_version_id: '018f3a50-0000-7000-8000-000000000001',
+        plan_name: 'Membresía Semestral Élite',
+        starts_on: '2026-10-01',
+        ends_on: '2027-04-01',
+        branch_id: null,
+        is_current: true,
+        access_status: 'eligible',
+      },
+    ],
+    class_samples: [
+      {
+        id: '018f3a60-0000-7000-8000-000000000001',
+        order_item_id: '018f3a70-0000-7000-8000-000000000001',
+        plan_version_id: '018f3a80-0000-7000-8000-000000000001',
+        plan_name: 'Muestra Muay Thai',
+        is_consumed: false,
+        consumed_at: null,
+        consumed_visit_id: null,
+      },
+    ],
+    financial: {
+      has_pending_balance: false,
+      credit_balance_minor: 0,
+      total_pending_balance_minor: null,
+      currency: 'MXN',
+      debts: [],
+    },
+    recent_visits: [
+      {
+        id: '018f3a90-0000-7000-8000-000000000001',
+        visit_id: '018f3aa0-0000-7000-8000-000000000001',
+        branch_id: '00000000-0000-7000-8000-000000000001',
+        period_id: '018f3a30-0000-7000-8000-000000000001',
+        sample_entitlement_id: null,
+        occurred_at: '2026-10-22T08:30:00.000Z',
+        access_reason: 'valid_membership',
+        access_warnings: [],
+      },
+    ],
+    server_time: '2026-10-23T05:00:00.000Z',
+  };
+
+  const dummyMember = {
+    id: '018f3a20-0000-7000-8000-000000000001',
+    name: 'Synthetic Reload Member',
+    phone: '+525555555555',
+    creditMinor: 0,
+    membership: null,
+  };
+
+  it('renders reloadable membership periods and class sample entitlements in native views', () => {
+    const { unmount } = render(
+      <DemoProvider>
+        <MemberDetailSections
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          gloves={[]}
+          gloveRentals={[]}
+          lockers={[]}
+          lockerRentals={[]}
+          payments={[]}
+          supplementSales={[]}
+          reloadState={baseReloadResponse}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+    expect(screen.getByText('Membresía Semestral Élite')).toBeVisible();
+    expect(screen.getByText(/2026-10-01 al 2027-04-01/)).toBeVisible();
+    expect(screen.getByText('Elegible')).toBeVisible();
+    expect(screen.getByText('Multisucursal')).toBeVisible();
+
+    expect(screen.getByText('Muestra Muay Thai')).toBeVisible();
+    expect(screen.getByText('Disponible para check-in')).toBeVisible();
+    unmount();
+
+    render(
+      <DemoProvider>
+        <MemberCounterView
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          reloadState={baseReloadResponse}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+    expect(screen.getByText('Membresía Semestral Élite')).toBeVisible();
+    expect(screen.getByText(/2026-10-01 al 2027-04-01/)).toBeVisible();
+  });
+
+  it('shows boolean balance warning for receptionist role in native card without leaking centavos', () => {
+    const receptionistReloadResponse: MemberReloadResponse = {
+      ...baseReloadResponse,
+      financial: {
+        has_pending_balance: true,
+        credit_balance_minor: 0,
+        total_pending_balance_minor: null,
+        currency: 'MXN',
+        debts: [],
+      },
+    };
+
+    render(
+      <DemoProvider>
+        <MemberCounterView
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          role="RECEPTION"
+          reloadState={receptionistReloadResponse}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Saldo pendiente registrado');
+    expect(screen.queryByText(/Adeudo/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-debt-details')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-debt-amount')).not.toBeInTheDocument();
+  });
+
+  it('shows debt amount in native card when viewing as Admin/Owner', () => {
+    const adminReloadResponse: MemberReloadResponse = {
+      ...baseReloadResponse,
+      financial: {
+        has_pending_balance: true,
+        credit_balance_minor: 0,
+        total_pending_balance_minor: 35000,
+        currency: 'MXN',
+        debts: [
+          {
+            debt_id: '018f3b00-0000-7000-8000-000000000001',
+            order_id: '018f3b10-0000-7000-8000-000000000001',
+            branch_id: '00000000-0000-7000-8000-000000000001',
+            currency: 'MXN',
+            initial_outstanding_minor: 50000,
+            remaining_balance_minor: 35000,
+            created_at: '2026-10-20T12:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    render(
+      <DemoProvider>
+        <MemberCounterView
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          role="OWNER"
+          reloadState={adminReloadResponse}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Saldo pendiente registrado');
+    expect(screen.getByText(/350\.00/)).toBeVisible();
+  });
+});

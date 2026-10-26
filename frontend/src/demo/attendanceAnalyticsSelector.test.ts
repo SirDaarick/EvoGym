@@ -99,7 +99,11 @@ describe('getAttendanceAnalytics pure selector', () => {
     expect(summary.hourlyBins).toHaveLength(16);
     expect(summary.dayOfWeekBins).toHaveLength(7);
     expect(summary.timeSlots).toHaveLength(3);
+    expect(summary.peakHour.label).toBe('—');
+    expect(summary.valleyHour.label).toBe('—');
+    expect(summary.busiestDay.dayName).toBe('—');
     expect(summary.recommendations.length).toBeGreaterThan(0);
+    expect(summary.recommendations[0].id).toBe('no-traffic-recorded');
   });
 
   it('computes live occupancy and occupants details accurately', () => {

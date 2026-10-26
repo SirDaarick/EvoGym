@@ -19,6 +19,9 @@ async function mount(path = '/owner/overview') {
 describe('application foundation', () => {
   it('preserves provider data and shell controls across lazy route changes', async () => {
     await mount('/owner/overview');
+    expect(screen.getByTestId('application-shell')).toHaveClass('app-shell');
+    expect(screen.getAllByLabelText('Navegación principal')[0].querySelector('.sidebar-icon')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Usar tema/ })).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Vaciar prueba' }));
     await userEvent.click(screen.getByRole('link', { name: 'Historial' }));
     expect(await screen.findByRole('heading', { name: 'Historial de movimientos' }, { timeout: 10000 })).toBeVisible();

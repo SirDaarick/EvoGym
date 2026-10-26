@@ -9,7 +9,7 @@ from app.auth.sessions import issue_session
 from app.db.base import Base
 from app.db.models import Branch, RoleGrant, StaffCredential, StaffUser
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings, seed_admin
 
 
 def _setup(tmp_path):
@@ -46,10 +46,11 @@ def _setup(tmp_path):
 def test_roster_is_branch_scoped_admin_managed_and_supports_inactive_profiles(tmp_path):
     url, engine, factory, branch_a_id, branch_b_id, desk_token, branch_admin_token = _setup(tmp_path)
     try:
-        with TestClient(create_app(configured_settings(url))) as client:
-            admin_token = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            }).json()["access_token"]
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin_token = complete_device_login(
+                client, delivery, "owner@example.invalid", "synthetic-admin-password"
+            ).json()["access_token"]
             admin = {"Authorization": f"Bearer {admin_token}"}
             desk = {"Authorization": f"Bearer {desk_token}"}
             assert client.get("/api/v1/staff-roster", headers=admin).status_code == 200
@@ -83,5 +84,21 @@ def test_roster_is_branch_scoped_admin_managed_and_supports_inactive_profiles(tm
                                        json={"is_active": False})
             assert deactivated.status_code == 200 and deactivated.json()["is_active"] is False
             assert client.get(f"/api/v1/staff-roster?branch_id={branch_a_id}&include_inactive=true", headers=desk).json()["items"][0]["is_active"] is False
+    finally:
+        engine.dispose()
+
+
+def test_staff_session_fallback_works_when_admin_signing_is_unconfigured(tmp_path):
+    url, engine, _factory, branch_a_id, _branch_b_id, desk_token, _branch_admin_token = _setup(tmp_path)
+    try:
+        app = create_app(configured_settings(url, admin_token_signing_secret=None))
+        with TestClient(app) as client:
+            response = client.get(
+                f"/api/v1/staff-roster?branch_id={branch_a_id}",
+                headers={"Authorization": f"Bearer {desk_token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["items"] == []
     finally:
         engine.dispose()

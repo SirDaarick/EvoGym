@@ -12,17 +12,25 @@ from app.db.base import Base
 from app.db.models import AdminPasswordCredential, AdminRecoveryToken, Branch, RoleGrant, StaffCredential, StaffSession, StaffUser
 from app.main import create_app
 from test_admin_auth import configured_settings, seed_admin
+from admin_session_helpers import approved_admin_session
 
 
 class CapturingDelivery:
     def __init__(self, fail=False):
         self.fail = fail
         self.messages = []
+        self.approval_links = []
 
     def enqueue_recovery_link(self, email, link):
         if self.fail:
             raise RuntimeError("synthetic delivery failure")
         self.messages.append((email, link))
+
+    def enqueue_admin_device_approval(self, email, link):
+        self.approval_links.append((email, link))
+
+    def enqueue_admin_security_notice(self, email, category):
+        return None
 
 
 def test_recovery_start_is_generic_and_token_is_only_delivered_and_digest_stored(tmp_path):
@@ -105,19 +113,18 @@ def test_recovery_completion_changes_password_and_revokes_all_owned_sessions_ato
     app = create_app(configured_settings(url), recovery_delivery=delivery)
     try:
         with TestClient(app) as client:
-            first_admin = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"}).json()
-            other_admin = client.post("/api/v1/auth/sessions", json={"login_identifier": "other@example.invalid", "password": "other-admin-password"}).json()
+            first_admin = approved_admin_session(client, delivery)
+            other_admin = approved_admin_session(client, delivery, "other@example.invalid", "other-admin-password")
             started = client.post("/api/v1/auth/recovery/start", json={"login_identifier": "owner@example.invalid"})
             token = delivery.messages[0][1].split("token=", 1)[1]
             completed = client.post("/api/v1/auth/recovery/complete", json={"token": token, "new_password": "replacement-password"})
             assert started.status_code == 202 and completed.status_code == 204
             replay = client.post("/api/v1/auth/recovery/complete", json={"token": token, "new_password": "another-password"})
             assert replay.status_code == 400
-            assert client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {first_admin['access_token']}"}).status_code == 401
+            assert client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {first_admin.json()['access_token']}"}).status_code == 401
             assert client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {pin_session.token}"}).status_code == 401
-            assert client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {other_admin['access_token']}"}).status_code == 200
-            replacement = client.post("/api/v1/auth/sessions", json={"login_identifier": "owner@example.invalid", "password": "replacement-password"})
-            assert replacement.status_code == 201
+            assert client.get("/api/v1/admin/sessions", headers={"Authorization": f"Bearer {other_admin.json()['access_token']}"}).status_code == 200
+            replacement = approved_admin_session(client, delivery, password="replacement-password")
         with factory() as session:
             credential = session.scalar(select(AdminPasswordCredential).where(AdminPasswordCredential.staff_id == target_id))
             assert verify_admin_password("replacement-password", credential.password_hash)

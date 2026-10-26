@@ -19,10 +19,14 @@ _bearer = HTTPBearer(auto_error=False)
 
 def _admin(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> UUID:
     factory = request.app.state.session_factory
-    if not request.app.state.settings.admin_auth_configured or factory is None or credentials is None or credentials.scheme.lower() != "bearer":
+    settings = request.app.state.settings
+    if (not settings.admin_auth_configured or not settings.admin_token_signing_configured or factory is None
+            or credentials is None or credentials.scheme.lower() != "bearer"):
         raise HTTPException(401, "Authentication failed.")
     try:
-        actor_id, _session_id = validate_admin_session(factory, credentials.credentials)
+        actor_id, _session_id = validate_admin_session(
+            factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
+        )
         return actor_id
     except AuthorizationDenied:
         try:

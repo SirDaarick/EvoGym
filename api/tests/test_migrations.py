@@ -2,7 +2,7 @@ from pathlib import Path
 import importlib.util
 import shutil
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from alembic import command
@@ -15,6 +15,14 @@ import pytest
 
 
 API_DIR = Path(__file__).resolve().parents[1]
+
+
+def test_migration_graph_has_one_head_with_distinct_admin_and_staff_revision_ids():
+    scripts = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
+
+    assert scripts.get_heads() == ["0038_staff_occurrence_attendance"]
+    assert scripts.get_revision("0031_admin_session_policy").revision == "0031_admin_session_policy"
+    assert scripts.get_revision("0038_staff_occurrence_attendance").revision == "0038_staff_occurrence_attendance"
 
 
 def test_staff_schedule_downgrade_refuses_to_drop_attendance_snapshots(tmp_path, monkeypatch):
@@ -51,6 +59,72 @@ def test_new_head_migration_revision_fits_alembic_version_column():
     assert max(len(revision.revision) for revision in revisions) == 35
     assert all(len(revision.revision) <= 128 for revision in revisions)
     assert scripts.get_revision("0010_registers_terminals_and_shifts").revision == "0010_registers_terminals_and_shifts"
+
+
+def test_profile_access_migration_preserves_legacy_device_and_guards_downgrade(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'profile-access-migration.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0036_staff_lockout_alert_ack")
+    command.upgrade(config, "0037_paired_profile_access")
+
+    from app.db.models import AdminTrustedDevice, Branch, ReceptionStation, StaffPairedDevice, StaffUser
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(database_url)
+    factory = sessionmaker(engine)
+    try:
+        with factory.begin() as session:
+            staff = StaffUser(login_identifier="migration-profile@example.invalid")
+            session.add(staff)
+            session.flush()
+            paired = StaffPairedDevice(
+                staff_id=staff.id, device_identifier_hash="a" * 64,
+                device_name="legacy mobile",
+            )
+            branch = Branch(code="migration-profile", name="Migration Profile")
+            session.add_all([paired, branch])
+            session.flush()
+            now = datetime.now(timezone.utc)
+            device = AdminTrustedDevice(
+                staff_id=staff.id, category="computer", cookie_digest="c" * 64,
+                created_at=now, last_used_at=now,
+            )
+            session.add(device)
+            session.flush()
+            station = ReceptionStation(
+                branch_id=branch.id, created_by=staff.id, source_admin_device_id=device.id,
+                credential_digest="d" * 64, created_at=now, expires_at=now + timedelta(days=90),
+            )
+            session.add(station)
+            session.flush()
+            paired_id = paired.id
+            station_id = station.id
+        with factory() as session:
+            assert session.get(StaffPairedDevice, paired_id).profile_access_digest is None
+        with factory.begin() as session:
+            session.get(StaffPairedDevice, paired_id).profile_access_digest = "b" * 64
+        with pytest.raises(RuntimeError, match="Cannot downgrade while profile-access credentials"):
+            command.downgrade(config, "0036_staff_lockout_alert_ack")
+        with factory.begin() as session:
+            session.get(StaffPairedDevice, paired_id).profile_access_digest = None
+        with pytest.raises(RuntimeError, match="Cannot downgrade while profile-access credentials"):
+            command.downgrade(config, "0036_staff_lockout_alert_ack")
+        with factory.begin() as session:
+            session.get(ReceptionStation, station_id).source_admin_device_id = None
+        command.downgrade(config, "0036_staff_lockout_alert_ack")
+        with engine.connect() as connection:
+            legacy = connection.execute(text(
+                "select device_identifier_hash, device_name, revoked_at from staff_paired_devices where id=:id"
+            ), {"id": paired_id.hex}).one()
+            assert legacy.device_identifier_hash == "a" * 64
+            assert legacy.device_name == "legacy mobile"
+            assert legacy.revoked_at is None
+    finally:
+        engine.dispose()
 
 
 def test_class_sample_downgrade_refuses_to_discard_entitlements(tmp_path, monkeypatch):
@@ -265,6 +339,9 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
             assert set(inspect(connection).get_table_names()) == {
                 "alembic_version", "staff_users", "staff_credentials", "security_events", "branches", "staff_role_grants", "staff_sessions", "audit_events",
                 "admin_password_credentials", "admin_recovery_tokens", "admin_auth_events",
+                "admin_trusted_devices", "admin_login_approvals",
+                "admin_role_bundles", "admin_role_bundle_permissions", "admin_role_bundle_assignments",
+                "organization_owners", "reception_stations",
                 "staff_enrollment_codes", "staff_device_pairing_codes", "staff_paired_devices", "members",
                 "member_notes", "member_eligibility_records",
                 "services", "plans", "plan_versions", "plan_version_services",
@@ -274,13 +351,14 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "shift_inventory_reviews", "shift_inventory_observations",
                     "orders", "order_items", "payments", "payment_review_events", "membership_periods", "membership_debts", "membership_debt_payments", "member_access_decisions",
                 "staff_roster_profiles", "staff_attendance_records", "staff_attendance_checkouts",
+                "staff_attendance_corrections",
                 "staff_schedule_series", "staff_schedule_exceptions",
                 "shift_closing_denomination_counts",
                 "member_check_ins",
                 "member_check_in_visits",
                 "class_sample_entitlements", "class_sample_check_ins",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
             checkin_triggers = {
                 row[0]
                 for row in connection.execute(
@@ -442,7 +520,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
     finally:
         engine.dispose()
 
@@ -531,7 +609,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
     finally:
         engine.dispose()
 
@@ -557,7 +635,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
     finally:
         engine.dispose()
 
@@ -641,7 +719,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -674,7 +752,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -746,7 +824,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -837,7 +915,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -921,7 +999,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0030_staff_schedules"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:
@@ -981,7 +1059,7 @@ def test_staff_roster_migration_is_branch_scoped_and_blocks_data_loss(tmp_path, 
         engine.dispose()
 
 
-def test_staff_attendance_migration_enforces_branch_date_uniqueness_and_append_only(tmp_path, monkeypatch):
+def test_staff_attendance_migration_allows_distinct_same_day_occurrences_and_is_append_only(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'attendance.db').as_posix()}"
     monkeypatch.setenv("EVOGYM_ENV", "test")
@@ -990,7 +1068,7 @@ def test_staff_attendance_migration_enforces_branch_date_uniqueness_and_append_o
     config = Config(str(API_DIR / "alembic.ini"))
     command.upgrade(config, "0021_staff_roster")
     engine = create_engine(database_url)
-    branch_id, profile_id, actor_id, record_id = (uuid4().hex for _ in range(4))
+    branch_id, profile_id, actor_id, series_id, second_series_id, record_id = (uuid4().hex for _ in range(6))
     try:
         with engine.begin() as connection:
             connection.execute(text("insert into branches (id, code, name) values (:id, 'attendance-migration', 'Attendance')"),
@@ -1004,23 +1082,38 @@ def test_staff_attendance_migration_enforces_branch_date_uniqueness_and_append_o
         command.upgrade(config, "head")
         with engine.begin() as connection:
             assert "staff_attendance_records" in inspect(connection).get_table_names()
-            values = {"id": record_id, "branch": branch_id, "profile": profile_id, "actor": actor_id}
+            for schedule_id, start_time in ((series_id, "09:00:00"), (second_series_id, "13:00:00")):
+                connection.execute(text(
+                    "insert into staff_schedule_series "
+                    "(id, profile_id, branch_id, start_date, weekdays, start_time, end_time, created_by) "
+                    "values (:id, :profile, :branch, '2026-10-20', '[1]', :start, '14:00:00', :actor)"
+                ), {"id": schedule_id, "profile": profile_id, "branch": branch_id,
+                    "start": start_time, "actor": actor_id})
+            values = {"id": record_id, "branch": branch_id, "profile": profile_id, "actor": actor_id,
+                      "series": series_id}
             connection.execute(text(
-                "insert into staff_attendance_records (id, branch_id, profile_id, recorded_by, occurred_at, business_date) "
-                "values (:id, :branch, :profile, :actor, '2026-10-21T02:30:00+00:00', '2026-10-20')"
+                "insert into staff_attendance_records "
+                "(id, branch_id, profile_id, recorded_by, occurred_at, business_date, series_id, occurrence_date) "
+                "values (:id, :branch, :profile, :actor, '2026-10-21T02:30:00+00:00', '2026-10-20', :series, '2026-10-20')"
             ), values)
+            connection.execute(text(
+                "insert into staff_attendance_records "
+                "(id, branch_id, profile_id, recorded_by, occurred_at, business_date, series_id, occurrence_date) "
+                "values (:id, :branch, :profile, :actor, '2026-10-21T06:30:00+00:00', '2026-10-20', :series, '2026-10-20')"
+            ), {**values, "id": uuid4().hex, "series": second_series_id})
         with engine.begin() as connection:
             with pytest.raises(IntegrityError):
                 connection.execute(text(
-                    "insert into staff_attendance_records (id, branch_id, profile_id, recorded_by, occurred_at, business_date) "
-                    "values (:id, :branch, :profile, :actor, '2026-10-21T03:00:00+00:00', '2026-10-20')"
+                    "insert into staff_attendance_records "
+                    "(id, branch_id, profile_id, recorded_by, occurred_at, business_date, series_id, occurrence_date) "
+                    "values (:id, :branch, :profile, :actor, '2026-10-21T03:00:00+00:00', '2026-10-20', :series, '2026-10-20')"
                 ), {**values, "id": uuid4().hex})
             with pytest.raises(IntegrityError):
                 connection.execute(text("update staff_attendance_records set business_date='2026-10-21' where id=:id"),
                                    {"id": record_id})
             with pytest.raises(IntegrityError):
                 connection.execute(text("delete from staff_attendance_records where id=:id"), {"id": record_id})
-        with pytest.raises(RuntimeError, match="staff attendance records exist"):
+        with pytest.raises(RuntimeError, match="staff attendance records contain occurrence-linked data"):
             command.downgrade(config, "0021_staff_roster")
         with engine.connect() as connection:
             assert connection.execute(text("select count(*) from staff_attendance_records where id=:id"),
@@ -1095,3 +1188,60 @@ def test_staff_schedule_weekday_check_compiles_portably_for_sqlite_and_postgresq
     for dialect in (sqlite.dialect(), postgresql.dialect()):
         ddl = str(sa.schema.CreateTable(StaffScheduleSeries.__table__).compile(dialect=dialect))
         assert "json_array_length(weekdays) > 0" in ddl
+
+
+def test_staff_occurrence_attendance_migration_creates_columns_and_refuses_history_loss(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'staff-occurrence-att.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", database_url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    branch_id, staff_id, profile_id, series_id, att_id, corr_id = (uuid4().hex for _ in range(6))
+    try:
+        with engine.connect() as connection:
+            columns = {col["name"] for col in inspect(connection).get_columns("staff_attendance_records")}
+            assert {
+                "series_id", "occurrence_date", "device_captured_at", "server_received_at",
+                "idempotency_key", "scheduled_start_time", "scheduled_end_time", "clock_skew_seconds",
+                "clock_validation_status", "review_required", "schedule_conflict"
+            }.issubset(columns)
+            assert "staff_attendance_corrections" in inspect(connection).get_table_names()
+
+        with engine.begin() as connection:
+            connection.execute(text("insert into branches (id, code, name) values (:id, 'att-test', 'Attendance Test')"), {"id": branch_id})
+            connection.execute(text("insert into staff_users (id, login_identifier) values (:id, 'att-test@example.invalid')"), {"id": staff_id})
+            connection.execute(text("insert into staff_roster_profiles (id, branch_id, full_name, position) values (:id, :branch, 'Att Worker', 'Reception')"),
+                               {"id": profile_id, "branch": branch_id})
+            connection.execute(text(
+                "insert into staff_schedule_series (id, profile_id, branch_id, start_date, weekdays, start_time, end_time, created_by) "
+                "values (:id, :profile, :branch, '2026-10-26', '[0]', '09:00:00', '10:00:00', :staff)"
+            ), {"id": series_id, "profile": profile_id, "branch": branch_id, "staff": staff_id})
+            connection.execute(text(
+                "insert into staff_attendance_records "
+                "(id, branch_id, profile_id, recorded_by, occurred_at, business_date, series_id, occurrence_date, clock_validation_status) "
+                "values (:id, :branch, :profile, :staff, '2026-10-26T09:00:00+00:00', '2026-10-26', :series, '2026-10-26', 'trusted')"
+            ), {"id": att_id, "branch": branch_id, "profile": profile_id, "staff": staff_id, "series": series_id})
+            connection.execute(text(
+                "insert into staff_attendance_corrections "
+                "(id, attendance_id, corrected_by, field_name, original_value, corrected_value, reason) "
+                "values (:id, :att_id, :staff, 'status', 'late', 'present', 'Traffic justified')"
+            ), {"id": corr_id, "att_id": att_id, "staff": staff_id})
+
+        # Test trigger: corrections are append-only
+        with engine.begin() as connection:
+            with pytest.raises(IntegrityError):
+                connection.execute(text("update staff_attendance_corrections set reason='Mutated' where id=:id"), {"id": corr_id})
+            with pytest.raises(IntegrityError):
+                connection.execute(text("delete from staff_attendance_corrections where id=:id"), {"id": corr_id})
+
+        # Test downgrade refusal while corrections exist
+        with pytest.raises(RuntimeError, match="staff attendance corrections exist"):
+            command.downgrade(config, "0030_staff_schedules")
+
+        with engine.connect() as connection:
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+    finally:
+        engine.dispose()

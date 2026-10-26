@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 import hashlib
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -16,9 +17,9 @@ from app.auth.devices import (
     revoke_paired_device,
 )
 from app.db.base import Base
-from app.db.models import AdminAuthEvent, Branch, RoleGrant, StaffDevicePairingCode, StaffPairedDevice, StaffUser
+from app.db.models import AdminAuthEvent, Branch, OrganizationOwner, ReceptionStation, RoleGrant, StaffDevicePairingCode, StaffPairedDevice, StaffSession, StaffUser
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings, seed_admin
 
 
 def _setup_db(tmp_path):
@@ -182,6 +183,13 @@ def test_pairing_code_lockout_after_3_failed_attempts(tmp_path):
             assert False, "Expected DevicePairingDenied on locked code"
         except DevicePairingDenied:
             pass
+        with factory() as session:
+            row = session.get(StaffDevicePairingCode, issued.id)
+            active_devices = session.scalars(select(StaffPairedDevice).where(
+                StaffPairedDevice.staff_id == staff_id, StaffPairedDevice.revoked_at.is_(None),
+            )).all()
+            assert row.revoked_at is not None
+            assert active_devices == []
     finally:
         engine.dispose()
 
@@ -254,6 +262,61 @@ def test_enforce_one_active_device_limit_per_staff(tmp_path):
         engine.dispose()
 
 
+def test_pairing_replacement_revokes_only_phone_sessions_and_consumes_code_atomically(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        admin_id = seed_admin(factory)
+        staff_id = _seed_staff(factory, "sheila@evogym.com")
+        first_code = issue_device_pairing_code(factory, admin_id, staff_id)
+        first_device_id = pair_device(factory, "sheila@evogym.com", first_code.raw_code, "old", "Old phone")
+        now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        phone = StaffSession(staff_id=staff_id, branch_id=_branch_for_staff(factory, staff_id),
+                             scope_kind="branch", auth_method="pin", token_digest="p" * 64,
+                             issued_at=now, expires_at=now + timedelta(days=1),
+                             employee_purpose="phone")
+        legacy_phone = StaffSession(staff_id=staff_id, branch_id=phone.branch_id,
+                                    scope_kind="branch", auth_method="pin", token_digest="l" * 64,
+                                    issued_at=now, expires_at=now + timedelta(days=1),
+                                    employee_purpose=None)
+        with factory.begin() as session:
+            branch = session.get(Branch, phone.branch_id)
+            station = ReceptionStation(branch_id=branch.id, created_by=staff_id,
+                                       credential_digest="s" * 64, created_at=now,
+                                       expires_at=now + timedelta(days=90))
+            session.add(station)
+            session.flush()
+            reception = StaffSession(staff_id=staff_id, branch_id=branch.id,
+                                     scope_kind="branch", auth_method="pin", token_digest="r" * 64,
+                                     issued_at=now, expires_at=now + timedelta(days=1),
+                                     employee_purpose="reception", reception_station_id=station.id)
+            admin = StaffSession(staff_id=admin_id, branch_id=None,
+                                 scope_kind="organization", auth_method="admin_password",
+                                 token_digest="a" * 64, issued_at=now,
+                                 expires_at=now + timedelta(days=1))
+            session.add_all([phone, legacy_phone, reception, admin])
+
+        replacement_code = issue_device_pairing_code(factory, admin_id, staff_id)
+        replacement_id = pair_device(factory, "sheila@evogym.com", replacement_code.raw_code, "new", "New phone")
+
+        with factory() as session:
+            stored = {row.token_digest: row for row in session.scalars(select(StaffSession)).all()}
+            assert stored["p" * 64].revoked_at is not None
+            assert stored["l" * 64].revoked_at is not None
+            assert stored["r" * 64].revoked_at is None
+            assert stored["a" * 64].revoked_at is None
+            assert session.get(StaffPairedDevice, first_device_id).revoked_at is not None
+            assert session.get(StaffPairedDevice, replacement_id).revoked_at is None
+            assert session.get(StaffDevicePairingCode, replacement_code.id).used_at is not None
+    finally:
+        engine.dispose()
+
+
+def _branch_for_staff(factory, staff_id: UUID) -> UUID:
+    with factory() as session:
+        grant = session.scalar(select(RoleGrant).where(RoleGrant.staff_id == staff_id))
+        return grant.branch_id
+
+
 def test_admin_list_and_revoke_devices(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -271,7 +334,8 @@ def test_admin_list_and_revoke_devices(tmp_path):
         assert devices[0].revoked is False
         assert not hasattr(devices[0], "device_identifier_hash")
 
-        # Revoke device
+        # A lost phone revocation also consumes any still-pending authorization to pair it.
+        pending = issue_device_pairing_code(factory, admin_id, staff_id)
         assert revoke_paired_device(factory, admin_id, dev_id) is True
 
         devices_after = list_paired_devices(factory, admin_id)
@@ -286,6 +350,26 @@ def test_admin_list_and_revoke_devices(tmp_path):
                 )
             )
             assert event is not None
+            pending_row = session.get(StaffDevicePairingCode, pending.id)
+            assert pending_row.revoked_at is not None
+        with pytest.raises(DevicePairingDenied):
+            pair_device(factory, "sheila@evogym.com", pending.raw_code, "lost", "Lost phone")
+    finally:
+        engine.dispose()
+
+
+def test_device_management_requires_live_employee_permission_after_owner_claim(tmp_path):
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        owner_id = seed_admin(factory, "owner@example.invalid")
+        nonowner_id = seed_admin(factory, "manager@example.invalid")
+        target_id = _seed_staff(factory)
+        with factory.begin() as session:
+            session.add(OrganizationOwner(id=1, staff_id=owner_id))
+        with pytest.raises(AuthorizationDenied):
+            issue_device_pairing_code(factory, nonowner_id, target_id)
+        issued = issue_device_pairing_code(factory, owner_id, target_id)
+        assert issued.staff_id == target_id
     finally:
         engine.dispose()
 
@@ -295,15 +379,13 @@ def test_device_pairing_api_endpoints(tmp_path):
     try:
         admin_id = seed_admin(factory, "owner@example.invalid", "synthetic-admin-password")
         staff_id = _seed_staff(factory, "sheila@evogym.com")
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
 
         with TestClient(app) as client:
             # 1. Admin login
-            login_res = client.post(
-                "/api/v1/auth/sessions",
-                json={"login_identifier": "owner@example.invalid", "password": "synthetic-admin-password"},
-            )
-            assert login_res.status_code == 201
+            login_res = complete_device_login(client, delivery, "owner@example.invalid", "synthetic-admin-password")
+            assert login_res.status_code == 200
             token = login_res.json()["access_token"]
             headers = {"Authorization": f"Bearer {token}"}
 

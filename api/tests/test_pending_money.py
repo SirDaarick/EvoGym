@@ -9,7 +9,8 @@ from app.db.models import (
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
 from app.main import create_app
-from test_admin_auth import configured_settings, seed_admin
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
 
 
@@ -61,16 +62,13 @@ def test_admin_pending_money_lists_pending_transfers_and_outstanding_debt(tmp_pa
                 members[0].id, members[1].id, members[2].id, members[3].id, version.id, register.id, other_register.id,
             )
 
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
         with TestClient(app) as client:
             assert client.get("/api/v1/admin/pending-money").status_code == 401
             denied = client.get("/api/v1/admin/pending-money", headers={"Authorization": f"Bearer {staff_token}"})
             assert denied.status_code == 403
-            admin_login = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            })
-            assert admin_login.status_code == 201, admin_login.text
-            admin_token = admin_login.json()["access_token"]
+            admin_headers = approved_admin_headers(client, delivery)
             other_transfer = client.post(
                 f"/api/v1/registers/{other_register_id}/membership-transfer-sales",
                 headers={"Authorization": f"Bearer {other_staff_token}", "Idempotency-Key": "pm-other-transfer"},
@@ -101,7 +99,7 @@ def test_admin_pending_money_lists_pending_transfers_and_outstanding_debt(tmp_pa
             ):
                 reviewed = client.post(
                     f"/api/v1/registers/transfer-payments/{sale.json()['payment']['id']}/review",
-                    headers={"Authorization": f"Bearer {admin_token}", "Idempotency-Key": key},
+                    headers={**admin_headers, "Idempotency-Key": key},
                     json={"status": status},
                 )
                 assert reviewed.status_code == 200, reviewed.text
@@ -136,7 +134,7 @@ def test_admin_pending_money_lists_pending_transfers_and_outstanding_debt(tmp_pa
             )
             assert full_repayment.status_code == 201, full_repayment.text
 
-            response = client.get("/api/v1/admin/pending-money", headers={"Authorization": f"Bearer {admin_token}"})
+            response = client.get("/api/v1/admin/pending-money", headers=admin_headers)
             assert response.status_code == 200, response.text
             payload = response.json()
             assert payload["total_pending_minor"] == 12000 * 3 + 3500
@@ -172,7 +170,7 @@ def test_admin_pending_money_lists_pending_transfers_and_outstanding_debt(tmp_pa
                     session.query(Payment).count(), session.query(MembershipDebt).count(),
                     session.query(MembershipDebtPayment).count(), session.query(PaymentReviewEvent).count(),
                 )
-            repeated = client.get("/api/v1/admin/pending-money", headers={"Authorization": f"Bearer {admin_token}"})
+            repeated = client.get("/api/v1/admin/pending-money", headers=admin_headers)
             assert repeated.status_code == 200
             with factory() as session:
                 after_counts = (

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { DemoState } from '../domain/models';
 import type { CashDenominationCount } from '../domain/models';
-import { createBaselineDemoState, createDemoState, isRichDemoEnabled } from './adapter';
+import { createBaselineDemoState, createDemoState, createEmptyDemoState, isDemoDataDisabled, isRichDemoEnabled } from './adapter';
 import { createRichDemoState } from './richDemoState';
 import type { Transaction } from './operations';
 import { acquireExclusiveWriter, createPersistenceRecord, hydratePersistence, savePersistenceRecord, type PersistenceRecord, type ShiftDrafts } from './shiftPersistence';
@@ -78,6 +78,18 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         if (hydrated.status === 'unsupported' || hydrated.status === 'corrupt') {
           setPersistenceStatus('recovery-required');
           return false;
+        }
+        if (isDemoDataDisabled()) {
+          const emptyState = createEmptyDemoState();
+          const cleanRecord = createPersistenceRecord(emptyState, {}, 'evogym-empty-dataset');
+          savePersistenceRecord(localStorage, cleanRecord);
+          record.current = cleanRecord;
+          current.current = emptyState;
+          setState(emptyState);
+          draftsRef.current = {};
+          setDrafts({});
+          setPersistenceStatus('ready');
+          return true;
         }
         const richEnabled = isRichDemoEnabled();
         if (hydrated.status === 'ready') {

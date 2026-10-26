@@ -5,11 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
+from app.observability.metrics import RequestMetrics
 from app.observability.request_id import RequestIdMiddleware
-from app.observability.logging import install_safe_logging, log_request, request_context
+from app.observability.logging import install_safe_logging, log_request, request_context, request_id
 
 
-def test_ids_are_server_generated_for_normal_and_non_http_asgi():
+def test_ids_are_server_generated_for_http_requests():
     async def run():
         async def app(scope, receive, send):
             if scope["type"] == "http":
@@ -28,6 +29,98 @@ def test_ids_are_server_generated_for_normal_and_non_http_asgi():
     UUID(second.headers["x-request-id"])
 
 
+def test_non_http_lifespan_scope_is_passed_through_unchanged(caplog):
+    async def run():
+        scope = {"type": "lifespan", "asgi": {"version": "3.0"}, "state": {"sentinel": object()}}
+        original_state = scope["state"].copy()
+        metrics = RequestMetrics()
+        application = type("Application", (), {"state": type("State", (), {"request_metrics": metrics})()})()
+        scope["app"] = application
+        received = []
+        sent = []
+
+        async def receive():
+            message = {"type": "lifespan.startup"}
+            received.append(message)
+            return message
+
+        async def send(message):
+            sent.append(message)
+
+        async def app(actual_scope, actual_receive, actual_send):
+            assert actual_scope is scope
+            assert actual_receive is receive
+            assert actual_send is send
+            observed_request_ids.append(request_id())
+            message = await actual_receive()
+            await actual_send({"type": "lifespan.startup.complete", "message": message["type"]})
+
+        wrapped = RequestIdMiddleware(app)
+        before_metrics = metrics.snapshot()
+        before_request_id = request_id()
+        observed_request_ids = []
+        await wrapped(scope, receive, send)
+        return scope, original_state, received, sent, before_metrics, metrics.snapshot(), before_request_id, observed_request_ids
+
+    logger = logging.getLogger("evogym.api")
+    with caplog.at_level(logging.INFO, logger="evogym.api"):
+        scope, original_state, received, sent, before_metrics, after_metrics, before_request_id, observed_request_ids = asyncio.run(run())
+    assert scope["state"] == original_state
+    assert received == [{"type": "lifespan.startup"}]
+    assert sent == [{"type": "lifespan.startup.complete", "message": "lifespan.startup"}]
+    assert after_metrics == before_metrics
+    assert observed_request_ids == [before_request_id]
+    assert request_id() == before_request_id
+    assert not [record for record in caplog.records if record.name == "evogym.api"]
+
+
+def test_non_http_websocket_scope_and_messages_are_passed_through_unchanged(caplog):
+    async def run():
+        scope = {"type": "websocket", "asgi": {"version": "3.0"}, "path": "/socket", "state": {"sentinel": object()}}
+        original_state = scope["state"].copy()
+        metrics = RequestMetrics()
+        application = type("Application", (), {"state": type("State", (), {"request_metrics": metrics})()})()
+        scope["app"] = application
+        received = []
+        sent = []
+        incoming = {"type": "websocket.connect"}
+        outgoing = {"type": "websocket.accept", "subprotocol": "unchanged"}
+
+        async def receive():
+            received.append(incoming)
+            return incoming
+
+        async def send(message):
+            sent.append(message)
+
+        async def app(actual_scope, actual_receive, actual_send):
+            assert actual_scope is scope
+            assert actual_receive is receive
+            assert actual_send is send
+            observed_request_ids.append(request_id())
+            await actual_receive()
+            await actual_send(outgoing)
+
+        wrapped = RequestIdMiddleware(app)
+        before_metrics = metrics.snapshot()
+        before_request_id = request_id()
+        observed_request_ids = []
+        await wrapped(scope, receive, send)
+        return scope, original_state, received, sent, incoming, outgoing, before_metrics, metrics.snapshot(), before_request_id, observed_request_ids
+
+    logger = logging.getLogger("evogym.api")
+    with caplog.at_level(logging.INFO, logger="evogym.api"):
+        scope, original_state, received, sent, incoming, outgoing, before_metrics, after_metrics, before_request_id, observed_request_ids = asyncio.run(run())
+    assert scope["state"] == original_state
+    assert received == [incoming] and received[0] is incoming
+    assert sent == [outgoing] and sent[0] is outgoing
+    assert "headers" not in sent[0]
+    assert after_metrics == before_metrics
+    assert observed_request_ids == [before_request_id]
+    assert request_id() == before_request_id
+    assert not [record for record in caplog.records if record.name == "evogym.api"]
+
+
 def test_request_context_is_isolated_between_concurrent_requests():
     async def run():
         async def app(scope, receive, send):
@@ -44,7 +137,6 @@ def test_request_context_is_isolated_between_concurrent_requests():
     assert first.text == first.headers["x-request-id"]
     assert second.text == second.headers["x-request-id"]
     assert first.text != second.text
-
 
 def test_structured_logs_use_allowlisted_fields_only(caplog):
     logger = logging.getLogger("evogym.test")

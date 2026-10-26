@@ -25,10 +25,11 @@ _bearer = HTTPBearer(auto_error=False)
 def _admin_principal(request: Request, credentials: HTTPAuthorizationCredentials | None):
     settings = request.app.state.settings
     factory = request.app.state.session_factory
-    if not settings.admin_auth_configured or factory is None or credentials is None or credentials.scheme.lower() != "bearer":
+    if (not settings.admin_auth_configured or not settings.admin_token_signing_configured or factory is None
+            or credentials is None or credentials.scheme.lower() != "bearer"):
         raise HTTPException(401, "Authentication failed.")
     try:
-        return validate_admin_session(factory, credentials.credentials)
+        return validate_admin_session(factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value())
     except AuthorizationDenied:
         raise HTTPException(401, "Authentication failed.") from None
 

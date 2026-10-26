@@ -1,7 +1,7 @@
 from datetime import datetime, time
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Time, Uuid, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Time, UniqueConstraint, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db.base import Base
@@ -12,6 +12,7 @@ class StaffRosterProfile(Base):
 
     __tablename__ = "staff_roster_profiles"
     __table_args__ = (
+        UniqueConstraint("staff_user_id", "branch_id", name="uq_staff_roster_staff_user_branch"),
         CheckConstraint("length(full_name) > 0 AND full_name = trim(full_name)", name="ck_staff_roster_full_name"),
         CheckConstraint("length(position) > 0 AND position = trim(position)", name="ck_staff_roster_position"),
         CheckConstraint("(expected_entry_time IS NULL) = (grace_tolerance_minutes IS NULL)", name="ck_staff_roster_schedule_complete"),
@@ -23,6 +24,9 @@ class StaffRosterProfile(Base):
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     branch_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False
+    )
+    staff_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=True
     )
     full_name: Mapped[str] = mapped_column(String(160), nullable=False)
     position: Mapped[str] = mapped_column(String(80), nullable=False)

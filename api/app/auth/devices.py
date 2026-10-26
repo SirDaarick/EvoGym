@@ -6,12 +6,16 @@ import hmac
 import secrets
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.admin import _utc, utc_now
 from app.auth.authorization import AuthorizationDenied
-from app.db.models import AdminAuthEvent, RoleGrant, StaffDevicePairingCode, StaffPairedDevice, StaffUser
+from app.auth.authorization import Permission
+from app.auth.owner import require_organization_permission
+from app.db.models import AdminAuthEvent, RoleGrant, StaffDevicePairingCode, StaffPairedDevice, StaffSession, StaffUser
+from app.observability.security import SecurityEventType, make_security_event, queue_security_event
 
 
 class DevicePairingDenied(Exception):
@@ -59,11 +63,9 @@ def _require_admin(session: Session, admin_id: UUID) -> None:
         .execution_options(populate_existing=True)
         .with_for_update()
     ).all()
-    if not any(
-        g.is_active and g.role == "admin" and g.scope_kind == "organization" and g.branch_id is None
-        for g in grants
-    ):
+    if not any(g.is_active and g.role == "admin" and g.scope_kind == "organization" and g.branch_id is None for g in grants):
         raise AuthorizationDenied("Authorization denied")
+    require_organization_permission(session, admin_id, Permission.STAFF_EMPLOYEE_MANAGE)
 
 
 def issue_device_pairing_code(
@@ -80,8 +82,6 @@ def issue_device_pairing_code(
         raise ValueError("ttl_seconds must be positive.")
 
     now = clock().astimezone(timezone.utc)
-    raw_code = f"{secrets.randbelow(1_000_000):06d}"
-    code_hash = hashlib.sha256(raw_code.encode("ascii")).hexdigest()
     expires_at = now + timedelta(seconds=ttl_seconds)
 
     with session_factory.begin() as session:
@@ -103,17 +103,44 @@ def issue_device_pairing_code(
             )
             .values(revoked_at=now)
         )
+        # Expired six-digit values no longer reserve a scarce code-space slot.
+        session.execute(update(StaffDevicePairingCode).where(
+            StaffDevicePairingCode.used_at.is_(None),
+            StaffDevicePairingCode.revoked_at.is_(None),
+            StaffDevicePairingCode.expires_at <= now,
+        ).values(revoked_at=now))
 
-        pairing_record = StaffDevicePairingCode(
-            staff_id=staff_id,
-            code_hash=code_hash,
-            created_by=admin_id,
-            created_at=now,
-            expires_at=expires_at,
-            failed_attempts=0,
-        )
-        session.add(pairing_record)
-        session.flush()
+        pairing_record = None
+        raw_code = ""
+        for _attempt in range(12):
+            raw_code = f"{secrets.randbelow(1_000_000):06d}"
+            code_hash = hashlib.sha256(raw_code.encode("ascii")).hexdigest()
+            try:
+                # The partial unique index resolves concurrent allocations across
+                # staff accounts; savepoints keep a collision retry in this unit.
+                with session.begin_nested():
+                    pairing_record = StaffDevicePairingCode(
+                        staff_id=staff_id,
+                        code_hash=code_hash,
+                        created_by=admin_id,
+                        created_at=now,
+                        expires_at=expires_at,
+                        failed_attempts=0,
+                    )
+                    session.add(pairing_record)
+                    session.flush()
+                break
+            except IntegrityError:
+                collision = session.scalar(select(StaffDevicePairingCode.id).where(
+                    StaffDevicePairingCode.code_hash == code_hash,
+                    StaffDevicePairingCode.used_at.is_(None),
+                    StaffDevicePairingCode.revoked_at.is_(None),
+                ))
+                if collision is None:
+                    raise
+                pairing_record = None
+        if pairing_record is None:
+            raise ValueError("A unique pairing code could not be issued.")
 
         session.add(
             AdminAuthEvent(
@@ -209,6 +236,19 @@ def pair_device(
                     )
                     .values(revoked_at=now)
                 )
+                # Pairing and phone-session issuance both serialize on the staff row.
+                # Legacy branch PIN sessions with no purpose are phone sessions too.
+                session.execute(
+                    update(StaffSession)
+                    .where(
+                        StaffSession.staff_id == staff.id,
+                        StaffSession.scope_kind == "branch",
+                        StaffSession.auth_method == "pin",
+                        StaffSession.revoked_at.is_(None),
+                        or_(StaffSession.employee_purpose == "phone", StaffSession.employee_purpose.is_(None)),
+                    )
+                    .values(revoked_at=now)
+                )
 
                 paired_device = StaffPairedDevice(
                     staff_id=staff.id,
@@ -230,6 +270,14 @@ def pair_device(
                     )
                 )
                 paired_device_id = paired_device.id
+                queue_security_event(session, make_security_event(
+                    SecurityEventType.DEVICE_PAIRED,
+                    employee_id=staff.id,
+                    device_id=paired_device.id,
+                    initiating_actor_id=staff.id,
+                    request_id=request_id,
+                    occurred_at=now,
+                ))
 
     if denial_reason is not None:
         raise DevicePairingDenied(denial_reason)
@@ -281,9 +329,25 @@ def revoke_paired_device(
     with session_factory.begin() as session:
         _require_admin(session, admin_id)
 
+        reference = session.execute(
+            select(StaffPairedDevice.id, StaffPairedDevice.staff_id)
+            .where(StaffPairedDevice.id == device_id)
+        ).one_or_none()
+        if reference is None:
+            return False
+
+        # Match issuance/deactivation lock order: lock the employee before their
+        # device, sessions, and outstanding pairing codes.
+        session.scalar(
+            select(StaffUser)
+            .where(StaffUser.id == reference.staff_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
         dev = session.scalar(
             select(StaffPairedDevice)
-            .where(StaffPairedDevice.id == device_id)
+            .where(StaffPairedDevice.id == reference.id)
+            .execution_options(populate_existing=True)
             .with_for_update()
         )
         if dev is None:
@@ -291,6 +355,26 @@ def revoke_paired_device(
 
         if dev.revoked_at is None:
             dev.revoked_at = now
+            session.execute(
+                update(StaffSession)
+                .where(
+                    StaffSession.staff_id == dev.staff_id,
+                    StaffSession.scope_kind == "branch",
+                    StaffSession.auth_method == "pin",
+                    StaffSession.revoked_at.is_(None),
+                    or_(StaffSession.employee_purpose == "phone", StaffSession.employee_purpose.is_(None)),
+                )
+                .values(revoked_at=now)
+            )
+            session.execute(
+                update(StaffDevicePairingCode)
+                .where(
+                    StaffDevicePairingCode.staff_id == dev.staff_id,
+                    StaffDevicePairingCode.used_at.is_(None),
+                    StaffDevicePairingCode.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
             session.add(
                 AdminAuthEvent(
                     actor_id=admin_id,
@@ -300,4 +384,12 @@ def revoke_paired_device(
                     occurred_at=now,
                 )
             )
+            queue_security_event(session, make_security_event(
+                SecurityEventType.DEVICE_REVOKED,
+                employee_id=dev.staff_id,
+                device_id=dev.id,
+                initiating_actor_id=admin_id,
+                request_id=request_id,
+                occurred_at=now,
+            ))
         return True
