@@ -14,7 +14,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.member_reads import router as member_reads_router
 from app.main import create_app
-from app.auth.admin import authenticate_admin
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
 from app.db.base import Base
@@ -43,7 +42,7 @@ from app.members.read_queries import (
     register_member_org,
     register_period_branch,
 )
-from test_admin_auth import seed_admin
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings, seed_admin
 
 
 def _setup_db(tmp_path):
@@ -84,19 +83,17 @@ def _seed_admin_principal(
     factory, login="admin@evogym.com", password="synthetic-admin-password"
 ) -> tuple[UUID, str]:
     admin_id = seed_admin(factory, login=login, password=password)
-    admin_session = authenticate_admin(
-        factory,
-        login_identifier=login,
-        password=password,
-        ttl_seconds=3600,
-        request_id=uuid4(),
-    )
-    return admin_id, admin_session.token
+    delivery = FakeRecoveryDelivery()
+    database_url = str(factory.kw["bind"].url)
+    with TestClient(create_app(configured_settings(database_url), recovery_delivery=delivery)) as client:
+        access = complete_device_login(client, delivery, login, password)
+    return admin_id, access.json()["access_token"]
 
 
 def _create_test_app(factory) -> FastAPI:
     app = FastAPI()
     app.state.session_factory = factory
+    app.state.settings = configured_settings(str(factory.kw["bind"].url))
     app.include_router(member_reads_router)
     return app
 

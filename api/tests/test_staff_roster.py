@@ -86,3 +86,19 @@ def test_roster_is_branch_scoped_admin_managed_and_supports_inactive_profiles(tm
             assert client.get(f"/api/v1/staff-roster?branch_id={branch_a_id}&include_inactive=true", headers=desk).json()["items"][0]["is_active"] is False
     finally:
         engine.dispose()
+
+
+def test_staff_session_fallback_works_when_admin_signing_is_unconfigured(tmp_path):
+    url, engine, _factory, branch_a_id, _branch_b_id, desk_token, _branch_admin_token = _setup(tmp_path)
+    try:
+        app = create_app(configured_settings(url, admin_token_signing_secret=None))
+        with TestClient(app) as client:
+            response = client.get(
+                f"/api/v1/staff-roster?branch_id={branch_a_id}",
+                headers={"Authorization": f"Bearer {desk_token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+    finally:
+        engine.dispose()

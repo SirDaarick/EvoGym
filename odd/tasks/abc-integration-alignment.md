@@ -15,7 +15,7 @@ Capture only intended product source/tests/migrations/contract docs and named ta
 
 ## Tasks
 - [x] T1 Preserve selected package snapshots and reconcile A/B/C into this integration checkout, recording source SHAs, selected paths, conflicts and preservation checks.
-- [ ] T2 Reconcile signed-admin/staff authentication contracts and C migration lineage with meaningful regression tests; classify and fix the twelve current C failures against approved contracts, not by weakening assertions.
+- [x] T2 Reconcile signed-admin/staff authentication contracts and C migration lineage with meaningful regression tests; classify and fix the twelve current C failures against approved contracts, not by weakening assertions.
 - [ ] T3 Wire existing B/C frontend views to actual A session providers and authenticated routes without demo leakage or design changes; restore existing admin itemized debt visibility where supported.
 - [ ] T4 Correct merge/closure documentation, safe rollback and executable verification commands to describe observed integrated behavior.
 - [ ] T5 Run applicable complete API/frontend/type/build/migration checks and independent review; preserve failed/unavailable proof and perform a parent spot check and browser workflow validation where runtime is available.
@@ -29,7 +29,8 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - New integration checkout created safely; primary and A/B/C remain untouched.
 - Source refs currently detached; B/C committed history plus dirty deltas must both be included.
 - Independent read-only review baseline: API A79 pass, B12 pass, C66 pass/12 fail; frontend A18/B45/C20 pass; actual TS app/node projects pass. These are NOT integrated acceptance evidence.
-- T1: selected A/B/C source snapshots are integrated with source HEAD ancestry and dirty deltas; mirror synchronization is being recorded.\n- Next: T2 reconcile A/C migration revision IDs and auth contracts; T3 wire live frontend sessions to member and staff-attendance views.
+- T1: selected A/B/C source snapshots are integrated with source HEAD ancestry and dirty deltas; mirror synchronization is being recorded.
+- Next: T2 reconcile A/C migration revision IDs and auth contracts; T3 wire live frontend sessions to member and staff-attendance views.
 
 
 ### T1 snapshot/integration evidence (2026-10-26)
@@ -41,3 +42,13 @@ Preserve admin-only credential login, operational profile PIN/temporary PIN forc
 - Semantic conflict resolutions: `api/app/api/members.py` and `api/app/api/staff_roster.py` retain A's configured signed-admin-session verification and deliberately omit B/C unsigned-admin fallback; `frontend/src/api/receptionApi.ts` keeps A typed/sanitized HTTP/network errors and C's exported shared request helper.
 - No Git conflict paths remain. `git diff --check` reports imported Markdown hard-break trailing spaces in P2/P6 documents and one blank-at-EOF in `api/tests/test_member_reads.py`; content preserved for T4 cleanup. No functional suites were run in T1.
 - Explicit T2 follow-up: both `api/migrations/versions/0031_admin_session_policy.py` and `api/migrations/versions/0031_staff_occurrence_attendance.py` are present with colliding Alembic revision IDs; migration graph reconciliation and tests remain pending. Snapshot provenance is not proof of runtime correctness or product readiness.
+
+### T2 authentication and migration reconciliation (2026-10-26)
+- Route: delegated direct, one writer; edits stayed within the T2 allowlist. RDD remained off.
+- Migration revision IDs are distinct: A keeps `0031_admin_session_policy`; C is now `0038_staff_occurrence_attendance` with `down_revision = "0037_paired_profile_access"`. The migration graph has one head. No revision is described as an identical-ID merge.
+- Removed the duplicate signed-Admin validation attempt in `api/app/api/staff_roster.py`. Staff sessions still fall through when Admin signing is unconfigured; a regression test covers that path. Roster and attendance Admin tests use the existing approval-and-poll helper, not the pre-approval login response.
+- Member-read Admin fixture now obtains a signed access token through the approved device-login protocol. P1’s signed-session validation and authorization constraints remain unchanged.
+- Failure classification/fixes: T2 baseline migration failures were caused by Alembic’s two heads and resulting `head` upgrade failures. After rechain, remaining assertions expected the former `0037` head, and one uniqueness assertion still encoded the earlier one-attendance-per-business-date schema. Updated head expectations/table inventory and the test to allow distinct scheduled occurrences on a day while retaining exact-occurrence uniqueness and append-only checks. Two schedule tests failed on stale/date-sensitive expectations; corrected the first to use a future initial occurrence and the second to retain the Oct 26 historical occurrence while the replacement series starts Nov 2, matching the P6 rule that future edits do not rewrite history.
+- TDD evidence: the one-head/distinct-revision test failed before the migration rechain (two heads were reported) and passed after. The Admin projection test also failed before fixture adaptation because unsigned legacy authentication cannot issue an Admin session, then passed through the approved protocol.
+- Verification: API focused suite (184 tests) passed; `tests/test_migrations.py` (37 passed); `tests/test_staff_schedules.py` (30 passed); PostgreSQL migration tests (4 skipped because no disposable PostgreSQL target was configured). Full API suite was not run: 526 tests are collected and the focused 184-test suite took 388.65 seconds; it remains for T5.
+- Relevant changed paths: `api/app/api/staff_roster.py`; `api/migrations/versions/0038_staff_occurrence_attendance.py` (renamed from the C `0031` filename); `api/tests/test_member_reads.py`; `api/tests/test_migrations.py`; `api/tests/test_staff_attendance.py`; `api/tests/test_staff_roster.py`; `api/tests/test_staff_schedules.py`.

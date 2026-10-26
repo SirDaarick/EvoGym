@@ -17,7 +17,7 @@ from app.db.models import (
 )
 from app.db.models.staff_attendance import StaffAttendanceCorrection, StaffAttendanceRecord
 from app.main import create_app
-from test_admin_auth import FakeRecoveryDelivery, configured_settings
+from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings
 from admin_session_helpers import approved_admin_headers
 from test_staff_roster import _setup
 
@@ -571,12 +571,13 @@ def test_append_only_correction_rbac_and_immutability(tmp_path, monkeypatch):
     monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
 
     try:
-        with TestClient(create_app(configured_settings(url))) as client:
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
             desk_a = {"Authorization": f"Bearer {desk_token}"}
             desk_b = {"Authorization": f"Bearer {desk_b_token}"}
-            admin_token = client.post("/api/v1/auth/sessions", json={
-                "login_identifier": "owner@example.invalid", "password": "synthetic-admin-password",
-            }).json()["access_token"]
+            admin_token = complete_device_login(
+                client, delivery, "owner@example.invalid", "synthetic-admin-password"
+            ).json()["access_token"]
             admin = {"Authorization": f"Bearer {admin_token}"}
 
             # Create record in Branch A

@@ -137,12 +137,12 @@ def test_edit_before_first_occurrence_updates_series_without_invalid_empty_histo
         with TestClient(create_app(configured_settings(url))) as client:
             headers = {"Authorization": f"Bearer {admin_token}"}
             created = client.post(f"/api/v1/staff-schedules/branches/{branch}/profiles/{profile}", headers=headers, json={
-                "start_date": "2026-10-26", "weekdays": [0], "start_time": "09:00", "end_time": "10:00", "occurrence_count": 4,
+                "start_date": "2027-01-04", "weekdays": [0], "start_time": "09:00", "end_time": "10:00", "occurrence_count": 4,
             })
             assert created.status_code == 201, created.text
             series_id = created.json()["id"]
             edited = client.patch(f"/api/v1/staff-schedules/{series_id}/edit", headers=headers, json={
-                "effective_date": "2026-10-26", "scope": "series", "start_time": "11:00", "end_time": "12:00",
+                "effective_date": "2027-01-04", "scope": "series", "start_time": "11:00", "end_time": "12:00",
             })
             assert edited.status_code == 201, edited.text
             assert edited.json()["id"] == series_id
@@ -219,8 +219,10 @@ def test_full_series_edit_changes_all_future_occurrences_and_keeps_history(tmp_p
                              params={"from_date": "2026-10-12", "to_date": "2026-11-02"}).json()
             new = client.get(f"/api/v1/staff-schedules/{edited.json()['id']}/occurrences", headers=headers,
                              params={"from_date": "2026-10-12", "to_date": "2026-11-02"}).json()
-            assert [item["local_start"] for item in old] == ["2026-10-12T09:00:00", "2026-10-19T09:00:00"]
-            assert [item["local_start"] for item in new] == ["2026-10-26T11:00:00", "2026-11-02T11:00:00"]
+            assert [item["local_start"] for item in old] == [
+                "2026-10-12T09:00:00", "2026-10-19T09:00:00", "2026-10-26T09:00:00"
+            ]
+            assert [item["local_start"] for item in new] == ["2026-11-02T11:00:00"]
     finally:
         engine.dispose()
 

@@ -79,13 +79,6 @@ def _principal(request: Request, credentials: HTTPAuthorizationCredentials | Non
             return RosterPrincipal(staff_id, True, None)
         except (AuthorizationDenied, ValueError):
             pass
-        try:
-            staff_id, _session_id = validate_admin_session(
-                factory, token, settings.admin_token_signing_secret.get_secret_value()
-            )
-            return RosterPrincipal(staff_id, True, None)
-        except (AuthorizationDenied, ValueError):
-            pass
     try:
         principal = validate_session(factory, token, Permission.STAFF_ROSTER_READ)
         return RosterPrincipal(principal.staff_id, False, principal.branch_id)

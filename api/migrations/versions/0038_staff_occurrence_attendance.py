@@ -2,8 +2,8 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0031_staff_occurrence_attendance"
-down_revision = "0030_staff_schedules"
+revision = "0038_staff_occurrence_attendance"
+down_revision = "0037_paired_profile_access"
 branch_labels = None
 depends_on = None
 
