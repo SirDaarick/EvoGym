@@ -26,7 +26,7 @@ The user clarified on 2026-10-26: opening automatically selects the applicable t
 ## Work units and routing
 All tasks use delegated direct: connected multi-file changes and execution exceed the inline budget. One Luna writer at a time; parent review plus independent verification. Exact edit surfaces are derived before each writer starts.
 
-- [x] T1 Add inventory discrepancy reason persistence, API DTO validation/readback and a single-head migration. Observed RED on missing reason, then GREEN. Commit: pending.
+- [x] T1 Add inventory discrepancy reason persistence, API DTO validation/readback and a single-head migration. Observed RED on missing reason, then GREEN. Commit: `e156222` (`feat(shifts): persist inventory discrepancy reasons`).
 - [ ] T2 Connect the existing authenticated opening/current workflow: real register/snapshot, automatic opener/window, denomination-only count, discrepancy comments, error/retry states and reload. Reuse the modal design and actual route shell.
 - [ ] T3 Connect persisted totals and closing to the existing close interface. Verify live reconciliation preview, close/reload, immutable closed totals and retry behavior; do not build membership checkout. Backend read-contract note: `GET /api/v1/shifts/current` and `GET /api/v1/shifts/{id}` use `ShiftDTO.expected_cash_at_close_minor`, which remains null until close freezes it. T3 should expose a server-computed active preview from the same canonical cash calculation; keep the close result authoritative if activity changes after preview.
 - [ ] T4 Independently verify the feature with API/frontend/type/build checks and real-browser disposable API/DB flows; record exact commit/commands/results, skipped checks and warnings. Obtain owner daily-workflow signoff separately.
