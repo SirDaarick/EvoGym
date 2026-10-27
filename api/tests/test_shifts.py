@@ -102,6 +102,43 @@ def test_open_shift_rejects_invalid_denomination_evidence(counts, total, message
         OpenShiftDTO.model_validate(request)
 
 
+def test_open_shift_accepts_manual_total_without_denomination_breakdown():
+    payload = OpenShiftDTO.model_validate(
+        {
+            "cash_register_id": str(uuid4()),
+            "inventory_snapshot_id": str(uuid4()),
+            "opening_cash_minor": 12345,
+        }
+    )
+
+    assert payload.opening_cash_minor == 12345
+    assert payload.denomination_counts is None
+
+
+@pytest.mark.parametrize("invalid_total", [None, True, 1.5, -1, 2**63])
+def test_open_shift_requires_valid_explicit_total_without_denomination_breakdown(invalid_total):
+    request = {
+        "cash_register_id": str(uuid4()),
+        "inventory_snapshot_id": str(uuid4()),
+    }
+    if invalid_total is not None:
+        request["opening_cash_minor"] = invalid_total
+    with pytest.raises(ValidationError):
+        OpenShiftDTO.model_validate(request)
+
+
+def test_open_shift_rejects_explicit_empty_denomination_list_as_unclear_mode():
+    with pytest.raises(ValidationError):
+        OpenShiftDTO.model_validate(
+            {
+                "cash_register_id": str(uuid4()),
+                "inventory_snapshot_id": str(uuid4()),
+                "opening_cash_minor": 0,
+                "denomination_counts": [],
+            }
+        )
+
+
 def test_open_shift_allows_explicit_zero_cash_counts():
     payload = OpenShiftDTO.model_validate(
         {
@@ -598,6 +635,46 @@ def test_concurrent_open_shift_yields_exactly_one_success(tmp_path):
 # ==============================================================================
 # API & RBAC Integration Tests
 # ==============================================================================
+
+
+def test_manual_total_opening_roundtrips_without_fabricated_denominations(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "manual-branch", "Manual Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "manual@evogym.com", "1234")
+        with factory() as session:
+            register = create_cash_register(session, branch_id=branch_id, code="manual", name="Manual")
+            snapshot = capture_register_inventory_snapshot(session, register_id=register.id, actor_id=staff_id)
+            register_id = str(register.id)
+            snapshot_id = str(snapshot.id)
+            session.commit()
+        app = create_app(configured_settings(url), recovery_delivery=FakeRecoveryDelivery())
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            empty_counts = client.post(
+                "/api/v1/shifts/open", headers=headers,
+                json={"cash_register_id": register_id, "inventory_snapshot_id": snapshot_id,
+                      "opening_cash_minor": 0, "denomination_counts": []},
+            )
+            assert empty_counts.status_code == 422
+            opened = client.post(
+                "/api/v1/shifts/open", headers=headers,
+                json={"cash_register_id": register_id, "inventory_snapshot_id": snapshot_id,
+                      "opening_cash_minor": 12345},
+            )
+            assert opened.status_code == 201, opened.text
+            shift = opened.json()
+            assert shift["opening_cash_minor"] == 12345
+            assert shift["opened_by"] == str(staff_id)
+            assert shift["denomination_counts"] == []
+            current = client.get(f"/api/v1/shifts/current?register_id={register_id}", headers=headers)
+            assert current.status_code == 200
+            assert current.json()["id"] == shift["id"]
+            assert current.json()["denomination_counts"] == []
+        with factory() as session:
+            assert session.query(ShiftDenominationCount).filter_by(shift_id=UUID(shift["id"])).count() == 0
+    finally:
+        engine.dispose()
 
 
 def test_shifts_and_registers_rbac_and_api(tmp_path):

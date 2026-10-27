@@ -89,7 +89,10 @@ class ShiftDTO(BaseModel):
     closed_at: datetime | str | None = None
     status: str
     opening_cash_minor: int
-    denomination_counts: list["ShiftDenominationCountDTO"] = Field(default_factory=list)
+    denomination_counts: list["ShiftDenominationCountDTO"] = Field(
+        default_factory=list,
+        description="Recorded physical denomination breakdown; empty means no breakdown was recorded, not a known capture method."
+    )
     closing_denomination_counts: list["ShiftClosingDenominationCountDTO"] = Field(default_factory=list)
     inventory_review: "ShiftInventoryReviewDTO | None" = None
     expected_cash_at_close_minor: int | None = None
@@ -113,19 +116,26 @@ class OpenShiftDTO(BaseModel):
 
     cash_register_id: str = Field(..., description="UUID of the cash register to open.")
     opening_cash_minor: StrictInt | None = Field(
-        None, ge=0, le=MAX_MINOR_UNITS, description="Optional compatibility total; must match denomination counts."
+        None, ge=0, le=MAX_MINOR_UNITS,
+        description="Explicit total for manual entry, or a compatibility total that must match denomination counts."
     )
-    denomination_counts: list["ShiftDenominationCountDTO"] = Field(
-        ..., min_length=1, max_length=64, description="Required physical bill and coin counts at opening."
+    denomination_counts: list["ShiftDenominationCountDTO"] | None = Field(
+        None, min_length=1, max_length=64,
+        description="Physical bill and coin counts; omit only when opening_cash_minor is an explicitly entered total."
     )
     inventory_snapshot_id: UUID
     inventory_observations: list["ShiftInventoryObservationInputDTO"] = Field(default_factory=list, max_length=10000)
 
     @model_validator(mode="after")
     def _validate_opening_total(self) -> "OpenShiftDTO":
+        if self.denomination_counts is None:
+            if self.opening_cash_minor is None:
+                raise ValueError("Opening cash total is required when denomination counts are omitted.")
+        elif not self.denomination_counts:
+            raise ValueError("Omit denomination_counts for a manual total; an empty count list is invalid.")
         total = 0
         seen: set[int] = set()
-        for item in self.denomination_counts:
+        for item in self.denomination_counts or []:
             if item.denomination_minor in seen:
                 raise ValueError("Opening denomination counts cannot contain duplicates.")
             seen.add(item.denomination_minor)
@@ -133,9 +143,10 @@ class OpenShiftDTO(BaseModel):
             if value > MAX_MINOR_UNITS or total > MAX_MINOR_UNITS - value:
                 raise ValueError("Opening denomination total exceeds signed 64-bit minor units.")
             total += value
-        if self.opening_cash_minor is not None and self.opening_cash_minor != total:
-            raise ValueError("Opening cash total must match denomination counts.")
-        self.opening_cash_minor = total
+        if self.denomination_counts is not None:
+            if self.opening_cash_minor is not None and self.opening_cash_minor != total:
+                raise ValueError("Opening cash total must match denomination counts.")
+            self.opening_cash_minor = total
         seen_products: set[UUID] = set()
         for observation in self.inventory_observations:
             if observation.product_id in seen_products:

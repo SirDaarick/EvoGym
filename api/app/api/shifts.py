@@ -304,7 +304,7 @@ def open_shift_endpoint(
                 register_id=register_uuid,
                 opened_by=principal.staff_id,
                 opening_cash_minor=payload.opening_cash_minor,
-                denomination_counts=[item.model_dump() for item in payload.denomination_counts],
+                denomination_counts=[item.model_dump() for item in payload.denomination_counts or []],
                 inventory_snapshot_id=payload.inventory_snapshot_id,
                 inventory_observations=[item.model_dump() for item in payload.inventory_observations],
             )

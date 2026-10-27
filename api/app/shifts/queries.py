@@ -165,8 +165,12 @@ def open_shift(
 ) -> Shift:
     """Open a new shift for a cash register with pessimistic locking and uniqueness guard."""
     maximum = 2**63 - 1
-    if not isinstance(denomination_counts, list) or not denomination_counts:
-        raise ValueError("At least one opening denomination count is required.")
+    if not isinstance(denomination_counts, list):
+        raise ValueError("Opening denomination counts must be a list.")
+    if not denomination_counts and (
+        type(opening_cash_minor) is not int or not 0 <= opening_cash_minor <= maximum
+    ):
+        raise ValueError("An explicit valid opening cash total is required without denomination counts.")
     total = 0
     seen: set[int] = set()
     validated_counts: list[tuple[int, int]] = []
@@ -189,11 +193,12 @@ def open_shift(
         validated_counts.append((denomination, quantity))
     if type(opening_cash_minor) is int and opening_cash_minor < 0:
         raise ValueError("Opening cash cannot be negative.")
-    if opening_cash_minor is not None and (
+    if denomination_counts and opening_cash_minor is not None and (
         type(opening_cash_minor) is not int or opening_cash_minor != total
     ):
         raise ValueError("Opening cash total must match denomination counts.")
-    opening_cash_minor = total
+    if denomination_counts:
+        opening_cash_minor = total
 
     # 1. Lock the CashRegister row
     stmt = select(CashRegister).where(CashRegister.id == register_id).with_for_update()

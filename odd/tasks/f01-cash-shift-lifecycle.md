@@ -3,21 +3,21 @@
 ## Objective and approved product flow
 Implement the existing cash-shift workflow through the real authenticated API without redesigning the screens or implementing F04 sales UI.
 
-The user clarified on 2026-10-26: opening automatically selects the applicable time window; the responsible receptionist is the authenticated opener; opening cash requires denomination counts; staff counts physical inventory and enters a reason for any known discrepancy before opening. Do not replace this with a reduced/manual-choice workflow.
+The user clarified on 2026-10-26: opening automatically selects the applicable time window; the responsible receptionist is the authenticated opener; opening cash supports counted units, amount per denomination, or an explicitly entered total; staff counts physical inventory and enters a reason for any known discrepancy before opening. Do not replace this with a reduced/manual-choice workflow.
 
 ## Baseline and preservation
 - Base: f267cac on codex/backend-foundation; working branch: codex/f01-cash-shift-lifecycle.
 - Preserve the original 11 dirty paths and the untracked remaining-feature-integrations.md backlog. Do not stage unrelated files, private spreadsheets, temporary outputs, secrets, runtime env files or dependency changes.
 - Recorded baseline: API 508 passed / 18 skipped; frontend 739 passed; TypeScript app/node and production build passed. These are historical, not F01 proof.
 - RDD is explicitly off at clone/global scope. Do not enable or start it. Independent functional verification remains required.
-- Delivery strategy: exception-ok, explicitly approved for F01 by the user on 2026-10-26. One local feature branch with cohesive functional commits. Forecast: 650–900 authored lines including tests/migration/adapters; advisory only, never remove tests or compress code to fit. No remote publication or automatic merge is authorized.
+- Delivery strategy: exception-ok, explicitly approved for F01 by the user on 2026-10-26. One local feature branch with cohesive functional commits. Forecast: 750–1,100 authored lines including tests/migration/adapters; advisory only, never remove tests or compress code to fit. No remote publication or automatic merge is authorized.
 
 ## Scope and minimal technical decisions
 - Strict visual freeze: no stylesheet/class/layout/component visual changes or new controls without explicit user approval. Reuse the existing components and bind real data/callbacks only. If integration requires a visual change, stop that part and ask the user first.
 - Reuse ShiftOpenModal, ShiftCloseDialog and existing shift visual components; API mode must not load DemoProvider or fabricate DemoState/financial history.
 - Use actual Admin/ProductAccess authenticated request transports and server-side actor/branch authorization, not token globals or a client-selected responsible user. opened_by already stores the opener; no duplicate responsibility column.
 - Derive the displayed time window using authoritative opened_at and the existing business timezone/cutoff. Preserve existing time-window behavior; do not invent new operating-hour rules or add a redundant window column. Verify the actual cutoff implementation rather than copying an exploration summary.
-- Only denomination counts are allowed in the live opening flow. Preserve existing denomination validation and integer minor-unit amounts.
+- User-approved opening capture modes: units per denomination, amount per denomination, and total manual. Reuse the existing controls. Convert the first two to exact physical counts; reject non-multiples rather than rounding. Manual totals must persist honestly without a fabricated denomination breakdown. Preserve integer minor-unit validation. This supersedes the prior denominations-only assumption.
 - Add minimal persisted reason/comment support to inventory observations. Require a nonblank reason when physical quantity differs from a known authoritative snapshot quantity; keep unknown baselines unknown. Return comments on reload. A reason documents a discrepancy; it must not create waste/restock stock-ledger movements (F09).
 - Preserve stale-snapshot, wrong-branch, duplicate count and negative quantity protections.
 - Preserve the current close preview. If current read DTOs lack expected cash, expose a server-computed read value using the same calculation as close; do not calculate authoritative money from incomplete frontend arrays. Persisted close response remains authoritative if activity changes after a preview.
@@ -27,8 +27,9 @@ The user clarified on 2026-10-26: opening automatically selects the applicable t
 All tasks use delegated direct: connected multi-file changes and execution exceed the inline budget. One Luna writer at a time; parent review plus independent verification. Exact edit surfaces are derived before each writer starts.
 
 - [x] T1 Add inventory discrepancy reason persistence, API DTO validation/readback and a single-head migration. Observed RED on missing reason, then GREEN. Commit: `e156222` (`feat(shifts): persist inventory discrepancy reasons`).
-- [ ] T2 Connect the existing authenticated opening/current workflow: real register/snapshot, automatic opener/window, denomination-only count, discrepancy comments, error/retry states and reload. Reuse the modal design and actual route shell.
-- [ ] T3 Connect persisted totals and closing to the existing close interface. Verify live reconciliation preview, close/reload, immutable closed totals and retry behavior; do not build membership checkout. Backend read-contract note: `GET /api/v1/shifts/current` and `GET /api/v1/shifts/{id}` use `ShiftDTO.expected_cash_at_close_minor`, which remains null until close freezes it. T3 should expose a server-computed active preview from the same canonical cash calculation; keep the close result authoritative if activity changes after preview.
+- [x] T1b Extend the opening contract minimally for a genuine manual total without denomination rows; preserve counted modes, legacy reads and secure opener/snapshot constraints. Observed RED -> GREEN; API readback verified. Commit: pending.
+- [ ] T2 Connect the existing authenticated opening/current workflow: real register/snapshot, automatic opener/window, all three approved count modes, discrepancy comments, error/retry states and reload. Reuse the modal design and actual route shell.
+- [ ] T3 Add the smallest server-computed current-cash preview from the canonical close calculation, then connect persisted totals and closing to the existing close interface. Keep expected_cash_at_close_minor frozen/nullable until close rather than overloading its meaning. Verify live reconciliation preview, close/reload, immutable closed totals and retry behavior; do not build membership checkout. Backend read-contract note: `GET /api/v1/shifts/current` and `GET /api/v1/shifts/{id}` use `ShiftDTO.expected_cash_at_close_minor`, which remains null until close freezes it. T3 should expose a server-computed active preview from the same canonical cash calculation; keep the close result authoritative if activity changes after preview.
 - [ ] T4 Independently verify the feature with API/frontend/type/build checks and real-browser disposable API/DB flows; record exact commit/commands/results, skipped checks and warnings. Obtain owner daily-workflow signoff separately.
 
 ## Acceptance evidence required
@@ -46,4 +47,31 @@ All tasks use delegated direct: connected multi-file changes and execution excee
 - T1 checks: RED `pytest tests/test_inventory_reviews.py::test_known_inventory_difference_requires_and_persists_reason -p no:cacheprovider -q` failed before implementation as expected; GREEN API targeted suite `pytest tests/test_inventory_reviews.py tests/test_shifts.py tests/test_migrations.py tests/test_contract_smoke.py -p no:cacheprovider -q` passed 88 tests (21 warnings). Follow-up `pytest tests/test_inventory_reviews.py -p no:cacheprovider -q` passed 18 tests. PostgreSQL-specific tests were not run because no disposable PostgreSQL target was authorized.
 - Existing backend already supports secure opener attribution, denomination counts, snapshot validation and persisted close reconciliation.
 - T3 retains the active-cash preview read-contract above; do not add a stored expected-cash column or frontend-computed totals.
+- T1b adds a manual-total API mode while preserving truthful denomination data; see the T1b contract note below.
 - Next: T2 connects the existing UI without visual changes. Engram mirror is pending while the provider is unavailable.
+
+## T1 independent verification and UI approval checkpoint
+- T1 implementation commit: e156222; evidence commit: 032d71f. A fresh Luna verifier reran 88 targeted API tests (21 existing warnings) at 032d71f, with no findings. Disposable SQLite HTTP proof: missing discrepancy reason returned 422; padded reason returned 201, was trimmed, attributed to the authenticated opener and survived GET current-shift readback. PostgreSQL was not verified.
+- Parent spot check: tests/test_inventory_reviews.py -k reason passed 2 tests (16 deselected). No full F01 suite or browser proof is claimed yet.
+- Native risk assessment was unassessable because unrelated untracked files were deliberately preserved; treated as high. RDD remains off. Independent T1 verification was performed instead; this is not native-review approval.
+- Frontend files and styles remain unchanged. The user subsequently approved the conditional register selector and surplus-reason UI changes; no UI files are changed in T1b.
+- Concrete UI seams: the existing inventory reason control is shown only for shortages; surplus rows currently show static text. The modal also exposes manual cash and editable time-window controls. API employee sessions identify a branch, not a default register; never silently select the first of several registers.
+- Approved UI scope (latest user clarification): reuse the same reason control in its existing column for shortages and surpluses; keep automatic time selection and all three opening modes; select one authorized register automatically, but show a Caja selector before counting if multiple authorized registers exist. No CSS/redesign or duplicate screen.
+- No UI writer has been launched yet. The full F01 feature remains incomplete.
+
+## Latest user clarification — approved capture modes and UI scope
+- Keep all three existing opening modes: quantity per denomination, amount per denomination, and total manual. A total-only entry must not create fake bill/coin rows or falsely claim a measured breakdown. A per-denomination amount must divide exactly into whole bills/coins.
+- Comments are required for known surplus as well as shortage; reuse the existing reason control in its current inventory column.
+- Exactly one authorized register is selected automatically. When multiple registers are available, use the previously proposed register selector; never silently pick the first.
+- The earlier proposal to disable total-manual capture is rejected and superseded. Preserve existing visual design and controls; only the explicitly approved reason coverage and conditional register control are authorized. No other visual changes may be made without asking.
+- T1 reason persistence and T1b manual-total API contract are complete. T2/T3/T4 remain pending. The current implementation branch and size exception remain in force.
+
+
+## T1b verified opening API contract
+- `POST /api/v1/shifts/open`: omit `denomination_counts` only when providing an explicit nonnegative signed-64-bit integer `opening_cash_minor`; this is the manual-total mode. Explicit `denomination_counts: []` is invalid. When counts are supplied, they remain strict physical counts; total is derived and any supplied compatibility total must match exactly.
+- Manual total 0 is valid only when explicitly present. Missing both fields, booleans, floats, negative values, and out-of-range values are rejected. No denomination row or inferred capture-method column is written.
+- `GET /api/v1/shifts/current` (and existing shift DTO reads) returns `denomination_counts: []` when no breakdown was recorded. This means the breakdown is unavailable; it does not assert that a legacy record used manual entry. Legacy rows remain valid without migration. Authenticated opener attribution, branch enforcement, and snapshot consumption are unchanged.
+- RED: `pytest tests/test_shifts.py::test_open_shift_accepts_manual_total_without_denomination_breakdown tests/test_shifts.py::test_open_shift_requires_valid_explicit_total_without_denomination_breakdown tests/test_shifts.py::test_open_shift_rejects_explicit_empty_denomination_list_as_unclear_mode -p no:cacheprovider -q --basetemp %TEMP%/evogym-f01-manual-red` -> 1 failed (manual total rejected as missing denomination_counts), 6 passed.
+- GREEN focused: same three tests plus `test_manual_total_opening_roundtrips_without_fabricated_denominations` -> 8 passed, 1 existing Starlette httpx deprecation warning.
+- GREEN targeted suite: `pytest tests/test_shifts.py tests/test_inventory_reviews.py -p no:cacheprovider -q --basetemp %TEMP%/evogym-f01-manual-full` -> 54 passed, 1 existing warning (40.06s). Disposable SQLite API test verified 201 open, authenticated opener readback, current-shift GET with an empty breakdown, no denomination rows persisted, and explicit empty list 422. PostgreSQL-specific tests not run.
+- Scope: backend/API only; no schema migration, frontend, or new persistence column. Commit identity pending.
