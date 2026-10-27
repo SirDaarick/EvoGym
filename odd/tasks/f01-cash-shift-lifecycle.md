@@ -107,4 +107,4 @@ All tasks use delegated direct: connected multi-file changes and execution excee
 - Replaced the obsolete `/owner/shifts` unavailable-page expectation with an authenticated owner-route integration assertion: the real API shifts view requests active registers/history, exposes the opening action for one authorized register, and does not mount DemoProvider. Other unconnected-route unavailable behavior remains unchanged.
 - RED evidence: independent full frontend run at base `e60c1c2` reported 750 passed / 1 failed; the sole failure expected `/owner/shifts` to remain unavailable after F01 integration.
 - Focus GREEN: `npm.cmd exec vitest -- run src/app/ProductRoutes.test.tsx --config "$env:TEMP/evogym-f01-vitest.config.mts" --reporter=dot` -> 16 passed. Broader focused check and typecheck pending.
-- Work-unit commit: pending.
+- Work-unit commit: `98b81e724e05a5343e73184037786eae6a1d1810` (`test(shifts): assert authenticated API route`).
