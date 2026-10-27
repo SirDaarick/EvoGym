@@ -102,3 +102,9 @@ All tasks use delegated direct: connected multi-file changes and execution excee
 - GREEN: `npm.cmd exec vitest -- run src/features/shifts/ShiftOpenModal.test.tsx src/features/shifts/ShiftCloseDialog.test.tsx src/features/shifts/ShiftFlow.test.tsx src/api/shiftsApi.test.ts src/app/ApiProductApp.test.tsx --config "$env:TEMP/evogym-f01-vitest.config.mts" --reporter=dot` -> 47 passed. `npm.cmd run typecheck -- --pretty false` and scoped `git diff --check` passed.
 - Fix: align the snapshot response DTO and `startOpening` consumer with `id`; route regression verifies the outgoing open JSON contains `inventory_snapshot_id: 'snapshot-1'`. No backend/API or design changes.
 - Work-unit commit: `635ba2de304c7f391d85be7b37c07e6d45162b18` (`fix(shifts): use canonical inventory snapshot id`). Parent browser hard-reload verification and independent T4 remain pending; no feature-completion claim.
+
+## T4 stale API-unavailable route expectation
+- Replaced the obsolete `/owner/shifts` unavailable-page expectation with an authenticated owner-route integration assertion: the real API shifts view requests active registers/history, exposes the opening action for one authorized register, and does not mount DemoProvider. Other unconnected-route unavailable behavior remains unchanged.
+- RED evidence: independent full frontend run at base `e60c1c2` reported 750 passed / 1 failed; the sole failure expected `/owner/shifts` to remain unavailable after F01 integration.
+- Focus GREEN: `npm.cmd exec vitest -- run src/app/ProductRoutes.test.tsx --config "$env:TEMP/evogym-f01-vitest.config.mts" --reporter=dot` -> 16 passed. Broader focused check and typecheck pending.
+- Work-unit commit: pending.

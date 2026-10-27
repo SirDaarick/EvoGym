@@ -6,7 +6,7 @@ import type { ProfileEntrySession } from '../api/profileAccessApi';
 import { ProductRoutes } from './ProductRoutes';
 
 const { access, adminSession, demoMounted } = vi.hoisted(() => ({
-  access: { principal: null as null | { kind: 'admin' | 'employee'; identity: { is_owner: boolean; can_manage_employees: boolean }; session?: { purpose: string } }, loading: false, error: '', listeners: new Set<() => void>(), reload: vi.fn(async () => {}), leaveProfile: vi.fn(async () => {}), unlinkPairedDevice: vi.fn(async () => {}), exit: vi.fn(async () => {}) },
+  access: { principal: null as null | { kind: 'admin' | 'employee'; identity: { id?: string; display_name?: string; is_owner: boolean; can_manage_employees: boolean }; session?: { purpose: string } }, loading: false, error: '', listeners: new Set<() => void>(), reload: vi.fn(async () => {}), leaveProfile: vi.fn(async () => {}), unlinkPairedDevice: vi.fn(async () => {}), exit: vi.fn(async () => {}) },
   adminSession: { status: 'unauthenticated' as string, request: vi.fn(async (_path: string, _init?: RequestInit) => new Response('{}')) },
   demoMounted: vi.fn(),
 }));
@@ -377,12 +377,21 @@ describe('ProductRoutes mode boundary', () => {
     expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
     expect(adminSession.request).not.toHaveBeenCalled();
   });
-  it('shows unavailable API state without demo fallback or enabled fake actions', async () => {
+  it('renders authenticated API shifts without falling back to demo', async () => {
     adminSession.status = 'authenticated';
-    access.principal = { kind: 'admin', identity: { is_owner: true, can_manage_employees: true } };
+    access.principal = { kind: 'admin', identity: { id: 'admin-1', display_name: 'Owner', is_owner: true, can_manage_employees: true } };
+    const register = { id: 'register-1', branch_id: 'branch-1', code: 'front', name: 'Reception', status: 'active', has_open_shift: false };
+    adminSession.request.mockImplementation(async path => {
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
+      if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: [], total: 0, offset: 0, limit: 100 }));
+      if (path.startsWith('/api/v1/shifts/current?')) return new Response('{}', { status: 404 });
+      return new Response('{}');
+    });
     render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
-    expect(await screen.findByRole('heading', { name: 'Función no disponible' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Turno no disponible' })).toBeDisabled();
+    expect(await screen.findByText('No hay turnos registrados para esta caja.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Abrir Turno' })).toBeEnabled();
+    expect(adminSession.request).toHaveBeenCalledWith('/api/v1/registers', undefined);
+    expect(adminSession.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined);
     expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
   });
 });
