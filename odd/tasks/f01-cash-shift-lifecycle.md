@@ -13,6 +13,7 @@ The user clarified on 2026-10-26: opening automatically selects the applicable t
 - Recorded baseline: API 508 passed / 18 skipped; frontend 739 passed; TypeScript app/node and production build passed. These are historical, not F01 proof.
 - RDD is explicitly off at clone/global scope. Do not enable or start it. Independent functional verification remains required.
 - Delivery strategy: exception-ok, explicitly approved for F01 by the user on 2026-10-26. One local feature branch with cohesive functional commits. Forecast: 750–1,100 authored lines including tests/migration/adapters; advisory only, never remove tests or compress code to fit. No remote publication or automatic merge is authorized.
+- Final running branch size: approximately 2,400 authored additions plus deletions (2,394 through `46f8b95`, before this accounting line), exceeding the initial forecast because shared-view integration and browser-discovered regressions required corrections and tests. The approved exception remains in force; no tests were removed or code compressed to meet a size budget.
 
 ## Scope and minimal technical decisions
 - Strict visual freeze: no stylesheet/class/layout/component visual changes or new controls without explicit user approval. Reuse the existing components and bind real data/callbacks only. If integration requires a visual change, stop that part and ask the user first.
