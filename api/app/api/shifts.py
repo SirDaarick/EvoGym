@@ -29,6 +29,7 @@ from app.shifts.queries import (
     get_cash_register,
     get_open_shift,
     get_shift_by_id,
+    list_shifts_by_register,
     list_cash_registers,
     list_payment_terminals,
     open_shift,
@@ -44,6 +45,7 @@ from app.shifts.schemas import (
     OpenShiftDTO,
     PaymentTerminalDTO,
     ShiftDTO,
+    ShiftPageDTO,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["shifts"])
@@ -271,7 +273,7 @@ def get_current_shift_endpoint(
         if shift is None:
             raise HTTPException(404, "No open shift found for this cash register.")
 
-        return to_shift_dto(shift)
+        return to_shift_dto(shift, session=session)
 
 
 @router.post("/shifts/open", response_model=ShiftDTO, status_code=201)
@@ -309,7 +311,7 @@ def open_shift_endpoint(
                 inventory_observations=[item.model_dump() for item in payload.inventory_observations],
             )
             session.commit()
-            return to_shift_dto(shift)
+            return to_shift_dto(shift, session=session)
         except ShiftAlreadyOpenError:
             raise HTTPException(
                 409,
@@ -349,7 +351,14 @@ def close_shift_endpoint(
                 session,
                 shift_id=shift_id,
                 closed_by=principal.staff_id,
-                denomination_counts=[item.model_dump() for item in payload.denomination_counts],
+                denomination_counts=(
+                    [item.model_dump() for item in payload.denomination_counts]
+                    if payload.denomination_counts is not None else None
+                ),
+                counted_cash_minor=(
+                    payload.counted_cash_minor if payload.denomination_counts is None else None
+                ),
+                closing_notes=payload.closing_notes,
             )
             session.commit()
             if result.replayed:
@@ -386,7 +395,34 @@ def get_shift_endpoint(
         if not principal.is_admin and shift.cash_register.branch_id != principal.branch_id:
             raise HTTPException(403, "Access restricted to staff branch.")
 
-        return to_shift_dto(shift)
+        return to_shift_dto(shift, session=session)
+
+
+@router.get("/shifts", response_model=ShiftPageDTO)
+def list_shifts_endpoint(
+    request: Request,
+    register_id: UUID = Query(..., description="Cash register UUID."),
+    offset: int = Query(0, ge=0, le=2**63 - 1),
+    limit: int = Query(50, ge=1, le=100),
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> ShiftPageDTO:
+    """Retrieve a paged history for one cash register."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    with factory() as session:
+        register = get_cash_register(session, register_id)
+        if register is None:
+            raise HTTPException(404, "Cash register not found.")
+        if not principal.is_admin and register.branch_id != principal.branch_id:
+            raise HTTPException(403, "Access restricted to staff branch.")
+        shifts, total = list_shifts_by_register(session, register_id=register_id, offset=offset, limit=limit)
+        return ShiftPageDTO(
+            items=[to_shift_dto(shift, session=session) for shift in shifts],
+            total=total,
+            offset=offset,
+            limit=limit,
+        )
 
 
 @router.post(

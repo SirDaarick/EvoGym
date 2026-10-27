@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -306,17 +306,27 @@ def close_shift(
     *,
     shift_id: UUID,
     closed_by: UUID,
-    denomination_counts: list[dict[str, int]],
+    denomination_counts: list[dict[str, int]] | None,
+    counted_cash_minor: int | None = None,
+    closing_notes: str | None = None,
     now: datetime | None = None,
 ) -> ShiftCloseResult:
     """Freeze a shift's physical cash cut while serializing against register posting/opening."""
     maximum = 2**63 - 1
-    if not isinstance(denomination_counts, list) or not denomination_counts:
+    if (denomination_counts is None) == (counted_cash_minor is None):
+        raise ValueError("Provide either closing denomination counts or a manual counted total.")
+    if denomination_counts is not None and (not isinstance(denomination_counts, list) or not denomination_counts):
         raise ValueError("At least one closing denomination count is required.")
-    total_counted = 0
+    if counted_cash_minor is not None and (type(counted_cash_minor) is not int or not 0 <= counted_cash_minor <= maximum):
+        raise ValueError("Counted cash must be a nonnegative signed 64-bit integer.")
+    if closing_notes is not None:
+        if not isinstance(closing_notes, str) or len(closing_notes.strip()) > 500:
+            raise ValueError("Closing notes must be at most 500 characters.")
+        closing_notes = closing_notes.strip() or None
+    total_counted = counted_cash_minor if counted_cash_minor is not None else 0
     seen: set[int] = set()
     validated: list[tuple[int, int]] = []
-    for item in denomination_counts:
+    for item in denomination_counts or []:
         if not isinstance(item, dict):
             raise ValueError("Closing denomination counts must be mappings.")
         denomination = item.get("denomination_minor")
@@ -354,12 +364,33 @@ def close_shift(
         stored = sorted(
             (item.denomination_minor, item.quantity) for item in shift.closing_denomination_counts
         )
-        if stored != sorted(validated):
+        same_counts = denomination_counts is not None and stored == sorted(validated)
+        same_manual = denomination_counts is None and not stored and shift.counted_cash_minor == total_counted
+        if not (same_counts or same_manual) or shift.closing_notes != closing_notes:
             raise ShiftCloseConflictError("A closed shift's cash cut cannot be changed.")
         return ShiftCloseResult(shift, replayed=True)
     if shift.status != "open":
         raise ShiftCloseConflictError("Only an open shift can be closed.")
 
+    expected = expected_cash_for_shift(session, shift)
+    shift.closed_by = closed_by
+    shift.closed_at = now or datetime.now(timezone.utc)
+    shift.expected_cash_at_close_minor = expected
+    shift.counted_cash_minor = total_counted
+    shift.difference_minor = total_counted - expected
+    shift.closing_notes = closing_notes
+    shift.status = "closed"
+    shift.closing_denomination_counts = [
+        ShiftClosingDenominationCount(denomination_minor=denomination, quantity=quantity)
+        for denomination, quantity in validated
+    ]
+    session.flush()
+    return ShiftCloseResult(shift, replayed=False)
+
+
+def expected_cash_for_shift(session: Session, shift: Shift) -> int:
+    """Calculate current expected cash from the same authoritative sources used by close."""
+    maximum = 2**63 - 1
     inflow = 0
     amounts = session.scalars(
         select(Payment.amount_minor)
@@ -386,20 +417,7 @@ def close_shift(
         raise ValueError("Opening cash is outside supported minor-unit bounds.")
     if shift.opening_cash_minor > maximum - inflow:
         raise ValueError("Expected closing cash exceeds signed 64-bit minor units.")
-    expected = shift.opening_cash_minor + inflow
-
-    shift.closed_by = closed_by
-    shift.closed_at = now or datetime.now(timezone.utc)
-    shift.expected_cash_at_close_minor = expected
-    shift.counted_cash_minor = total_counted
-    shift.difference_minor = total_counted - expected
-    shift.status = "closed"
-    shift.closing_denomination_counts = [
-        ShiftClosingDenominationCount(denomination_minor=denomination, quantity=quantity)
-        for denomination, quantity in validated
-    ]
-    session.flush()
-    return ShiftCloseResult(shift, replayed=False)
+    return shift.opening_cash_minor + inflow
 
 
 def get_shift_by_id(
@@ -412,6 +430,25 @@ def get_shift_by_id(
         selectinload(Shift.inventory_review).selectinload(ShiftInventoryReview.observations),
     )
     return session.scalar(stmt)
+
+
+def list_shifts_by_register(
+    session: Session, *, register_id: UUID, offset: int = 0, limit: int = 50
+) -> tuple[list[Shift], int]:
+    """Return a bounded, newest-first history page for one cash register."""
+    total = session.scalar(select(func.count()).select_from(Shift).where(Shift.cash_register_id == register_id)) or 0
+    stmt = (
+        select(Shift)
+        .where(Shift.cash_register_id == register_id)
+        .order_by(Shift.opened_at.desc(), Shift.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .options(
+            selectinload(Shift.inventory_review).joinedload(ShiftInventoryReview.snapshot),
+            selectinload(Shift.inventory_review).selectinload(ShiftInventoryReview.observations),
+        )
+    )
+    return list(session.scalars(stmt).all()), total
 
 
 def to_payment_terminal_dto(terminal: PaymentTerminal) -> PaymentTerminalDTO:
@@ -429,7 +466,7 @@ def to_cash_register_dto(
     return dto
 
 
-def to_shift_dto(shift: Shift) -> ShiftDTO:
+def to_shift_dto(shift: Shift, session: Session | None = None) -> ShiftDTO:
     """Convert Shift model to ShiftDTO."""
     dto = ShiftDTO.model_validate({
         "id": shift.id,
@@ -443,6 +480,9 @@ def to_shift_dto(shift: Shift) -> ShiftDTO:
         "denomination_counts": shift.denomination_counts,
         "closing_denomination_counts": shift.closing_denomination_counts,
         "expected_cash_at_close_minor": shift.expected_cash_at_close_minor,
+        "current_expected_cash_minor": (
+            expected_cash_for_shift(session, shift) if session is not None and shift.status == "open" else None
+        ),
         "counted_cash_minor": shift.counted_cash_minor,
         "difference_minor": shift.difference_minor,
         "closing_notes": shift.closing_notes,

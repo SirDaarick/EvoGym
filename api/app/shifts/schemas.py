@@ -96,6 +96,7 @@ class ShiftDTO(BaseModel):
     closing_denomination_counts: list["ShiftClosingDenominationCountDTO"] = Field(default_factory=list)
     inventory_review: "ShiftInventoryReviewDTO | None" = None
     expected_cash_at_close_minor: int | None = None
+    current_expected_cash_minor: int | None = None
     counted_cash_minor: int | None = None
     difference_minor: int | None = None
     closing_notes: str | None = None
@@ -174,13 +175,22 @@ class ShiftClosingDenominationCountDTO(BaseModel):
 class CloseShiftDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    denomination_counts: list[ShiftClosingDenominationCountDTO] = Field(..., min_length=1, max_length=64)
+    denomination_counts: list[ShiftClosingDenominationCountDTO] | None = Field(None, min_length=1, max_length=64)
+    counted_cash_minor: StrictInt | None = Field(None, ge=0, le=MAX_MINOR_UNITS)
+    closing_notes: str | None = Field(None, max_length=500)
+
+    @field_validator("closing_notes")
+    @classmethod
+    def _normalize_closing_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
     @model_validator(mode="after")
     def _validate_counts(self) -> "CloseShiftDTO":
+        if (self.denomination_counts is None) == (self.counted_cash_minor is None):
+            raise ValueError("Provide either denomination counts or an explicit counted cash total.")
         seen: set[int] = set()
         total = 0
-        for item in self.denomination_counts:
+        for item in self.denomination_counts or []:
             if item.denomination_minor in seen:
                 raise ValueError("Closing denomination counts cannot contain duplicates.")
             seen.add(item.denomination_minor)
@@ -188,7 +198,16 @@ class CloseShiftDTO(BaseModel):
             if amount > MAX_MINOR_UNITS or total > MAX_MINOR_UNITS - amount:
                 raise ValueError("Closing denomination total exceeds signed 64-bit minor units.")
             total += amount
+        if self.denomination_counts is not None:
+            self.counted_cash_minor = total
         return self
+
+
+class ShiftPageDTO(BaseModel):
+    items: list[ShiftDTO]
+    total: int
+    offset: int
+    limit: int
 
 
 class ShiftInventoryObservationInputDTO(BaseModel):

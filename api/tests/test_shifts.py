@@ -167,6 +167,18 @@ def test_close_shift_rejects_invalid_denomination_evidence(counts, message):
         CloseShiftDTO.model_validate({"denomination_counts": counts})
 
 
+@pytest.mark.parametrize("value", [True, 1.5, -1, 2**63])
+def test_close_shift_rejects_invalid_manual_total(value):
+    with pytest.raises(ValidationError):
+        CloseShiftDTO.model_validate({"counted_cash_minor": value})
+
+
+@pytest.mark.parametrize("body", [{}, {"denomination_counts": []}, {"counted_cash_minor": 1, "denomination_counts": [{"denomination_minor": 1, "quantity": 1}]}])
+def test_close_shift_requires_one_unambiguous_capture_mode(body):
+    with pytest.raises(ValidationError):
+        CloseShiftDTO.model_validate(body)
+
+
 def test_close_shift_endpoint_persists_server_owned_cash_cut(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -204,6 +216,95 @@ def test_close_shift_endpoint_persists_server_owned_cash_cut(tmp_path):
                 headers=headers,
             )
             assert conflict.status_code == 409
+    finally:
+        engine.dispose()
+
+
+def test_close_shift_endpoint_accepts_manual_total_and_persists_notes(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "close-manual", "Manual Close Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "close-manual@example.invalid")
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "close-manual", "Manual Close Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 4}])
+            shift_id = shift.id
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {"counted_cash_minor": 250, "closing_notes": "  Drawer was short  "}
+        with TestClient(app) as client:
+            response = client.post(f"/api/v1/shifts/{shift_id}/close", json=body, headers=headers)
+            assert response.status_code == 201, response.text
+            closed = response.json()
+            assert closed["counted_cash_minor"] == 250
+            assert closed["difference_minor"] == -150
+            assert closed["closing_notes"] == "Drawer was short"
+            assert closed["closing_denomination_counts"] == []
+            assert client.get(f"/api/v1/shifts/{shift_id}", headers=headers).json() == closed
+            assert client.post(f"/api/v1/shifts/{shift_id}/close", json=body, headers=headers).status_code == 200
+            for changed in (
+                {"counted_cash_minor": 251, "closing_notes": "Drawer was short"},
+                {"counted_cash_minor": 250, "closing_notes": "Different note"},
+                {"denomination_counts": [{"denomination_minor": 250, "quantity": 1}], "closing_notes": "Drawer was short"},
+            ):
+                assert client.post(f"/api/v1/shifts/{shift_id}/close", json=changed, headers=headers).status_code == 409
+            assert client.post(f"/api/v1/shifts/{shift_id}/close", json={"counted_cash_minor": True}, headers=headers).status_code == 422
+            assert client.post(f"/api/v1/shifts/{shift_id}/close", json={"denomination_counts": []}, headers=headers).status_code == 422
+    finally:
+        engine.dispose()
+
+
+def test_open_shift_read_exposes_live_expected_cash_without_freezing_close_total(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "cash-preview", "Cash Preview Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "cash-preview@example.invalid")
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "cash-preview", "Cash Preview Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 1000, "quantity": 1}])
+            shift_id = shift.id
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            current = client.get(f"/api/v1/shifts/{shift_id}", headers=headers)
+            assert current.status_code == 200, current.text
+            assert current.json()["expected_cash_at_close_minor"] is None
+            assert current.json()["current_expected_cash_minor"] == 1000
+            closed = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                json={"denomination_counts": [{"denomination_minor": 1000, "quantity": 1}]},
+                headers=headers,
+            )
+            assert closed.status_code == 201, closed.text
+            assert closed.json()["expected_cash_at_close_minor"] == current.json()["current_expected_cash_minor"]
+            assert closed.json()["current_expected_cash_minor"] is None
+
+            with factory.begin() as session:
+                open_shift(session, register_id=UUID(closed.json()["cash_register_id"]), opened_by=staff_id,
+                           denomination_counts=[{"denomination_minor": 100, "quantity": 1}])
+
+            history = client.get(f"/api/v1/shifts?register_id={closed.json()['cash_register_id']}&limit=1", headers=headers)
+            assert history.status_code == 200, history.text
+            assert history.json()["total"] == 2
+            assert history.json()["offset"] == 0
+            assert history.json()["limit"] == 1
+            first_page_id = history.json()["items"][0]["id"]
+            next_page = client.get(
+                f"/api/v1/shifts?register_id={closed.json()['cash_register_id']}&offset=1&limit=1", headers=headers
+            )
+            assert next_page.status_code == 200, next_page.text
+            assert next_page.json()["total"] == 2
+            assert next_page.json()["offset"] == 1
+            assert next_page.json()["items"][0]["id"] != first_page_id
+
+            other_branch = _seed_branch(factory, "other-history", "Other History Branch")
+            with factory.begin() as session:
+                other_register = create_cash_register(session, other_branch, "other-history", "Other History Register")
+                other_register_id = other_register.id
+            denied = client.get(f"/api/v1/shifts?register_id={other_register_id}", headers=headers)
+            assert denied.status_code == 403
     finally:
         engine.dispose()
 
