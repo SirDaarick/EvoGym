@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Chart } from '@tanstack/charts/react';
 import { barX, defineChart, text } from '@tanstack/charts';
@@ -18,9 +19,56 @@ import { shiftDashboard, type ShiftActivityRow, type ShiftInventoryRow } from '.
 import { Badge, Button, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { ShiftCloseDialog } from './ShiftCloseDialog';
 import { ShiftOpenModal } from './ShiftOpenModal';
+import {
+  ShiftApiError, getCurrentShift, getShiftHistory, getShiftSummary,
+  getShiftSnapshot, listCashRegisters, openShift as openApiShift,
+  type ApiRequest, type CashRegisterDTO, type InventorySnapshotDTO, type ShiftDTO, type ShiftSummaryDTO,
+} from '../../api/shiftsApi';
 import './ShiftDashboard.css';
 
-export function Shifts({ role }: { role: Role }) {
+interface ApiShiftsProps { role: Role; apiRequest: ApiRequest; actorId: string; actorName: string; }
+type ShiftActivityViewRow = Omit<ShiftActivityRow, 'family'> & { family: string };
+
+interface ShiftDashboardViewProps {
+  role: Role;
+  shift: { id: string; status: 'open' | 'closed'; openedAt: string; window: ShiftWindow; closedAt?: string; expectedCashAtCloseMinor?: number | null; countedCashMinor?: number | null; cashDifferenceMinor?: number | null; closingNotes?: string | null; cashDenominations?: { valueMinor: number; quantity: number }[] } | null;
+  isCurrentOpenShift: boolean;
+  hasClosedCurrentShift: boolean;
+  shiftOptions?: ReactNode;
+  contextControls?: ReactNode;
+  emptyMessage?: ReactNode;
+  canOpen?: boolean;
+  dashboard: {
+    confirmedMinor?: number;
+    operationCount: number | string;
+    pendingTransferMinor?: number;
+    expenseMinor?: number;
+    expenseCount: number | string;
+    expenseDescription?: string;
+    expectedCashMinor?: number;
+    dataLoaded: boolean;
+    paymentMethods: { method: 'cash' | 'card' | 'transfer'; count: number; amountMinor: number }[];
+    activities: { family: string; count: number; amountMinor: number }[];
+    rows: (Omit<ShiftActivityRow, 'family'> & { family: string })[];
+    inventoryRows: ShiftInventoryRow[] | null;
+  };
+  message: string;
+  error: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  openDialog?: ReactNode;
+  closeDialog?: ReactNode;
+}
+
+export function Shifts(props: { role: Role; apiRequest?: ApiRequest; actorId?: string; actorName?: string }) {
+  if (props.apiRequest) {
+    if (!props.actorId || !props.actorName) return <><PageHeader eyebrow="TURNO" title="Turno de trabajo" description="Resumen operativo del turno seleccionado." /><Panel><p role="alert">No se pudo identificar la sesión autenticada para administrar el turno.</p></Panel></>;
+    return <ApiShifts role={props.role} apiRequest={props.apiRequest} actorId={props.actorId} actorName={props.actorName} />;
+  }
+  return <DemoShifts role={props.role} />;
+}
+
+function DemoShifts({ role }: { role: Role }) {
   const { state, transact } = useDemo();
   const [selectedId, setSelectedId] = useState(state.currentShiftId);
   const [message, setMessage] = useState('');
@@ -44,48 +92,55 @@ export function Shifts({ role }: { role: Role }) {
   const shiftName = shift.window.startsWith('06:00') ? 'Matutino' : 'Vespertino';
   const isCurrentOpenShift = shift.status === 'open' && selected === state.currentShiftId;
   const closeDialog = () => { setClosingOpen(false); setTimeout(() => document.getElementById('shift-close-trigger')?.focus(), 0); };
-  return <>
-    <PageHeader eyebrow="TURNO · CONTROL MANUAL" title={`Turno: ${shiftName} ${shiftDate}`} description="Control de cobros, efectivo y actividad del turno."
-      action={isCurrentOpenShift ? <Button id="shift-close-trigger" onClick={() => setClosingOpen(true)}>Cerrar turno</Button> : <Button id="shift-open-trigger" onClick={() => setOpenModalOpen(true)}>Abrir Turno</Button>} />
-    <p className="shift-status-label">{shift.status === 'open' ? 'Turno abierto' : 'Turno cerrado'}</p>
-    {!closingOpen && !openModalOpen && message && <div role={error ? 'alert' : 'status'}><Notice tone={error ? 'error' : 'success'}>{message}</Notice></div>}
-    {role === 'OWNER' && <div className="field"><label htmlFor="shift-selection">Turno a consultar</label><select id="shift-selection" value={selectedId} onChange={event => { setSelectedId(event.target.value); setClosingOpen(false); }}>{state.shifts.map(item => <option key={item.id} value={item.id}>{item.id} · {item.window} · {item.status === 'open' ? 'Abierto' : 'Cerrado'}</option>)}</select></div>}
-    {isCurrentOpenShift && closingOpen && <ShiftCloseDialog key={shift.id} isOpen shiftId={shift.id} shiftName={shiftName}
-      expectedCashMinor={summary.expectedCashMinor} expectedCashBreakdown={expectedCashBreakdown} onClose={closeDialog} onSuccess={() => { setClosingOpen(false); setError(false); setMessage('Cierre registrado.'); }} />}
-    {openModalOpen && <ShiftOpenModal isOpen state={state} onClose={() => setOpenModalOpen(false)} onConfirm={data => {
+  return <ShiftDashboardView role={role} shift={shift} isCurrentOpenShift={isCurrentOpenShift} hasClosedCurrentShift={current?.status === 'closed'}
+    shiftOptions={role === 'OWNER' && <div className="field"><label htmlFor="shift-selection">Turno a consultar</label><select id="shift-selection" value={selectedId} onChange={event => { setSelectedId(event.target.value); setClosingOpen(false); }}>{state.shifts.map(item => <option key={item.id} value={item.id}>{item.id} · {item.window} · {item.status === 'open' ? 'Abierto' : 'Cerrado'}</option>)}</select></div>}
+    dashboard={{ confirmedMinor: dashboard.confirmedMinor, operationCount: dashboard.activities.reduce((total, item) => total + item.count, 0), pendingTransferMinor: dashboard.pendingTransferMinor, expenseMinor: dashboard.expenseMinor, expenseCount: dashboard.expenseCount, expectedCashMinor: dashboard.expectedCashMinor, dataLoaded: true, paymentMethods: dashboard.paymentMethods, activities: dashboard.activities, rows: dashboard.rows, inventoryRows: dashboard.inventoryRows }}
+    message={message} error={error} onOpen={() => setOpenModalOpen(true)} onClose={() => setClosingOpen(true)}
+    closeDialog={isCurrentOpenShift && closingOpen ? <ShiftCloseDialog key={shift.id} isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expectedCashMinor} expectedCashBreakdown={expectedCashBreakdown} onClose={closeDialog} onSuccess={() => { setClosingOpen(false); setError(false); setMessage('Cierre registrado.'); }} /> : null}
+    openDialog={openModalOpen ? <ShiftOpenModal isOpen state={state} onClose={() => setOpenModalOpen(false)} onConfirm={data => {
       const id = `shift-${crypto.randomUUID()}`;
-      const result = transact(currentState => openShift(currentState, {
-        id,
-        window: data.window,
-        openingCashMinor: data.openingCashMinor,
-        cashDenominations: data.cashDenominations,
-        openingCashDenominations: data.cashDenominations,
-        responsibleStaffId: data.responsibleStaffId,
-        responsibleStaffName: data.responsibleStaffName,
-        stockAdjustments: data.stockAdjustments,
-        counts: data.counts,
-      }));
-      setError(result.status === 'error');
-      setMessage(result.status === 'error' ? result.message : 'Turno abierto exitosamente.');
-      if (result.status === 'ok') {
-        setSelectedId(id);
-      }
-    }} />}
+      const result = transact(currentState => openShift(currentState, { id, window: data.window, openingCashMinor: data.openingCashMinor, cashDenominations: data.cashDenominations, openingCashDenominations: data.cashDenominations, responsibleStaffId: data.responsibleStaffId, responsibleStaffName: data.responsibleStaffName, stockAdjustments: data.stockAdjustments, counts: data.counts }));
+      setError(result.status === 'error'); setMessage(result.status === 'error' ? result.message : 'Turno abierto exitosamente.'); if (result.status === 'ok') setSelectedId(id);
+    }} /> : null} />;
+}
+
+function ShiftDashboardView({ role, shift, isCurrentOpenShift, hasClosedCurrentShift, shiftOptions, contextControls, emptyMessage, canOpen = true, dashboard, message, error, onOpen, onClose, openDialog, closeDialog }: ShiftDashboardViewProps) {
+  const cash = (value: number | null | undefined) => value == null ? 'Sin registrar' : `${formatMoney(value)} MXN`;
+  if (!shift) return <>
+    <PageHeader eyebrow="TURNO" title="Turno de trabajo" description="Resumen operativo del turno seleccionado."
+      action={<Button id="shift-open-trigger" disabled={!canOpen} onClick={onOpen}>Abrir Turno</Button>} />
+    {contextControls}{shiftOptions}
+    {message && <div role={error ? 'alert' : 'status'}><Notice tone={error ? 'error' : 'success'}>{message}</Notice></div>}
+    <Panel><p>{emptyMessage ?? 'No hay un turno disponible para mostrar.'}</p></Panel>{openDialog}
+  </>;
+  const shiftName = shift.window.startsWith('06:00') ? 'Matutino' : 'Vespertino';
+  const date = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(shift.openedAt));
+  const action = isCurrentOpenShift
+    ? <Button id="shift-close-trigger" onClick={onClose}>Cerrar turno</Button>
+    : <Button id="shift-open-trigger" disabled={!canOpen} onClick={onOpen}>Abrir Turno</Button>;
+  const expectedCash = shift.status === 'closed' ? shift.expectedCashAtCloseMinor : dashboard.expectedCashMinor;
+  return <>
+    <PageHeader eyebrow="TURNO · CONTROL MANUAL" title={`Turno: ${shiftName} ${date}`} description="Control de cobros, efectivo y actividad del turno." action={action} />
+    {contextControls}{shiftOptions}
+    <p className="shift-status-label">{shift.status === 'open' ? 'Turno abierto' : 'Turno cerrado'}</p>
+    {!closeDialog && !openDialog && message && <div role={error ? 'alert' : 'status'}><Notice tone={error ? 'error' : 'success'}>{message}</Notice></div>}
+    {closeDialog}{openDialog}
     <div className="shift-kpis">
-      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={ChartBarBigIcon} size={22} /></span><h2>Cobros confirmados</h2><p className="shift-kpi-value">{cash(dashboard.confirmedMinor)}</p><p>Operaciones {dashboard.activities.reduce((total, item) => total + item.count, 0)} · Pendiente {cash(dashboard.pendingTransferMinor)}</p></Panel>
-      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={Cash01Icon} size={22} /></span><h2>Gastos</h2><p className="shift-kpi-value">{cash(dashboard.expenseMinor)}</p><p>{dashboard.expenseCount} {dashboard.expenseCount === 1 ? 'movimiento' : 'movimientos'}</p></Panel>
-      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={CreditCardIcon} size={22} /></span><h2>Efectivo esperado</h2><p className="shift-kpi-value">{cash(shift.status === 'closed' ? shift.expectedCashAtCloseMinor : dashboard.expectedCashMinor)}</p><details className="shift-formula"><summary>Ver cálculo</summary><p>Fondo + efectivo cobrado + Extra − Gastos</p></details>{shift.status === 'open' && dashboard.expectedCashMinor < 0 && <Notice tone="warning">El efectivo esperado es negativo; revisa los movimientos.</Notice>}</Panel>
+      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={ChartBarBigIcon} size={22} /></span><h2>Cobros confirmados</h2><p className="shift-kpi-value">{cash(dashboard.confirmedMinor)}</p><p>Operaciones {dashboard.operationCount} · Pendiente {cash(dashboard.pendingTransferMinor)}</p></Panel>
+      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={Cash01Icon} size={22} /></span><h2>Gastos</h2><p className="shift-kpi-value">{cash(dashboard.expenseMinor)}</p><p>{dashboard.expenseDescription ?? `${dashboard.expenseCount} ${dashboard.expenseCount === 1 ? 'movimiento' : 'movimientos'}`}</p></Panel>
+      <Panel className="shift-kpi"><span className="shift-kpi-icon"><HugeiconsIcon icon={CreditCardIcon} size={22} /></span><h2>Efectivo esperado</h2><p className="shift-kpi-value">{cash(expectedCash)}</p><details className="shift-formula"><summary>Ver cálculo</summary><p>Fondo + efectivo cobrado + Extra − Gastos</p></details>{shift.status === 'open' && dashboard.expectedCashMinor != null && dashboard.expectedCashMinor < 0 && <Notice tone="warning">El efectivo esperado es negativo; revisa los movimientos.</Notice>}</Panel>
     </div>
-    <div className="shift-dashboard-grid mt-6"><Panel className="shift-method-panel"><h2><HugeiconsIcon icon={CreditCardIcon} size={20} /> Cobros por método</h2><ShiftPaymentMethods paymentMethods={dashboard.paymentMethods} pendingTransferMinor={dashboard.pendingTransferMinor} /></Panel>
-      <Panel className="shift-activity-panel"><h2><HugeiconsIcon icon={ChartBarBigIcon} size={20} /> Actividad</h2><ShiftCharts activities={dashboard.activities} /></Panel></div>
-    <Panel className="mt-6"><h2>Movimientos financieros</h2><ShiftActivityTable key={shift.id} rows={dashboard.rows} /></Panel>
-    <Panel className="mt-6"><h2><HugeiconsIcon icon={PackageIcon} size={20} /> Movimientos de inventario</h2><ShiftInventoryTable key={`inventory-${shift.id}`} rows={dashboard.inventoryRows} /></Panel>
-    {(shift.status === 'closed' || current?.status === 'closed') && <Panel className="mt-6"><h2>Cierre y continuidad</h2><p className="muted">Reapertura y correcciones excepcionales no disponibles.</p>{shift.closedAt && <p>Cierre: {shift.closedAt}</p>}
-      {shift.status === 'closed' && (shift.cashDenominations ? <TableRegion label="Conteo registrado"><table><caption>Desglose de efectivo guardado al cerrar</caption><thead><tr><th scope="col">Valor MXN</th><th scope="col">Cantidad</th><th scope="col">Subtotal MXN</th></tr></thead><tbody>{shift.cashDenominations.filter(row => row.quantity > 0).map(row => <tr key={row.valueMinor}><td>{formatMoney(row.valueMinor)}</td><td>{row.quantity}</td><td>{formatMoney(row.valueMinor * row.quantity)}</td></tr>)}</tbody></table></TableRegion> : <p>Sin desglose por denominación registrado.</p>)}
-      {current?.status === 'closed' && <div className="mt-6 clay-card" style={{ padding: '1.25rem', border: '1px solid var(--color-divider)', borderRadius: '18px', background: 'var(--color-surface)', boxShadow: 'var(--shadow-clay)' }}>
+    <div className="shift-dashboard-grid mt-6"><Panel className="shift-method-panel"><h2><HugeiconsIcon icon={CreditCardIcon} size={20} /> Cobros por método</h2>{dashboard.dataLoaded ? <ShiftPaymentMethods paymentMethods={dashboard.paymentMethods} pendingTransferMinor={dashboard.pendingTransferMinor ?? 0} /> : <p role="status">Cargando cobros…</p>}</Panel>
+      <Panel className="shift-activity-panel"><h2><HugeiconsIcon icon={ChartBarBigIcon} size={20} /> Actividad</h2>{dashboard.dataLoaded ? <ShiftCharts activities={dashboard.activities} /> : <p role="status">Cargando actividad…</p>}</Panel></div>
+    <Panel className="mt-6"><h2>Movimientos financieros</h2>{dashboard.dataLoaded ? <ShiftActivityTable key={shift.id} rows={dashboard.rows} /> : <p role="status">Cargando movimientos…</p>}</Panel>
+    <Panel className="mt-6"><h2><HugeiconsIcon icon={PackageIcon} size={20} /> Movimientos de inventario</h2>{dashboard.inventoryRows ? <ShiftInventoryTable key={`inventory-${shift.id}`} rows={dashboard.inventoryRows} /> : <p>Historial no disponible en esta integración.</p>}</Panel>
+    {(shift.status === 'closed' || hasClosedCurrentShift) && <Panel className="mt-6"><h2>Cierre y continuidad</h2><p className="muted">Reapertura y correcciones excepcionales no disponibles.</p>{shift.closedAt && <p>Cierre: {shift.closedAt}</p>}
+      {shift.status === 'closed' && (shift.cashDenominations?.length ? <TableRegion label="Conteo registrado"><table><caption>Desglose de efectivo guardado al cerrar</caption><thead><tr><th scope="col">Valor MXN</th><th scope="col">Cantidad</th><th scope="col">Subtotal MXN</th></tr></thead><tbody>{shift.cashDenominations.filter(row => row.quantity > 0).map(row => <tr key={row.valueMinor}><td>{formatMoney(row.valueMinor)}</td><td>{row.quantity}</td><td>{formatMoney(row.valueMinor * row.quantity)}</td></tr>)}</tbody></table></TableRegion> : <p>Sin desglose por denominación registrado.</p>)}
+      {shift.closingNotes && <p>Observaciones del cierre: {shift.closingNotes}</p>}{shift.countedCashMinor != null && <p>Efectivo contado: {cash(shift.countedCashMinor)}</p>}{shift.cashDifferenceMinor != null && <p>Diferencia: {cash(shift.cashDifferenceMinor)}</p>}
+      {hasClosedCurrentShift && <div className="mt-6 clay-card" style={{ padding: '1.25rem', border: '1px solid var(--color-divider)', borderRadius: '18px', background: 'var(--color-surface)', boxShadow: 'var(--shadow-clay)' }}>
         <h3>Abrir siguiente turno</h3>
         <p className="muted" style={{ margin: '0 0 1rem' }}>El turno anterior ha finalizado. Realiza el conteo de caja chica y la verificación de inventario inicial para comenzar.</p>
-        <Button id="shift-open-bottom-trigger" onClick={() => setOpenModalOpen(true)}>Abrir turno</Button>
+        <Button id="shift-open-bottom-trigger" onClick={onOpen}>Abrir turno</Button>
       </div>}
       <div role={error ? 'alert' : 'status'}>{message && <Notice tone={error ? 'error' : 'success'}>{message}</Notice>}</div>
     </Panel>}
@@ -93,15 +148,15 @@ export function Shifts({ role }: { role: Role }) {
   </>;
 }
 
-function ShiftPaymentMethods({ paymentMethods, pendingTransferMinor }: { paymentMethods: { method: 'cash' | 'card'; count: number; amountMinor: number }[]; pendingTransferMinor: number }) {
-  const labels = { cash: 'Efectivo', card: 'Tarjeta' };
-  const [activeMethod, setActiveMethod] = useState<'cash' | 'card' | null>(null);
+function ShiftPaymentMethods({ paymentMethods, pendingTransferMinor }: { paymentMethods: { method: 'cash' | 'card' | 'transfer'; count: number; amountMinor: number }[]; pendingTransferMinor: number }) {
+  const labels = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
+  const [activeMethod, setActiveMethod] = useState<'cash' | 'card' | 'transfer' | null>(null);
   const confirmedOperationCount = paymentMethods.reduce((total, item) => total + item.count, 0);
   const slices = paymentMethods.map(item => ({ ...item, label: labels[item.method], percent: confirmedOperationCount ? item.count / confirmedOperationCount * 100 : 0 }));
   const donut = defineChart({ marks: [polar({ inset: 8, radiusRatio: 0.92, marks: [radialArc(pie(slices, { value: 'count' }), {
     innerRadius: ({ radius }) => radius * 0.66, cornerRadius: 5, color: 'method', key: 'method',
   })], scales: { angle: null, radius: null } })], scales: { x: null, y: null },
-    color: { domain: ['cash', 'card'], range: ['#FC6C06', '#2455A4'] }, keyboard: true });
+    color: { domain: ['cash', 'card', 'transfer'], range: ['#FC6C06', '#2455A4', '#2455A4'] }, keyboard: true });
   return <div className="shift-payment-methods">
     <div className="shift-donut-wrap" aria-label={`Total de cobros confirmados ${confirmedOperationCount} operaciones`}>
       {slices.length ? <Chart definition={donut} height={210} ariaLabel="Operaciones confirmadas por método de pago" /> : <div className="shift-donut-empty" role="img" aria-label="Sin cobros confirmados" />}
@@ -128,7 +183,7 @@ function ShiftCharts({ activities }: { activities: { family: string; count: numb
     <div className="shift-chart-amounts" aria-label="Montos confirmados por familia">{rows.map(item => <span key={item.family}>{item.family} {formatMoney(item.amountMinor)} MXN</span>)}</div></section></div>;
 }
 
-function ShiftActivityTable({ rows }: { rows: ShiftActivityRow[] }) {
+function ShiftActivityTable({ rows }: { rows: ShiftActivityViewRow[] }) {
   const [query, setQuery] = useState('');
   const [family, setFamily] = useState('all');
   const [method, setMethod] = useState('all');
@@ -139,7 +194,7 @@ function ShiftActivityTable({ rows }: { rows: ShiftActivityRow[] }) {
       && (family === 'all' || row.family === family)
       && (method === 'all' || row.method === method)
   }), [rows, query, family, method]);
-  const columns = useMemo<ColumnDef<ShiftActivityRow>[]>(() => [
+  const columns = useMemo<ColumnDef<ShiftActivityViewRow>[]>(() => [
     { accessorKey: 'recordedAt', header: 'Fecha y hora', cell: ({ getValue }) => new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'short', timeStyle: 'short' }).format(new Date(String(getValue()))) },
     {
       accessorKey: 'description',
@@ -206,4 +261,200 @@ function ShiftInventoryTable({ rows }: { rows: ShiftInventoryRow[] }) {
       <tbody>{table.getRowModel().rows.map(row => <tr key={row.id}>{row.getVisibleCells().map(cell => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}{!table.getRowModel().rows.length && <tr><td colSpan={columns.length}>No hay movimientos de inventario.</td></tr>}</tbody></table></TableRegion>
     <div className="shift-pagination"><span>{filtered.length} movimientos · página {table.getState().pagination.pageIndex + 1} de {Math.max(1, table.getPageCount())}</span><label>Filas por página<select aria-label="Filas de inventario por página" value={table.getState().pagination.pageSize} onChange={event => table.setPageSize(Number(event.target.value))}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label><Button variant="secondary" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>Anterior</Button><Button variant="secondary" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>Siguiente</Button></div>
   </>;
+}
+
+function windowFor(date: string): ShiftWindow {
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', hour: '2-digit', hourCycle: 'h23' }).format(new Date(date)));
+  return hour < 14 ? '06:00–14:00' : '14:00–22:00';
+}
+
+function isNotFound(error: unknown): boolean { return error instanceof ShiftApiError && error.status === 404; }
+
+function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
+  const [registers, setRegisters] = useState<CashRegisterDTO[]>([]);
+  const [registerId, setRegisterId] = useState('');
+  const [shifts, setShifts] = useState<ShiftDTO[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [summary, setSummary] = useState<ShiftSummaryDTO | null>(null);
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
+  const [inventorySnapshot, setInventorySnapshot] = useState<InventorySnapshotDTO | null>(null);
+  const [openModalOpen, setOpenModalOpen] = useState(false);
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const sequence = useRef(0);
+  const openIntent = useRef<{ registerId: string; snapshotId: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void listCashRegisters(apiRequest).then(rows => {
+      if (!active) return;
+      const available = rows.filter(register => register.status === 'active');
+      setRegisters(available);
+      if (available.length === 1) setRegisterId(available[0].id);
+      setLoading(false);
+    }).catch(reason => {
+      if (!active) return;
+      setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar las cajas.');
+      setError(true);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [apiRequest]);
+
+  async function reloadRegister(targetRegister: string, chooseCurrent = true) {
+    const current = ++sequence.current;
+    setLoading(true);
+    setMessage('');
+    setError(false);
+    try {
+      const first = await getShiftHistory(apiRequest, targetRegister, 0, 100);
+      const all = [...first.items];
+      for (let offset = first.items.length; offset < first.total; offset += first.limit) {
+        const page = await getShiftHistory(apiRequest, targetRegister, offset, first.limit);
+        all.push(...page.items);
+      }
+      let activeShift: ShiftDTO | null = null;
+      try { activeShift = await getCurrentShift(apiRequest, targetRegister); }
+      catch (reason) { if (!isNotFound(reason)) throw reason; }
+      const merged = activeShift ? [activeShift, ...all.filter(row => row.id !== activeShift!.id)] : all;
+      if (sequence.current !== current) return;
+      setShifts(merged);
+      const nextSelected = chooseCurrent ? activeShift?.id ?? merged[0]?.id ?? '' : selectedId;
+      setSelectedId(merged.some(row => row.id === nextSelected) ? nextSelected : merged[0]?.id ?? '');
+    } catch (reason) {
+      if (sequence.current !== current) return;
+      setMessage(reason instanceof Error ? reason.message : 'No se pudo cargar el historial del turno.');
+      setError(true);
+      setShifts([]);
+      setSelectedId('');
+    } finally {
+      if (sequence.current === current) setLoading(false);
+    }
+  }
+
+  useEffect(() => { if (registerId) void reloadRegister(registerId); }, [registerId, apiRequest]);
+
+  const shift = shifts.find(item => item.id === selectedId);
+  const current = shifts.find(item => item.status === 'open');
+  useEffect(() => {
+    if (!shift) { setSummary(null); setSummaryLoaded(false); return; }
+    let active = true;
+    setSummary(null);
+    setSummaryLoaded(false);
+    void getShiftSummary(apiRequest, shift.id).then(value => { if (active) { setSummary(value); setSummaryLoaded(true); } }).catch(reason => {
+      if (active) { setSummary(null); setSummaryLoaded(true); setMessage(reason instanceof Error ? reason.message : 'No se pudo cargar el resumen del turno.'); setError(true); }
+    });
+    return () => { active = false; };
+  }, [apiRequest, shift?.id]);
+
+  async function startOpening() {
+    if (!registerId || openIntent.current) return;
+    setMessage('');
+    setError(false);
+    try {
+      const captured = await getShiftSnapshot(apiRequest, registerId);
+      openIntent.current = { registerId, snapshotId: captured.snapshot_id };
+      setInventorySnapshot(captured);
+      setOpenModalOpen(true);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : 'No se pudo capturar el inventario inicial.');
+      setError(true);
+    }
+  }
+
+  async function confirmOpening(data: { openingCashMinor: number; cashDenominations?: { valueMinor: number; quantity: number }[]; counts?: { productId: string; quantity: number; reason?: string }[] }) {
+    const intent = openIntent.current;
+    const snapshot = inventorySnapshot;
+    if (!intent || !snapshot || intent.registerId !== registerId) return;
+    const payload = {
+      cash_register_id: intent.registerId,
+      inventory_snapshot_id: intent.snapshotId,
+      ...(data.cashDenominations ? { denomination_counts: data.cashDenominations.map(row => ({ denomination_minor: row.valueMinor, quantity: row.quantity })) } : { opening_cash_minor: data.openingCashMinor }),
+      inventory_observations: (data.counts ?? []).map(row => ({ product_id: row.productId, physical_quantity: row.quantity, ...(row.reason ? { reason: row.reason } : {}) })),
+    };
+    setMessage('');
+    setError(false);
+    try {
+      const opened = await openApiShift(apiRequest, payload);
+      setOpenModalOpen(false);
+      setInventorySnapshot(null);
+      openIntent.current = null;
+      await reloadRegister(registerId, false);
+      setSelectedId(opened.id);
+      setMessage('Turno abierto exitosamente.');
+      setError(false);
+    } catch (reason) {
+      // A timeout or conflict may have committed this exact snapshot. Reconcile before retrying it.
+      try {
+        const first = await getShiftHistory(apiRequest, intent.registerId, 0, 100);
+        const candidates = [...first.items];
+        for (let offset = first.items.length; offset < first.total; offset += first.limit) {
+          candidates.push(...(await getShiftHistory(apiRequest, intent.registerId, offset, first.limit)).items);
+        }
+        const matched = candidates.find(item => item.cash_register_id === intent.registerId
+          && item.opened_by === actorId && item.inventory_review?.snapshot_id === intent.snapshotId);
+        if (matched) {
+          setOpenModalOpen(false);
+          setInventorySnapshot(null);
+          openIntent.current = null;
+          await reloadRegister(registerId, false);
+          setSelectedId(matched.id);
+          setMessage('Turno abierto exitosamente.');
+          setError(false);
+          return;
+        }
+      } catch { /* Preserve the original opening intent and captured snapshot for a safe retry. */ }
+      setMessage(reason instanceof Error ? reason.message : 'No se pudo confirmar la apertura. El mismo conteo permanece disponible para reconciliar o reintentar.');
+      setError(true);
+    }
+  }
+
+  if (loading && registers.length === 0) return <><PageHeader eyebrow="TURNO" title="Turno de trabajo" description="Resumen operativo del turno seleccionado." /><Panel><p role="status">Cargando cajas autorizadas…</p></Panel></>;
+  if (registers.length === 0) return <><PageHeader eyebrow="TURNO" title="Turno de trabajo" description="Resumen operativo del turno seleccionado." /><Panel>{message ? <p role="alert">{message}</p> : <p>No hay cajas activas autorizadas para esta sesión.</p>}</Panel></>;
+  const dashboardRows: ShiftActivityViewRow[] | null = summary?.payments.map(item => ({
+    id: item.id, family: 'Sin clasificar', description: item.description, method: item.method,
+    status: item.status === 'confirmed' ? 'confirmed' : 'pending', amountMinor: item.amount_minor, recordedAt: item.recorded_at,
+  })) ?? null;
+  const viewShift = shift ? {
+    id: shift.id,
+    status: shift.status === 'open' ? 'open' as const : 'closed' as const,
+    openedAt: shift.opened_at,
+    window: windowFor(shift.opened_at),
+    closedAt: shift.closed_at ?? undefined,
+    expectedCashAtCloseMinor: shift.expected_cash_at_close_minor,
+    countedCashMinor: shift.counted_cash_minor,
+    cashDifferenceMinor: shift.difference_minor,
+    closingNotes: shift.closing_notes,
+    cashDenominations: shift.closing_denomination_counts.length ? shift.closing_denomination_counts.map(row => ({ valueMinor: row.denomination_minor, quantity: row.quantity })) : undefined,
+  } : null;
+  const dashboardViewData = {
+    confirmedMinor: summary?.confirmed_minor,
+    operationCount: summary?.activities.reduce((total, item) => total + item.count, 0) ?? 'Sin registrar',
+    pendingTransferMinor: summary?.pending_transfer_minor,
+    expenseMinor: undefined,
+    expenseCount: 'Sin registrar',
+    expenseDescription: 'Movimientos no disponibles en esta integración',
+    expectedCashMinor: summary?.expected_cash_minor,
+    dataLoaded: summaryLoaded,
+    paymentMethods: summary?.payment_methods.map(item => ({ method: item.method, count: item.count, amountMinor: item.amount_minor })) ?? [],
+    activities: summary?.activities.map(item => ({ family: item.family, count: item.count, amountMinor: item.amount_minor })) ?? [],
+    rows: dashboardRows ?? [],
+    inventoryRows: shift?.inventory_review ? shift.inventory_review.observations.map(item => ({
+      id: item.product_id,
+      movement: 'Conteo físico' as const,
+      product: item.name,
+      quantity: `${item.physical_quantity} ${item.unit} · esperado al abrir: ${item.initialized && item.expected_quantity !== null ? `${item.expected_quantity} ${item.unit}` : 'Sin registrar'}${item.reason ? ` · Motivo: ${item.reason}` : ''}`,
+      recordedAt: shift.opened_at,
+    })) : null,
+  };
+  const shiftName = viewShift ? (viewShift.window.startsWith('06:00') ? 'Matutino' : 'Vespertino') : '';
+  return <ShiftDashboardView role={role} shift={viewShift} isCurrentOpenShift={current?.id === shift?.id && current?.status === 'open'} hasClosedCurrentShift={false} canOpen={Boolean(registerId)}
+    emptyMessage={!current && shifts.length === 0 && !loading ? 'No hay turnos registrados para esta caja.' : undefined}
+    contextControls={registers.length > 1 && <div className="field"><label htmlFor="shift-register-selection">Caja</label><select id="shift-register-selection" value={registerId} onChange={event => { setRegisterId(event.target.value); setShifts([]); setSelectedId(''); }}><option value="">Selecciona una caja</option>{registers.map(item => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></div>}
+    shiftOptions={role === 'OWNER' && shifts.length > 0 && <div className="field"><label htmlFor="shift-selection">Turno a consultar</label><select id="shift-selection" value={selectedId} onChange={event => setSelectedId(event.target.value)}>{shifts.map(item => <option key={item.id} value={item.id}>{item.id} · {windowFor(item.opened_at)} · {item.status === 'open' ? 'Abierto' : 'Cerrado'}</option>)}</select></div>}
+    dashboard={dashboardViewData} message={!loading ? message : ''} error={error} onOpen={() => void startOpening()} onClose={() => setCloseModalOpen(true)}
+    closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor }} apiRequest={apiRequest} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
+    openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={data => { void confirmOpening(data); }} /> : null} />;
 }

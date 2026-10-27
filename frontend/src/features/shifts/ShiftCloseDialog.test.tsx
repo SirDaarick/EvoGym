@@ -1,4 +1,5 @@
 import { createElement, useEffect, useState } from 'react';
+import type { ComponentType } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +44,52 @@ function RecoveryHarness() {
 }
 
 describe('ShiftCloseDialog', () => {
+  it('submits manual total and notes through the API without a DemoProvider', async () => {
+    const apiRequest = vi.fn(async (_path: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'closed' }), { status: 200 }));
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(ShiftCloseDialog as ComponentType<any>, { isOpen: true, shiftId: 'shift-1', shiftName: 'Matutino', expectedCashMinor: 1000, apiRequest, onClose: vi.fn(), onSuccess }));
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await user.selectOptions(await screen.findByLabelText('Forma de conteo'), 'manual');
+    await user.type(await screen.findByLabelText('Efectivo contado (MXN)'), '0');
+    await user.type(await screen.findByLabelText('Observaciones del cierre'), 'conteo manual');
+    await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
+    expect(apiRequest).toHaveBeenCalledWith('/api/v1/shifts/shift-1/close', expect.objectContaining({ method: 'POST', body: JSON.stringify({ counted_cash_minor: 0, closing_notes: 'conteo manual' }) }));
+    expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
+  it('submits denomination counts from the shared amount-per-denomination control', async () => {
+    const apiRequest = vi.fn(async (_path: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'closed' }), { status: 200 }));
+    const user = userEvent.setup();
+    render(createElement(ShiftCloseDialog as ComponentType<any>, { isOpen: true, shiftId: 'shift-1', shiftName: 'Matutino', expectedCashMinor: 150000, apiRequest, onClose: vi.fn(), onSuccess: vi.fn() }));
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await user.click(await screen.findByRole('radio', { name: /Por importe en dinero/ }));
+    await user.type(await screen.findByLabelText('Billete $500.00 · importe ($)'), '1500');
+    await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
+    const body = JSON.parse(String(apiRequest.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({ denomination_counts: expect.arrayContaining([{ denomination_minor: 50000, quantity: 3 }]) });
+    expect(body).not.toHaveProperty('counted_cash_minor');
+  });
+
+  it('keeps an API close open and retryable after a server error', async () => {
+    const apiRequest = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'invalid close' }), { status: 422 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'shift-1', status: 'open', counted_cash_minor: null, closing_notes: null, closing_denomination_counts: [] }), { status: 200 }));
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(ShiftCloseDialog as ComponentType<any>, { isOpen: true, shiftId: 'shift-1', shiftName: 'Matutino', expectedCashMinor: 0, apiRequest, onClose: vi.fn(), onSuccess }));
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await user.selectOptions(await screen.findByLabelText('Forma de conteo'), 'manual');
+    await user.type(await screen.findByLabelText('Efectivo contado (MXN)'), '10');
+    await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/solicitud falló|revisa los datos/i);
+    expect(screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' })).toHaveAttribute('open');
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it('opens a native dialog with denomination-first counting and focused controls', async () => {
     renderDialog();
     const dialog = await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });

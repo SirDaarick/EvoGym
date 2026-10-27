@@ -4,6 +4,7 @@ import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { useAdminSession } from '../features/auth/AdminSessionProvider';
 import { ApiMembers, ApiMemberDetail } from './ApiMembers';
 import { ApiStaffAttendance } from './ApiStaffAttendance';
+import { Shifts } from '../features/shifts/Shifts';
 import { OwnerManagementPage } from '../features/auth/OwnerManagementPage';
 import { ApiStaffManagement } from '../features/owner/StaffManagement';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
@@ -111,6 +112,8 @@ export function ApiProductApp() {
     content = <ApiMemberDetail role={role} request={apiRequest} isAdmin={isAdmin} />;
   } else if (pathname === '/reception/staff' && principal.kind === 'employee') {
     content = <ApiStaffAttendance />;
+  } else if ((pathname === '/owner/shifts' || pathname === '/reception/shifts') && (isAdmin || principal.kind === 'employee')) {
+    content = <Shifts role={role} apiRequest={apiRequest} actorId={principal.identity.id} actorName={principal.identity.display_name} />;
   } else if (pathname === '/owner/staff' && !canManageEmployees) {
     content = <UnavailablePage title="Personal" />;
   }
@@ -120,7 +123,7 @@ export function ApiProductApp() {
     brandTo={homePath(role)}
     caption={principal.identity.display_name}
     headerContent={<span className="muted">Sesión verificada por la API</span>}
-    headerActionsBeforeTheme={<Button variant="secondary" disabled title="La operación de turnos todavía no está conectada a la API.">Turno no disponible</Button>}
+    headerActionsBeforeTheme={<Button variant="secondary" onClick={() => navigate(rolePath(role, 'shifts'))}>Turno</Button>}
     headerActionsAfterTheme={isPhoneEmployee ? <>
       <Button variant="secondary" disabled={access.loading} onClick={() => void unlinkDevice()}>Desvincular este dispositivo</Button>
       {access.error && <span role="alert">{access.error}</span>}

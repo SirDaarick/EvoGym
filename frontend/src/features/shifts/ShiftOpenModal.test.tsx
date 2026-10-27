@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ShiftOpenModal, type ShiftOpenConfirmData } from './ShiftOpenModal';
@@ -23,6 +23,33 @@ afterEach(() => {
 
 describe('ShiftOpenModal Stepper', () => {
   const dummyState = createRichDemoState();
+
+  it('keeps an unknown live inventory baseline unknown until staff counts it', () => {
+    render(<ShiftOpenModal isOpen liveInventory={{ products: [{ id: 'api-product', name: 'API Producto', expectedQuantity: null, initialized: false }], window: '06:00–14:00', openerName: 'Ana' }} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /2\. Inventario Inicial/ }));
+    expect(screen.getByText('Sin registrar')).toBeInTheDocument();
+      expect(screen.getByLabelText('Stock físico de API Producto')).toHaveDisplayValue('');
+    expect(screen.getByText('No se conoce el stock esperado')).toBeInTheDocument();
+  });
+
+  it('requires an explicitly selected reason for both opening shortages and surpluses', async () => {
+    const onConfirm = vi.fn();
+    render(<ShiftOpenModal isOpen liveInventory={{ products: [
+      { id: 'short', name: 'Shortage', expectedQuantity: 5, initialized: true },
+      { id: 'surplus', name: 'Surplus', expectedQuantity: 5, initialized: true },
+    ], window: '06:00–14:00', openerName: 'Ana' }} onClose={vi.fn()} onConfirm={onConfirm} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    fireEvent.change(screen.getByLabelText('Stock físico de Shortage'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Stock físico de Surplus'), { target: { value: '6' } });
+    await userEvent.selectOptions(screen.getByLabelText('Motivo de diferencia para Shortage'), 'Merma detectada al abrir');
+    await userEvent.selectOptions(screen.getByLabelText('Motivo de diferencia para Surplus'), 'Producto dañado / roto');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ counts: [
+      { productId: 'short', quantity: 4, reason: 'Merma detectada al abrir' },
+      { productId: 'surplus', quantity: 6, reason: 'Producto dañado / roto' },
+    ] }));
+  });
 
   it('renders Step 1 with denominations breakdown, calculates subtotal in real time', async () => {
     const handleClose = vi.fn();
@@ -175,12 +202,13 @@ describe('ShiftOpenModal Stepper', () => {
   });
 
   it('allows counting by money amount with switch toggle', async () => {
+    const onConfirm = vi.fn();
     render(
       <ShiftOpenModal
         isOpen
         state={dummyState}
         onClose={vi.fn()}
-        onConfirm={vi.fn()}
+        onConfirm={onConfirm}
       />
     );
 
@@ -197,5 +225,12 @@ describe('ShiftOpenModal Stepper', () => {
     // Subtotal reflects $1,500.00 MXN (3 bills of $500)
     expect(screen.getByText('$1,500.00 MXN')).toBeInTheDocument();
     expect(screen.getByText('3 billetes')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      openingCashMinor: 150000,
+      cashDenominations: expect.arrayContaining([{ valueMinor: 50000, quantity: 3 }]),
+    }));
   });
 });

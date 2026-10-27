@@ -24,12 +24,21 @@ export interface ShiftOpenConfirmData {
   counts?: {
     productId: string;
     quantity: number;
+    reason?: string;
   }[];
 }
 
 interface ShiftOpenModalProps {
   isOpen: boolean;
-  state: DemoState;
+  state?: DemoState;
+  liveInventory?: {
+    products: { id: string; name: string; category?: string | null; expectedQuantity: number | null; initialized: boolean }[];
+    window: ShiftWindow;
+    openerName: string;
+    registers?: { id: string; name: string }[];
+    registerId?: string;
+    onRegisterChange?: (registerId: string) => void;
+  };
   onClose: () => void;
   onConfirm: (data: ShiftOpenConfirmData) => void;
 }
@@ -44,17 +53,23 @@ const PRESET_WASTE_REASONS = [
   'Otro motivo',
 ];
 
-export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenModalProps) {
+export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfirm }: ShiftOpenModalProps) {
+  const products = state?.products ?? liveInventory?.products ?? [];
+  const expectedQuantity = (productId: string) => {
+    if (state) return expectedStock(state, productId);
+    return liveInventory?.products.find(item => item.id === productId)?.expectedQuantity ?? null;
+  };
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // General configuration
   const defaultWindow: ShiftWindow = new Date().getHours() < 14 ? '06:00–14:00' : '14:00–22:00';
-  const [windowChoice, setWindowChoice] = useState<ShiftWindow>(defaultWindow);
+  const [windowChoice, setWindowChoice] = useState<ShiftWindow>(liveInventory?.window ?? defaultWindow);
   
   const staffList = useMemo(() => getStaffList().filter(s => s.active), []);
   const initialStaff = getSelectedStaff();
   const [staffId, setStaffId] = useState<string>(() => {
+    if (liveInventory) return '__authenticated_opener__';
     if (initialStaff && staffList.some(s => s.id === initialStaff.id)) return initialStaff.id;
     return staffList[0]?.id ?? '';
   });
@@ -69,7 +84,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
 
   // Step 2: Inventory verification
   const [inventorySearch, setInventorySearch] = useState('');
-  const [physicalCounts, setPhysicalCounts] = useState<Record<string, number>>({});
+  const [physicalCounts, setPhysicalCounts] = useState<Record<string, number | undefined>>({});
   const [wasteReasons, setWasteReasons] = useState<Record<string, string>>({});
   const [customReasons, setCustomReasons] = useState<Record<string, string>>({});
 
@@ -77,7 +92,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
   useEffect(() => {
     if (!isOpen) return;
     setStep(1);
-    setWindowChoice(new Date().getHours() < 14 ? '06:00–14:00' : '14:00–22:00');
+    setWindowChoice(liveInventory?.window ?? (new Date().getHours() < 14 ? '06:00–14:00' : '14:00–22:00'));
     setMode('denominations');
     setEntryMode('units');
     setQuantities({});
@@ -89,9 +104,10 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
     // Initialize physical counts to match expected stock
     const initialCounts: Record<string, number> = {};
     const initialReasons: Record<string, string> = {};
-    for (const prod of state.products) {
-      initialCounts[prod.id] = expectedStock(state, prod.id);
-      initialReasons[prod.id] = PRESET_WASTE_REASONS[0];
+    for (const prod of products) {
+      const expected = expectedQuantity(prod.id);
+      if (expected !== null) initialCounts[prod.id] = expected;
+      initialReasons[prod.id] = liveInventory ? '' : PRESET_WASTE_REASONS[0];
     }
     setPhysicalCounts(initialCounts);
     setWasteReasons(initialReasons);
@@ -110,7 +126,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
     const dialog = dialogRef.current;
     if (!isOpen || !dialog || dialog.open) return;
     dialog.showModal();
-  }, [isOpen]);
+  }, [isOpen, liveInventory, products]);
 
   if (!isOpen) return null;
 
@@ -131,6 +147,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
   const calculatedOpeningCashMinor = mode === 'denominations' ? denominationTotalMinor : parsedManualMinor;
 
   const responsibleStaff = staffList.find(s => s.id === staffId);
+  const responsibleName = liveInventory?.openerName ?? responsibleStaff?.name ?? 'No asignado';
   const shiftLabel = windowChoice.startsWith('06:00') ? 'Matutino (06:00 – 14:00)' : 'Vespertino (14:00 – 22:00)';
 
   function increment(valueMinor: number) {
@@ -199,14 +216,26 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
     const adjustments: ShiftOpenConfirmData['stockAdjustments'] = [];
     const countRecords: ShiftOpenConfirmData['counts'] = [];
 
-    for (const product of state.products) {
-      const exp = expectedStock(state, product.id);
-      const physical = physicalCounts[product.id] ?? exp;
-      countRecords.push({ productId: product.id, quantity: physical });
+    for (const product of products) {
+      const exp = expectedQuantity(product.id);
+      const physical = physicalCounts[product.id];
+      if (physical === undefined) {
+        setStep1Error(`Registra el conteo físico de ${product.name} antes de iniciar el turno.`);
+        setStep(2);
+        return;
+      }
+      const diff = exp === null ? null : physical - exp;
+      const selectedReason = wasteReasons[product.id] || '';
+      const reasonText = selectedReason === 'Otro motivo' ? (customReasons[product.id] || '').trim() : selectedReason;
+      if (liveInventory && diff !== null && diff !== 0 && !reasonText) {
+        setStep1Error(`Indica el motivo de la diferencia de ${product.name}.`);
+        setStep(2);
+        return;
+      }
+      countRecords.push({ productId: product.id, quantity: physical, ...(diff && reasonText ? { reason: reasonText } : {}) });
 
-      if (physical < exp) {
+      if (!liveInventory && exp !== null && diff !== null && diff < 0) {
         const diff = exp - physical;
-        const selectedReason = wasteReasons[product.id] || PRESET_WASTE_REASONS[0];
         const reasonText = selectedReason === 'Otro motivo' ? (customReasons[product.id] || 'Merma detectada al abrir') : selectedReason;
         adjustments.push({
           productId: product.id,
@@ -214,7 +243,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
           quantity: diff,
           reason: reasonText,
         });
-      } else if (physical > exp) {
+      } else if (!liveInventory && exp !== null && diff !== null && diff > 0) {
         const diff = physical - exp;
         adjustments.push({
           productId: product.id,
@@ -239,27 +268,28 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
   }
 
   // Filter products for Step 2
-  const filteredProducts = state.products.filter(p => {
+  const filteredProducts = products.filter(p => {
     const term = inventorySearch.trim().toLowerCase();
     return !term || p.name.toLowerCase().includes(term) || (p.category ?? '').toLowerCase().includes(term);
   });
 
   // Calculate detected adjustments summary for Step 2 and 3
-  const adjustmentsList = state.products
+  const adjustmentsList = products
     .map(p => {
-      const exp = expectedStock(state, p.id);
-      const counted = physicalCounts[p.id] ?? exp;
-      const diff = counted - exp;
+      const exp = expectedQuantity(p.id);
+      const counted = physicalCounts[p.id];
+      const diff = exp === null || counted === undefined ? null : counted - exp;
       const selectedReason = wasteReasons[p.id] || PRESET_WASTE_REASONS[0];
       const reasonText = selectedReason === 'Otro motivo' ? (customReasons[p.id] || 'Merma detectada al abrir') : selectedReason;
       return { product: p, expected: exp, counted, diff, reason: reasonText };
     })
-    .filter(item => item.diff !== 0);
+    .filter(item => item.diff !== null && item.diff !== 0);
 
   function confirmAllInventoryMatches() {
     const matching: Record<string, number> = {};
-    for (const prod of state.products) {
-      matching[prod.id] = expectedStock(state, prod.id);
+    for (const prod of products) {
+      const expected = expectedQuantity(prod.id);
+      if (expected !== null) matching[prod.id] = expected;
     }
     setPhysicalCounts(matching);
   }
@@ -324,9 +354,10 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                   <select
                     id="shift-open-staff"
                     value={staffId}
+                    disabled={Boolean(liveInventory)}
                     onChange={e => setStaffId(e.target.value)}
                   >
-                    {staffList.map(st => (
+                    {liveInventory ? <option value="__authenticated_opener__">{liveInventory.openerName}</option> : staffList.map(st => (
                       <option key={st.id} value={st.id}>
                         {st.name} ({st.role === 'OWNER' ? 'Admin / Propietario' : 'Recepción'})
                       </option>
@@ -338,12 +369,19 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                   <select
                     id="shift-open-window"
                     value={windowChoice}
+                    disabled={Boolean(liveInventory)}
                     onChange={e => setWindowChoice(e.target.value as ShiftWindow)}
                   >
                     <option value="06:00–14:00">Matutino (06:00 – 14:00)</option>
                     <option value="14:00–22:00">Vespertino (14:00 – 22:00)</option>
                   </select>
                 </div>
+                {liveInventory && (liveInventory.registers?.length ?? 0) > 1 && <div className="shift-open-field">
+                  <label htmlFor="shift-open-register">Caja</label>
+                  <select id="shift-open-register" value={liveInventory.registerId ?? ''} onChange={event => liveInventory.onRegisterChange?.(event.target.value)}>
+                    {liveInventory.registers?.map(register => <option key={register.id} value={register.id}>{register.name}</option>)}
+                  </select>
+                </div>}
               </div>
 
               <div className="shift-open-cash-banner clay-card" role="status" aria-live="polite">
@@ -539,6 +577,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
           {/* STEP 2: Verificación / Ajuste de Inventario Inicial */}
           {step === 2 && (
             <div>
+              {step1Error && <div role="alert"><Notice tone="error">{step1Error}</Notice></div>}
               <div className="shift-open-inventory-toolbar">
                 <div className="shift-open-inventory-search">
                   <input
@@ -567,10 +606,11 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                   </thead>
                   <tbody>
                     {filteredProducts.map(prod => {
-                      const exp = expectedStock(state, prod.id);
-                      const currentVal = physicalCounts[prod.id] ?? exp;
-                      const diff = currentVal - exp;
-                      const reasonVal = wasteReasons[prod.id] || PRESET_WASTE_REASONS[0];
+                      const exp = expectedQuantity(prod.id);
+                      const currentVal = physicalCounts[prod.id] ?? exp ?? '';
+                      const counted = physicalCounts[prod.id];
+                      const diff = exp === null || counted === undefined ? null : counted - exp;
+                      const reasonVal = liveInventory ? (wasteReasons[prod.id] ?? '') : (wasteReasons[prod.id] || PRESET_WASTE_REASONS[0]);
 
                       return (
                         <tr key={prod.id}>
@@ -579,7 +619,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                             <div className="shift-inventory-item-cat">{prod.category ?? 'General'}</div>
                           </td>
                           <td>
-                            <strong>{exp}</strong> uds
+                            {exp === null ? 'Sin registrar' : <><strong>{exp}</strong> uds</>}
                           </td>
                           <td>
                             <input
@@ -592,7 +632,8 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                               onChange={e => {
                                 const raw = e.target.value.trim();
                                 if (raw === '') {
-                                  setPhysicalCounts(prev => ({ ...prev, [prod.id]: 0 }));
+                                  if (liveInventory) setPhysicalCounts(prev => { const next = { ...prev }; delete next[prod.id]; return next; });
+                                  else setPhysicalCounts(prev => ({ ...prev, [prod.id]: 0 }));
                                   return;
                                 }
                                 const val = parseInt(raw, 10);
@@ -603,21 +644,23 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                             />
                           </td>
                           <td>
+                            {diff === null && <Badge tone="neutral">Sin base registrada</Badge>}
                             {diff === 0 && <Badge tone="success">Conforme</Badge>}
-                            {diff < 0 && <Badge tone="warning">Merma ({diff})</Badge>}
-                            {diff > 0 && <Badge tone="neutral">Sobrante (+{diff})</Badge>}
+                            {diff !== null && diff < 0 && <Badge tone="warning">Merma ({diff})</Badge>}
+                            {diff !== null && diff > 0 && <Badge tone="neutral">Sobrante (+{diff})</Badge>}
                           </td>
                           <td>
-                            {diff < 0 ? (
+                            {diff !== null && diff !== 0 ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <select
                                   className="shift-inventory-reason-select"
-                                  aria-label={`Motivo de merma para ${prod.name}`}
+                                  aria-label={`${liveInventory ? 'Motivo de diferencia' : 'Motivo de merma'} para ${prod.name}`}
                                   value={reasonVal}
                                   onChange={e => {
                                     setWasteReasons(prev => ({ ...prev, [prod.id]: e.target.value }));
                                   }}
                                 >
+                                  {liveInventory && <option value="">Selecciona un motivo</option>}
                                   {PRESET_WASTE_REASONS.map(r => (
                                     <option key={r} value={r}>{r}</option>
                                   ))}
@@ -632,10 +675,12 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                                   />
                                 )}
                               </div>
-                            ) : diff > 0 ? (
+                            ) : diff !== null && diff > 0 ? (
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>Sobrante no registrado</span>
-                            ) : (
+                            ) : diff === 0 ? (
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>Sin ajuste</span>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>No se conoce el stock esperado</span>
                             )}
                           </td>
                         </tr>
@@ -648,7 +693,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
               <div style={{ marginTop: '1rem' }}>
                 {adjustmentsList.length === 0 ? (
                   <Notice tone="success">
-                    Todo el inventario coincide con las existencias esperadas en sistema ({state.products.length} productos verificados).
+                    Todo el inventario coincide con las existencias esperadas en sistema ({products.length} productos verificados).
                   </Notice>
                 ) : (
                   <Notice tone="warning">
@@ -665,9 +710,9 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
               <div className="shift-open-summary-grid">
                 <div className="shift-open-summary-card">
                   <h4>Recepcionista Responsable</h4>
-                  <div className="shift-open-summary-val">{responsibleStaff?.name ?? 'No asignado'}</div>
+                  <div className="shift-open-summary-val">{responsibleName}</div>
                   <p className="shift-open-summary-detail">
-                    {responsibleStaff?.role === 'OWNER' ? 'Administrador / Propietario' : 'Recepción de turno'}
+                    {liveInventory ? 'Apertura autenticada por esta persona' : responsibleStaff?.role === 'OWNER' ? 'Administrador / Propietario' : 'Recepción de turno'}
                   </p>
                 </div>
 
@@ -698,7 +743,7 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                   </div>
                   <p className="shift-open-summary-detail">
                     {adjustmentsList.length === 0
-                      ? `${state.products.length} productos verificados sin discrepancias.`
+                      ? `${products.length} productos verificados sin discrepancias.`
                       : 'Mermas y diferencias identificadas al abrir.'}
                   </p>
                 </div>
@@ -716,8 +761,8 @@ export function ShiftOpenModal({ isOpen, state, onClose, onConfirm }: ShiftOpenM
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <Badge tone={item.diff < 0 ? 'warning' : 'neutral'}>
-                              {item.diff < 0 ? `Merma ${item.diff} uds` : `+${item.diff} uds`}
+                            <Badge tone={item.diff !== null && item.diff < 0 ? 'warning' : 'neutral'}>
+                              {item.diff !== null && item.diff < 0 ? `Merma ${item.diff} uds` : `+${item.diff} uds`}
                             </Badge>
                             <div style={{ fontSize: '0.78rem', marginTop: '2px' }}>
                               Motivo: &quot;{item.reason}&quot;

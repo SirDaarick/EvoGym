@@ -74,6 +74,89 @@ describe('API product routes', () => {
     expect(screen.getByText('Sin coincidencias')).toBeInTheDocument();
   });
 
+  it('loads shift registers and current/history through the mounted authenticated API route', async () => {
+    const register = { id: 'register-1', branch_id: 'branch-1', code: 'front', name: 'Recepción', status: 'active', has_open_shift: false };
+    admin.request.mockImplementation(async path => {
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
+      if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: [], total: 0, offset: 0, limit: 100 }));
+      if (path.startsWith('/api/v1/shifts/current?')) return new Response('{}', { status: 404 });
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
+
+    expect(await screen.findByText('No hay turnos registrados para esta caja.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turno' })).toBeEnabled();
+    expect(admin.request).toHaveBeenCalledWith('/api/v1/registers', undefined);
+    expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined);
+    expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts/current?register_id=register-1', undefined);
+    expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
+  });
+
+  it('renders opening inventory baselines from the shift snapshot without implying current stock', async () => {
+    const register = { id: 'register-1', branch_id: 'branch-1', code: 'front', name: 'Recepción', status: 'active', has_open_shift: true };
+    const shift = {
+      id: 'shift-1', cash_register_id: register.id, opened_by: 'admin-1', opened_at: '2026-10-26T14:00:00Z', closed_at: null,
+      status: 'open', opening_cash_minor: 50000, denomination_counts: [], closing_denomination_counts: [],
+      inventory_review: { snapshot_id: 'snapshot-1', observations: [
+        { product_id: 'product-1', code: 'T-1', name: 'Toalla', unit: 'piezas', physical_quantity: 4, reason: 'Diferencia verificada', expected_quantity: 5, initialized: true },
+        { product_id: 'product-2', code: 'W-1', name: 'Agua', unit: 'botellas', physical_quantity: 2, reason: null, expected_quantity: null, initialized: false },
+      ] },
+      expected_cash_at_close_minor: null, current_expected_cash_minor: 50000, counted_cash_minor: null, difference_minor: null, closing_notes: null,
+    };
+    admin.request.mockImplementation(async path => {
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
+      if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: [shift], total: 1, offset: 0, limit: 100 }));
+      if (path.startsWith('/api/v1/shifts/current?')) return new Response(JSON.stringify(shift));
+      if (path.endsWith('/summary')) return new Response(JSON.stringify({
+        shift_id: shift.id, confirmed_minor: 0, confirmed_cash_minor: 0, pending_transfer_minor: 0,
+        payment_methods: [], activities: [], payments: [], expected_cash_minor: 50000,
+      }));
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
+
+    expect(await screen.findByText(/4 piezas · esperado al abrir: 5 piezas · Motivo: Diferencia verificada/)).toBeInTheDocument();
+    expect(screen.getByText(/2 botellas · esperado al abrir: Sin registrar/)).toBeInTheDocument();
+    expect(screen.queryByText(/stock actual/i)).not.toBeInTheDocument();
+  });
+
+  it('opens from the authenticated route with an explicit zero manual total and the captured snapshot', async () => {
+    const register = { id: 'register-1', branch_id: 'branch-1', code: 'front', name: 'Recepción', status: 'active', has_open_shift: false };
+    let opened = false;
+    const shift = {
+      id: 'shift-1', cash_register_id: register.id, opened_by: 'admin-1', opened_at: '2026-10-26T14:00:00Z', closed_at: null,
+      status: 'open', opening_cash_minor: 0, denomination_counts: [], closing_denomination_counts: [], inventory_review: null,
+      expected_cash_at_close_minor: null, current_expected_cash_minor: 0, counted_cash_minor: null, difference_minor: null, closing_notes: null,
+    };
+    admin.request.mockImplementation(async (path, init) => {
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
+      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ snapshot_id: 'snapshot-1', source_state: 'initialized', items: [{ product_id: 'product-1', name: 'Toalla', unit: 'piezas', initialized: true, expected_quantity: 2 }] }));
+      if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: opened ? [shift] : [], total: opened ? 1 : 0, offset: 0, limit: 100 }));
+      if (path.startsWith('/api/v1/shifts/current?')) return opened ? new Response(JSON.stringify(shift)) : new Response('{}', { status: 404 });
+      if (path === '/api/v1/shifts/open' && init?.method === 'POST') { opened = true; return new Response(JSON.stringify(shift), { status: 201 }); }
+      if (path.endsWith('/summary')) return new Response(JSON.stringify({ shift_id: shift.id, confirmed_minor: 0, confirmed_cash_minor: 0, pending_transfer_minor: 0, payment_methods: [], activities: [], payments: [], expected_cash_minor: 0 }));
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
+    await userEvent.click(await screen.findByRole('button', { name: 'Abrir Turno' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Forma de conteo'), 'manual');
+    await userEvent.type(screen.getByLabelText('Fondo inicial (MXN)'), '0');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' }));
+
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts/open', expect.objectContaining({ method: 'POST' })));
+    const request = admin.request.mock.calls.find(([path]) => path === '/api/v1/shifts/open');
+    const payload = JSON.parse(String(request?.[1]?.body));
+    expect(payload).toMatchObject({ cash_register_id: register.id, inventory_snapshot_id: 'snapshot-1', opening_cash_minor: 0,
+      inventory_observations: [{ product_id: 'product-1', physical_quantity: 2 }] });
+    expect(payload).not.toHaveProperty('denomination_counts');
+    expect(await screen.findByText('Turno abierto exitosamente.')).toBeInTheDocument();
+  });
+
   it('does not substitute demo rows when the API member response is empty', async () => {
     admin.request.mockResolvedValueOnce(new Response(JSON.stringify({ items: [], total: 0, page: 1, limit: 100, pages: 0 })));
     render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
