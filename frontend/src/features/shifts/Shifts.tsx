@@ -357,7 +357,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     setError(false);
     try {
       const captured = await getShiftSnapshot(apiRequest, registerId);
-      openIntent.current = { registerId, snapshotId: captured.snapshot_id };
+      openIntent.current = { registerId, snapshotId: captured.id };
       setInventorySnapshot(captured);
       setOpenModalOpen(true);
     } catch (reason) {

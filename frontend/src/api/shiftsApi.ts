@@ -10,7 +10,7 @@ export interface CashRegisterDTO {
 }
 
 export interface InventorySnapshotDTO {
-  snapshot_id: string;
+  id: string;
   source_state: string;
   items: { product_id: string; name: string; unit: string; initialized: boolean; expected_quantity: number | null }[];
 }

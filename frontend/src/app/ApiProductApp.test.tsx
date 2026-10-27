@@ -132,7 +132,7 @@ describe('API product routes', () => {
     };
     admin.request.mockImplementation(async (path, init) => {
       if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
-      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ snapshot_id: 'snapshot-1', source_state: 'initialized', items: [{ product_id: 'product-1', name: 'Toalla', unit: 'piezas', initialized: true, expected_quantity: 2 }] }));
+      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ id: 'snapshot-1', source_state: 'initialized', items: [{ product_id: 'product-1', name: 'Toalla', unit: 'piezas', initialized: true, expected_quantity: 2 }] }));
       if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: opened ? [shift] : [], total: opened ? 1 : 0, offset: 0, limit: 100 }));
       if (path.startsWith('/api/v1/shifts/current?')) return opened ? new Response(JSON.stringify(shift)) : new Response('{}', { status: 404 });
       if (path === '/api/v1/shifts/open' && init?.method === 'POST') { opened = true; return new Response(JSON.stringify(shift), { status: 201 }); }
@@ -163,7 +163,7 @@ describe('API product routes', () => {
     const pendingOpen = new Promise<Response>(resolve => { resolveOpen = resolve; });
     admin.request.mockImplementation(async (path, init) => {
       if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
-      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ snapshot_id: 'snapshot-1', source_state: 'initialized', items: [
+      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ id: 'snapshot-1', source_state: 'initialized', items: [
         { product_id: 'protein', name: 'Protein', unit: 'pieces', initialized: true, expected_quantity: 5 },
         { product_id: 'water', name: 'Water', unit: 'bottles', initialized: true, expected_quantity: 10 },
       ] }));

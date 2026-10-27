@@ -7,7 +7,7 @@ describe('authenticated shifts API', () => {
   it('uses only the supplied authenticated request for register, snapshot, current and history reads', async () => {
     const request = vi.fn<ApiRequest>(async path => {
       if (path === '/api/v1/registers') return response([{ id: 'register-1' }]);
-      if (path.includes('/inventory-snapshot')) return response({ snapshot_id: 'snapshot-1' });
+      if (path.includes('/inventory-snapshot')) return response({ id: 'snapshot-1' });
       if (path.includes('/api/v1/shifts/current')) return response({ id: 'shift-1' });
       return response({ items: [{ id: 'shift-1' }], total: 1, offset: 0, limit: 50 });
     });
