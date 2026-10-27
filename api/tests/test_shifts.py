@@ -120,6 +120,42 @@ def test_open_shift_accepts_manual_total_without_denomination_breakdown():
     assert payload.denomination_counts is None
 
 
+def test_shift_datetime_dto_json_marks_sqlite_naive_values_as_utc_and_preserves_strings():
+    from datetime import datetime, timedelta, timezone
+
+    from app.shifts.schemas import ShiftDTO, ShiftInventoryReviewDTO, ShiftSummaryPaymentDTO
+
+    naive = datetime(2026, 10, 27, 5, 40, 55, 420980)
+    shift = ShiftDTO(
+        id=str(uuid4()), cash_register_id=str(uuid4()), opened_by=str(uuid4()),
+        opened_at=naive, closed_at=None, status="open", opening_cash_minor=0,
+    )
+    payment = ShiftSummaryPaymentDTO(
+        id=str(uuid4()), description="Membership", method="cash", status="confirmed",
+        amount_minor=100, recorded_at=naive,
+    )
+    review = ShiftInventoryReviewDTO(
+        snapshot_id=uuid4(), confirmed_by=uuid4(), confirmed_at=naive,
+        mode="no_changes_declared", source_state="empty_catalog", item_count=0, missing_count=0,
+    )
+    assert shift.model_dump(mode="json")["opened_at"] == "2026-10-27T05:40:55.420980+00:00"
+    assert shift.model_dump(mode="json")["closed_at"] is None
+    assert payment.model_dump(mode="json")["recorded_at"] == "2026-10-27T05:40:55.420980+00:00"
+    assert review.model_dump(mode="json")["confirmed_at"] == "2026-10-27T05:40:55.420980+00:00"
+
+    legacy = ShiftDTO(
+        id=str(uuid4()), cash_register_id=str(uuid4()), opened_by=str(uuid4()),
+        opened_at="legacy-unparsed-value", closed_at=None, status="open", opening_cash_minor=0,
+    )
+    aware = ShiftDTO(
+        id=str(uuid4()), cash_register_id=str(uuid4()), opened_by=str(uuid4()),
+        opened_at=naive.replace(tzinfo=timezone(timedelta(hours=3))), closed_at=None,
+        status="open", opening_cash_minor=0,
+    )
+    assert legacy.model_dump(mode="json")["opened_at"] == "legacy-unparsed-value"
+    assert aware.model_dump(mode="json")["opened_at"] == "2026-10-27T05:40:55.420980+03:00"
+
+
 @pytest.mark.parametrize("invalid_total", [None, True, 1.5, -1, 2**63])
 def test_open_shift_requires_valid_explicit_total_without_denomination_breakdown(invalid_total):
     request = {
@@ -310,6 +346,53 @@ def test_open_shift_read_exposes_live_expected_cash_without_freezing_close_total
                 other_register_id = other_register.id
             denied = client.get(f"/api/v1/shifts?register_id={other_register_id}", headers=headers)
             assert denied.status_code == 403
+    finally:
+        engine.dispose()
+
+
+def test_shift_http_datetime_roundtrip_keeps_utc_instant_after_sqlite_reload(tmp_path):
+    from zoneinfo import ZoneInfo
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "utc-roundtrip", "UTC Roundtrip")
+        staff_id, token = _seed_receptionist(factory, branch_id, "utc-roundtrip@example.invalid")
+        opened_at = datetime(2026, 10, 27, 5, 40, 55, 420980, tzinfo=timezone.utc)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "utc", "UTC Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 1}])
+            shift.opened_at = opened_at
+            shift.inventory_review.confirmed_at = opened_at
+            shift_id, register_id = shift.id, register.id
+
+        # SQLite stores the instant as a naive datetime; the API contract restores UTC.
+        with factory() as session:
+            persisted = session.get(Shift, shift_id)
+            assert persisted.opened_at.tzinfo is None
+            assert persisted.inventory_review.confirmed_at.tzinfo is None
+
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        expected = "2026-10-27T05:40:55.420980+00:00"
+        with TestClient(app) as client:
+            current = client.get(f"/api/v1/shifts/current?register_id={register_id}", headers=headers)
+            detail = client.get(f"/api/v1/shifts/{shift_id}", headers=headers)
+            history = client.get(f"/api/v1/shifts?register_id={register_id}", headers=headers)
+            for response in (current, detail, history):
+                assert response.status_code == 200, response.text
+            assert current.json()["opened_at"] == detail.json()["opened_at"] == expected
+            assert history.json()["items"][0]["opened_at"] == expected
+            assert current.json()["closed_at"] is None
+            assert current.json()["inventory_review"]["confirmed_at"] == expected
+            local_opened = datetime.fromisoformat(current.json()["opened_at"]).astimezone(ZoneInfo("America/Mexico_City"))
+            assert local_opened.strftime("%Y-%m-%d %H:%M") == "2026-10-26 23:40"
+
+            closed = client.post(f"/api/v1/shifts/{shift_id}/close",
+                                 json={"counted_cash_minor": 100}, headers=headers)
+            assert closed.status_code == 201, closed.text
+            assert closed.json()["opened_at"] == expected
+            assert closed.json()["closed_at"].endswith("+00:00")
     finally:
         engine.dispose()
 

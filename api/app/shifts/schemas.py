@@ -1,9 +1,17 @@
 """DTOs and schemas for payment terminals, cash registers, and shifts."""
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_serializer, field_validator, model_validator
 
 MAX_MINOR_UNITS = 2**63 - 1
+
+
+def _serialize_datetime(value: datetime | str | None) -> str | None:
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
 
 
 class PaymentTerminalDTO(BaseModel):
@@ -100,6 +108,10 @@ class ShiftDTO(BaseModel):
     counted_cash_minor: int | None = None
     difference_minor: int | None = None
     closing_notes: str | None = None
+
+    @field_serializer("opened_at", "closed_at")
+    def _serialize_timestamps(self, value: datetime | str | None) -> str | None:
+        return _serialize_datetime(value)
 
     @field_validator("id", "cash_register_id", "opened_by", mode="before")
     @classmethod
@@ -218,6 +230,10 @@ class ShiftSummaryPaymentDTO(BaseModel):
     amount_minor: int
     recorded_at: datetime | str
 
+    @field_serializer("recorded_at")
+    def _serialize_recorded_at(self, value: datetime | str) -> str:
+        return _serialize_datetime(value)
+
     @field_validator("id", mode="before")
     @classmethod
     def _coerce_id(cls, value: object) -> str:
@@ -274,6 +290,10 @@ class ShiftInventoryReviewDTO(BaseModel):
     item_count: int
     missing_count: int
     observations: list[ShiftInventoryObservationDTO] = Field(default_factory=list)
+
+    @field_serializer("confirmed_at")
+    def _serialize_confirmed_at(self, value: datetime) -> str:
+        return _serialize_datetime(value)
 
 
 ShiftDTO.model_rebuild()
