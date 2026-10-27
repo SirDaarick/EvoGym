@@ -297,5 +297,6 @@ class ShiftInventoryObservation(Base):
     review_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("shift_inventory_reviews.id", ondelete="CASCADE"), nullable=False)
     snapshot_item_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("register_inventory_snapshot_items.id", ondelete="RESTRICT"), nullable=False)
     physical_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     review: Mapped[ShiftInventoryReview] = relationship("ShiftInventoryReview", back_populates="observations")
     snapshot_item: Mapped["RegisterInventorySnapshotItem"] = relationship("RegisterInventorySnapshotItem", lazy="joined")

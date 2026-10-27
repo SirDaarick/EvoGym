@@ -229,15 +229,29 @@ def open_shift(
             raise ValueError("Inventory observations must be mappings.")
         product_id = item.get("product_id")
         quantity = item.get("physical_quantity")
+        reason = item.get("reason")
         if not isinstance(product_id, UUID) or product_id not in snapshot_items:
             raise ValueError("Inventory observation product is not present in the snapshot.")
         if product_id in seen_products:
             raise ValueError("Inventory observations cannot contain duplicate products.")
         if type(quantity) is not int or not 0 <= quantity <= maximum:
             raise ValueError("Physical quantities must be nonnegative signed 64-bit integers.")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("Inventory observation reason must be text.")
+        reason = reason.strip() if reason is not None else None
+        if reason is not None and len(reason) > 500:
+            raise ValueError("Inventory observation reason cannot exceed 500 characters.")
+        snapshot_item = snapshot_items[product_id]
+        if (
+            snapshot_item.initialized
+            and snapshot_item.expected_quantity is not None
+            and quantity != snapshot_item.expected_quantity
+            and not reason
+        ):
+            raise ValueError("A reason is required when physical inventory differs from the known baseline.")
         seen_products.add(product_id)
         persisted_observations.append(ShiftInventoryObservation(
-            snapshot_item=snapshot_items[product_id], physical_quantity=quantity
+            snapshot_item=snapshot_item, physical_quantity=quantity, reason=reason
         ))
 
     # 3. Create shift and flush to trigger DB constraints
@@ -445,6 +459,7 @@ def to_shift_dto(shift: Shift) -> ShiftDTO:
                     "name": observation.snapshot_item.name,
                     "unit": observation.snapshot_item.unit,
                     "physical_quantity": observation.physical_quantity,
+                    "reason": observation.reason,
                 }
                 for observation in review.observations
             ],

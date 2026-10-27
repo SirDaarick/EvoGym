@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from alembic import command
 from alembic.config import Config
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -20,9 +22,43 @@ API_DIR = Path(__file__).resolve().parents[1]
 def test_migration_graph_has_one_head_with_distinct_admin_and_staff_revision_ids():
     scripts = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
 
-    assert scripts.get_heads() == ["0038_staff_occurrence_attendance"]
+    assert scripts.get_heads() == ["0039_shift_inv_obs_reason"]
     assert scripts.get_revision("0031_admin_session_policy").revision == "0031_admin_session_policy"
     assert scripts.get_revision("0038_staff_occurrence_attendance").revision == "0038_staff_occurrence_attendance"
+    assert scripts.get_revision("0039_shift_inv_obs_reason").down_revision == "0038_staff_occurrence_attendance"
+
+
+def test_inventory_observation_reason_migration_preserves_historical_rows(tmp_path):
+    migration_path = API_DIR / "migrations" / "versions" / "0039_shift_inventory_observation_reason.py"
+    spec = importlib.util.spec_from_file_location("shift_inventory_observation_reason", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_engine(f"sqlite+pysqlite:///{(tmp_path / 'inventory-reason.db').as_posix()}")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "create table shift_inventory_observations "
+                "(id text primary key, review_id text, snapshot_item_id text, physical_quantity integer)"
+            ))
+            connection.execute(text(
+                "insert into shift_inventory_observations "
+                "(id, review_id, snapshot_item_id, physical_quantity) values ('legacy', 'review', 'item', 4)"
+            ))
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            assert connection.execute(text(
+                "select physical_quantity, reason from shift_inventory_observations where id='legacy'"
+            )).one() == (4, None)
+            connection.execute(text(
+                "insert into shift_inventory_observations "
+                "(id, review_id, snapshot_item_id, physical_quantity, reason) "
+                "values ('new', 'review', 'item-2', 5, 'Count discrepancy')"
+            ))
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+            assert "reason" not in {column["name"] for column in inspect(connection).get_columns("shift_inventory_observations")}
+    finally:
+        engine.dispose()
 
 
 def test_staff_schedule_downgrade_refuses_to_drop_attendance_snapshots(tmp_path, monkeypatch):
@@ -358,7 +394,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "member_check_in_visits",
                 "class_sample_entitlements", "class_sample_check_ins",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
             checkin_triggers = {
                 row[0]
                 for row in connection.execute(
@@ -520,7 +556,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
     finally:
         engine.dispose()
 
@@ -609,7 +645,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
     finally:
         engine.dispose()
 
@@ -635,7 +671,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
     finally:
         engine.dispose()
 
@@ -719,7 +755,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -752,7 +788,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -824,7 +860,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -915,7 +951,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -999,7 +1035,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0039_shift_inv_obs_reason"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:

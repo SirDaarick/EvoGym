@@ -184,6 +184,12 @@ class ShiftInventoryObservationInputDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
     product_id: UUID
     physical_quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
+    reason: str | None = Field(None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _normalize_reason(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
 
 class ShiftInventoryObservationDTO(BaseModel):
@@ -193,6 +199,7 @@ class ShiftInventoryObservationDTO(BaseModel):
     name: str
     unit: str
     physical_quantity: int
+    reason: str | None = None
 
 
 class ShiftInventoryReviewDTO(BaseModel):

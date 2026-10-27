@@ -98,6 +98,67 @@ def test_opening_persists_physical_observation_without_rewriting_unknown_expecte
     engine.dispose()
 
 
+def test_known_inventory_difference_requires_and_persists_reason(tmp_path):
+    engine, session, actor, register, product = _opening_session(tmp_path)
+    session.add(StockInitialization(
+        branch_id=register.branch_id, product_id=product.id, quantity=10, initialized_by=actor.id
+    ))
+    session.flush()
+    snapshot = capture_register_inventory_snapshot(session, register_id=register.id, actor_id=actor.id)
+    session.commit()
+    opening = {
+        "product_id": product.id,
+        "physical_quantity": 7,
+    }
+
+    for reason in (None, "  \t "):
+        observation = {**opening}
+        if reason is not None:
+            observation["reason"] = reason
+        with pytest.raises(ValueError, match="reason"):
+            open_shift(
+                session, register_id=register.id, opened_by=actor.id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+                inventory_snapshot_id=snapshot.id,
+                inventory_observations=[observation],
+            )
+        session.rollback()
+
+    shift = open_shift(
+        session, register_id=register.id, opened_by=actor.id,
+        denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+        inventory_snapshot_id=snapshot.id,
+        inventory_observations=[{**opening, "reason": "Damaged during prior shift"}],
+    )
+    session.commit()
+    reloaded = to_shift_dto(get_shift_by_id(session, shift.id))
+
+    assert reloaded.inventory_review.observations[0].reason == "Damaged during prior shift"
+    assert session.scalar(select(StockInitialization).where(StockInitialization.product_id == product.id)).quantity == 10
+    session.close()
+    engine.dispose()
+
+
+def test_equal_known_inventory_count_does_not_require_reason(tmp_path):
+    engine, session, actor, register, product = _opening_session(tmp_path)
+    session.add(StockInitialization(
+        branch_id=register.branch_id, product_id=product.id, quantity=10, initialized_by=actor.id
+    ))
+    session.flush()
+    snapshot = capture_register_inventory_snapshot(session, register_id=register.id, actor_id=actor.id)
+    shift = open_shift(
+        session, register_id=register.id, opened_by=actor.id,
+        denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+        inventory_snapshot_id=snapshot.id,
+        inventory_observations=[{"product_id": product.id, "physical_quantity": 10}],
+    )
+
+    assert to_shift_dto(shift).inventory_review.observations[0].reason is None
+    session.rollback()
+    session.close()
+    engine.dispose()
+
+
 def test_stale_snapshot_cannot_open_shift(tmp_path):
     engine, session, actor, register, product = _opening_session(tmp_path)
     snapshot = capture_register_inventory_snapshot(session, register_id=register.id, actor_id=actor.id)
@@ -196,6 +257,20 @@ def test_review_observations_reject_invalid_values_duplicates_and_unknown_produc
                 **common,
                 "inventory_observations": [{"product_id": str(product.id), "physical_quantity": bad_quantity}],
             })
+    normalized = OpenShiftDTO.model_validate({
+        **common,
+        "inventory_observations": [{
+            "product_id": str(product.id), "physical_quantity": 1, "reason": "  Count discrepancy  "
+        }],
+    })
+    assert normalized.inventory_observations[0].reason == "Count discrepancy"
+    with pytest.raises(ValidationError):
+        OpenShiftDTO.model_validate({
+            **common,
+            "inventory_observations": [{
+                "product_id": str(product.id), "physical_quantity": 1, "reason": "x" * 501
+            }],
+        })
     with pytest.raises(ValidationError, match="duplicate"):
         OpenShiftDTO.model_validate({
             **common,
