@@ -437,19 +437,22 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         .order_by(MembershipDebtPayment.created_at.desc(), MembershipDebtPayment.id.desc())
     ).scalars().all()
 
+    order_descriptions: dict[UUID, str] = {}
+    if payment_rows:
+        for order_id, description in session.execute(
+            select(OrderItem.order_id, OrderItem.description_snapshot)
+            .where(OrderItem.order_id.in_({order.id for _, order in payment_rows}))
+            .order_by(OrderItem.order_id, OrderItem.line_number)
+        ):
+            order_descriptions.setdefault(order_id, description)
+
     payments: list[dict[str, object]] = []
     confirmed_minor = 0
     cash_minor = 0
     pending_transfer_minor = 0
     methods: dict[str, dict[str, int | str]] = {}
     for payment, order in payment_rows:
-        item = session.scalar(
-            select(OrderItem.description_snapshot)
-            .where(OrderItem.order_id == order.id)
-            .order_by(OrderItem.line_number)
-            .limit(1)
-        )
-        description = item or "Membresía"
+        description = order_descriptions.get(order.id) or "Membresía"
         payments.append({"id": payment.id, "description": description, "method": payment.method,
                          "status": payment.status, "amount_minor": payment.amount_minor,
                          "recorded_at": payment.received_at})
@@ -568,6 +571,8 @@ def to_shift_dto(shift: Shift, session: Session | None = None) -> ShiftDTO:
                     "unit": observation.snapshot_item.unit,
                     "physical_quantity": observation.physical_quantity,
                     "reason": observation.reason,
+                    "expected_quantity": observation.snapshot_item.expected_quantity,
+                    "initialized": observation.snapshot_item.initialized,
                 }
                 for observation in review.observations
             ],

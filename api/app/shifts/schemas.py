@@ -260,6 +260,8 @@ class ShiftInventoryObservationDTO(BaseModel):
     unit: str
     physical_quantity: int
     reason: str | None = None
+    expected_quantity: int | None = None
+    initialized: bool | None = None
 
 
 class ShiftInventoryReviewDTO(BaseModel):

@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -20,12 +20,14 @@ from app.db.models import (
     Plan,
     PlanVersion,
     PaymentTerminal,
+    Product,
     RoleGrant,
     Shift,
     ShiftClosingDenominationCount,
     ShiftDenominationCount,
     StaffCredential,
     StaffUser,
+    StockInitialization,
 )
 from app.inventory.queries import capture_register_inventory_snapshot
 from app.main import create_app
@@ -312,6 +314,49 @@ def test_open_shift_read_exposes_live_expected_cash_without_freezing_close_total
         engine.dispose()
 
 
+def test_shift_read_returns_immutable_inventory_baseline_metadata(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "inventory-read", "Inventory Read")
+        staff_id, token = _seed_receptionist(factory, branch_id, "inventory-read@example.invalid")
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "inventory-read", "Inventory Read Register")
+            register_id = register.id
+            known = Product(code="known-item", name="Known item", created_by=staff_id)
+            unknown = Product(code="unknown-item", name="Unknown item", created_by=staff_id)
+            session.add_all([known, unknown])
+            session.flush()
+            session.add(StockInitialization(
+                branch_id=branch_id, product_id=known.id, quantity=5, initialized_by=staff_id
+            ))
+            session.flush()
+            snapshot = capture_register_inventory_snapshot(session, register_id=register.id, actor_id=staff_id)
+            snapshot_id = snapshot.id
+            observations = [
+                {"product_id": str(known.id), "physical_quantity": 5},
+                {"product_id": str(unknown.id), "physical_quantity": 2},
+            ]
+
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            opened = client.post("/api/v1/shifts/open", headers={"Authorization": f"Bearer {token}"}, json={
+                "cash_register_id": str(register_id), "inventory_snapshot_id": str(snapshot_id),
+                "denomination_counts": [{"denomination_minor": 100, "quantity": 0}],
+                "inventory_observations": observations,
+            })
+            assert opened.status_code == 201, opened.text
+            shift_id = opened.json()["id"]
+            reloaded = client.get(f"/api/v1/shifts/{shift_id}", headers={"Authorization": f"Bearer {token}"})
+            assert reloaded.status_code == 200, reloaded.text
+            rows = {item["code"]: item for item in reloaded.json()["inventory_review"]["observations"]}
+            assert (rows["known-item"]["physical_quantity"], rows["known-item"]["expected_quantity"],
+                    rows["known-item"]["initialized"]) == (5, 5, True)
+            assert (rows["unknown-item"]["physical_quantity"], rows["unknown-item"]["expected_quantity"],
+                    rows["unknown-item"]["initialized"]) == (2, None, False)
+    finally:
+        engine.dispose()
+
+
 def test_shift_summary_uses_supported_financial_read_model_and_branch_protection(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -380,8 +425,15 @@ def test_shift_summary_matches_cash_sale_debt_receipt_and_pending_transfer(tmp_p
                                   json={"order_id": order_id, "amount_minor": 2500})
             assert receipt.status_code == 201, receipt.text
 
+            order_item_reads = []
+            def count_order_item_reads(_connection, _cursor, statement, _parameters, _context, _executemany):
+                if "SELECT order_items.order_id, order_items.description_snapshot" in statement:
+                    order_item_reads.append(statement)
+            event.listen(app.state.database_engine, "before_cursor_execute", count_order_item_reads)
             summary = client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers)
+            event.remove(app.state.database_engine, "before_cursor_execute", count_order_item_reads)
             assert summary.status_code == 200, summary.text
+            assert len(order_item_reads) == 1
             body = summary.json()
             assert body["confirmed_minor"] == 6500
             assert body["confirmed_cash_minor"] == 6500

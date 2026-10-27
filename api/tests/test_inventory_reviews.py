@@ -93,6 +93,9 @@ def test_opening_persists_physical_observation_without_rewriting_unknown_expecte
     assert review.observations[0].physical_quantity == 6
     assert review.observations[0].snapshot_item.expected_quantity is None
     assert review.observations[0].snapshot_item.initialized is False
+    observation = to_shift_dto(shift).inventory_review.observations[0]
+    assert observation.expected_quantity is None
+    assert observation.initialized is False
     session.rollback()
     session.close()
     engine.dispose()
@@ -134,6 +137,8 @@ def test_known_inventory_difference_requires_and_persists_reason(tmp_path):
     reloaded = to_shift_dto(get_shift_by_id(session, shift.id))
 
     assert reloaded.inventory_review.observations[0].reason == "Damaged during prior shift"
+    assert reloaded.inventory_review.observations[0].expected_quantity == 10
+    assert reloaded.inventory_review.observations[0].initialized is True
     assert session.scalar(select(StockInitialization).where(StockInitialization.product_id == product.id)).quantity == 10
     session.close()
     engine.dispose()
