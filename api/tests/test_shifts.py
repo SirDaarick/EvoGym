@@ -16,6 +16,9 @@ from app.db.base import Base
 from app.db.models import (
     Branch,
     CashRegister,
+    Member,
+    Plan,
+    PlanVersion,
     PaymentTerminal,
     RoleGrant,
     Shift,
@@ -305,6 +308,88 @@ def test_open_shift_read_exposes_live_expected_cash_without_freezing_close_total
                 other_register_id = other_register.id
             denied = client.get(f"/api/v1/shifts?register_id={other_register_id}", headers=headers)
             assert denied.status_code == 403
+    finally:
+        engine.dispose()
+
+
+def test_shift_summary_uses_supported_financial_read_model_and_branch_protection(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "summary-route", "Summary Route")
+        _staff_id, token = _seed_receptionist(factory, branch_id, "summary-route@example.invalid")
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "summary-route", "Summary Register")
+            shift = open_shift(session, register_id=register.id, opened_by=_staff_id,
+                                denomination_counts=[{"denomination_minor": 1000, "quantity": 2}])
+            shift_id = shift.id
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            response = client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json() == {
+                "shift_id": str(shift_id), "confirmed_minor": 0, "confirmed_cash_minor": 0,
+                "pending_transfer_minor": 0, "payment_methods": [], "activities": [], "payments": [],
+                "expected_cash_minor": 2000,
+            }
+            other_branch = _seed_branch(factory, "summary-other", "Other Branch")
+            with factory.begin() as session:
+                other_register = create_cash_register(session, other_branch, "summary-other", "Other Register")
+                other_shift = open_shift(session, register_id=other_register.id, opened_by=_staff_id,
+                                          denomination_counts=[{"denomination_minor": 100, "quantity": 1}])
+                other_shift_id = other_shift.id
+            denied = client.get(f"/api/v1/shifts/{other_shift_id}/summary", headers=headers)
+            assert denied.status_code == 403
+    finally:
+        engine.dispose()
+
+
+def test_shift_summary_matches_cash_sale_debt_receipt_and_pending_transfer(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "summary-activity", "Summary Activity")
+        staff_id, token = _seed_receptionist(factory, branch_id, "summary-activity@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-SHIFT-SUMMARY", full_name="Summary Member", phone="5550190")
+            plan = Plan(code="shift-summary-plan", name="Summary Plan", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Summary Plan", price_minor=10000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            register = create_cash_register(session, branch_id, "summary-activity", "Summary Activity Register")
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 1000, "quantity": 2}])
+            register_id, member_id, version_id, shift_id = register.id, member.id, version.id, shift.id
+
+        app = create_app(configured_settings(url))
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            sale = client.post(f"/api/v1/registers/{register_id}/membership-sales",
+                               headers={**headers, "Idempotency-Key": "summary-cash-sale"},
+                               json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 4000})
+            assert sale.status_code == 201, sale.text
+            order_id = sale.json()["order"]["id"]
+            transfer = client.post(f"/api/v1/registers/{register_id}/membership-transfer-sales",
+                                   headers={**headers, "Idempotency-Key": "summary-transfer"},
+                                   json={"member_id": str(member_id), "plan_version_id": str(version_id)})
+            assert transfer.status_code == 201, transfer.text
+            receipt = client.post(f"/api/v1/registers/{register_id}/membership-debt-payments",
+                                  headers={**headers, "Idempotency-Key": "summary-debt-receipt"},
+                                  json={"order_id": order_id, "amount_minor": 2500})
+            assert receipt.status_code == 201, receipt.text
+
+            summary = client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers)
+            assert summary.status_code == 200, summary.text
+            body = summary.json()
+            assert body["confirmed_minor"] == 6500
+            assert body["confirmed_cash_minor"] == 6500
+            assert body["pending_transfer_minor"] == 10000
+            assert body["expected_cash_minor"] == 8500
+            assert body["payment_methods"] == [{"method": "cash", "count": 2, "amount_minor": 6500}]
+            assert len(body["payments"]) == 3
+            assert {item["status"] for item in body["payments"]} == {"confirmed", "under_review"}
     finally:
         engine.dispose()
 

@@ -33,6 +33,7 @@ from app.shifts.queries import (
     list_cash_registers,
     list_payment_terminals,
     open_shift,
+    shift_financial_summary,
     to_cash_register_dto,
     to_payment_terminal_dto,
     to_shift_dto,
@@ -46,6 +47,7 @@ from app.shifts.schemas import (
     PaymentTerminalDTO,
     ShiftDTO,
     ShiftPageDTO,
+    ShiftSummaryDTO,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["shifts"])
@@ -396,6 +398,29 @@ def get_shift_endpoint(
             raise HTTPException(403, "Access restricted to staff branch.")
 
         return to_shift_dto(shift, session=session)
+
+
+@router.get("/shifts/{shift_id}/summary", response_model=ShiftSummaryDTO)
+def get_shift_summary_endpoint(
+    shift_id: UUID,
+    request: Request,
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> ShiftSummaryDTO:
+    """Read the supported canonical payment summary for a shift."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    with factory() as session:
+        shift = get_shift_by_id(session, shift_id)
+        if shift is None:
+            raise HTTPException(404, "Shift not found.")
+        if not principal.is_admin and shift.cash_register.branch_id != principal.branch_id:
+            raise HTTPException(403, "Access restricted to staff branch.")
+        if shift.status == "open":
+            summary = shift_financial_summary(session, shift)
+        else:
+            summary = shift_financial_summary(session, shift)
+        return ShiftSummaryDTO.model_validate(summary)
 
 
 @router.get("/shifts", response_model=ShiftPageDTO)

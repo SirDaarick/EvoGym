@@ -3,11 +3,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.db.models.orders import Order, Payment
+from app.db.models.orders import Order, OrderItem, Payment
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.shifts import (
     CashRegister,
@@ -418,6 +418,69 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
     if shift.opening_cash_minor > maximum - inflow:
         raise ValueError("Expected closing cash exceeds signed 64-bit minor units.")
     return shift.opening_cash_minor + inflow
+
+
+def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]:
+    """Return only canonical order and membership-debt payment activity for a shift."""
+    payment_rows = session.execute(
+        select(Payment, Order)
+        .join(Order, Order.id == Payment.order_id)
+        .where(or_(
+            Order.financial_shift_id == shift.id,
+            and_(Order.shift_id == shift.id, Payment.method == "transfer"),
+        ))
+        .order_by(Payment.received_at.desc(), Payment.id.desc())
+    ).all()
+    debt_rows = session.execute(
+        select(MembershipDebtPayment)
+        .where(MembershipDebtPayment.shift_id == shift.id)
+        .order_by(MembershipDebtPayment.created_at.desc(), MembershipDebtPayment.id.desc())
+    ).scalars().all()
+
+    payments: list[dict[str, object]] = []
+    confirmed_minor = 0
+    cash_minor = 0
+    pending_transfer_minor = 0
+    methods: dict[str, dict[str, int | str]] = {}
+    for payment, order in payment_rows:
+        item = session.scalar(
+            select(OrderItem.description_snapshot)
+            .where(OrderItem.order_id == order.id)
+            .order_by(OrderItem.line_number)
+            .limit(1)
+        )
+        description = item or "Membresía"
+        payments.append({"id": payment.id, "description": description, "method": payment.method,
+                         "status": payment.status, "amount_minor": payment.amount_minor,
+                         "recorded_at": payment.received_at})
+        if payment.status == "confirmed":
+            confirmed_minor += payment.amount_minor
+            bucket = methods.setdefault(payment.method, {"method": payment.method, "count": 0, "amount_minor": 0})
+            bucket["count"] = int(bucket["count"]) + 1
+            bucket["amount_minor"] = int(bucket["amount_minor"]) + payment.amount_minor
+            if payment.method == "cash":
+                cash_minor += payment.amount_minor
+        elif payment.method == "transfer":
+            pending_transfer_minor += payment.amount_minor
+
+    for debt in debt_rows:
+        payments.append({"id": debt.id, "description": "Abono de membresía", "method": "cash",
+                         "status": "confirmed", "amount_minor": debt.amount_minor,
+                         "recorded_at": debt.created_at})
+        confirmed_minor += debt.amount_minor
+        cash_minor += debt.amount_minor
+        bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["amount_minor"] = int(bucket["amount_minor"]) + debt.amount_minor
+
+    payments.sort(key=lambda row: (row["recorded_at"], str(row["id"])), reverse=True)
+    activities = ([{"family": "membership", "count": sum(int(method["count"]) for method in methods.values()),
+                    "amount_minor": confirmed_minor}] if confirmed_minor else [])
+    return {"shift_id": shift.id, "confirmed_minor": confirmed_minor, "confirmed_cash_minor": cash_minor,
+            "pending_transfer_minor": pending_transfer_minor,
+            "payment_methods": sorted(methods.values(), key=lambda item: str(item["method"])),
+            "activities": activities, "payments": payments,
+            "expected_cash_minor": expected_cash_for_shift(session, shift)}
 
 
 def get_shift_by_id(

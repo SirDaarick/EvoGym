@@ -210,6 +210,36 @@ class ShiftPageDTO(BaseModel):
     limit: int
 
 
+class ShiftSummaryPaymentDTO(BaseModel):
+    id: str
+    description: str
+    method: str
+    status: str
+    amount_minor: int
+    recorded_at: datetime | str
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, value: object) -> str:
+        return str(value)
+
+
+class ShiftSummaryDTO(BaseModel):
+    shift_id: str
+    confirmed_minor: int
+    confirmed_cash_minor: int
+    pending_transfer_minor: int
+    payment_methods: list[dict[str, int | str]]
+    activities: list[dict[str, int | str]]
+    payments: list[ShiftSummaryPaymentDTO]
+    expected_cash_minor: int
+
+    @field_validator("shift_id", mode="before")
+    @classmethod
+    def _coerce_shift_id(cls, value: object) -> str:
+        return str(value)
+
+
 class ShiftInventoryObservationInputDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
     product_id: UUID
