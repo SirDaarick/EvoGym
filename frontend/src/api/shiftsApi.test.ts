@@ -28,6 +28,8 @@ describe('authenticated shifts API', () => {
     await openShift(request, { cash_register_id: 'register-1', inventory_snapshot_id: 'snapshot-1', opening_cash_minor: 80000, inventory_observations: [] });
     await closeShift(request, 'shift-1', { counted_cash_minor: 80000, closing_notes: 'Revisado' });
 
+    expect(request.mock.calls[0][1]?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(request.mock.calls[1][1]?.headers).toEqual({ 'Content-Type': 'application/json' });
     expect(JSON.parse(String(request.mock.calls[0][1]?.body))).not.toHaveProperty('denomination_counts');
     expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ counted_cash_minor: 80000, closing_notes: 'Revisado' });
   });

@@ -89,7 +89,7 @@ export function openShift(request: ApiRequest, payload: {
   denomination_counts?: { denomination_minor: number; quantity: number }[];
   inventory_observations: { product_id: string; physical_quantity: number; reason?: string }[];
 }): Promise<ShiftDTO> {
-  return requestJson(request, '/api/v1/shifts/open', { method: 'POST', body: JSON.stringify(payload) });
+  return requestJson(request, '/api/v1/shifts/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 }
 
 export function closeShift(request: ApiRequest, id: string, payload: {
@@ -97,5 +97,5 @@ export function closeShift(request: ApiRequest, id: string, payload: {
   denomination_counts?: { denomination_minor: number; quantity: number }[];
   closing_notes?: string;
 }): Promise<ShiftDTO> {
-  return requestJson(request, `/api/v1/shifts/${encodeURIComponent(id)}/close`, { method: 'POST', body: JSON.stringify(payload) });
+  return requestJson(request, `/api/v1/shifts/${encodeURIComponent(id)}/close`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 }

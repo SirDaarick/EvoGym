@@ -51,6 +51,36 @@ describe('ShiftOpenModal Stepper', () => {
     ] }));
   });
 
+  it('blocks the inventory summary until every known variance has a human-entered reason', async () => {
+    const onConfirm = vi.fn();
+    render(<ShiftOpenModal isOpen liveInventory={{ products: [
+      { id: 'protein', name: 'Protein', expectedQuantity: 5, initialized: true },
+      { id: 'water', name: 'Water', expectedQuantity: 10, initialized: true },
+    ], window: '06:00–14:00', openerName: 'Ana' }} onClose={vi.fn()} onConfirm={onConfirm} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    fireEvent.change(screen.getByLabelText('Stock físico de Protein'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Stock físico de Water'), { target: { value: '11' } });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    expect(screen.getByText('2. Inventario Inicial')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Indica el motivo de la diferencia de Protein.');
+
+    await userEvent.selectOptions(screen.getByLabelText('Motivo de diferencia para Protein'), 'Otro motivo');
+    await userEvent.selectOptions(screen.getByLabelText('Motivo de diferencia para Water'), 'Otro motivo');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    expect(screen.getByText('2. Inventario Inicial')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Indica el motivo de la diferencia de Protein.');
+
+    await userEvent.type(screen.getAllByPlaceholderText('Especificar motivo...')[0], 'Conteo físico verificado');
+    await userEvent.selectOptions(screen.getByLabelText('Motivo de diferencia para Water'), 'Caducidad');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ counts: [
+      { productId: 'protein', quantity: 4, reason: 'Conteo físico verificado' },
+      { productId: 'water', quantity: 11, reason: 'Caducidad' },
+    ] }));
+  });
+
   it('renders Step 1 with denominations breakdown, calculates subtotal in real time', async () => {
     const handleClose = vi.fn();
     const handleConfirm = vi.fn();

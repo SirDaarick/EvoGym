@@ -40,7 +40,7 @@ interface ShiftOpenModalProps {
     onRegisterChange?: (registerId: string) => void;
   };
   onClose: () => void;
-  onConfirm: (data: ShiftOpenConfirmData) => void;
+  onConfirm: (data: ShiftOpenConfirmData) => void | Promise<void>;
 }
 
 type CountMode = 'denominations' | 'manual';
@@ -60,7 +60,9 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
     return liveInventory?.products.find(item => item.id === productId)?.expectedQuantity ?? null;
   };
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const submittingRef = useRef(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // General configuration
   const defaultWindow: ShiftWindow = new Date().getHours() < 14 ? '06:00–14:00' : '14:00–22:00';
@@ -131,6 +133,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
   if (!isOpen) return null;
 
   function closeDialog() {
+    if (submittingRef.current) return;
     if (dialogRef.current?.open) dialogRef.current.close();
     onClose();
   }
@@ -206,11 +209,25 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
   }
 
   function handleNextToSummary() {
+    if (liveInventory) {
+      const product = products.find(item => {
+        const expected = expectedQuantity(item.id);
+        const physical = physicalCounts[item.id];
+        const selected = wasteReasons[item.id] ?? '';
+        const reason = selected === 'Otro motivo' ? (customReasons[item.id] ?? '').trim() : selected.trim();
+        return expected !== null && physical !== undefined && physical !== expected && !reason;
+      });
+      if (product) {
+        setStep1Error(`Indica el motivo de la diferencia de ${product.name}.`);
+        return;
+      }
+    }
+    setStep1Error('');
     setStep(3);
   }
 
-  function handleConfirmOpening() {
-    if (calculatedOpeningCashMinor === null || calculatedOpeningCashMinor < 0) return;
+  async function handleConfirmOpening() {
+    if (submittingRef.current || calculatedOpeningCashMinor === null || calculatedOpeningCashMinor < 0) return;
 
     // Collect inventory adjustments
     const adjustments: ShiftOpenConfirmData['stockAdjustments'] = [];
@@ -226,7 +243,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
       }
       const diff = exp === null ? null : physical - exp;
       const selectedReason = wasteReasons[product.id] || '';
-      const reasonText = selectedReason === 'Otro motivo' ? (customReasons[product.id] || '').trim() : selectedReason;
+      const reasonText = selectedReason === 'Otro motivo' ? (customReasons[product.id] || '').trim() : selectedReason.trim();
       if (liveInventory && diff !== null && diff !== 0 && !reasonText) {
         setStep1Error(`Indica el motivo de la diferencia de ${product.name}.`);
         setStep(2);
@@ -254,17 +271,27 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
       }
     }
 
-    onConfirm({
-      window: windowChoice,
-      openingCashMinor: calculatedOpeningCashMinor,
-      cashDenominations: mode === 'denominations' ? counts.filter(c => c.quantity > 0) : undefined,
-      responsibleStaffId: responsibleStaff?.id,
-      responsibleStaffName: responsibleStaff?.name,
-      stockAdjustments: adjustments.length ? adjustments : undefined,
-      counts: countRecords,
-    });
-
-    closeDialog();
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await onConfirm({
+        window: windowChoice,
+        openingCashMinor: calculatedOpeningCashMinor,
+        cashDenominations: mode === 'denominations' ? counts.filter(c => c.quantity > 0) : undefined,
+        responsibleStaffId: responsibleStaff?.id,
+        responsibleStaffName: responsibleStaff?.name,
+        stockAdjustments: adjustments.length ? adjustments : undefined,
+        counts: countRecords,
+      });
+      submittingRef.current = false;
+      closeDialog();
+    } catch (reason) {
+      setStep1Error(reason instanceof Error ? reason.message : 'No se pudo registrar la apertura.');
+      setStep(1);
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   }
 
   // Filter products for Step 2
@@ -279,8 +306,8 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
       const exp = expectedQuantity(p.id);
       const counted = physicalCounts[p.id];
       const diff = exp === null || counted === undefined ? null : counted - exp;
-      const selectedReason = wasteReasons[p.id] || PRESET_WASTE_REASONS[0];
-      const reasonText = selectedReason === 'Otro motivo' ? (customReasons[p.id] || 'Merma detectada al abrir') : selectedReason;
+      const selectedReason = wasteReasons[p.id] ?? '';
+      const reasonText = selectedReason === 'Otro motivo' ? (customReasons[p.id] ?? '').trim() : selectedReason.trim();
       return { product: p, expected: exp, counted, diff, reason: reasonText };
     })
     .filter(item => item.diff !== null && item.diff !== 0);
@@ -299,13 +326,13 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
       ref={dialogRef}
       className="shift-open-dialog"
       aria-labelledby="shift-open-title"
-      onCancel={event => { event.preventDefault(); closeDialog(); }}
+      onCancel={event => { event.preventDefault(); if (!submittingRef.current) closeDialog(); }}
       onClick={event => { if (event.target === event.currentTarget) event.preventDefault(); }}
     >
       <div className="shift-open-shell">
         <header className="shift-open-header">
           <h2 id="shift-open-title">Iniciar Nuevo Turno de Trabajo</h2>
-          <button className="shift-open-x" type="button" aria-label="Cerrar diálogo" onClick={closeDialog}>×</button>
+          <button className="shift-open-x" type="button" aria-label="Cerrar diálogo" disabled={isSubmitting} onClick={closeDialog}>×</button>
         </header>
 
         {/* Stepper Navigation */}
@@ -334,9 +361,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
           <button
             type="button"
             className={`shift-step-pill ${step === 3 ? 'is-active' : ''}`}
-            onClick={() => {
-              if (calculatedOpeningCashMinor !== null && calculatedOpeningCashMinor >= 0) setStep(3);
-            }}
+            onClick={handleNextToSummary}
             disabled={calculatedOpeningCashMinor === null || calculatedOpeningCashMinor < 0}
           >
             <span className="shift-step-number">3</span>
@@ -780,7 +805,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
 
         {/* Footer Actions */}
         <footer className="shift-open-footer">
-          <Button variant="secondary" onClick={closeDialog}>
+          <Button variant="secondary" disabled={isSubmitting} onClick={closeDialog}>
             Cancelar
           </Button>
 
@@ -807,7 +832,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
                 <Button variant="secondary" onClick={() => setStep(2)}>
                   ← Modificar
                 </Button>
-                <Button onClick={handleConfirmOpening}>
+                <Button disabled={isSubmitting} onClick={() => void handleConfirmOpening()}>
                   Confirmar e Iniciar Turno
                 </Button>
               </>

@@ -284,7 +284,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const sequence = useRef(0);
-  const openIntent = useRef<{ registerId: string; snapshotId: string } | null>(null);
+  const openIntent = useRef<{ registerId: string; snapshotId: string; shiftId?: string } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -319,16 +319,18 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
       try { activeShift = await getCurrentShift(apiRequest, targetRegister); }
       catch (reason) { if (!isNotFound(reason)) throw reason; }
       const merged = activeShift ? [activeShift, ...all.filter(row => row.id !== activeShift!.id)] : all;
-      if (sequence.current !== current) return;
+      if (sequence.current !== current) return false;
       setShifts(merged);
       const nextSelected = chooseCurrent ? activeShift?.id ?? merged[0]?.id ?? '' : selectedId;
       setSelectedId(merged.some(row => row.id === nextSelected) ? nextSelected : merged[0]?.id ?? '');
+      return true;
     } catch (reason) {
-      if (sequence.current !== current) return;
+      if (sequence.current !== current) return false;
       setMessage(reason instanceof Error ? reason.message : 'No se pudo cargar el historial del turno.');
       setError(true);
       setShifts([]);
       setSelectedId('');
+      return false;
     } finally {
       if (sequence.current === current) setLoading(false);
     }
@@ -366,8 +368,8 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
 
   async function confirmOpening(data: { openingCashMinor: number; cashDenominations?: { valueMinor: number; quantity: number }[]; counts?: { productId: string; quantity: number; reason?: string }[] }) {
     const intent = openIntent.current;
-    const snapshot = inventorySnapshot;
-    if (!intent || !snapshot || intent.registerId !== registerId) return;
+    if (!intent || !inventorySnapshot || intent.registerId !== registerId) throw new Error('La caja o el conteo inicial cambió. Captura nuevamente antes de abrir.');
+    const openingIntent = intent;
     const payload = {
       cash_register_id: intent.registerId,
       inventory_snapshot_id: intent.snapshotId,
@@ -376,38 +378,55 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     };
     setMessage('');
     setError(false);
+    async function findCommittedOpening() {
+      const first = await getShiftHistory(apiRequest, openingIntent.registerId, 0, 100);
+      const candidates = [...first.items];
+      for (let offset = first.items.length; offset < first.total; offset += first.limit) {
+        candidates.push(...(await getShiftHistory(apiRequest, openingIntent.registerId, offset, first.limit)).items);
+      }
+      return candidates.find(item => item.cash_register_id === openingIntent.registerId
+        && item.opened_by === actorId && item.inventory_review?.snapshot_id === openingIntent.snapshotId
+        && (!openingIntent.shiftId || item.id === openingIntent.shiftId));
+    }
     try {
-      const opened = await openApiShift(apiRequest, payload);
+      let opened: ShiftDTO | undefined;
+      if (intent.shiftId) {
+        opened = await findCommittedOpening();
+        if (!opened) throw new Error('La apertura ya fue enviada; no se reenvió. No se pudo reconciliar el mismo conteo.');
+      } else {
+        try {
+          opened = await openApiShift(apiRequest, payload);
+          intent.shiftId = opened.id;
+        } catch (requestError) {
+          opened = await findCommittedOpening();
+          if (!opened) throw requestError;
+          intent.shiftId = opened.id;
+        }
+      }
+      let refreshed = await reloadRegister(intent.registerId, false);
+      if (!refreshed) {
+        const reconciled = await findCommittedOpening();
+        if (!reconciled) throw new Error('La apertura fue enviada, pero no se pudo reconciliar el mismo conteo. Conserva el formulario e intenta actualizar de nuevo.');
+        opened = reconciled;
+        intent.shiftId = reconciled.id;
+        refreshed = await reloadRegister(intent.registerId, false);
+      }
+      if (!refreshed) throw new Error('La apertura fue reconciliada, pero no se pudo actualizar el turno. Conserva el formulario e intenta actualizar de nuevo.');
+      setSelectedId(opened.id);
       setOpenModalOpen(false);
       setInventorySnapshot(null);
       openIntent.current = null;
-      await reloadRegister(registerId, false);
-      setSelectedId(opened.id);
       setMessage('Turno abierto exitosamente.');
       setError(false);
     } catch (reason) {
       // A timeout or conflict may have committed this exact snapshot. Reconcile before retrying it.
-      try {
-        const first = await getShiftHistory(apiRequest, intent.registerId, 0, 100);
-        const candidates = [...first.items];
-        for (let offset = first.items.length; offset < first.total; offset += first.limit) {
-          candidates.push(...(await getShiftHistory(apiRequest, intent.registerId, offset, first.limit)).items);
-        }
-        const matched = candidates.find(item => item.cash_register_id === intent.registerId
-          && item.opened_by === actorId && item.inventory_review?.snapshot_id === intent.snapshotId);
-        if (matched) {
-          setOpenModalOpen(false);
-          setInventorySnapshot(null);
-          openIntent.current = null;
-          await reloadRegister(registerId, false);
-          setSelectedId(matched.id);
-          setMessage('Turno abierto exitosamente.');
-          setError(false);
-          return;
-        }
-      } catch { /* Preserve the original opening intent and captured snapshot for a safe retry. */ }
+      if (!intent.shiftId) {
+        try { intent.shiftId = (await findCommittedOpening())?.id; }
+        catch { /* Preserve the original opening intent and captured snapshot for a safe retry. */ }
+      }
       setMessage(reason instanceof Error ? reason.message : 'No se pudo confirmar la apertura. El mismo conteo permanece disponible para reconciliar o reintentar.');
       setError(true);
+      throw reason instanceof Error ? reason : new Error('No se pudo confirmar la apertura.');
     }
   }
 
@@ -456,5 +475,5 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     shiftOptions={role === 'OWNER' && shifts.length > 0 && <div className="field"><label htmlFor="shift-selection">Turno a consultar</label><select id="shift-selection" value={selectedId} onChange={event => setSelectedId(event.target.value)}>{shifts.map(item => <option key={item.id} value={item.id}>{item.id} · {windowFor(item.opened_at)} · {item.status === 'open' ? 'Abierto' : 'Cerrado'}</option>)}</select></div>}
     dashboard={dashboardViewData} message={!loading ? message : ''} error={error} onOpen={() => void startOpening()} onClose={() => setCloseModalOpen(true)}
     closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor }} apiRequest={apiRequest} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
-    openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={data => { void confirmOpening(data); }} /> : null} />;
+    openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={confirmOpening} /> : null} />;
 }

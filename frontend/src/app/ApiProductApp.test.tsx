@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -155,6 +155,70 @@ describe('API product routes', () => {
       inventory_observations: [{ product_id: 'product-1', physical_quantity: 2 }] });
     expect(payload).not.toHaveProperty('denomination_counts');
     expect(await screen.findByText('Turno abierto exitosamente.')).toBeInTheDocument();
+  });
+
+  it('keeps the API opening draft open and unchanged when the real controller receives a 422', async () => {
+    const register = { id: 'register-1', branch_id: 'branch-1', code: 'front', name: 'Recepción', status: 'active', has_open_shift: false };
+    let resolveOpen!: (response: Response) => void;
+    const pendingOpen = new Promise<Response>(resolve => { resolveOpen = resolve; });
+    admin.request.mockImplementation(async (path, init) => {
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([register]));
+      if (path.endsWith('/inventory-snapshots')) return new Response(JSON.stringify({ snapshot_id: 'snapshot-1', source_state: 'initialized', items: [
+        { product_id: 'protein', name: 'Protein', unit: 'pieces', initialized: true, expected_quantity: 5 },
+        { product_id: 'water', name: 'Water', unit: 'bottles', initialized: true, expected_quantity: 10 },
+      ] }));
+      if (path.startsWith('/api/v1/shifts?')) return new Response(JSON.stringify({ items: [], total: 0, offset: 0, limit: 100 }));
+      if (path.startsWith('/api/v1/shifts/current?')) return new Response('{}', { status: 404 });
+      if (path === '/api/v1/shifts/open' && init?.method === 'POST') return pendingOpen;
+      return new Response('{}');
+    });
+
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: 'Abrir Turno' }));
+    await user.type(await screen.findByLabelText('Billete $100.00 · cantidad'), '3');
+    await user.type(screen.getByLabelText('Billete $50.00 · cantidad'), '4');
+    await user.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    fireEvent.change(screen.getByLabelText('Stock físico de Protein'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Stock físico de Water'), { target: { value: '11' } });
+
+    await user.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    expect(screen.getByText('2. Inventario Inicial')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Indica el motivo de la diferencia de Protein.');
+    await user.selectOptions(screen.getByLabelText('Motivo de diferencia para Protein'), 'Otro motivo');
+    await user.selectOptions(screen.getByLabelText('Motivo de diferencia para Water'), 'Otro motivo');
+    await user.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+    expect(screen.getByText('2. Inventario Inicial')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Indica el motivo de la diferencia de Protein.');
+    await user.type(screen.getAllByPlaceholderText('Especificar motivo...')[0], 'Conteo físico verificado');
+    await user.selectOptions(screen.getByLabelText('Motivo de diferencia para Water'), 'Caducidad');
+    await user.click(screen.getByRole('button', { name: 'Continuar a Resumen →' }));
+
+    const confirm = screen.getByRole('button', { name: 'Confirmar e Iniciar Turno' });
+    await user.click(confirm);
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts/open', expect.objectContaining({ method: 'POST' })));
+    const payload = JSON.parse(String(admin.request.mock.calls.find(([path]) => path === '/api/v1/shifts/open')?.[1]?.body));
+    expect(payload).toMatchObject({ cash_register_id: register.id, inventory_snapshot_id: 'snapshot-1', denomination_counts: [
+      { denomination_minor: 10000, quantity: 3 }, { denomination_minor: 5000, quantity: 4 },
+    ], inventory_observations: [
+      { product_id: 'protein', physical_quantity: 4, reason: 'Conteo físico verificado' },
+      { product_id: 'water', physical_quantity: 11, reason: 'Caducidad' },
+    ] });
+    expect(confirm).toBeDisabled();
+    await user.click(confirm);
+    expect(admin.request.mock.calls.filter(([path]) => path === '/api/v1/shifts/open')).toHaveLength(1);
+
+    resolveOpen(new Response(JSON.stringify({ detail: 'Revisa los datos enviados.' }), { status: 422 }));
+    const dialog = screen.getByRole('dialog', { name: 'Iniciar Nuevo Turno de Trabajo' });
+    expect(await within(dialog).findByText('Revisa los datos enviados e intenta nuevamente.')).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('open');
+    expect(screen.getByLabelText('Billete $100.00 · cantidad')).toHaveValue('3');
+    expect(screen.getByLabelText('Billete $50.00 · cantidad')).toHaveValue('4');
+    await user.click(screen.getByRole('button', { name: 'Continuar a Inventario →' }));
+    expect(screen.getByLabelText('Stock físico de Protein')).toHaveValue(4);
+    expect(screen.getByLabelText('Stock físico de Water')).toHaveValue(11);
+    expect(screen.getAllByPlaceholderText('Especificar motivo...')[0]).toHaveValue('Conteo físico verificado');
+    expect(screen.getByLabelText('Motivo de diferencia para Water')).toHaveValue('Caducidad');
   });
 
   it('does not substitute demo rows when the API member response is empty', async () => {
