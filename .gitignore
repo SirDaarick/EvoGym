@@ -17,3 +17,9 @@ test-results/
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
+
+api/dev.db
+tmp/
+output/
+backend/*.xlsx
+backend/*.ipynb
