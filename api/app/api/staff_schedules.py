@@ -203,6 +203,17 @@ def _zone_for_branch(branch: Branch) -> tuple[ZoneInfo, str]:
         raise HTTPException(503, "IANA timezone rule data cannot be fingerprinted.") from None
 
 
+def _read_branch(session, principal: Principal, branch_id: UUID) -> Branch:
+    try:
+        authorize(session, principal.staff_id, Permission.STAFF_ROSTER_READ, branch_id)
+    except AuthorizationDenied:
+        raise HTTPException(403, "Schedule access is restricted.") from None
+    branch = session.get(Branch, branch_id)
+    if branch is None or not branch.is_active:
+        raise HTTPException(404, "Branch not found.")
+    return branch
+
+
 def _manage(session, principal: Principal, branch_id: UUID) -> Branch:
     try:
         authorize(session, principal.staff_id, Permission.STAFF_ROSTER_MANAGE, branch_id)
@@ -532,7 +543,7 @@ def create_series(branch_id: UUID, profile_id: UUID, payload: SeriesCreate, requ
 def list_series(branch_id: UUID, request: Request, principal: Principal = Depends(_principal)):
     factory = request.app.state.session_factory
     with factory.begin() as session:
-        _manage(session, principal, branch_id)
+        _read_branch(session, principal, branch_id)
         for profile_id in session.scalars(select(StaffRosterProfile.id).where(StaffRosterProfile.branch_id == branch_id)).all():
             _lock_profile(session, profile_id)
             _revalidate_profile_timezone_rules(session, profile_id)
