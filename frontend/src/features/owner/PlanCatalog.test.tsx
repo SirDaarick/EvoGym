@@ -255,4 +255,68 @@ describe('PlanCatalog owner screen', () => {
     const plansRegion = screen.getByRole('region', { name: 'Planes y visitas' });
     expect(within(plansRegion).getByText('Gym mensual')).toBeVisible();
   });
+
+  it('loads API plans through the supplied authenticated transport without demo fallback', async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/catalog/services') return new Response(JSON.stringify([
+        { id: '423e4567-e89b-42d3-a456-426614174000', code: 'gym', name: 'Gym', status: 'active' },
+      ]));
+      if (path === '/api/v1/catalog/plans') return new Response(JSON.stringify([{
+        id: '123e4567-e89b-42d3-a456-426614174000', code: 'api-plan', name: 'API Monthly', kind: 'membership', status: 'active',
+        current_version: { name: 'API Monthly', version_number: 1, price_minor: 12345, currency: 'MXN', reference_amount_minor: null,
+          duration_value: 1, duration_unit: 'month', entitlement_mode: 'period', eligibility_type: 'general', restriction_notes: null,
+          services: [{ service_id: '423e4567-e89b-42d3-a456-426614174000', session_limit: null }] },
+        versions: [],
+      }]));
+      return new Response('{}', { status: 404 });
+    });
+    render(<DemoProvider><PlanCatalog apiRequest={request} /></DemoProvider>);
+    expect(await screen.findByText('API Monthly')).toBeVisible();
+    expect(screen.getByText('$123.45 MXN')).toBeVisible();
+    expect(screen.queryByText('Gym mensual')).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith('/api/v1/catalog/plans', undefined);
+    expect(request).toHaveBeenCalledWith('/api/v1/catalog/services', undefined);
+  });
+
+  it('shows API authorization failures without substituting demo plans', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ detail: 'Forbidden' }), { status: 403 }));
+    render(<DemoProvider><PlanCatalog apiRequest={request} /></DemoProvider>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Forbidden');
+    expect(screen.queryByText('Gym mensual')).not.toBeInTheDocument();
+  });
+
+
+  it('saves an unchanged legacy student plan without publishing a replacement version', async () => {
+    const user = userEvent.setup();
+    const planId = '123e4567-e89b-42d3-a456-426614174000';
+    const serviceId = '423e4567-e89b-42d3-a456-426614174000';
+    const plan = {
+      id: planId, code: 'student-monthly', name: 'Student Monthly', kind: 'membership', status: 'active',
+      current_version: { id: '523e4567-e89b-42d3-a456-426614174000', plan_id: planId, version_number: 1,
+        name: 'Student Monthly', price_minor: 50000, currency: 'MXN', reference_amount_minor: null,
+        duration_value: 1, duration_unit: 'month', entitlement_mode: 'period', eligibility_type: 'student',
+        restriction_notes: 'Student documentation required', is_active: true,
+        services: [{ service_id: serviceId, service_code: 'gym', session_limit: null }] },
+      versions: [],
+    };
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      void init;
+      if (path === '/api/v1/catalog/services') return new Response(JSON.stringify([
+        { id: serviceId, code: 'gym', name: 'Gym', status: 'active' },
+      ]));
+      if (path === `/api/v1/catalog/plans/${planId}/versions`) return new Response(JSON.stringify({ ...plan.current_version, version_number: 2 }), { status: 201 });
+      if (path === '/api/v1/catalog/plans' || path === `/api/v1/catalog/plans/${planId}`) return new Response(JSON.stringify(path.endsWith(planId) ? plan : [plan]));
+      return new Response('{}', { status: 404 });
+    });
+    render(<DemoProvider><PlanCatalog apiRequest={request} /></DemoProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Editar Student Monthly' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Editar plan' })).not.toBeInTheDocument());
+    expect(request.mock.calls.filter(([path, init]) => path.endsWith('/versions') && init?.method === 'POST')).toHaveLength(0);
+    expect(request.mock.calls.filter(([path, init]) => path === `/api/v1/catalog/plans/${planId}` && init?.method === 'PATCH')).toHaveLength(0);
+    expect(plan.current_version).toMatchObject({ name: 'Student Monthly', price_minor: 50000, eligibility_type: 'student', restriction_notes: 'Student documentation required' });
+  });
+
 });

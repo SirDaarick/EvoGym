@@ -262,3 +262,29 @@ it.each([{ reference: 99999, recalculated: '333333.00' }, { reference: 100000, r
   fireEvent.change(screen.getByLabelText('Precio de referencia (100%)'), { target: { value: '999999' } });
   expect(screen.getByLabelText('Precio MXN')).toHaveValue(recalculated);
 });
+
+it('waits for save, blocks duplicate submits, and retains the draft after rejection', async () => {
+  const user = userEvent.setup();
+  resetPlans();
+  const plan = getPlanList().find(item => item.id === 'gym-month')!;
+  let rejectSave!: (error: Error) => void;
+  const onSave = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectSave = reject; }));
+  const onClose = vi.fn();
+  render(<PlanEditor plan={plan} onClose={onClose} onSave={onSave} />);
+  await continueStep(user);
+  await continueStep(user);
+  const name = screen.getByLabelText('Nombre del plan');
+  await user.clear(name);
+  await user.type(name, 'Async draft');
+  const save = screen.getByRole('button', { name: 'Guardar cambios' });
+  await user.click(save);
+  expect(save).toBeDisabled();
+  await user.click(save);
+  expect(onSave).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
+  rejectSave(new Error('Server unavailable'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Server unavailable');
+  expect(name).toHaveValue('Async draft');
+  expect(screen.getByRole('dialog', { name: 'Editar plan' })).toHaveAttribute('open');
+  expect(onClose).not.toHaveBeenCalled();
+});

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.catalog.schemas import (
     CreatePlanDTO,
+    PatchPlanDTO,
     PlanDTO,
     PlanServiceLinkDTO,
     PlanVersionDTO,
@@ -225,6 +226,25 @@ def create_plan(
 
     return plan
 
+
+def update_plan(session: Session, plan_id: UUID | str, changes: PatchPlanDTO) -> Plan | None:
+    """Update only plan name and availability, never published version terms."""
+    if isinstance(plan_id, str):
+        plan_id = UUID(plan_id)
+    plan = session.get(Plan, plan_id)
+    if plan is None:
+        return None
+    values = changes.model_dump(exclude_unset=True)
+    if "name" in values:
+        name = values["name"].strip()
+        if not name:
+            raise ValueError("Plan name cannot be empty.")
+        if name != plan.name:
+            plan.name = name
+    if "status" in values and values["status"] != plan.status:
+        plan.status = values["status"]
+    session.flush()
+    return plan
 
 def get_plan_by_id(
     session: Session,

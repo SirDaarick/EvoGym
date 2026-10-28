@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   flexRender,
   getCoreRowModel,
@@ -27,12 +27,66 @@ import {
 import { Badge, Button, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './PlanCatalog.css';
 import { PlanEditor } from './PlanEditor';
+import { listCatalogPlans, listCatalogServices, saveCatalogPlan, toOwnerPlan, updateCatalogPlanStatus, type CatalogPlan, type CatalogRequest, type CatalogService } from '../../api/catalogApi';
 
 type FilterPillOption = 'all' | 'active' | 'membership' | 'visit' | 'inactive';
 
-export function PlanCatalog() {
+export function PlanCatalog({ apiRequest }: { apiRequest?: CatalogRequest } = {}) {
+  return apiRequest ? <LivePlanCatalog request={apiRequest} /> : <DemoPlanCatalog />;
+}
+
+function DemoPlanCatalog() {
   const { state } = useDemo();
-  const plans = usePlans();
+  return <CatalogView plans={usePlans()} products={state.products} storageIssue={getPlanStorageIssue()}
+    onSave={(input, existing) => { if (existing) updatePlan(existing.id, input); else savePlan(input); }}
+    onToggle={id => { togglePlanActive(id); }} />;
+}
+
+function LivePlanCatalog({ request }: { request: CatalogRequest }) {
+  const [plans, setPlans] = useState<(Plan & { _raw: CatalogPlan })[]>([]);
+  const [services, setServices] = useState<CatalogService[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [refreshNotice, setRefreshNotice] = useState('');
+  const createCode = useRef<string | null>(null);
+  async function refresh() {
+    const [catalogPlans, catalogServices] = await Promise.all([listCatalogPlans(request), listCatalogServices(request)]);
+    setServices(catalogServices);
+    setPlans(catalogPlans.map(plan => toOwnerPlan(plan, catalogServices)));
+  }
+  useEffect(() => {
+    let active = true;
+    Promise.all([listCatalogPlans(request), listCatalogServices(request)]).then(([catalogPlans, catalogServices]) => {
+      if (!active) return;
+      setServices(catalogServices);
+      setPlans(catalogPlans.map(plan => toOwnerPlan(plan, catalogServices)));
+    }).catch(error => { if (active) setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los planes.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [request]);
+  async function save(input: Omit<Plan, 'id'>, existing?: Plan & { _raw?: CatalogPlan }) {
+    if (!existing && !createCode.current) createCode.current = `plan-${crypto.randomUUID().replaceAll('-', '')}`;
+    if (existing && !existing._raw) throw new Error('No se puede editar el plan porque no está disponible su versión vigente.');
+    await saveCatalogPlan(request, input, services, existing?._raw, createCode.current ?? undefined);
+    if (!existing) createCode.current = null;
+    setRefreshNotice('');
+    try { await refresh(); } catch { setRefreshNotice('El plan se guardó, pero no se pudo actualizar el catálogo. Vuelve a cargar la página para verificarlo.'); }
+  }
+  async function toggle(id: string, active: boolean) {
+    await updateCatalogPlanStatus(request, id, active);
+    try { await refresh(); } catch { setRefreshNotice('El estado se guardó, pero no se pudo actualizar el catálogo. Vuelve a cargar la página para verificarlo.'); }
+  }
+  return <CatalogView plans={plans} products={[]} apiMode loading={loading} loadError={loadError} refreshNotice={refreshNotice}
+    onSave={save} onToggle={toggle} />;
+}
+
+type CatalogViewProps = {
+  plans: Plan[]; products: { id: string; name: string; priceMinor: number; openingQuantity: number }[];
+  storageIssue?: string | null; apiMode?: boolean; loading?: boolean; loadError?: string; refreshNotice?: string;
+  onSave: (input: Omit<Plan, 'id'>, existing?: Plan & { _raw?: CatalogPlan }) => void | Promise<void>;
+  onToggle: (id: string, active: boolean) => void | Promise<void>;
+};
+function CatalogView({ plans, products, storageIssue, apiMode = false, loading = false, loadError, refreshNotice, onSave, onToggle }: CatalogViewProps) {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<FilterPillOption>('all');
@@ -41,8 +95,10 @@ export function PlanCatalog() {
   ]);
 
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
-  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [editingPlan, setEditingPlan] = useState<(Plan & { _raw?: CatalogPlan }) | null>(null);
   const [toggleError, setToggleError] = useState('');
+  const [toggleSaving, setToggleSaving] = useState(false);
+  const toggleInFlight = useRef(false);
 
   const [confirmTogglePlan, setConfirmTogglePlan] = useState<Plan | null>(null);
 
@@ -219,14 +275,17 @@ export function PlanCatalog() {
   });
 
   function handleOpenNewModal() { setIsNewModalOpen(true); }
-  function handleOpenEditModal(plan: Plan) { setEditingPlan(plan); }
-  function handleConfirmToggle() {
-    if (!confirmTogglePlan) return;
+  function handleOpenEditModal(plan: Plan & { _raw?: CatalogPlan }) { setEditingPlan(plan); }
+  async function handleConfirmToggle() {
+    if (!confirmTogglePlan || toggleInFlight.current) return;
+    toggleInFlight.current = true;
+    setToggleSaving(true);
     try {
-      togglePlanActive(confirmTogglePlan.id);
+      await onToggle(confirmTogglePlan.id, confirmTogglePlan.active === false);
       setConfirmTogglePlan(null);
       setToggleError('');
     } catch (error) { setToggleError(error instanceof Error ? error.message : 'No se pudo guardar.'); }
+    finally { toggleInFlight.current = false; setToggleSaving(false); }
   }
   return (
     <div className="plan-catalog-root">
@@ -236,7 +295,9 @@ export function PlanCatalog() {
         description="Gestión integral de membresías y pases de visita. Define precios, vigencias operativas y disponibilidad para recepción."
       />
 
-      {getPlanStorageIssue() ? <Notice tone="warning">{getPlanStorageIssue()}</Notice> : null}
+      {storageIssue ? <Notice tone="warning">{storageIssue}</Notice> : null}
+      {loadError ? <p role="alert">{loadError}</p> : null}
+      {refreshNotice ? <p role="status">{refreshNotice}</p> : null}
       {toggleError ? <p role="alert">{toggleError}</p> : null}
       {/* Bento Summary KPIs (4 cards) */}
       <div className="plan-bento-grid">
@@ -374,7 +435,7 @@ export function PlanCatalog() {
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.length === 0 ? (
+              {loading ? <tr><td colSpan={columns.length}><EmptyState title="Cargando planes">Consultando el catálogo.</EmptyState></td></tr> : table.getRowModel().rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length}>
                     <EmptyState title="No se encontraron planes">
@@ -402,8 +463,7 @@ export function PlanCatalog() {
         La beca de Box requiere selección del entrenador; no es tarifa general. Estudiantes y Box kids no se aprueban automáticamente. No se calculan fechas mensuales ni periodos de 30 días.
       </Notice>
 
-      {/* Products Catalog Panel */}
-      <Panel className="mt-6">
+      {!apiMode ? <Panel className="mt-6">
         <h2>Catálogo de productos</h2>
         <p className="muted">
           Precio y cantidad registrados para el inventario de recepción.
@@ -419,7 +479,7 @@ export function PlanCatalog() {
               </tr>
             </thead>
             <tbody>
-              {state.products.map(product => (
+              {products.map(product => (
                 <tr key={product.id}>
                   <td>{product.name}</td>
                   <td>{formatMoney(product.priceMinor)}</td>
@@ -429,10 +489,10 @@ export function PlanCatalog() {
             </tbody>
           </table>
         </TableRegion>
-      </Panel>
+      </Panel> : null}
 
-      {isNewModalOpen ? <PlanEditor onClose={() => setIsNewModalOpen(false)} onSave={savePlan} /> : null}
-      {editingPlan ? <PlanEditor key={editingPlan.id} plan={editingPlan} onClose={() => setEditingPlan(null)} onSave={input => { updatePlan(editingPlan.id, input); }} /> : null}
+      {isNewModalOpen ? <PlanEditor onClose={() => setIsNewModalOpen(false)} onSave={input => onSave(input)} /> : null}
+      {editingPlan ? <PlanEditor key={editingPlan.id} plan={editingPlan} onClose={() => setEditingPlan(null)} onSave={input => onSave(input, editingPlan)} /> : null}
       {/* Modal: Confirmar Activar / Desactivar */}
       {confirmTogglePlan && (
         <div
@@ -480,7 +540,7 @@ export function PlanCatalog() {
               >
                 Cancelar
               </Button>
-              <Button onClick={handleConfirmToggle}>
+              <Button disabled={toggleSaving} onClick={handleConfirmToggle}>
                 {confirmTogglePlan.active !== false ? 'Confirmar desactivación' : 'Confirmar activación'}
               </Button>
             </div>

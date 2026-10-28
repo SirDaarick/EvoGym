@@ -130,3 +130,21 @@ class CreatePlanDTO(BaseModel):
     name: str = Field(..., min_length=1, max_length=160, description="Display name of the plan.")
     kind: str = Field("membership", pattern="^(membership|visit)$", description="Plan kind.")
     initial_version: PublishPlanVersionDTO | None = Field(None, description="Optional initial version to publish immediately.")
+
+class PatchPlanDTO(BaseModel):
+    """Mutable plan metadata and availability; published terms stay immutable."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(None, min_length=1, max_length=160)
+    status: str | None = Field(None, pattern="^(active|inactive)$")
+
+    @model_validator(mode="after")
+    def require_changes(self):
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("Plan name cannot be null.")
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("Plan status cannot be null.")
+        if self.name is None and self.status is None:
+            raise ValueError("At least one plan field must be provided.")
+        return self

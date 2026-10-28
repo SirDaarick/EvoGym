@@ -19,11 +19,13 @@ from app.catalog.queries import (
     publish_plan_version,
     to_plan_dto,
     to_plan_version_dto,
+    update_plan,
     to_service_dto,
 )
 from app.catalog.schemas import (
     CreatePlanDTO,
     CreateServiceDTO,
+    PatchPlanDTO,
     PlanDTO,
     PlanVersionDTO,
     PublishPlanVersionDTO,
@@ -200,6 +202,29 @@ def get_plan_endpoint(
             raise HTTPException(404, "The requested resource was not found.")
         return to_plan_dto(plan)
 
+
+@router.patch("/plans/{plan_id}", response_model=PlanDTO)
+def patch_plan_endpoint(
+    plan_id: UUID,
+    payload: PatchPlanDTO,
+    request: Request,
+    principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+) -> PlanDTO:
+    """Update plan display name or active status. Admin only."""
+    if not principal.is_admin:
+        raise HTTPException(403, "Access restricted to admin.")
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    try:
+        with factory() as session:
+            plan = update_plan(session, plan_id, payload)
+            if plan is None:
+                raise HTTPException(404, "The requested resource was not found.")
+            session.commit()
+            return to_plan_dto(plan)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 @router.post("/plans/{plan_id}/versions", response_model=PlanVersionDTO, status_code=201)
 def publish_plan_version_endpoint(

@@ -511,3 +511,41 @@ def test_catalog_rbac_receptionist_vs_admin(tmp_path):
             assert res_bad_plan.status_code == 404
     finally:
         engine.dispose()
+
+
+def test_plan_status_patch_is_admin_only_and_preserves_versions(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        _staff_id, recep_token = _seed_receptionist(factory, branch_id)
+        seed_admin(factory, "owner@example.invalid", "super-secret-password")
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
+        with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
+            service = client.post("/api/v1/catalog/services", headers=admin_headers, json={"code": "gym", "name": "Gym"}).json()
+            plan = client.post("/api/v1/catalog/plans", headers=admin_headers, json={
+                "code": "monthly", "name": "Monthly", "kind": "membership",
+                "initial_version": {"name": "Monthly v1", "price_minor": 50000, "duration_value": 1,
+                    "duration_unit": "month", "services": [{"service_id": service["id"]}]},
+            }).json()
+            detail = f"/api/v1/catalog/plans/{plan['id']}"
+            receptionist = {"Authorization": f"Bearer {recep_token}"}
+            assert client.patch(detail, headers=receptionist, json={"status": "inactive"}).status_code == 403
+            response = client.patch(detail, headers=admin_headers, json={"name": "Monthly renamed", "status": "inactive"})
+            assert response.status_code == 200
+            assert response.json()["name"] == "Monthly renamed"
+            assert response.json()["status"] == "inactive"
+            history = client.get(detail, headers=admin_headers).json()
+            assert len(history["versions"]) == 1
+            assert history["versions"][0]["name"] == "Monthly v1"
+            assert history["versions"][0]["price_minor"] == 50000
+            active = client.get("/api/v1/catalog/plans", headers=admin_headers, params={"status": "active"})
+            assert plan["id"] not in {item["id"] for item in active.json()}
+            restored = client.patch(detail, headers=admin_headers, json={"status": "active"})
+            assert restored.status_code == 200
+            active = client.get("/api/v1/catalog/plans", headers=admin_headers, params={"status": "active"})
+            assert plan["id"] in {item["id"] for item in active.json()}
+            assert len(client.get(detail, headers=admin_headers).json()["versions"]) == 1
+    finally:
+        engine.dispose()

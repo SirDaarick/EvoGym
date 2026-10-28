@@ -10,7 +10,7 @@ type PlanInput = Omit<Plan, 'id'>;
 interface PlanEditorProps {
   plan?: Plan;
   onClose: () => void;
-  onSave: (plan: PlanInput) => void;
+  onSave: (plan: PlanInput) => void | Promise<void>;
 }
 const serviceOptions: { id: PlanService; label: string; detail: string }[] = [
   { id: 'gym', label: 'Gym', detail: 'Pesas y cardio' },
@@ -132,6 +132,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
   const [advancedOpen, setAdvancedOpen] = useState(Boolean(plan?.restriction || plan?.composition?.conditions.notes || (plan?.composition && plan.composition.conditions.eligibility !== 'general')));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
   const amountMinor = parseMoney(pricing.final);
   const referenceAmountMinor = parseMoney(pricing.reference);
   const percentage = pricing.percentageDraft ?? displayedPercentage(amountMinor, referenceAmountMinor);
@@ -256,19 +257,21 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
     setStep(next);
   }
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!validate(step)) return;
     if (step < 3) { navigate(step + 1); return; }
     const unresolved = pendingService || !services.length;
     const conditionRestriction = eligibility !== 'general' ? 'Elegibilidad pendiente de validar.' : undefined;
+    if (saving) return;
+    setSaving(true);
     try {
-      onSave({
+      await onSave({
         name: nameEdited ? name.trim() : name,
         kind, amountMinor: amountMinor!, referenceAmountMinor: referenceAmountMinor!,
         applicability: descriptionEdited ? description.trim() : description,
         active: plan?.active ?? true,
-        restriction: restriction || (unresolved ? 'Actividad pendiente de confirmar.' : conditionRestriction),
+        restriction: restriction || (plan ? undefined : unresolved ? 'Actividad pendiente de confirmar.' : conditionRestriction),
         sourceLabel: plan?.sourceLabel, legacy: plan?.legacy,
         composition: {
           services: [...services], serviceStatus: unresolved ? 'pending' : 'confirmed',
@@ -279,7 +282,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
       onClose();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'No se pudo guardar el plan. Inténtalo de nuevo.');
-    }
+    } finally { setSaving(false); }
   }
 
   function selectPreset(preset: typeof periodPresets[number]) {
@@ -321,7 +324,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
               <span><strong>{service.label}</strong><small>{service.detail}</small></span>
             </label>)}</div>{error('services')}
           </fieldset>
-          <div className="field"><label htmlFor={id('kind')}>Tipo de acceso</label><select id={id('kind')} value={kind} onChange={event => setKind(event.target.value as Plan['kind'])}><option value="membership">Membresía</option><option value="visit">Pase por visita</option></select></div>
+          <div className="field"><label htmlFor={id('kind')}>Tipo de acceso</label><select id={id('kind')} value={kind} onChange={event => { const next = event.target.value as Plan['kind']; setKind(next); if (next === 'visit') { setPeriodValue('1'); setPeriodUnit('session'); setExpiryRule('pending'); setCustomPeriod(false); } }}><option value="membership">Membresía</option><option value="visit">Pase por visita</option></select></div>
           <details className="plan-editor-details" open={pendingService || undefined}>
             <summary>¿La actividad todavía no está definida?</summary>
             <label className="plan-editor-check"><input type="checkbox" checked={pendingService} onChange={event => setPendingService(event.target.checked)} />Actividad pendiente de confirmar</label>
@@ -384,7 +387,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
         <div className="plan-editor-buttons">
           <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
           {step > 1 ? <Button type="button" variant="secondary" onClick={() => navigate(step - 1)}>Atrás</Button> : null}
-          <Button type="submit">{step < 3 ? 'Continuar' : plan ? 'Guardar cambios' : 'Guardar plan'}</Button>
+          <Button type="submit" disabled={saving}>{step < 3 ? 'Continuar' : plan ? 'Guardar cambios' : 'Guardar plan'}</Button>
         </div>
       </footer>
     </form>
