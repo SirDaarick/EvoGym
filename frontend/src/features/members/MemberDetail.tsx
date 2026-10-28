@@ -3,10 +3,19 @@ import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-tabl
 import type { ColumnDef } from '@tanstack/react-table';
 import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, Role, Sale, SupplementSale } from '../../domain/models';
 import type { MemberReloadResponse } from '../../api/memberReadsApi';
+import type { MemberNoteDTO } from '../../api/membersApi';
 import { formatMoney } from '../../demo/adapter';
 import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
 import { getMemberHabits } from '../../demo/memberAnalyticsSelector';
 import { useDemo } from '../../demo/DemoProvider';
+
+function useOptionalDemo() {
+  try {
+    return useDemo();
+  } catch {
+    return null;
+  }
+}
 import { getSelectedStaff } from '../staff/staffStore';
 import { openAttendance } from '../../demo/attendanceOperations';
 import { getMemberStatusInfo, rentalStatus } from './memberDetailUtils';
@@ -22,12 +31,12 @@ function ReadOnlyMemberNotes({ note }: { note: string | null }) {
 }
 
 function MemberNotes({ member, now }: { member: Member; now: string }) {
-  const { state, update } = useDemo();
+  const demo = useOptionalDemo();
   const selectedStaff = getSelectedStaff();
   const activeStaff = selectedStaff || { id: 'recep-1', name: 'Valeria M.' };
   const [noteBody, setNoteBody] = useState('');
   const [isAddingNote, setIsAddingNote] = useState(false);
-  const notes = (state.memberNotes ?? []).filter(note => note.memberId === member.id);
+  const notes = (demo?.state.memberNotes ?? []).filter(note => note.memberId === member.id);
 
   return (
     <Panel>
@@ -47,7 +56,7 @@ function MemberNotes({ member, now }: { member: Member; now: string }) {
           event.preventDefault();
           if (!noteBody.trim()) return;
           const note = { memberId: member.id, body: noteBody.trim(), authorId: activeStaff.id, authorName: activeStaff.name, createdAt: now };
-          update(current => ({ ...current, memberNotes: addMemberNote(current.memberNotes ?? [], note) }));
+          demo?.update(current => ({ ...current, memberNotes: addMemberNote(current.memberNotes ?? [], note) }));
           setNoteBody('');
           setIsAddingNote(false);
         }}>
@@ -82,6 +91,98 @@ function MemberNotes({ member, now }: { member: Member; now: string }) {
           ))}
         </div>
       ) : <EmptyState title="Sin notas registradas">Todavía no hay notas para este socio.</EmptyState>}
+    </Panel>
+  );
+}
+
+function LiveAdminNotes({
+  notes,
+  onAddNote,
+  submitting,
+  error,
+}: {
+  notes: MemberNoteDTO[];
+  onAddNote?: (body: string) => Promise<void>;
+  submitting?: boolean;
+  error?: string;
+}) {
+  const [body, setBody] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const safeNotes = Array.isArray(notes) ? notes : [];
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!body.trim() || submitting || !onAddNote) return;
+    try {
+      await onAddNote(body.trim());
+      setBody('');
+      setIsAdding(false);
+    } catch {
+      // error handled via prop
+    }
+  }
+
+  return (
+    <Panel>
+      <div className="member-notes-header">
+        <div className="member-notes-title-wrap">
+          <h2>Notas del socio</h2>
+          <span className="member-notes-counter" aria-label={`${safeNotes.length} notas`}>
+            {safeNotes.length}
+          </span>
+        </div>
+        {onAddNote && (
+          <Button variant="secondary" className="member-notes-toggle-btn" onClick={() => setIsAdding(prev => !prev)}>
+            {isAdding ? 'Cancelar' : '+ Agregar nota'}
+          </Button>
+        )}
+      </div>
+      {isAdding && onAddNote && (
+        <form className="member-note-form" onSubmit={handleSubmit}>
+          <textarea
+            id="member-live-note"
+            aria-label="Nueva nota"
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            maxLength={1000}
+            placeholder="Escribe la nota para el socio..."
+            disabled={submitting}
+          />
+          {error && <p role="alert" className="text-danger">{error}</p>}
+          <div className="flow">
+            <Button type="submit" disabled={!body.trim() || submitting}>
+              {submitting ? 'Guardando…' : 'Guardar nota'}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => { setBody(''); setIsAdding(false); }} disabled={submitting}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      )}
+      {safeNotes.length ? (
+        <div className="member-notes-list">
+          {safeNotes.map(note => (
+            <article key={note.id} className="member-note-card">
+              <div className="member-note-header">
+                <div className="member-note-author">
+                  <span className="member-note-author-avatar" aria-hidden="true">AD</span>
+                  <strong>Administrador</strong>
+                </div>
+                <time dateTime={note.created_at}>
+                  {new Intl.DateTimeFormat('es-MX', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                    timeZone: 'America/Mexico_City',
+                  }).format(new Date(note.created_at))}
+                </time>
+              </div>
+              <p className="member-note-body">{note.body}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="Sin notas registradas">Todavía no hay notas para este socio.</EmptyState>
+      )}
     </Panel>
   );
 }
@@ -143,6 +244,10 @@ export function MemberDetailSections({
   role = 'RECEPTION',
   reloadState,
   liveNotes,
+  liveNotesList,
+  onAddLiveNote,
+  noteSubmitting,
+  noteError,
   liveApi = false,
 }: {
   member: Member;
@@ -158,6 +263,10 @@ export function MemberDetailSections({
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
   liveNotes?: string | null;
+  liveNotesList?: MemberNoteDTO[];
+  onAddLiveNote?: (body: string) => Promise<void>;
+  noteSubmitting?: boolean;
+  noteError?: string;
   liveApi?: boolean;
 }) {
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
@@ -379,7 +488,20 @@ export function MemberDetailSections({
             ) : null}
           </Panel>
         </div>
-        <div className="member-detail-notes">{liveApi ? <ReadOnlyMemberNotes note={liveNotes ?? null} /> : <MemberNotes member={member} now={now} />}</div>
+        <div className="member-detail-notes">
+          {liveApi ? (
+            (role === 'OWNER' || role === 'ADMIN') ? (
+              <LiveAdminNotes
+                notes={liveNotesList ?? []}
+                onAddNote={onAddLiveNote}
+                submitting={noteSubmitting}
+                error={noteError}
+              />
+            ) : null
+          ) : (
+            <MemberNotes member={member} now={now} />
+          )}
+        </div>
       </div>
     </div>
     {!liveApi && <div className="member-detail-habits">
@@ -544,6 +666,10 @@ export function MemberCounterView({
   role = 'RECEPTION',
   reloadState,
   onSwitchToRecord,
+  liveNotesList,
+  onAddLiveNote,
+  noteSubmitting,
+  noteError,
 }: {
   member: Member;
   now: string;
@@ -558,14 +684,30 @@ export function MemberCounterView({
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
   onSwitchToRecord?: () => void;
+  liveNotesList?: MemberNoteDTO[];
+  onAddLiveNote?: (body: string) => Promise<void>;
+  noteSubmitting?: boolean;
+  noteError?: string;
 }) {
-  const { state, update } = useDemo();
+  const demo = useOptionalDemo();
   const selectedStaff = getSelectedStaff();
   const activeStaff = selectedStaff || { id: 'recep-1', name: 'Valeria M.' };
   const [noteBody, setNoteBody] = useState('');
   const [isAddingNote, setIsAddingNote] = useState(false);
 
-  const allNotes = (state.memberNotes ?? []).filter(note => note.memberId === member.id);
+  const liveNoteItems = useMemo(() => {
+    if (!Array.isArray(liveNotesList)) return null;
+    return liveNotesList.map(n => ({
+      id: n.id,
+      memberId: n.member_id,
+      body: n.body,
+      authorId: n.author_id,
+      authorName: 'Administrador',
+      createdAt: n.created_at,
+    }));
+  }, [liveNotesList]);
+
+  const allNotes = liveNoteItems ?? (demo?.state.memberNotes ?? []).filter(note => note.memberId === member.id);
   const latestNote = allNotes[0] ?? null;
 
   const statusInfo = getMemberStatusInfo(member, now);
@@ -634,22 +776,34 @@ export function MemberCounterView({
   const lockerState = locker ? rentalStatus(locker.expiresAt, now) : 'none';
   const hasRentalWarning = lockerState === 'overdue' || lockerState === 'eviction-status';
 
-  const handleSaveNote = (event: React.FormEvent) => {
+  const handleSaveNote = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!noteBody.trim()) return;
-    const newNote = {
-      memberId: member.id,
-      body: noteBody.trim(),
-      authorId: activeStaff.id,
-      authorName: activeStaff.name,
-      createdAt: now,
-    };
-    update(current => ({
-      ...current,
-      memberNotes: addMemberNote(current.memberNotes ?? [], newNote),
-    }));
-    setNoteBody('');
-    setIsAddingNote(false);
+    if (!noteBody.trim() || noteSubmitting) return;
+    if (onAddLiveNote) {
+      try {
+        await onAddLiveNote(noteBody.trim());
+        setNoteBody('');
+        setIsAddingNote(false);
+      } catch {
+        // Handled by noteError prop
+      }
+      return;
+    }
+    if (demo) {
+      const newNote = {
+        memberId: member.id,
+        body: noteBody.trim(),
+        authorId: activeStaff.id,
+        authorName: activeStaff.name,
+        createdAt: now,
+      };
+      demo.update(current => ({
+        ...current,
+        memberNotes: addMemberNote(current.memberNotes ?? [], newNote),
+      }));
+      setNoteBody('');
+      setIsAddingNote(false);
+    }
   };
 
   return (
@@ -880,101 +1034,108 @@ export function MemberCounterView({
           )}
         </div>
 
-        {/* Card 4: Atención al Socio */}
-        <div className="counter-card counter-card-service">
-          <div className="counter-card-header">
-            <div className="counter-card-title-group">
-              <span className="counter-card-icon" aria-hidden="true">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-              </span>
-              <h2>Atención al socio</h2>
+        {/* Card 4: Atención al Socio - Hidden for reception in live mode */}
+        {(isAdmin || !reloadState) && (
+          <div className="counter-card counter-card-service">
+            <div className="counter-card-header">
+              <div className="counter-card-title-group">
+                <span className="counter-card-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                </span>
+                <h2>Atención al socio</h2>
+              </div>
+              <Button
+                variant="secondary"
+                className="member-notes-toggle-btn"
+                onClick={() => setIsAddingNote(prev => !prev)}
+              >
+                {isAddingNote ? 'Cancelar' : '+ Agregar nota'}
+              </Button>
             </div>
-            <Button
-              variant="secondary"
-              className="member-notes-toggle-btn"
-              onClick={() => setIsAddingNote(prev => !prev)}
-            >
-              {isAddingNote ? 'Cancelar' : '+ Agregar nota'}
-            </Button>
-          </div>
 
-          <div className="counter-card-content">
-            {isAddingNote ? (
-              <form className="member-note-form" onSubmit={handleSaveNote}>
-                <div className="member-note-author-info">
-                  Registrando como: <strong>{activeStaff.name}</strong>
-                </div>
-                <textarea
-                  id="counter-member-note"
-                  aria-label="Nueva nota"
-                  value={noteBody}
-                  onChange={event => setNoteBody(event.target.value)}
-                  maxLength={1000}
-                  placeholder="Escribe la nota para el socio..."
-                />
-                <p className="muted">Las notas se guardan solo en el estado en memoria.</p>
-                <div className="flow">
-                  <Button type="submit" disabled={!noteBody.trim()}>
-                    Guardar nota
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setNoteBody('');
-                      setIsAddingNote(false);
-                    }}
-                  >
-                    Cancelar
-                  </Button>
-                </div>
-              </form>
-            ) : latestNote ? (
-              <article className="counter-latest-note">
-                <div className="member-note-header">
-                  <div className="member-note-author">
-                    <span className="member-note-author-avatar" aria-hidden="true">
-                      {latestNote.authorName.slice(0, 2).toUpperCase()}
-                    </span>
-                    <strong>{latestNote.authorName}</strong>
+            <div className="counter-card-content">
+              {isAddingNote ? (
+                <form className="member-note-form" onSubmit={handleSaveNote}>
+                  <div className="member-note-author-info">
+                    Registrando como: <strong>{activeStaff.name}</strong>
                   </div>
-                  <time dateTime={latestNote.createdAt}>
-                    {new Intl.DateTimeFormat('es-MX', {
-                      dateStyle: 'medium',
-                      timeStyle: 'short',
-                      timeZone: 'America/Mexico_City',
-                    }).format(new Date(latestNote.createdAt))}
-                  </time>
-                </div>
-                <p className="member-note-body">{latestNote.body}</p>
-              </article>
-            ) : (
-              <p className="counter-empty-note muted">Sin notas registradas.</p>
-            )}
-
-            {habits.favoriteProducts.length > 0 && !isAddingNote && (
-              <div className="counter-upsell-box">
-                <span className="counter-upsell-icon" aria-hidden="true">🥤</span>
-                <div className="counter-upsell-content">
-                  <span className="counter-upsell-title">Sugerencia de mostrador:</span>
-                  <p className="counter-upsell-text">
-                    Ofrecer su habitual: <strong>{habits.favoriteProducts[0].name}</strong>
+                  <textarea
+                    id="counter-member-note"
+                    aria-label="Nueva nota"
+                    value={noteBody}
+                    onChange={event => setNoteBody(event.target.value)}
+                    maxLength={1000}
+                    placeholder="Escribe la nota para el socio..."
+                    disabled={noteSubmitting}
+                  />
+                  {noteError && <p role="alert" className="text-danger">{noteError}</p>}
+                  <p className="muted">
+                    {reloadState ? 'Las notas se guardan en el servidor.' : 'Las notas se guardan solo en el estado en memoria.'}
                   </p>
+                  <div className="flow">
+                    <Button type="submit" disabled={!noteBody.trim() || noteSubmitting}>
+                      {noteSubmitting ? 'Guardando…' : 'Guardar nota'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setNoteBody('');
+                        setIsAddingNote(false);
+                      }}
+                      disabled={noteSubmitting}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </form>
+              ) : latestNote ? (
+                <article className="counter-latest-note">
+                  <div className="member-note-header">
+                    <div className="member-note-author">
+                      <span className="member-note-author-avatar" aria-hidden="true">
+                        {latestNote.authorName.slice(0, 2).toUpperCase()}
+                      </span>
+                      <strong>{latestNote.authorName}</strong>
+                    </div>
+                    <time dateTime={latestNote.createdAt}>
+                      {new Intl.DateTimeFormat('es-MX', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                        timeZone: 'America/Mexico_City',
+                      }).format(new Date(latestNote.createdAt))}
+                    </time>
+                  </div>
+                  <p className="member-note-body">{latestNote.body}</p>
+                </article>
+              ) : (
+                <p className="counter-empty-note muted">Sin notas registradas.</p>
+              )}
+
+              {habits.favoriteProducts.length > 0 && !isAddingNote && (
+                <div className="counter-upsell-box">
+                  <span className="counter-upsell-icon" aria-hidden="true">🥤</span>
+                  <div className="counter-upsell-content">
+                    <span className="counter-upsell-title">Sugerencia de mostrador:</span>
+                    <p className="counter-upsell-text">
+                      Ofrecer su habitual: <strong>{habits.favoriteProducts[0].name}</strong>
+                    </p>
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {onSwitchToRecord && !isAddingNote && (
+              <div className="counter-card-footer">
+                <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
+                  Ver todas las notas ({allNotes.length}) ›
+                </button>
               </div>
             )}
           </div>
-
-          {onSwitchToRecord && !isAddingNote && (
-            <div className="counter-card-footer">
-              <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
-                Ver todas las notas ({allNotes.length}) ›
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </section>
   );

@@ -1282,3 +1282,26 @@ def test_member_birth_date_patch_presence_preserves_updates_and_clears(member_mu
         assert member.preferred_name == "Original Alias"
 
 
+
+
+def test_create_member_note_rejects_whitespace_body(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        seed_admin(factory, "owner@example.invalid", "super-secret-password")
+        members = _seed_sample_members(factory)
+        member = members[0]
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
+        with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
+            response = client.post(
+                f"/api/v1/members/{member.id}/notes",
+                headers=admin_headers,
+                json={"body": "   "},
+            )
+            assert response.status_code == 422
+            with factory() as session:
+                assert session.scalar(select(func.count()).select_from(MemberNote)) == 0
+    finally:
+        engine.dispose()

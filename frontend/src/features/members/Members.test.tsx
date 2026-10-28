@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import * as memberReadsApi from '../../api/memberReadsApi';
 import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
+import { MemberDetail } from './Members';
+import { ApiMembers, ApiMemberDetail, ApiNewMember } from '../../app/ApiMembers';
 
 async function mount(path = '/reception/members') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
@@ -280,5 +282,513 @@ describe('member workflow', () => {
       sessionStorage.clear();
       reloadSpy.mockRestore();
     }
+  });
+
+  describe('F05 live member check-in flow', () => {
+    const mockReload: memberReadsApi.MemberReloadResponse = {
+      profile: {
+        id: 'member-f05',
+        organization_id: 'org-1',
+        home_branch_id: 'branch-1',
+        member_number: 'SOC-F05',
+        full_name: 'Carlos Santana',
+        preferred_name: null,
+        phone: '5551234567',
+        email: 'carlos@example.com',
+        birth_date: null,
+        joined_on: '2026-01-01',
+        status: 'active',
+        photo_url: null,
+        emergency_contact_name: null,
+        emergency_contact_phone: null,
+      },
+      active_periods: [
+        {
+          id: 'period-f05',
+          order_item_id: 'oi-f05',
+          plan_version_id: 'pv-f05',
+          plan_name: 'Membresía Activa F05',
+          starts_on: '2026-10-01',
+          ends_on: '2026-11-01',
+          branch_id: 'branch-1',
+          is_current: true,
+          access_status: 'eligible',
+        },
+      ],
+      class_samples: [],
+      financial: {
+        has_pending_balance: false,
+        credit_balance_minor: 0,
+        total_pending_balance_minor: null,
+        currency: 'MXN',
+        debts: [],
+      },
+      recent_visits: [],
+      server_time: '2026-10-27T12:00:00.000Z',
+    };
+
+    const mockDetailMember = {
+      id: 'member-f05',
+      name: 'Carlos Santana',
+      phone: '5551234567',
+      creditMinor: 0,
+      membership: null,
+      joinedOn: '2026-01-01',
+    };
+
+    it('renders Mostrador by default with live reload data and Asistencia previa', () => {
+      render(
+        <MemoryRouter>
+          <MemberDetail
+            role="RECEPTION"
+            liveData={{
+              member: mockDetailMember,
+              reload: mockReload,
+              notes: null,
+              status: 'active',
+              isAdmin: false,
+            }}
+          />
+        </MemoryRouter>
+      );
+
+      const counterTab = screen.getByRole('tab', { name: 'Mostrador' });
+      expect(counterTab).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeVisible();
+      expect(screen.queryByText('Mostrador no disponible')).not.toBeInTheDocument();
+    });
+
+    it('enables Registrar entrada when eligible and displays success feedback after check-in', async () => {
+      const onCheckIn = vi.fn().mockResolvedValue({ ok: true, message: 'Entrada registrada.' });
+      render(
+        <MemoryRouter>
+          <MemberDetail
+            role="RECEPTION"
+            liveData={{
+              member: mockDetailMember,
+              reload: mockReload,
+              notes: null,
+              status: 'active',
+              isAdmin: false,
+              onCheckIn,
+            }}
+          />
+        </MemoryRouter>
+      );
+
+      const checkInBtn = screen.getByRole('button', { name: 'Registrar entrada' });
+      expect(checkInBtn).toBeEnabled();
+
+      await userEvent.click(checkInBtn);
+      expect(onCheckIn).toHaveBeenCalledTimes(1);
+
+      const feedback = screen.getByRole('status', { name: 'Resultado de asistencia' });
+      expect(feedback).toHaveTextContent('Entrada registrada.');
+    });
+
+    it('disables Registrar entrada when access_status is not eligible', () => {
+      const expiredReload: memberReadsApi.MemberReloadResponse = {
+        ...mockReload,
+        active_periods: [
+          {
+            ...mockReload.active_periods[0],
+            access_status: 'expired',
+          },
+        ],
+      };
+
+      render(
+        <MemoryRouter>
+          <MemberDetail
+            role="RECEPTION"
+            liveData={{
+              member: mockDetailMember,
+              reload: expiredReload,
+              notes: null,
+              status: 'expired',
+              isAdmin: false,
+              onCheckIn: vi.fn(),
+            }}
+          />
+        </MemoryRouter>
+      );
+
+      expect(screen.getByRole('button', { name: 'Registrar entrada' })).toBeDisabled();
+    });
+
+    it('records check-in via ApiMemberDetail and reuses idempotency key on retry', async () => {
+      let callCount = 0;
+      const idempotencyKeysUsed: string[] = [];
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/v1/members/member-f05') {
+          return new Response(JSON.stringify({
+            ...mockDetailMember,
+            member_number: 'SOC-F05',
+            full_name: 'Carlos Santana',
+            preferred_name: null,
+            email: null,
+            birth_date: null,
+            notes: null,
+            status: 'active',
+            credit_balance_minor: 0,
+            pending_balance_minor: 0,
+            has_pending_balance: false,
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            photo_url: null,
+          }));
+        }
+        if (path === '/api/v1/members/member-f05/reload?visit_limit=12') {
+          return new Response(JSON.stringify(mockReload));
+        }
+        if (path.startsWith('/api/v1/member-check-ins/branches/')) {
+          callCount += 1;
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          const key = headers['Idempotency-Key'] || headers['idempotency-key'];
+          if (key) idempotencyKeysUsed.push(key);
+
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ message: 'Internal server error' }), { status: 500 });
+          }
+          return new Response(JSON.stringify({
+            id: 'checkin-1',
+            visit_id: 'visit-1',
+            member_id: 'member-f05',
+            period_id: 'period-f05',
+            branch_id: 'branch-1',
+            recorded_by: 'staff-1',
+            occurred_at: '2026-10-27T12:00:00Z',
+            access_reason: 'eligible',
+            access_warnings: [],
+            replayed: false,
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/reception/members/member-f05']}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByRole('button', { name: 'Registrar entrada' })).toBeVisible();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+      expect(await screen.findByRole('alert', { name: 'Resultado de asistencia' })).toHaveTextContent(/No se pudo registrar la entrada|Internal server error/);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+      expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
+
+      expect(idempotencyKeysUsed.length).toBe(2);
+      expect(idempotencyKeysUsed[0]).toBe(idempotencyKeysUsed[1]);
+      expect(idempotencyKeysUsed[0]).toMatch(/^checkin-/);
+    });
+  });
+
+  describe('F02 members lifecycle', () => {
+    const fixtureMember = {
+      id: 'member-f02-1',
+      member_number: 'M-F02-100',
+      full_name: 'Elena Morales',
+      preferred_name: 'Ele',
+      phone: '5551112233',
+      email: 'elena@example.com' as string | null,
+      status: 'active',
+      joined_on: '2026-10-27',
+      credit_balance_minor: 0,
+      emergency_contact_name: null,
+      emergency_contact_phone: null,
+      photo_url: null,
+      birth_date: null,
+      notes: null,
+      pending_balance_minor: 0,
+      has_pending_balance: false,
+    };
+
+    const fixtureReload = {
+      profile: {
+        ...fixtureMember,
+        organization_id: 'org-1',
+        home_branch_id: 'branch-1',
+      },
+      active_periods: [
+        {
+          id: 'period-f02',
+          order_item_id: 'order-item-f02',
+          plan_version_id: 'plan-f02',
+          plan_name: 'Mensualidad Estándar',
+          starts_on: '2026-10-01',
+          ends_on: '2026-10-31',
+          branch_id: 'branch-1',
+          is_current: true,
+          access_status: 'eligible' as const,
+        },
+      ],
+      class_samples: [],
+      financial: {
+        has_pending_balance: false,
+        credit_balance_minor: 0,
+        total_pending_balance_minor: 0,
+        currency: 'MXN' as const,
+        debts: [],
+      },
+      recent_visits: [],
+      server_time: '2026-10-27T12:00:00Z',
+    };
+
+    it('shows both "Nuevo socio" and "Actualizar" in live directory, creates a member, and edits pre-filled legal full_name', async () => {
+      let currentMember = { ...fixtureMember };
+      const requests: { path: string; init?: RequestInit }[] = [];
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path.startsWith('/api/v1/members?page=')) {
+          return new Response(JSON.stringify({
+            items: [currentMember],
+            total: 1,
+            page: 1,
+            limit: 100,
+            pages: 1,
+          }));
+        }
+        if (path === '/api/v1/members' && init?.method === 'POST') {
+          const body = JSON.parse(init?.body as string);
+          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+          expect(body.full_name).toBe('Elena Morales');
+          expect(body.phone).toBe('5551112233');
+          expect(body.email).toBe('elena@example.com');
+          return new Response(JSON.stringify(currentMember), { status: 201 });
+        }
+        if (path === `/api/v1/members/${currentMember.id}` && init?.method === 'PATCH') {
+          const body = JSON.parse(init?.body as string);
+          expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+          expect(body).toEqual({
+            full_name: 'Elena Morales',
+            phone: '5559998877',
+            email: null,
+          });
+          currentMember = { ...currentMember, phone: '5559998877', email: null };
+          return new Response(JSON.stringify(currentMember), { status: 200 });
+        }
+        if (path === `/api/v1/members/${currentMember.id}`) {
+          return new Response(JSON.stringify(currentMember));
+        }
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify({
+            ...fixtureReload,
+            profile: currentMember,
+          }));
+        }
+        return new Response('{}');
+      });
+
+      // 1. Live directory shows both "Nuevo socio" and "Actualizar"
+      const { unmount: unmountDir } = render(
+        <MemoryRouter initialEntries={['/reception/members']}>
+          <ApiMembers role="RECEPTION" request={mockRequest} />
+        </MemoryRouter>
+      );
+      expect(await screen.findByRole('link', { name: 'Nuevo socio' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Actualizar' })).toBeVisible();
+      unmountDir();
+
+      // 2. Submitting create form sends POST /api/v1/members
+      const { unmount: unmountCreate } = render(
+        <MemoryRouter initialEntries={['/reception/members/new']}>
+          <ApiNewMember role="RECEPTION" request={mockRequest} />
+        </MemoryRouter>
+      );
+      await userEvent.type(screen.getByLabelText('Nombre completo'), 'Elena Morales');
+      await userEvent.type(screen.getByLabelText('Teléfono'), '5551112233');
+      await userEvent.type(screen.getByLabelText('Correo electrónico (opcional)'), 'elena@example.com');
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith('/api/v1/members', expect.objectContaining({ method: 'POST' }));
+      });
+      unmountCreate();
+
+      // 3. Editing pre-fills legal full_name (not preferred_name "Ele"), sends PATCH, and updates detail
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${currentMember.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+      expect(await screen.findByRole('button', { name: 'Editar datos' })).toBeVisible();
+      await userEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
+
+      // Legal name "Elena Morales" must be pre-filled, NOT preferred_name "Ele"!
+      const nameInput = screen.getByLabelText('Nombre completo') as HTMLInputElement;
+      const phoneInput = screen.getByLabelText('Teléfono') as HTMLInputElement;
+      const emailInput = screen.getByLabelText('Correo electrónico (opcional)') as HTMLInputElement;
+      expect(nameInput.value).toBe('Elena Morales');
+      expect(phoneInput.value).toBe('5551112233');
+      expect(emailInput.value).toBe('elena@example.com');
+
+      // Update phone and clear email
+      await userEvent.clear(phoneInput);
+      await userEvent.type(phoneInput, '5559998877');
+      await userEvent.clear(emailInput);
+      await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(
+          `/api/v1/members/${currentMember.id}`,
+          expect.objectContaining({ method: 'PATCH' })
+        );
+      });
+    });
+
+    it('surfaces alert on 422/409/500, preserves typed form values, and never fabricates saved state', async () => {
+      const mockFailRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/v1/members' && init?.method === 'POST') {
+          return new Response(JSON.stringify({ detail: 'Teléfono inválido.' }), { status: 422 });
+        }
+        if (init?.method === 'PATCH') {
+          return new Response(JSON.stringify({ detail: 'Error de servidor.' }), { status: 500 });
+        }
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(fixtureReload));
+        }
+        return new Response(JSON.stringify(fixtureMember));
+      });
+
+      // 1. Error on create preserves input values
+      const { unmount } = render(
+        <MemoryRouter initialEntries={['/reception/members/new']}>
+          <ApiNewMember role="RECEPTION" request={mockFailRequest} />
+        </MemoryRouter>
+      );
+      const nameInput = screen.getByLabelText('Nombre completo');
+      const phoneInput = screen.getByLabelText('Teléfono');
+      await userEvent.type(nameInput, 'Persona Rechazada');
+      await userEvent.type(phoneInput, '0000');
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Teléfono inválido.');
+      expect(nameInput).toHaveValue('Persona Rechazada');
+      expect(phoneInput).toHaveValue('0000');
+      unmount();
+
+      // 2. Error on edit preserves input values
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${fixtureMember.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockFailRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+      expect(await screen.findByRole('button', { name: 'Editar datos' })).toBeVisible();
+      await userEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
+      const editPhoneInput = screen.getByLabelText('Teléfono');
+      await userEvent.clear(editPhoneInput);
+      await userEvent.type(editPhoneInput, '999');
+      await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+      expect(await screen.findByRole('alert')).toBeVisible();
+      expect(editPhoneInput).toHaveValue('999');
+    });
+
+    it('OWNER loads and posts durable notes via /notes with zero DemoProvider mounted; RECEPTION cannot see note controls; F05 check-in continues to work', async () => {
+      const notesList = [
+        {
+          id: 'note-f02-1',
+          member_id: fixtureMember.id,
+          author_id: 'admin-1',
+          body: 'Nota existente de dirección',
+          created_at: '2026-10-27T10:00:00Z',
+          voided_at: null,
+          voided_by: null,
+          is_voided: false,
+        },
+      ];
+
+      const requestedPaths: string[] = [];
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        requestedPaths.push(path);
+        if (path === `/api/v1/members/${fixtureMember.id}`) {
+          return new Response(JSON.stringify(fixtureMember));
+        }
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(fixtureReload));
+        }
+        if (path === `/api/v1/members/${fixtureMember.id}/notes` && init?.method === 'POST') {
+          const body = JSON.parse(init?.body as string);
+          expect(body.body).toBe('Socio solicita factura mensual');
+          const created = {
+            id: 'note-f02-2',
+            member_id: fixtureMember.id,
+            author_id: 'admin-1',
+            body: body.body,
+            created_at: '2026-10-27T11:00:00Z',
+            voided_at: null,
+            voided_by: null,
+            is_voided: false,
+          };
+          notesList.unshift(created);
+          return new Response(JSON.stringify(created), { status: 201 });
+        }
+        if (path === `/api/v1/members/${fixtureMember.id}/notes`) {
+          return new Response(JSON.stringify(notesList));
+        }
+        if (path.startsWith('/api/v1/member-check-ins/branches/')) {
+          return new Response(JSON.stringify({
+            id: 'checkin-f02',
+            visit_id: 'visit-f02',
+            member_id: fixtureMember.id,
+            period_id: 'period-f02',
+            branch_id: 'branch-1',
+            recorded_by: 'staff-1',
+            occurred_at: '2026-10-27T12:00:00Z',
+            access_reason: 'eligible',
+            access_warnings: [],
+            replayed: false,
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      // 1. RECEPTION: No /notes request, no note controls visible, F05 check-in works
+      const { unmount: unmountRecep } = render(
+        <MemoryRouter initialEntries={[`/reception/members/${fixtureMember.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+      expect(await screen.findByRole('button', { name: 'Registrar entrada' })).toBeVisible();
+      expect(requestedPaths.some(p => p.includes('/notes'))).toBe(false);
+      expect(screen.queryByRole('button', { name: '+ Agregar nota' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Atención al socio')).not.toBeInTheDocument();
+
+      // Check-in still works (F05 preservation)
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+      expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
+      unmountRecep();
+
+      // 2. OWNER: Zero DemoProvider mounted, /notes requested and displayed, can post new note
+      requestedPaths.length = 0;
+      render(
+        <MemoryRouter initialEntries={[`/owner/members/${fixtureMember.id}`]}>
+          <ApiMemberDetail role="OWNER" request={mockRequest} isAdmin={true} />
+        </MemoryRouter>
+      );
+
+      // Verify /notes was called
+      expect(await screen.findByRole('heading', { name: 'Atención al socio' })).toBeVisible();
+      expect(requestedPaths.some(p => p.includes('/notes'))).toBe(true);
+      expect(screen.getByText('Nota existente de dirección')).toBeInTheDocument();
+
+      // Post new note
+      await userEvent.click(screen.getByRole('button', { name: '+ Agregar nota' }));
+      const noteInput = screen.getByLabelText('Nueva nota');
+      await userEvent.type(noteInput, 'Socio solicita factura mensual');
+      await userEvent.click(screen.getByRole('button', { name: 'Guardar nota' }));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(
+          `/api/v1/members/${fixtureMember.id}/notes`,
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+      expect(await screen.findByText('Socio solicita factura mensual')).toBeInTheDocument();
+    });
   });
 });

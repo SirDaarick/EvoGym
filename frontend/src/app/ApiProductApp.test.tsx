@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -241,9 +241,9 @@ describe('API product routes', () => {
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Mostrador' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Expediente' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Expediente' }));
     expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Períodos de membresía' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('tab', { name: 'Expediente' }));
     expect(await screen.findByText('Plan adicional')).toBeInTheDocument();
     expect(await screen.findByText('Adeudos pendientes')).toBeInTheDocument();
     expect(screen.getByText('order-1')).toBeInTheDocument();
@@ -261,8 +261,8 @@ describe('API product routes', () => {
     expect(screen.queryByText(/visitas totales/i)).not.toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${member.id}/reload?visit_limit=12`, expect.any(Object));
     await userEvent.click(screen.getByRole('tab', { name: 'Mostrador' }));
-    expect(screen.getByText('Mostrador no disponible')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Registrar entrada' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Vista operativa de mostrador' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Registrar entrada' })).toBeInTheDocument();
   });
 
   it('routes reception staff attendance through the operating profile and API roster', async () => {
@@ -348,5 +348,28 @@ describe('API product routes', () => {
       await userEvent.type(search, term);
       expect(screen.getByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
     }
+  });
+
+  it('/reception/members/new and /owner/members/new render the live creation form instead of treating "new" as a :memberId lookup', async () => {
+    // 1. Owner route
+    render(<MemoryRouter initialEntries={['/owner/members/new']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Nuevo socio' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Nombre completo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Teléfono')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Registrar socio' })).toBeInTheDocument();
+    expect(admin.request).not.toHaveBeenCalledWith(expect.stringContaining('/members/new'), expect.any(Object));
+
+    cleanup();
+
+    // 2. Receptionist route
+    access.principal = {
+      kind: 'employee',
+      identity: { id: 'emp-1', display_name: 'Receptionist' },
+      branch: { branch_id: 'branch-1', name: 'Central Branch' },
+      session: { purpose: 'desk' },
+    };
+    render(<MemoryRouter initialEntries={['/reception/members/new']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Nuevo socio' })).toBeInTheDocument();
+    expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/members/new'), expect.any(Object));
   });
 });

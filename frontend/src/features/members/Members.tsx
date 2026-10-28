@@ -9,7 +9,7 @@ import {
 import type { ColumnDef, SortingState } from '@tanstack/react-table';
 import type { DemoState, Member, Role } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
-import { useDemo } from '../../demo/DemoProvider';
+import { DemoProvider, useDemo } from '../../demo/DemoProvider';
 import { addMember } from '../../demo/operations';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import type { Tone } from '../../shared/ui';
@@ -22,6 +22,7 @@ import { formatAttendanceError, getMemberStatusInfo } from './memberDetailUtils'
 import { NewMemberRegistration } from './NewMemberRegistration';
 import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 import { getMemberReload, type MemberReloadResponse } from '../../api/memberReadsApi';
+import type { MemberNoteDTO } from '../../api/membersApi';
 import { readOperationalToken } from '../../api/receptionApi';
 
 export { getMemberStatusInfo };
@@ -195,7 +196,12 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
             ? 'Métricas de retención, distribución de membresías y antigüedad de la base activa.'
             : 'Encuentra a la persona antes de registrar una operación.'
         }
-        action={onRefresh ? <Button variant="secondary" disabled={loading} onClick={onRefresh}>Actualizar</Button> : <Link className="button button-primary" to={rolePath(role, 'members/new')}>Nuevo socio</Link>}
+        action={
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <Link className="button button-primary" to={rolePath(role, 'members/new')}>Nuevo socio</Link>
+            {onRefresh && <Button variant="secondary" disabled={loading} onClick={onRefresh}>Actualizar</Button>}
+          </div>
+        }
       />
       {role === 'OWNER' && demoClock && (
         <OwnerMemberAnalytics
@@ -297,24 +303,187 @@ function resolveOperationalToken(): string | null {
   return readOperationalToken();
 }
 
-export function MemberDetail({ role, liveData }: { role: Role; liveData?: { member: Member; reload: MemberReloadResponse; notes: string | null; status: string; isAdmin: boolean; onRefresh?: () => void } }) {
+export function MemberDetail({
+  role,
+  liveData,
+}: {
+  role: Role;
+  liveData?: {
+    member: Member;
+    reload: MemberReloadResponse;
+    notes: string | null;
+    status: string;
+    isAdmin: boolean;
+    onRefresh?: () => void;
+    onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
+    legalFullName?: string;
+    email?: string | null;
+    liveNotesList?: MemberNoteDTO[];
+    onAddLiveNote?: (body: string) => Promise<void>;
+    noteSubmitting?: boolean;
+    noteError?: string;
+    onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+  };
+}) {
   if (liveData) return <LiveMemberDetail role={role} {...liveData} />;
   return <DemoMemberDetail role={role} />;
 }
 
-function LiveMemberDetail({ role, member, reload, notes, status, isAdmin, onRefresh }: { role: Role; member: Member; reload: MemberReloadResponse; notes: string | null; status: string; isAdmin: boolean; onRefresh?: () => void }) {
-  const [activeTab, setActiveTab] = useState<'counter' | 'record'>('record');
-  const visits = reload.recent_visits.map(visit => ({ id: visit.visit_id, memberId: member.id, observedCheckIn: visit.occurred_at, observedCheckOut: null, autoClosedAt: null }));
+function LiveMemberDetail({
+  role,
+  member,
+  reload,
+  notes,
+  status,
+  isAdmin,
+  onRefresh,
+  onCheckIn,
+  legalFullName,
+  email,
+  liveNotesList,
+  onAddLiveNote,
+  noteSubmitting,
+  noteError,
+  onUpdateMember,
+}: {
+  role: Role;
+  member: Member;
+  reload: MemberReloadResponse;
+  notes: string | null;
+  status: string;
+  isAdmin: boolean;
+  onRefresh?: () => void;
+  onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
+  legalFullName?: string;
+  email?: string | null;
+  liveNotesList?: MemberNoteDTO[];
+  onAddLiveNote?: (body: string) => Promise<void>;
+  noteSubmitting?: boolean;
+  noteError?: string;
+  onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+}) {
+  const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState<{ message: string; error: boolean }>({ message: '', error: false });
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
+  const [editPhone, setEditPhone] = useState(member.phone ?? '');
+  const [editEmail, setEditEmail] = useState(email ?? '');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  // shortcut: entry-only check-in, add exit event when turnstile hardware contract exists
+  const visits = reload.recent_visits.map(visit => ({ id: visit.visit_id, memberId: member.id, observedCheckIn: visit.occurred_at, observedCheckOut: visit.occurred_at, autoClosedAt: null }));
   const currentPeriod = reload.active_periods.find(period => period.is_current) ?? reload.active_periods[0];
   const statusTone = currentPeriod?.access_status === 'eligible' || (!currentPeriod && status === 'active') ? 'success' : currentPeriod ? 'warning' : 'neutral';
+
+  function handleOpenEdit() {
+    setEditFullName(legalFullName ?? member.name);
+    setEditPhone(member.phone ?? '');
+    setEditEmail(email ?? '');
+    setEditError('');
+    setIsEditing(true);
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editFullName.trim() || !editPhone.trim() || savingEdit) return;
+    setSavingEdit(true);
+    setEditError('');
+    try {
+      if (onUpdateMember) {
+        await onUpdateMember({
+          full_name: editFullName.trim(),
+          phone: editPhone.trim(),
+          email: editEmail.trim() || null,
+        });
+      }
+      setIsEditing(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'No se pudo actualizar el socio.');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   return <>
     <div className="member-hero-banner">
       <div className="member-hero-avatar-wrap"><div className="member-hero-avatar" aria-hidden="true">{getMemberInitials(member.name)}</div></div>
       <div className="member-hero-details">
-        <PageHeader eyebrow="Socio" title={member.name} description={member.phone || 'Teléfono no capturado'} action={<div className="member-hero-actions"><Badge tone={statusTone}>{currentPeriod?.access_status ?? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}</Badge>{onRefresh && <Button variant="secondary" onClick={onRefresh}>Actualizar</Button>}</div>} />
+        <PageHeader
+          eyebrow="Socio"
+          title={member.name}
+          description={member.phone || 'Teléfono no capturado'}
+          action={
+            <div className="member-hero-actions">
+              <Badge tone={statusTone}>
+                {currentPeriod?.access_status ?? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
+              </Badge>
+              {onCheckIn && (
+                <div className="member-attendance-action">
+                  <Button className="member-attendance-btn" disabled={loading || currentPeriod?.access_status !== 'eligible'} onClick={async () => { setLoading(true); try { const result = await onCheckIn(); setFeedback({ message: result.message, error: !result.ok }); } catch (err) { setFeedback({ message: err instanceof Error ? err.message : 'No se pudo registrar la entrada.', error: true }); } finally { setLoading(false); } }}>Registrar entrada</Button>
+                  <div className="member-attendance-feedback" role={feedback.error ? 'alert' : 'status'} aria-label="Resultado de asistencia">{feedback.message}</div>
+                </div>
+              )}
+              {onUpdateMember && (
+                <Button variant="secondary" onClick={handleOpenEdit}>
+                  Editar datos
+                </Button>
+              )}
+              {onRefresh && <Button variant="secondary" onClick={onRefresh}>Actualizar</Button>}
+            </div>
+          }
+        />
       </div>
     </div>
+    {isEditing && (
+      <Panel>
+        <h3>Editar datos del socio</h3>
+        <form onSubmit={handleSaveEdit} className="flow">
+          <Field
+            id="edit-full-name"
+            label="Nombre completo"
+            required
+            value={editFullName}
+            onChange={e => setEditFullName(e.target.value)}
+            disabled={savingEdit}
+          />
+          <Field
+            id="edit-phone"
+            label="Teléfono"
+            required
+            value={editPhone}
+            onChange={e => setEditPhone(e.target.value)}
+            disabled={savingEdit}
+          />
+          <Field
+            id="edit-email"
+            label="Correo electrónico (opcional)"
+            type="email"
+            value={editEmail}
+            onChange={e => setEditEmail(e.target.value)}
+            disabled={savingEdit}
+          />
+          {editError && <p role="alert" className="text-danger">{editError}</p>}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+            <Button type="submit" disabled={savingEdit || !editFullName.trim() || !editPhone.trim()}>
+              {savingEdit ? 'Guardando…' : 'Guardar cambios'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setIsEditing(false);
+                setEditError('');
+              }}
+              disabled={savingEdit}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </Panel>
+    )}
     <div className="member-tabs-container">
       <div className="member-tabs-nav" role="tablist" aria-label="Secciones del socio">
         <button type="button" role="tab" id="member-tab-counter" aria-selected={activeTab === 'counter'} aria-controls="member-tabpanel-counter" className={`member-tab-btn ${activeTab === 'counter' ? 'is-active' : ''}`} onClick={() => setActiveTab('counter')}>Mostrador</button>
@@ -322,10 +491,49 @@ function LiveMemberDetail({ role, member, reload, notes, status, isAdmin, onRefr
       </div>
     </div>
     {activeTab === 'counter' ? (
-      <div id="member-tabpanel-counter" role="tabpanel" aria-labelledby="member-tab-counter"><Panel><EmptyState title="Mostrador no disponible">Las operaciones de mostrador no están habilitadas para este perfil de API.</EmptyState></Panel></div>
+      <div id="member-tabpanel-counter" role="tabpanel" aria-labelledby="member-tab-counter">
+        <MemberCounterView
+          member={member}
+          now={reload.server_time}
+          visits={visits}
+          gloves={[]}
+          gloveRentals={[]}
+          lockers={[]}
+          lockerRentals={[]}
+          payments={[]}
+          supplementSales={[]}
+          sales={[]}
+          role={isAdmin ? 'OWNER' : role}
+          reloadState={reload}
+          onSwitchToRecord={() => setActiveTab('record')}
+          liveNotesList={isAdmin ? liveNotesList : undefined}
+          onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
+          noteSubmitting={noteSubmitting}
+          noteError={noteError}
+        />
+      </div>
     ) : (
       <div id="member-tabpanel-record" role="tabpanel" aria-labelledby="member-tab-record">
-        <MemberDetailSections member={member} now={reload.server_time} visits={visits} gloves={[]} gloveRentals={[]} lockers={[]} lockerRentals={[]} payments={[]} supplementSales={[]} sales={[]} role={isAdmin ? 'OWNER' : role} reloadState={reload} liveNotes={notes} liveApi />
+        <MemberDetailSections
+          member={member}
+          now={reload.server_time}
+          visits={visits}
+          gloves={[]}
+          gloveRentals={[]}
+          lockers={[]}
+          lockerRentals={[]}
+          payments={[]}
+          supplementSales={[]}
+          sales={[]}
+          role={isAdmin ? 'OWNER' : role}
+          reloadState={reload}
+          liveNotes={notes}
+          liveNotesList={isAdmin ? liveNotesList : undefined}
+          onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
+          noteSubmitting={noteSubmitting}
+          noteError={noteError}
+          liveApi
+        />
       </div>
     )}
     <div className="flow member-detail-back-flow"><Link to={rolePath(role, 'members')} className="member-back-link">Volver a socios</Link></div>

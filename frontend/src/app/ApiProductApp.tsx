@@ -2,11 +2,12 @@ import { useEffect } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { useAdminSession } from '../features/auth/AdminSessionProvider';
-import { ApiMembers, ApiMemberDetail } from './ApiMembers';
+import { ApiMembers, ApiMemberDetail, ApiNewMember } from './ApiMembers';
 import { ApiStaffAttendance } from './ApiStaffAttendance';
 import { Shifts } from '../features/shifts/Shifts';
 import { OwnerManagementPage } from '../features/auth/OwnerManagementPage';
 import { ApiStaffManagement } from '../features/owner/StaffManagement';
+import { PlanCatalog } from '../features/owner/PlanCatalog';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
@@ -102,12 +103,16 @@ export function ApiProductApp() {
   if (requestedRole !== role) return <Navigate to={homePath(role)} replace />;
 
   let content = <UnavailablePage title={pageTitles[pathname] ?? 'Función no disponible'} />;
-  if (pathname === '/owner/staff' && canManageEmployees && admin.status === 'authenticated') {
+  if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
+    content = <PlanCatalog apiRequest={apiRequest} />;
+  } else if (pathname === '/owner/staff' && canManageEmployees && admin.status === 'authenticated') {
     content = <ApiStaffManagement />;
   } else if (pathname === '/owner/permissions' && isOwner && admin.status === 'authenticated') {
     content = <OwnerManagementPage request={admin.request} />;
   } else if ((pathname === '/owner/members' || pathname === '/reception/members') && (isAdmin || principal.kind === 'employee')) {
     content = <ApiMembers role={role} request={apiRequest} />;
+  } else if ((pathname === '/owner/members/new' || pathname === '/reception/members/new') && (isAdmin || principal.kind === 'employee')) {
+    content = <ApiNewMember role={role} request={apiRequest} />;
   } else if ((pathname.startsWith('/owner/members/') || pathname.startsWith('/reception/members/')) && (isAdmin || principal.kind === 'employee')) {
     content = <ApiMemberDetail role={role} request={apiRequest} isAdmin={isAdmin} />;
   } else if (pathname === '/reception/staff' && principal.kind === 'employee') {

@@ -82,6 +82,19 @@ export interface MemberVisitLog {
   access_warnings: string[];
 }
 
+export interface MemberCheckInResponse {
+  id: string;
+  visit_id: string;
+  member_id: string;
+  period_id: string;
+  branch_id: string;
+  recorded_by: string;
+  occurred_at: string;
+  access_reason: string;
+  access_warnings: string[];
+  replayed: boolean;
+}
+
 export interface MemberReloadResponse {
   profile: MemberProfile;
   active_periods: MemberPeriodRead[];

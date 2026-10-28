@@ -144,3 +144,42 @@ def test_distinct_checkins_link_to_fixed_five_minute_visit_root(tmp_path, monkey
                 assert len(events) == 4
     finally:
         engine.dispose()
+
+
+def test_member_checkin_immediately_reflects_in_member_reload(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "member-checkin-reload", "Reload Checkin")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "RELOAD")
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            initial_reload = client.get(f"/api/v1/members/{member_id}/reload", headers=headers)
+            assert initial_reload.status_code == 200
+            assert initial_reload.json()["recent_visits"] == []
+
+            sale = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={**headers, "Idempotency-Key": "reload-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert sale.status_code == 201
+            period_id = UUID(sale.json()["membership"]["id"])
+
+            checkin = client.post(
+                f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}",
+                headers={**headers, "Idempotency-Key": "reload-checkin"},
+            )
+            assert checkin.status_code == 201
+            checkin_data = checkin.json()
+
+            reload_after = client.get(f"/api/v1/members/{member_id}/reload", headers=headers)
+            assert reload_after.status_code == 200
+            visits = reload_after.json()["recent_visits"]
+            assert len(visits) == 1
+            assert visits[0]["id"] == checkin_data["id"]
+            assert visits[0]["visit_id"] == checkin_data["visit_id"]
+            assert visits[0]["period_id"] == str(period_id)
+            assert visits[0]["branch_id"] == str(branch_id)
+    finally:
+        engine.dispose()

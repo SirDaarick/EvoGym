@@ -76,6 +76,11 @@ class CreateMemberNoteDTO(BaseModel):
 
     body: str = Field(..., min_length=1, max_length=5000)
 
+    @field_validator("body", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
 
 class MemberEligibilityDTO(BaseModel):
     """Member eligibility attestation record representation."""
