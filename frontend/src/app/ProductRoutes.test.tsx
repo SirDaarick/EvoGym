@@ -158,7 +158,7 @@ describe('ProductRoutes mode boundary', () => {
     expect(within(staffPage!).getByRole('columnheader', { name: 'Sueldo mensual' })).toBeInTheDocument();
     expect(within(staffPage!).getByRole('columnheader', { name: 'Credencial' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Editar' }));
-    expect(screen.getByLabelText('Turno asignado')).toBeDisabled();
+    expect(screen.getByText('Horario semanal recurrente')).toBeInTheDocument();
     expect(screen.getByLabelText('Sueldo mensual (MXN) *')).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'Estado de PIN no disponible en API' })).toHaveAttribute('aria-disabled', 'true');
     await userEvent.selectOptions(screen.getByLabelText('Vincular cuenta de acceso'), accountId);
