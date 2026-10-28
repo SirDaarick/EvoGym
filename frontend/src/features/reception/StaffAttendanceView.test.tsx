@@ -627,8 +627,15 @@ describe('StaffAttendanceView', () => {
       expect(selectDropdown).toBeInTheDocument();
       expect(screen.getByText('Bob (08:00 - 16:00)')).toBeInTheDocument();
 
-      // Confirm covering Bob
+      // Confirm button is disabled until a colleague is chosen
       const confirmBtn = screen.getByRole('button', { name: 'Confirmar Entrada' });
+      expect(confirmBtn).toBeDisabled();
+
+      // Select Bob to cover in AnimatedList
+      await user.click(screen.getByText('Bob (08:00 - 16:00)'));
+      expect(confirmBtn).toBeEnabled();
+
+      // Confirm covering Bob
       await user.click(confirmBtn);
 
       // Verify success feedback and API payload

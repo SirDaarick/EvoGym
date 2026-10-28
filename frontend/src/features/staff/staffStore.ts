@@ -138,11 +138,69 @@ export const INITIAL_STAFF: StaffProfile[] = [
   },
 ];
 
-let currentStaff: StaffProfile[] = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : [...INITIAL_STAFF];
+export const EXTENDED_DEMO_STAFF: StaffProfile[] = [
+  ...INITIAL_STAFF.map(s => {
+    if (s.id === 'staff-sheila') return { ...s, shift: 'Descanso (Mar/Jue/Sáb)' };
+    if (s.id === 'staff-maho') return { ...s, shift: 'Descanso (Jue a Dom)' };
+    return s;
+  }),
+  {
+    id: 'staff-valeria',
+    name: 'Valeria',
+    role: 'RECEPTION',
+    shift: 'Matutino (Lun/Mié/Vie)',
+    salaryMinor: 950000,
+    hasPin: true,
+    pin: '1234',
+    active: true,
+    avatarInitials: 'V',
+    department: 'Staff',
+  },
+  {
+    id: 'staff-rodrigo',
+    name: 'Rodrigo',
+    role: 'RECEPTION',
+    shift: 'Vespertino (Lun/Mié/Vie)',
+    salaryMinor: 950000,
+    hasPin: true,
+    pin: '1234',
+    active: true,
+    avatarInitials: 'R',
+    department: 'Staff',
+  },
+  {
+    id: 'staff-camila',
+    name: 'Camila',
+    role: 'RECEPTION',
+    shift: 'Descanso (Mar/Jue)',
+    salaryMinor: 1000000,
+    hasPin: true,
+    pin: '1234',
+    active: true,
+    avatarInitials: 'C',
+    department: 'Staff',
+  },
+  {
+    id: 'staff-diego',
+    name: 'Diego',
+    role: 'RECEPTION',
+    shift: 'Sin turno (Sáb/Dom)',
+    salaryMinor: 800000,
+    hasPin: true,
+    pin: '1234',
+    active: true,
+    avatarInitials: 'D',
+    department: 'Staff',
+  },
+];
+
+const defaultStaffList = () => (import.meta.env.MODE === 'test' ? INITIAL_STAFF : EXTENDED_DEMO_STAFF);
+
+let currentStaff: StaffProfile[] = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : [...defaultStaffList()];
 const listeners = new Set<(staff: StaffProfile[]) => void>();
 
 export function getStaffList(): StaffProfile[] {
-  if (isDemoDataDisabled() && import.meta.env.MODE !== 'test' && currentStaff.length === INITIAL_STAFF.length && currentStaff[0]?.id === 'admin-1') {
+  if (isDemoDataDisabled() && import.meta.env.MODE !== 'test' && currentStaff.length === defaultStaffList().length && currentStaff[0]?.id === 'admin-1') {
     return [];
   }
   return currentStaff;
@@ -196,7 +254,7 @@ export function toggleStaffActive(id: string): StaffProfile | undefined {
 }
 
 export function resetStaff() {
-  currentStaff = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : INITIAL_STAFF.map((s) => ({ ...s }));
+  currentStaff = isDemoDataDisabled() && import.meta.env.MODE !== 'test' ? [] : defaultStaffList().map((s) => ({ ...s }));
   notify();
 }
 
