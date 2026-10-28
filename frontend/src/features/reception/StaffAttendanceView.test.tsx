@@ -382,5 +382,266 @@ describe('StaffAttendanceView', () => {
         ).toBeInTheDocument();
       });
     });
+
+    it('renders corrections column in live mode, shows append-only history, and allows submitting a correction', async () => {
+      const user = userEvent.setup();
+      sessionStorage.setItem('evogym:operational-session', 'live-token');
+
+      const mockAttendance = [
+        {
+          id: 'att-live-100',
+          profile_id: 'staff-charly',
+          branch_id: testBranchId,
+          full_name: 'Charly',
+          position: 'Staff',
+          recorded_by: 'Supervisor Central',
+          occurred_at: '2026-10-23T08:00:00Z',
+          business_date: '2026-10-23',
+          status: 'present',
+          expected_entry_time: '08:00:00',
+          grace_tolerance_minutes: 10,
+          checkout_at: null,
+          checkout_recorded_by: null,
+          series_id: null,
+          occurrence_date: '2026-10-23',
+          device_captured_at: '2026-10-23T08:00:00Z',
+          server_received_at: '2026-10-23T08:00:02Z',
+          idempotency_key: 'idem-charly-1',
+          clock_validation_status: 'accepted',
+          review_required: false,
+          schedule_conflict: false,
+        },
+      ];
+
+      const mockExistingCorrections = [
+        {
+          id: 'corr-001',
+          attendance_id: 'att-live-100',
+          correction_number: 1,
+          field_name: 'notes',
+          original_value: null,
+          corrected_value: 'Registro verificado por supervisor',
+          reason: 'Aclaración de registro inicial',
+          actor_user_id: 'user-admin-1',
+          created_at: '2026-10-23T08:05:00Z',
+        },
+      ];
+
+      let submittedCorrection: any = null;
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+
+        if (url.includes('/api/v1/staff-attendance/branches/') && url.includes('/corrections') && method === 'GET') {
+          return new Response(JSON.stringify(mockExistingCorrections), { status: 200 });
+        }
+
+        if (url.includes('/api/v1/staff-attendance') && method === 'GET') {
+          return new Response(JSON.stringify({ items: mockAttendance, total: mockAttendance.length }), { status: 200 });
+        }
+
+        if (url.includes('/att-live-100/corrections') && method === 'POST') {
+          submittedCorrection = JSON.parse(String(init?.body || '{}'));
+          return new Response(
+            JSON.stringify({
+              id: 'corr-002',
+              attendance_id: 'att-live-100',
+              correction_number: 2,
+              field_name: submittedCorrection.field_name,
+              original_value: submittedCorrection.original_value,
+              corrected_value: submittedCorrection.corrected_value,
+              reason: submittedCorrection.reason,
+              actor_user_id: 'user-admin-1',
+              created_at: '2026-10-23T08:10:00Z',
+            }),
+            { status: 201 }
+          );
+        }
+
+        return new Response('Not Found', { status: 404 });
+      });
+
+      renderView();
+
+      // Verify the Correcciones header exists in the audit table
+      await waitFor(() => {
+        expect(screen.getByRole('columnheader', { name: 'Correcciones' })).toBeInTheDocument();
+      });
+
+      // Verify the existing correction history is shown beneath the cell without overwriting original times
+      expect(screen.getByText('notes:')).toBeInTheDocument();
+      expect(screen.getByText(/Registro verificado por supervisor/)).toBeInTheDocument();
+      expect(screen.getByText(/Aclaración de registro inicial/)).toBeInTheDocument();
+
+      // Original entry time remains visible in the row
+      expect(screen.getAllByText(/hrs/).length).toBeGreaterThanOrEqual(1);
+
+      // Find Corregir button and click it to open the form
+      const correctBtn = screen.getByRole('button', { name: 'Corregir' });
+      await user.click(correctBtn);
+
+      // Button toggles to Cerrar
+      expect(screen.getByRole('button', { name: 'Cerrar' })).toBeInTheDocument();
+
+      // Form fields are visible
+      const fieldSelect = screen.getByLabelText('Campo');
+      const valInput = screen.getByLabelText('Valor corregido');
+      const reasonInput = screen.getByLabelText('Motivo *');
+      const saveCorrectionBtn = screen.getByRole('button', { name: 'Guardar corrección' });
+
+      // Save button is initially disabled (empty inputs)
+      expect(saveCorrectionBtn).toBeDisabled();
+
+      // Select status and fill values
+      await user.selectOptions(fieldSelect, 'status');
+      await user.type(valInput, 'late');
+      // Less than 5 chars reason should keep button disabled
+      await user.type(reasonInput, 'abc');
+      expect(saveCorrectionBtn).toBeDisabled();
+
+      // Add full reason
+      await user.type(reasonInput, ' Llegó con retraso confirmado');
+      expect(saveCorrectionBtn).not.toBeDisabled();
+
+      // Submit the correction
+      await user.click(saveCorrectionBtn);
+
+      // Verify success feedback
+      await waitFor(() => {
+        expect(screen.getByText('Corrección registrada')).toBeInTheDocument();
+      });
+
+      // Verify submitted payload
+      expect(submittedCorrection).not.toBeNull();
+      expect(submittedCorrection.field_name).toBe('status');
+      expect(submittedCorrection.corrected_value).toBe('late');
+      expect(submittedCorrection.reason).toContain('Llegó con retraso confirmado');
+
+      // Verify new correction appears in the history
+      expect(screen.getByText('status:')).toBeInTheDocument();
+      expect(screen.getByText(/late/)).toBeInTheDocument();
+    });
+
+    it('prompts confirmation when unscheduled employee clocks in to cover colleague or perform support shift', async () => {
+      const user = userEvent.setup();
+      sessionStorage.setItem('evogym:operational-session', 'live-token');
+
+      const liveStaffList = [
+        { id: 'staff-alex', name: 'Alex', active: true, avatarInitials: 'A', department: 'Staff' },
+        { id: 'staff-bob', name: 'Bob', shift: '08:00 - 16:00', active: true, avatarInitials: 'B', department: 'Entrenador' },
+      ];
+
+      const mockSchedules = [
+        {
+          id: 'series-bob',
+          profile_id: 'staff-bob',
+          branch_id: testBranchId,
+          start_date: '2026-01-01',
+          weekdays: [0, 1, 2, 3, 4, 5, 6],
+          start_time: '08:00:00',
+          end_time: '16:00:00',
+          end_date: null,
+          occurrence_count: null,
+          cancelled_from: null,
+        },
+      ];
+
+      let recordedPayload: any = null;
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+
+        if (url.includes('/api/v1/staff-schedules/branches/') && method === 'GET') {
+          return new Response(JSON.stringify(mockSchedules), { status: 200 });
+        }
+
+        if (url.includes('/api/v1/staff-attendance/branches/') && url.includes('/corrections') && method === 'GET') {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+
+        if (url.includes('/api/v1/staff-attendance') && method === 'GET') {
+          return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+        }
+
+        if (url.includes('/profiles/staff-alex') && method === 'POST') {
+          recordedPayload = JSON.parse(String(init?.body || '{}'));
+          return new Response(
+            JSON.stringify({
+              id: 'att-alex-1',
+              profile_id: 'staff-alex',
+              branch_id: testBranchId,
+              full_name: 'Alex',
+              position: 'Staff',
+              recorded_by: 'Operador',
+              occurred_at: '2026-10-27T08:00:00Z',
+              business_date: '2026-10-27',
+              status: 'present',
+              expected_entry_time: '08:00:00',
+              grace_tolerance_minutes: 15,
+              checkout_at: null,
+              checkout_recorded_by: null,
+              series_id: recordedPayload.series_id,
+              occurrence_date: '2026-10-27',
+              device_captured_at: '2026-10-27T08:00:00Z',
+              server_received_at: '2026-10-27T08:00:01Z',
+              idempotency_key: recordedPayload.idempotency_key,
+              clock_validation_status: 'accepted',
+              review_required: false,
+              schedule_conflict: false,
+              notes: recordedPayload.notes,
+            }),
+            { status: 201 }
+          );
+        }
+
+        return new Response('Not Found', { status: 404 });
+      });
+
+      render(
+        <DemoProvider>
+          <StaffAttendanceView liveStaff={liveStaffList} branchId={testBranchId} />
+        </DemoProvider>
+      );
+
+      // Wait for schedules to load from live API
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/staff-schedules/branches/'), expect.anything());
+      });
+
+      // Bob has scheduled shift, Alex does not
+      const clockInAlexBtn = screen.getByRole('button', { name: 'Marcar entrada para Alex' });
+      await user.click(clockInAlexBtn);
+
+      // Confirmation modal appears
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('heading', { name: 'Confirmar Entrada' })).toBeInTheDocument();
+      expect(screen.getByText(/no tiene turno programado para hoy/)).toBeInTheDocument();
+
+      // Option A: Cubrir a un compañero is available with Bob in dropdown
+      expect(screen.getByText('Cubrir a un compañero')).toBeInTheDocument();
+      const selectDropdown = screen.getByLabelText('Seleccionar compañero a cubrir');
+      expect(selectDropdown).toBeInTheDocument();
+      expect(screen.getByText('Bob (08:00 - 16:00)')).toBeInTheDocument();
+
+      // Confirm covering Bob
+      const confirmBtn = screen.getByRole('button', { name: 'Confirmar Entrada' });
+      await user.click(confirmBtn);
+
+      // Verify success feedback and API payload
+      await waitFor(() => {
+        expect(screen.getByText('Entrada registrada')).toBeInTheDocument();
+      });
+      expect(recordedPayload).not.toBeNull();
+      expect(recordedPayload.series_id).toBe('series-bob');
+      expect(recordedPayload.covered_profile_id).toBe('staff-bob');
+      expect(recordedPayload.notes).toBe('Cubriendo turno de Bob');
+
+      // In the audit table, the coverage note is displayed
+      expect(screen.getByText('Cubriendo turno de Bob')).toBeInTheDocument();
+    });
   });
 });

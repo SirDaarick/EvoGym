@@ -26,6 +26,19 @@ import {
   type AdminBranchChoice,
   type AdminStaffAccountChoice,
 } from '../../api/staffCredentialsApi';
+import {
+  listScheduleSeries,
+  createScheduleSeries,
+  listScheduleOccurrences,
+  editFutureScheduleSeries,
+  createScheduleException,
+  cancelScheduleSeries,
+  formatScheduleSummary,
+  type StaffScheduleSeriesItem,
+  type StaffScheduleOccurrenceItem,
+  type CreateSeriesPayload,
+  type EditSeriesPayload,
+} from '../../api/staffSchedulesApi';
 export interface ManagedStaffProfile extends StaffProfile {
   staffUserId?: string;
 }
@@ -764,6 +777,21 @@ export function ApiStaffManagement() {
   const [pinIssuingId, setPinIssuingId] = useState<string | null>(null);
   const [issuedPin, setIssuedPin] = useState<{ name: string; value: string } | null>(null);
   const [deviceProfile, setDeviceProfile] = useState<AdminRosterProfileChoice | null>(null);
+  const [scheduleSeries, setScheduleSeries] = useState<StaffScheduleSeriesItem[]>([]);
+  const [scheduleWeekdays, setScheduleWeekdays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [scheduleStartTime, setScheduleStartTime] = useState('06:00');
+  const [scheduleEndTime, setScheduleEndTime] = useState('14:00');
+  const [scheduleStartDate, setScheduleStartDate] = useState('');
+  const [scheduleEndDate, setScheduleEndDate] = useState('');
+  const [scheduleEditScope, setScheduleEditScope] = useState<'this_and_future' | 'all_future'>('this_and_future');
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleCancelling, setScheduleCancelling] = useState(false);
+  const [scheduleError, setScheduleError] = useState('');
+  const [occurrences, setOccurrences] = useState<StaffScheduleOccurrenceItem[]>([]);
+  const [overridingDate, setOverridingDate] = useState<string | null>(null);
+  const [overrideStartTime, setOverrideStartTime] = useState('');
+  const [overrideEndTime, setOverrideEndTime] = useState('');
+  const [exceptionSaving, setExceptionSaving] = useState(false);
   const operation = useRef(0);
 
   useEffect(() => {
@@ -805,17 +833,23 @@ export function ApiStaffManagement() {
     setDeviceProfile(null);
     setError('');
     setNotice('');
+    setScheduleSeries([]);
+    setOccurrences([]);
+    setOverridingDate(null);
+    setScheduleError('');
     setLoading(false);
     if (!nextBranchId || !adminSession || adminSession.status !== 'authenticated') return;
     setLoading(true);
     try {
-      const [nextProfiles, nextAccounts] = await Promise.all([
+      const [nextProfiles, nextAccounts, nextSeries] = await Promise.all([
         listAdminRosterProfiles(adminSession.request, nextBranchId),
         listAdminStaffAccounts(adminSession.request, nextBranchId),
+        listScheduleSeries(adminSession.request, nextBranchId).catch(() => []),
       ]);
       if (operation.current === current) {
         setProfiles(nextProfiles);
         setAccounts(nextAccounts);
+        setScheduleSeries(nextSeries);
       }
     } catch {
       if (operation.current === current) setError('No se pudo cargar el personal de la sucursal. No se usaron datos locales.');
@@ -830,17 +864,163 @@ export function ApiStaffManagement() {
   const activeCount = profiles.filter(profile => profile.is_active).length;
   const inactiveCount = profiles.length - activeCount;
 
+  const getActiveSeriesForProfile = useCallback((profileId: string) => {
+    const list = scheduleSeries.filter(s => s.profile_id === profileId);
+    const active = list.find(s => !s.cancelled_from) ?? list[0];
+    return active;
+  }, [scheduleSeries]);
+
+  const loadOccurrences = useCallback(async (seriesId: string) => {
+    if (!adminSession || adminSession.status !== 'authenticated') return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const toDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const list = await listScheduleOccurrences(adminSession.request, seriesId, today, toDate);
+      setOccurrences(list);
+    } catch {
+      setOccurrences([]);
+    }
+  }, [adminSession]);
+
   function openEdit(profile: AdminRosterProfileChoice) {
     if (!profiles.some(row => row.id === profile.id)) return;
     setEditingProfile(profile);
     setSelectedAccountId(profile.staff_user_id ?? '');
     setError('');
     setNotice('');
+    setScheduleError('');
+    setOverridingDate(null);
+
+    const active = getActiveSeriesForProfile(profile.id);
+    const today = new Date().toISOString().slice(0, 10);
+    if (active) {
+      setScheduleWeekdays(active.weekdays.length ? active.weekdays : [0, 1, 2, 3, 4]);
+      setScheduleStartTime(active.start_time.slice(0, 5));
+      setScheduleEndTime(active.end_time.slice(0, 5));
+      setScheduleStartDate(active.start_date);
+      setScheduleEndDate(active.end_date ?? '');
+      setScheduleEditScope('this_and_future');
+      void loadOccurrences(active.id);
+    } else {
+      setScheduleWeekdays([0, 1, 2, 3, 4]);
+      setScheduleStartTime('06:00');
+      setScheduleEndTime('14:00');
+      setScheduleStartDate(today);
+      setScheduleEndDate('');
+      setScheduleEditScope('this_and_future');
+      setOccurrences([]);
+    }
   }
 
   function closeEdit() {
     setEditingProfile(null);
     setSelectedAccountId('');
+    setOverridingDate(null);
+    setScheduleError('');
+  }
+
+  async function handleSaveSchedule() {
+    if (!editingProfile || !branchId || !adminSession || adminSession.status !== 'authenticated') return;
+    const active = getActiveSeriesForProfile(editingProfile.id);
+    setScheduleSaving(true);
+    setScheduleError('');
+    try {
+      const startTime = scheduleStartTime.length === 5 ? `${scheduleStartTime}:00` : scheduleStartTime;
+      const endTime = scheduleEndTime.length === 5 ? `${scheduleEndTime}:00` : scheduleEndTime;
+
+      if (active) {
+        const payload: EditSeriesPayload = {
+          effective_date: scheduleStartDate,
+          scope: scheduleEditScope,
+          weekdays: scheduleWeekdays,
+          start_time: startTime,
+          end_time: endTime,
+          end_date: scheduleEndDate ? scheduleEndDate : null,
+        };
+        const updated = await editFutureScheduleSeries(adminSession.request, active.id, payload);
+        const nextSeries = await listScheduleSeries(adminSession.request, branchId);
+        setScheduleSeries(nextSeries);
+        await loadOccurrences(updated.id);
+        setNotice('Horario actualizado correctamente.');
+      } else {
+        const payload: CreateSeriesPayload = {
+          start_date: scheduleStartDate,
+          weekdays: scheduleWeekdays,
+          start_time: startTime,
+          end_time: endTime,
+          end_date: scheduleEndDate ? scheduleEndDate : null,
+        };
+        const created = await createScheduleSeries(adminSession.request, branchId, editingProfile.id, payload);
+        const nextSeries = await listScheduleSeries(adminSession.request, branchId);
+        setScheduleSeries(nextSeries);
+        await loadOccurrences(created.id);
+        setNotice('Horario asignado correctamente.');
+      }
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : 'Error al guardar horario.');
+    } finally {
+      setScheduleSaving(false);
+    }
+  }
+
+  async function handleCancelSchedule() {
+    if (!editingProfile || !branchId || !adminSession || adminSession.status !== 'authenticated') return;
+    const active = getActiveSeriesForProfile(editingProfile.id);
+    if (!active) return;
+    setScheduleCancelling(true);
+    setScheduleError('');
+    try {
+      await cancelScheduleSeries(adminSession.request, active.id);
+      const nextSeries = await listScheduleSeries(adminSession.request, branchId);
+      setScheduleSeries(nextSeries);
+      await loadOccurrences(active.id);
+      setNotice('Serie de horario cancelada.');
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : 'Error al cancelar horario.');
+    } finally {
+      setScheduleCancelling(false);
+    }
+  }
+
+  async function handleSkipOccurrence(localDate: string) {
+    if (!editingProfile || !adminSession || adminSession.status !== 'authenticated') return;
+    const active = getActiveSeriesForProfile(editingProfile.id);
+    if (!active) return;
+    setExceptionSaving(true);
+    setScheduleError('');
+    try {
+      await createScheduleException(adminSession.request, active.id, localDate, { action: 'skip' });
+      await loadOccurrences(active.id);
+      setNotice(`Ocurrencia del ${localDate} omitida.`);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : 'Error al omitir ocurrencia.');
+    } finally {
+      setExceptionSaving(false);
+    }
+  }
+
+  async function handleSaveOverride(localDate: string) {
+    if (!editingProfile || !adminSession || adminSession.status !== 'authenticated') return;
+    const active = getActiveSeriesForProfile(editingProfile.id);
+    if (!active || !overrideStartTime || !overrideEndTime) return;
+    setExceptionSaving(true);
+    setScheduleError('');
+    try {
+      const startTime = overrideStartTime.length === 5 ? `${overrideStartTime}:00` : overrideStartTime;
+      const endTime = overrideEndTime.length === 5 ? `${overrideEndTime}:00` : overrideEndTime;
+      await createScheduleException(adminSession.request, active.id, localDate, {
+        action: 'override',
+        start_time: startTime,
+        end_time: endTime,
+      });
+      await loadOccurrences(active.id);
+      setOverridingDate(null);
+      setNotice(`Horario modificado para el ${localDate}.`);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : 'Error al cambiar horario de la ocurrencia.');
+    } finally {
+      setExceptionSaving(false);
+    }
   }
 
   async function linkAccount() {
@@ -863,13 +1043,15 @@ export function ApiStaffManagement() {
       const refresh = ++operation.current;
       setLoading(true);
       try {
-        const [nextProfiles, nextAccounts] = await Promise.all([
+        const [nextProfiles, nextAccounts, nextSeries] = await Promise.all([
           listAdminRosterProfiles(adminSession.request, targetBranch),
           listAdminStaffAccounts(adminSession.request, targetBranch),
+          listScheduleSeries(adminSession.request, targetBranch).catch(() => []),
         ]);
         if (operation.current === refresh) {
           setProfiles(nextProfiles);
           setAccounts(nextAccounts);
+        setScheduleSeries(nextSeries);
           setNotice(`La cuenta ${account.login_identifier} quedó vinculada a ${profile.full_name}.`);
         }
       } catch {
@@ -958,7 +1140,7 @@ export function ApiStaffManagement() {
               <td><div className="staff-cell"><div className="staff-avatar staff-avatar-recep" aria-hidden="true">{profile.full_name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? '').join('').toUpperCase() || '?'}</div>
                 <div className="staff-info"><strong>{profile.full_name}</strong><span className="muted">{profile.position} · ID: {profile.id}</span>
                   {account && <span className="muted">Cuenta: {account.login_identifier} · {account.is_active ? 'Activa' : 'Inactiva'}</span>}</div></div></td>
-              <td>No disponible en API</td><td>No disponible en API</td><td>No disponible en API</td>
+              <td>{formatScheduleSummary(getActiveSeriesForProfile(profile.id))}</td><td>No disponible en API</td><td>No disponible en API</td>
               <td><span className={`badge ${profile.is_active ? 'badge-success' : 'badge-neutral'}`}>{profile.is_active ? '● Activo' : '○ Inactivo'}</span></td>
               <td><div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end', width: '100%', flexWrap: 'wrap' }}>
                 <Button variant="secondary" disabled={!profile.staff_user_id || pinIssuingId === profile.id}
@@ -984,14 +1166,253 @@ export function ApiStaffManagement() {
       <div className="staff-modal-card staff-mgmt-modal-card">
         <div className="staff-modal-header" style={{ width: '100%', textAlign: 'left', alignItems: 'flex-start' }}>
           <h2 id="modal-staff-form-title">Editar Recepcionista</h2>
-          <p className="muted">Los datos de sueldo y turno no están disponibles en la API.</p>
+          <p className="muted">Administra el horario semanal y la cuenta de acceso del colaborador.</p>
         </div>
         <form className="staff-form" onSubmit={event => event.preventDefault()}>
           <div className="field"><label htmlFor="staff-name-input">Nombre completo *</label><input id="staff-name-input" value={editingProfile.full_name} readOnly /></div>
           <div className="field-row">
-            <div className="field"><label htmlFor="staff-shift-select">Turno asignado</label><select id="staff-shift-select" disabled value=""><option value="">No disponible en API</option></select></div>
+
             <div className="field"><label htmlFor="staff-salary-input">Sueldo mensual (MXN) *</label><input id="staff-salary-input" type="text" disabled value="No disponible en API" /></div>
           </div>
+          {(() => {
+            const activeScheduleSeries = getActiveSeriesForProfile(editingProfile.id);
+            return (
+              <div className="staff-pin-toggle-card" style={{ marginTop: '12px' }}>
+                <div>
+                  <strong>Horario semanal recurrente</strong>
+                  <p className="muted" style={{ fontSize: '12px', margin: '2px 0 8px' }}>
+                    Define los días y horas de turno habituales para este colaborador.
+                  </p>
+                </div>
+
+                <div style={{ margin: '8px 0' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Días laborales
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {[
+                      { day: 0, label: 'L' },
+                      { day: 1, label: 'M' },
+                      { day: 2, label: 'X' },
+                      { day: 3, label: 'J' },
+                      { day: 4, label: 'V' },
+                      { day: 5, label: 'S' },
+                      { day: 6, label: 'D' },
+                    ].map(w => {
+                      const active = scheduleWeekdays.includes(w.day);
+                      return (
+                        <button
+                          key={w.day}
+                          type="button"
+                          className={`staff-att-pill-btn ${active ? 'active' : ''}`}
+                          style={active ? { background: 'var(--color-primary, #FC6C06)', color: '#000', fontWeight: 700 } : undefined}
+                          onClick={() => {
+                            setScheduleWeekdays(prev =>
+                              prev.includes(w.day)
+                                ? (prev.length > 1 ? prev.filter(d => d !== w.day) : prev)
+                                : [...prev, w.day].sort((a, b) => a - b)
+                            );
+                          }}
+                          disabled={scheduleSaving || scheduleCancelling}
+                          aria-label={`Día ${w.label}`}
+                        >
+                          {w.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="field-row">
+                  <div className="field">
+                    <label htmlFor="staff-schedule-start-time">Hora inicio</label>
+                    <input
+                      id="staff-schedule-start-time"
+                      type="time"
+                      value={scheduleStartTime}
+                      onChange={e => setScheduleStartTime(e.target.value)}
+                      disabled={scheduleSaving || scheduleCancelling}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="staff-schedule-end-time">Hora fin</label>
+                    <input
+                      id="staff-schedule-end-time"
+                      type="time"
+                      value={scheduleEndTime}
+                      onChange={e => setScheduleEndTime(e.target.value)}
+                      disabled={scheduleSaving || scheduleCancelling}
+                    />
+                  </div>
+                </div>
+
+                <div className="field-row">
+                  <div className="field">
+                    <label htmlFor="staff-schedule-start-date">Fecha inicio</label>
+                    <input
+                      id="staff-schedule-start-date"
+                      type="date"
+                      value={scheduleStartDate}
+                      onChange={e => setScheduleStartDate(e.target.value)}
+                      disabled={scheduleSaving || scheduleCancelling}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="staff-schedule-end-date">Fecha fin (opcional)</label>
+                    <input
+                      id="staff-schedule-end-date"
+                      type="date"
+                      value={scheduleEndDate}
+                      onChange={e => setScheduleEndDate(e.target.value)}
+                      disabled={scheduleSaving || scheduleCancelling}
+                    />
+                  </div>
+                </div>
+
+                {activeScheduleSeries && (
+                  <div className="field" style={{ margin: '8px 0' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                      Alcance de edición
+                    </label>
+                    <JellyRadio
+                      items={[
+                        { value: 'this_and_future', label: 'Esta y futuras' },
+                        { value: 'all_future', label: 'Toda la serie' },
+                      ]}
+                      value={scheduleEditScope}
+                      onChange={val => setScheduleEditScope(val as 'this_and_future' | 'all_future')}
+                      size="sm"
+                      ariaLabel="Alcance de edición de horario"
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <Button
+                    variant="primary"
+                    disabled={scheduleSaving || scheduleCancelling || !scheduleStartTime || !scheduleEndTime || !scheduleStartDate || scheduleWeekdays.length === 0}
+                    onClick={handleSaveSchedule}
+                  >
+                    {scheduleSaving ? 'Guardando horario…' : activeScheduleSeries ? 'Actualizar horario' : 'Asignar horario'}
+                  </Button>
+                  {activeScheduleSeries && (
+                    <Button
+                      variant="secondary"
+                      disabled={scheduleSaving || scheduleCancelling}
+                      onClick={handleCancelSchedule}
+                    >
+                      {scheduleCancelling ? 'Cancelando…' : 'Cancelar serie futura'}
+                    </Button>
+                  )}
+                </div>
+
+                {scheduleError && (
+                  <p role="alert" className="staff-pin-error" style={{ marginTop: '8px' }}>
+                    {scheduleError}
+                  </p>
+                )}
+
+                {activeScheduleSeries && occurrences.length > 0 && (
+                  <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+                    <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--color-muted)' }}>
+                      Próximas ocurrencias (7 días)
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {occurrences.map(occ => {
+                        const isEditing = overridingDate === occ.local_date;
+                        const timeDisplay = `${occ.local_start.slice(11, 16)}–${occ.local_end.slice(11, 16)}`;
+                        return (
+                          <div
+                            key={occ.local_date}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '6px 10px',
+                              background: 'var(--color-canvas, #1a1a1a)',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                            }}
+                          >
+                            <span>
+                              <strong>{occ.local_date}</strong> · {timeDisplay}
+                              {occ.recorded_exception === 'skip' && (
+                                <span className="badge badge-neutral" style={{ marginLeft: '6px', fontSize: '10px' }}>Omitida</span>
+                              )}
+                              {occ.recorded_exception === 'override' && (
+                                <span className="badge badge-warning" style={{ marginLeft: '6px', fontSize: '10px' }}>Hora cambiada</span>
+                              )}
+                            </span>
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              {isEditing ? (
+                                <>
+                                  <input
+                                    type="time"
+                                    value={overrideStartTime}
+                                    onChange={e => setOverrideStartTime(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px' }}
+                                    aria-label="Hora inicio excepción"
+                                  />
+                                  <span>–</span>
+                                  <input
+                                    type="time"
+                                    value={overrideEndTime}
+                                    onChange={e => setOverrideEndTime(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px' }}
+                                    aria-label="Hora fin excepción"
+                                  />
+                                  <Button
+                                    variant="primary"
+                                    disabled={exceptionSaving}
+                                    onClick={() => handleSaveOverride(occ.local_date)}
+                                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                                  >
+                                    Guardar
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    disabled={exceptionSaving}
+                                    onClick={() => setOverridingDate(null)}
+                                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                                  >
+                                    Cancelar
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="secondary"
+                                    disabled={exceptionSaving || occ.recorded_exception === 'skip'}
+                                    onClick={() => handleSkipOccurrence(occ.local_date)}
+                                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                                  >
+                                    Omitir
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    disabled={exceptionSaving}
+                                    onClick={() => {
+                                      setOverridingDate(occ.local_date);
+                                      setOverrideStartTime(occ.local_start.slice(11, 16));
+                                      setOverrideEndTime(occ.local_end.slice(11, 16));
+                                    }}
+                                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                                  >
+                                    Cambiar hora
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {!editingProfile.staff_user_id && <div className="field">
             <label htmlFor="staff-account-select">Vincular cuenta de acceso</label>
             <select id="staff-account-select" value={selectedAccountId} onChange={event => setSelectedAccountId(event.target.value)} disabled={linking}>

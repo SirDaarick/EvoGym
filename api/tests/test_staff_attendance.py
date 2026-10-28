@@ -616,6 +616,34 @@ def test_append_only_correction_rbac_and_immutability(tmp_path, monkeypatch):
             r_admin = client.post(f"/api/v1/staff-attendance/{entry_id}/corrections", headers=admin, json=admin_corr_payload)
             assert r_admin.status_code == 201
 
+            # 3b. Read correction history via GET /{entry_id}/corrections and /records/{entry_id}/corrections
+            # Desk B cannot read corrections for Branch A
+            get_b = client.get(f"/api/v1/staff-attendance/{entry_id}/corrections", headers=desk_b)
+            assert get_b.status_code == 403
+
+            # Desk A reads corrections for Branch A
+            get_a = client.get(f"/api/v1/staff-attendance/{entry_id}/corrections", headers=desk_a)
+            assert get_a.status_code == 200
+            history_a = get_a.json()
+            assert len(history_a) == 2
+            assert history_a[0]["field_name"] == "status"
+            assert {h["corrected_value"] for h in history_a} == {"present", "late"}
+
+            # Alias /records/{entry_id}/corrections also works
+            get_alias = client.get(f"/api/v1/staff-attendance/records/{entry_id}/corrections", headers=desk_a)
+            assert get_alias.status_code == 200
+            assert len(get_alias.json()) == 2
+
+            # Admin can also read corrections
+            get_admin = client.get(f"/api/v1/staff-attendance/{entry_id}/corrections", headers=admin)
+            assert get_admin.status_code == 200
+            assert len(get_admin.json()) == 2
+
+            # Branch-level corrections read: GET /branches/{branch_id}/corrections
+            get_branch = client.get(f"/api/v1/staff-attendance/branches/{branch_a_id}/corrections", headers=desk_a)
+            assert get_branch.status_code == 200
+            assert len(get_branch.json()) == 2
+
             # 4. Verify DB immutability: StaffAttendanceRecord remains unmodified
             with factory() as session:
                 db_record = session.get(StaffAttendanceRecord, UUID(entry_id))
@@ -687,5 +715,85 @@ def test_offline_event_against_cancelled_series(tmp_path, monkeypatch):
                 assert rec is not None
                 assert rec.schedule_conflict is True
                 assert rec.review_required is True
+    finally:
+        engine.dispose()
+
+def test_shift_covering_and_adhoc_support_shift(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, branch_b_id, desk_token, branch_admin_token = _setup(tmp_path)
+    with factory.begin() as session:
+        receptionist_id = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
+        # Employee A (worker without fixed schedule)
+        emp_a = StaffRosterProfile(branch_id=branch_a_id, full_name="Worker Alex", position="Staff")
+        # Employee B (colleague with scheduled shift)
+        emp_b = StaffRosterProfile(branch_id=branch_a_id, full_name="Colleague Bob", position="Staff")
+        emp_b.expected_entry_time = time(8, 0)
+        emp_b.grace_tolerance_minutes = 15
+        session.add_all([emp_a, emp_b])
+        session.flush()
+        emp_a_id = emp_a.id
+        emp_b_id = emp_b.id
+
+        # Scheduled series for Bob: 08:00 - 16:00 on Fridays
+        series_b = StaffScheduleSeries(
+            profile_id=emp_b_id,
+            branch_id=branch_a_id,
+            start_date=date(2026, 10, 1),
+            weekdays=[4],
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            created_by=receptionist_id,
+        )
+        session.add(series_b)
+        session.flush()
+        series_b_id = series_b.id
+
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+
+            # 1. Employee A clocks in covering Employee B's series
+            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 5, tzinfo=timezone.utc))
+            res_cover = client.post(
+                f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{emp_a_id}",
+                headers=desk,
+                json={
+                    "series_id": str(series_b_id),
+                    "occurrence_date": "2026-10-23",
+                    "device_captured_at": "2026-10-23T14:05:00Z",
+                    "idempotency_key": "cover-mark-1",
+                    "covered_profile_id": str(emp_b_id),
+                },
+            )
+            assert res_cover.status_code == 201, res_cover.text
+            data_cover = res_cover.json()
+            assert data_cover["profile_id"] == str(emp_a_id)
+            assert data_cover["status"] == "present"
+            assert data_cover["expected_entry_time"] == "08:00:00"
+            assert "Cubriendo turno de Colleague Bob" in (data_cover.get("notes") or "")
+
+            # 2. Employee with expected_entry_time is None clocks in without series as ad-hoc support shift
+            with factory.begin() as session:
+                emp_c = StaffRosterProfile(branch_id=branch_a_id, full_name="Extra Support Charlie", position="Cleaning")
+                emp_c.expected_entry_time = None
+                emp_c.grace_tolerance_minutes = None
+                session.add(emp_c)
+                session.flush()
+                emp_c_id = emp_c.id
+
+            res_adhoc = client.post(
+                f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{emp_c_id}",
+                headers=desk,
+                json={
+                    "device_captured_at": "2026-10-23T14:10:00Z",
+                    "idempotency_key": "adhoc-mark-1",
+                    "notes": "Turno de apoyo / extraordinario",
+                },
+            )
+            assert res_adhoc.status_code == 201, res_adhoc.text
+            data_adhoc = res_adhoc.json()
+            assert data_adhoc["profile_id"] == str(emp_c_id)
+            assert data_adhoc["status"] == "present"
+            assert data_adhoc["scheduled_start_time"] is None
+            assert "apoyo" in (data_adhoc.get("notes") or "")
     finally:
         engine.dispose()

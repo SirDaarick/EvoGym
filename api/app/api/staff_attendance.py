@@ -48,12 +48,15 @@ class StaffAttendanceItem(BaseModel):
     device_captured_at: datetime | None = None
     server_received_at: datetime | None = None
     idempotency_key: str | None = None
+    covered_profile_id: UUID | None = None
+    notes: str | None = None
     scheduled_start_time: time | None = None
     scheduled_end_time: time | None = None
     clock_skew_seconds: int | None = None
     clock_validation_status: str = "trusted"
     review_required: bool = False
     schedule_conflict: bool = False
+    notes: str | None = None
 
 
 class StaffAttendanceCheckoutItem(BaseModel):
@@ -82,6 +85,8 @@ class StaffAttendanceCreateRequest(BaseModel):
     occurrence_date: date | None = None
     device_captured_at: datetime | None = None
     idempotency_key: str | None = None
+    covered_profile_id: UUID | None = None
+    notes: str | None = None
 
 
 class StaffAttendanceCorrectionRequest(BaseModel):
@@ -137,10 +142,32 @@ def _correction_item(correction: StaffAttendanceCorrection) -> StaffAttendanceCo
     )
 
 
+def _record_notes(
+    session,
+    record: StaffAttendanceRecord | None,
+    profile: StaffRosterProfile,
+    explicit_notes: str | None = None,
+    covered_profile: StaffRosterProfile | None = None,
+) -> str | None:
+    if explicit_notes:
+        return explicit_notes
+    if covered_profile is not None:
+        return f"Cubriendo turno de {covered_profile.full_name}"
+    if record is not None and record.series_id is not None:
+        series = session.get(StaffScheduleSeries, record.series_id)
+        if series is not None and series.profile_id != profile.id:
+            cov = session.get(StaffRosterProfile, series.profile_id)
+            if cov:
+                return f"Cubriendo turno de {cov.full_name}"
+    elif record is not None and record.scheduled_start_time is None and record.expected_entry_time is None:
+        return "Turno de apoyo / extraordinario"
+    return None
+
 def _item(
     record: StaffAttendanceRecord,
     profile: StaffRosterProfile,
     checkout: StaffAttendanceCheckout | None = None,
+    notes: str | None = None,
 ) -> StaffAttendanceItem:
     occurred_at = record.occurred_at
     if occurred_at.tzinfo is None:
@@ -185,6 +212,7 @@ def _item(
         clock_validation_status=record.clock_validation_status or "trusted",
         review_required=bool(record.review_required),
         schedule_conflict=bool(record.schedule_conflict),
+        notes=notes,
     )
 
 
@@ -260,9 +288,33 @@ def list_staff_attendance(
             else []
         )
         checkouts_by_attendance_id = {checkout.attendance_id: checkout for checkout in checkouts}
+        series_ids = {record.series_id for record, _ in rows if record.series_id is not None}
+        series_by_id = (
+            {s.id: s for s in session.scalars(select(StaffScheduleSeries).where(StaffScheduleSeries.id.in_(series_ids))).all()}
+            if series_ids
+            else {}
+        )
+        cov_profile_ids = {s.profile_id for s in series_by_id.values()}
+        cov_profiles = (
+            {p.id: p for p in session.scalars(select(StaffRosterProfile).where(StaffRosterProfile.id.in_(cov_profile_ids))).all()}
+            if cov_profile_ids
+            else {}
+        )
+
+        def _row_notes(rec, prof):
+            if rec.series_id and rec.series_id in series_by_id:
+                s = series_by_id[rec.series_id]
+                if s.profile_id != prof.id:
+                    cov = cov_profiles.get(s.profile_id)
+                    if cov:
+                        return f"Cubriendo turno de {cov.full_name}"
+            elif rec.series_id is None and rec.scheduled_start_time is None and rec.expected_entry_time is None:
+                return "Turno de apoyo / extraordinario"
+            return None
+
         return StaffAttendancePage(
             items=[
-                _item(record, profile, checkouts_by_attendance_id.get(record.id))
+                _item(record, profile, checkouts_by_attendance_id.get(record.id), notes=_row_notes(record, profile))
                 for record, profile in rows
             ],
             total=total,
@@ -372,7 +424,7 @@ def record_staff_attendance(
                             StaffAttendanceCheckout.attendance_id == existing_series_rec.id
                         )
                     )
-                    return _item(existing_series_rec, profile, checkout)
+                    return _item(existing_series_rec, profile, checkout, notes=_record_notes(session, existing_series_rec, profile, explicit_notes=payload.notes if payload else None))
 
             # 3. Existing ad-hoc / legacy lookup (when neither series_id nor idempotency_key is supplied)
             if eff_series_id is None and eff_idempotency_key is None:
@@ -384,12 +436,13 @@ def record_staff_attendance(
                             StaffAttendanceCheckout.attendance_id == existing.id
                         )
                     )
-                    return _item(existing, profile, checkout)
+                    return _item(existing, profile, checkout, notes=_record_notes(session, existing, profile, explicit_notes=payload.notes if payload else None))
 
             if not profile.is_active:
                 raise HTTPException(409, "Inactive staff cannot be marked for attendance.")
 
             schedule_conflict = False
+            covered_profile: StaffRosterProfile | None = None
             review_required = clock_review_flag
             scheduled_start_time: time | None = None
             scheduled_end_time: time | None = None
@@ -398,8 +451,17 @@ def record_staff_attendance(
                 series = session.get(StaffScheduleSeries, eff_series_id)
                 if series is None:
                     raise HTTPException(404, "Schedule series not found.")
-                if series.profile_id != profile.id or series.branch_id != branch.id:
-                    raise HTTPException(400, "Schedule series does not match profile or branch.")
+                if series.branch_id != branch.id:
+                    raise HTTPException(400, "Schedule series does not match branch.")
+                if series.profile_id != profile.id:
+                    target_cov_id = payload.covered_profile_id if (payload and payload.covered_profile_id) else series.profile_id
+                    covered_profile = session.get(StaffRosterProfile, target_cov_id)
+                    if covered_profile is None or covered_profile.branch_id != branch.id:
+                        raise HTTPException(400, "Covered profile does not match branch.")
+                elif payload and payload.covered_profile_id and payload.covered_profile_id != profile.id:
+                    covered_profile = session.get(StaffRosterProfile, payload.covered_profile_id)
+                    if covered_profile is None or covered_profile.branch_id != branch.id:
+                        raise HTTPException(400, "Covered profile does not match branch.")
 
                 # If series was cancelled, retain and store mark with conflict flag
                 if series.cancelled_from is not None and occ_date >= series.cancelled_from:
@@ -437,16 +499,33 @@ def record_staff_attendance(
                 status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
             else:
                 # Ad-hoc / legacy flow
-                if profile.expected_entry_time is None or profile.grace_tolerance_minutes is None:
-                    raise HTTPException(409, "A complete staff entry schedule is required before attendance can be recorded.")
-                local_time = device_time.astimezone(ZoneInfo(branch.timezone))
-                cutoff = datetime.combine(local_time.date(), profile.expected_entry_time) + timedelta(
-                    minutes=profile.grace_tolerance_minutes
-                )
-                status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
-                scheduled_start_time = profile.expected_entry_time
-                scheduled_end_time = None
-                tolerance_minutes = profile.grace_tolerance_minutes
+                if profile.expected_entry_time is None:
+                    if payload and payload.notes:
+                        status = "present"
+                        scheduled_start_time = None
+                        scheduled_end_time = None
+                        tolerance_minutes = profile.grace_tolerance_minutes or 15
+                    else:
+                        raise HTTPException(409, "A complete staff entry schedule is required before attendance can be recorded.")
+                else:
+                    tolerance_minutes = profile.grace_tolerance_minutes if profile.grace_tolerance_minutes is not None else 15
+                    local_time = device_time.astimezone(ZoneInfo(branch.timezone))
+                    cutoff = datetime.combine(local_time.date(), profile.expected_entry_time) + timedelta(
+                        minutes=tolerance_minutes
+                    )
+                    status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
+                    scheduled_start_time = profile.expected_entry_time
+                    scheduled_end_time = None
+
+            eff_notes = _record_notes(
+                session,
+                None,
+                profile,
+                explicit_notes=payload.notes if payload else None,
+                covered_profile=covered_profile,
+            )
+            if not eff_notes and eff_series_id is None and scheduled_start_time is None:
+                eff_notes = (payload and payload.notes) or "Turno de apoyo / extraordinario"
 
             record = StaffAttendanceRecord(
                 branch_id=branch.id,
@@ -504,8 +583,12 @@ def record_staff_attendance(
                 )
                 return _item(existing, profile, checkout)
 
-            return _item(record, profile)
+            return _item(record, profile, notes=eff_notes)
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise
     except IntegrityError as exc:
         orig_msg = str(getattr(exc, "orig", exc))
         if any(c in orig_msg for c in ("uq_staff_attendance", "UNIQUE constraint", "unique constraint")):
@@ -611,4 +694,70 @@ def record_staff_attendance_correction(
         )
         session.add(correction)
         session.flush()
+        session.flush()
         return _correction_item(correction)
+
+
+@router.get("/branches/{branch_id}/corrections", response_model=list[StaffAttendanceCorrectionItem])
+def list_branch_attendance_corrections(
+    branch_id: UUID,
+    request: Request,
+    business_date: date | None = Query(default=None),
+    principal: RosterPrincipal = Depends(_principal),
+):
+    factory = request.app.state.session_factory
+    with factory() as session:
+        if not principal.is_admin:
+            if principal.branch_id is None or principal.branch_id != branch_id:
+                raise HTTPException(403, "Receptionists may only view corrections in their assigned branch.")
+            try:
+                authorize(session, principal.staff_id, Permission.STAFF_ATTENDANCE_RECORD, branch_id)
+            except AuthorizationDenied:
+                try:
+                    authorize(session, principal.staff_id, Permission.STAFF_ROSTER_MANAGE, branch_id)
+                except AuthorizationDenied:
+                    raise HTTPException(403, "Not authorized to view corrections.") from None
+
+        query = (
+            select(StaffAttendanceCorrection)
+            .join(StaffAttendanceRecord, StaffAttendanceRecord.id == StaffAttendanceCorrection.attendance_id)
+            .where(StaffAttendanceRecord.branch_id == branch_id)
+        )
+        if business_date is not None:
+            query = query.where(StaffAttendanceRecord.business_date == business_date)
+        corrections = session.scalars(
+            query.order_by(StaffAttendanceCorrection.corrected_at.asc(), StaffAttendanceCorrection.id.asc())
+        ).all()
+        return [_correction_item(c) for c in corrections]
+
+
+@router.get("/{attendance_id}/corrections", response_model=list[StaffAttendanceCorrectionItem])
+@router.get("/records/{attendance_id}/corrections", response_model=list[StaffAttendanceCorrectionItem])
+def list_staff_attendance_corrections(
+    attendance_id: UUID,
+    request: Request,
+    principal: RosterPrincipal = Depends(_principal),
+):
+    factory = request.app.state.session_factory
+    with factory() as session:
+        record = session.get(StaffAttendanceRecord, attendance_id)
+        if record is None:
+            raise HTTPException(404, "Attendance entry not found.")
+
+        if not principal.is_admin:
+            if principal.branch_id is None or principal.branch_id != record.branch_id:
+                raise HTTPException(403, "Receptionists may only view records in their assigned branch.")
+            try:
+                authorize(session, principal.staff_id, Permission.STAFF_ATTENDANCE_RECORD, record.branch_id)
+            except AuthorizationDenied:
+                try:
+                    authorize(session, principal.staff_id, Permission.STAFF_ROSTER_MANAGE, record.branch_id)
+                except AuthorizationDenied:
+                    raise HTTPException(403, "Not authorized to view corrections.") from None
+
+        corrections = session.scalars(
+            select(StaffAttendanceCorrection)
+            .where(StaffAttendanceCorrection.attendance_id == record.id)
+            .order_by(StaffAttendanceCorrection.corrected_at.asc(), StaffAttendanceCorrection.id.asc())
+        ).all()
+        return [_correction_item(c) for c in corrections]

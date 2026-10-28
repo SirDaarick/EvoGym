@@ -1,7 +1,18 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+let mockAdminSession: any = null;
+vi.mock('../auth/AdminSessionProvider', () => ({
+  useAdminSession: () => {
+    if (!mockAdminSession) throw new Error('No admin session');
+    return mockAdminSession;
+  },
+  useOptionalAdminSession: () => mockAdminSession,
+}));
+
+import { ApiStaffManagement } from './StaffManagement';
 import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { resetStaff } from '../staff/staffStore';
@@ -20,6 +31,7 @@ async function mount(path = '/owner/staff') {
 describe('StaffManagement (T02 — Admin Staff Management)', () => {
   beforeEach(() => {
     resetStaff();
+    mockAdminSession = null;
   });
 
   it('renders reception staff table with salary and without KPI summary cards', async () => {
@@ -189,6 +201,210 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId('pairing-code-display')).not.toBeInTheDocument();
+    });
+  });
+});
+
+
+describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
+  const branchId = '00000000-0000-4000-8000-000000000001';
+  const profileId = '11111111-1111-4111-8111-111111111111';
+
+  it('displays active schedule summary in Turno column and allows updating schedule', async () => {
+    const user = userEvent.setup();
+    let updatedPayload: any = null;
+
+    const mockRequest = vi.fn().mockImplementation(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (path.includes('/api/v1/admin/staff-accounts/branches')) {
+        return new Response(JSON.stringify({
+          branches: [{ id: branchId, code: 'SUR', name: 'Sucursal Sur' }],
+        }), { status: 200 });
+      }
+      if (path.includes('/roster-profiles')) {
+        return new Response(JSON.stringify({
+          profiles: [{ id: profileId, full_name: 'Lucia Mendez', position: 'Recepcionista', is_active: true, staff_user_id: null }],
+        }), { status: 200 });
+      }
+      if (path.includes('/admin/staff-accounts?')) {
+        return new Response(JSON.stringify({ accounts: [] }), { status: 200 });
+      }
+      if (path.includes('/api/v1/staff-schedules/branches/') && method === 'GET') {
+        return new Response(JSON.stringify([
+          {
+            id: 'series-101',
+            profile_id: profileId,
+            branch_id: branchId,
+            start_date: '2026-10-01',
+            weekdays: [0, 1, 2, 3, 4],
+            start_time: '06:00:00',
+            end_time: '14:00:00',
+            end_date: null,
+            occurrence_count: null,
+            cancelled_from: null,
+          },
+        ]), { status: 200 });
+      }
+      if (path.includes('/occurrences?') && method === 'GET') {
+        return new Response(JSON.stringify([
+          {
+            series_id: 'series-101',
+            local_date: '2026-10-28',
+            local_start: '2026-10-28T06:00:00',
+            local_end: '2026-10-28T14:00:00',
+            starts_at: '2026-10-28T12:00:00Z',
+            ends_at: '2026-10-28T20:00:00Z',
+            timezone: 'America/Mexico_City',
+            recorded_exception: null,
+          },
+        ]), { status: 200 });
+      }
+      if (path.includes('/edit') && method === 'PATCH') {
+        updatedPayload = JSON.parse(init?.body as string);
+        return new Response(JSON.stringify({
+          id: 'series-101',
+          profile_id: profileId,
+          branch_id: branchId,
+          start_date: '2026-10-01',
+          weekdays: updatedPayload.weekdays,
+          start_time: updatedPayload.start_time,
+          end_time: updatedPayload.end_time,
+          end_date: null,
+          occurrence_count: null,
+          cancelled_from: null,
+        }), { status: 201 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    mockAdminSession = {
+      status: 'authenticated',
+      request: mockRequest,
+    };
+
+    render(
+      <MemoryRouter>
+        <ApiStaffManagement />
+      </MemoryRouter>
+    );
+
+    // Wait for branch to load
+    await waitFor(() => {
+      expect(screen.getByText(/Sucursal Sur/)).toBeInTheDocument();
+    });
+
+    // Select branch
+    const branchSelect = screen.getByLabelText('Sucursal');
+    await user.selectOptions(branchSelect, branchId);
+
+    // Turno column should display the active schedule summary
+    await waitFor(() => {
+      expect(screen.getByText('L, M, X, J, V · 06:00–14:00')).toBeInTheDocument();
+    });
+
+    // Open edit modal
+    const editBtn = screen.getByRole('button', { name: 'Editar' });
+    await user.click(editBtn);
+
+    // Modal should show weekly recurring schedule card
+    expect(screen.getByText('Horario semanal recurrente')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/2026-10-28/)).toBeInTheDocument();
+    });
+
+    // Change time and submit
+    const startTimeInput = screen.getByLabelText('Hora inicio');
+    await user.clear(startTimeInput);
+    await user.type(startTimeInput, '07:00');
+
+    const updateBtn = screen.getByRole('button', { name: 'Actualizar horario' });
+    await user.click(updateBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Horario actualizado correctamente.')).toBeInTheDocument();
+    });
+    expect(updatedPayload).not.toBeNull();
+    expect(updatedPayload.start_time).toBe('07:00:00');
+  });
+
+  it('disables submit button while schedule request is in flight', async () => {
+    const user = userEvent.setup();
+    let resolvePost: (res: Response) => void;
+    const postPromise = new Promise<Response>(resolve => {
+      resolvePost = resolve;
+    });
+
+    const mockRequest = vi.fn().mockImplementation(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (path.includes('/api/v1/admin/staff-accounts/branches')) {
+        return new Response(JSON.stringify({
+          branches: [{ id: branchId, code: 'SUR', name: 'Sucursal Sur' }],
+        }), { status: 200 });
+      }
+      if (path.includes('/roster-profiles')) {
+        return new Response(JSON.stringify({
+          profiles: [{ id: profileId, full_name: 'Lucia Mendez', position: 'Recepcionista', is_active: true, staff_user_id: null }],
+        }), { status: 200 });
+      }
+      if (path.includes('/admin/staff-accounts?')) {
+        return new Response(JSON.stringify({ accounts: [] }), { status: 200 });
+      }
+      if (path.includes('/api/v1/staff-schedules/branches/') && method === 'GET') {
+        return new Response(JSON.stringify([]), { status: 200 }); // Sin horario
+      }
+      if (path.includes('/profiles/') && method === 'POST') {
+        return postPromise; // In-flight
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    mockAdminSession = {
+      status: 'authenticated',
+      request: mockRequest,
+    };
+
+    render(
+      <MemoryRouter>
+        <ApiStaffManagement />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByText(/Sucursal Sur/)).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
+
+    // Displays Sin horario
+    await waitFor(() => {
+      expect(screen.getByText('Sin horario')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Editar' }));
+
+    const assignBtn = screen.getByRole('button', { name: 'Asignar horario' });
+    expect(assignBtn).not.toBeDisabled();
+
+    // Click assign
+    await user.click(assignBtn);
+
+    // Button should be disabled and in flight
+    expect(assignBtn).toBeDisabled();
+    expect(screen.getByText('Guardando horario…')).toBeInTheDocument();
+
+    // Resolve request
+    resolvePost!(new Response(JSON.stringify({
+      id: 'series-new',
+      profile_id: profileId,
+      branch_id: branchId,
+      start_date: '2026-10-27',
+      weekdays: [0, 1, 2, 3, 4],
+      start_time: '06:00:00',
+      end_time: '14:00:00',
+      end_date: null,
+      occurrence_count: null,
+      cancelled_from: null,
+    }), { status: 201 }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Horario asignado correctamente.')).toBeInTheDocument();
     });
   });
 });

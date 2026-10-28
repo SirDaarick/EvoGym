@@ -111,7 +111,7 @@ class SeriesEdit(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope(self):
-        if self.scope not in {"this_and_future", "series"}:
+        if self.scope not in {"this_and_future", "series", "all_future"}:
             raise ValueError("scope must be this_and_future or series")
         if self.end_date is not None and self.occurrence_count is not None:
             raise ValueError("Choose either end_date or occurrence_count")
@@ -628,7 +628,7 @@ def edit_series(series_id: UUID, payload: SeriesEdit, request: Request, principa
         now_local = datetime.now(zone)
         if payload.effective_date < now_local.date():
             raise HTTPException(422, "Series edits must start on a future local date.")
-        effective_from = max(now_local.date(), old.start_date) if payload.scope == "series" else payload.effective_date
+        effective_from = max(now_local.date(), old.start_date) if payload.scope in {"series", "all_future"} else payload.effective_date
         search_end = date.max if effective_from > date.max - timedelta(days=13) else effective_from + timedelta(days=13)
         split_day = next((
             day for day in _occurrence_dates(old, effective_from, search_end)

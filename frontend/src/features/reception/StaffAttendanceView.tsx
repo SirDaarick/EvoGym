@@ -13,8 +13,14 @@ import {
   OperationalApiHttpError,
   OperationalApiNetworkError,
   type StaffAttendanceItem,
+  correctStaffAttendance,
+  getStaffAttendanceCorrections,
+  listBranchAttendanceCorrections,
+  type StaffAttendanceCorrectionItem,
 } from '../../api/staffAttendanceApi';
-import { readOperationalToken } from '../../api/receptionApi';
+import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi';
+import type { StaffScheduleSeriesItem } from '../../api/staffSchedulesApi';
+import type { RecordAttendancePayload } from '../../api/staffAttendanceApi';
 import { createEmptyDemoState } from '../../demo/adapter';
 import { Button, EmptyState, PageHeader } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
@@ -94,6 +100,25 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     type: 'success' | 'error';
   } | null>(null);
 
+  const [correctionsByAttendanceId, setCorrectionsByAttendanceId] = useState<Record<string, StaffAttendanceCorrectionItem[]>>({});
+  const [correctingRecordId, setCorrectingRecordId] = useState<string | null>(null);
+  const [correctionField, setCorrectionField] = useState<'clock_in_at' | 'clock_out_at' | 'status' | 'notes'>('clock_in_at');
+  const [correctionValue, setCorrectionValue] = useState('');
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
+
+  // Branch schedules for shift detection
+  const [branchSchedules, setBranchSchedules] = useState<StaffScheduleSeriesItem[]>([]);
+
+  // Modal for unscheduled staff clock-in
+  interface UnscheduledPromptState {
+    staff: StaffAttendancePerson;
+    selectedOption: 'cover' | 'support';
+    coveredStaffId: string;
+  }
+  const [unscheduledPrompt, setUnscheduledPrompt] = useState<UnscheduledPromptState | null>(null);
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+
   const fetchLiveAttendance = useCallback(async () => {
     if (!operationalToken && !liveRequest) return;
     try {
@@ -106,7 +131,56 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       } else {
         records = (await listStaffAttendance(today, operationalToken!)).items;
       }
+      let correctionsList: StaffAttendanceCorrectionItem[] = [];
+      if (liveRequest) {
+        try {
+          const corrRes = await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/corrections?business_date=${today}`);
+          if (corrRes.ok) {
+            correctionsList = (await corrRes.json()) as StaffAttendanceCorrectionItem[];
+          }
+        } catch {
+          // ignore corrections load error
+        }
+      } else {
+        try {
+          correctionsList = await listBranchAttendanceCorrections(branchId, today, operationalToken!);
+        } catch {
+          // ignore corrections load error
+        }
+      }
+
+      let seriesList: StaffScheduleSeriesItem[] = [];
+      if (liveRequest) {
+        try {
+          const schedRes = await liveRequest(`/api/v1/staff-schedules/branches/${encodeURIComponent(branchId ?? '')}`);
+          if (schedRes.ok) {
+            seriesList = (await schedRes.json()) as StaffScheduleSeriesItem[];
+          }
+        } catch {
+          // ignore schedule load error
+        }
+      } else if (operationalToken) {
+        try {
+          const config = getReceptionConfig();
+          const targetBranchId = branchId ?? config.branchId;
+          const schedRes = await fetch(`${config.apiOrigin}/api/v1/staff-schedules/branches/${encodeURIComponent(targetBranchId)}`, {
+            headers: { Authorization: `Bearer ${operationalToken}` },
+          });
+          if (schedRes.ok) {
+            seriesList = (await schedRes.json()) as StaffScheduleSeriesItem[];
+          }
+        } catch {
+          // ignore schedule load error
+        }
+      }
+      setBranchSchedules(seriesList);
       setLiveRecords(records);
+      const corrMap: Record<string, StaffAttendanceCorrectionItem[]> = {};
+      correctionsList.forEach(c => {
+        if (!corrMap[c.attendance_id]) corrMap[c.attendance_id] = [];
+        corrMap[c.attendance_id].push(c);
+      });
+      setCorrectionsByAttendanceId(corrMap);
       setLiveError(null);
     } catch (err) {
       if (err instanceof OperationalApiHttpError || err instanceof OperationalApiNetworkError) {
@@ -116,6 +190,88 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       }
     }
   }, [branchId, liveRequest, operationalToken]);
+
+  function handleStartCorrection(recId: string) {
+    if (correctingRecordId === recId) {
+      setCorrectingRecordId(null);
+      return;
+    }
+    setCorrectingRecordId(recId);
+    setCorrectionField('clock_in_at');
+    setCorrectionValue('');
+    setCorrectionReason('');
+  }
+
+  async function handleSubmitCorrection(recordId: string) {
+    if (!correctionReason.trim() || correctionReason.trim().length < 5 || !correctionValue.trim()) {
+      setToast({
+        open: true,
+        type: 'error',
+        title: 'Formulario incompleto',
+        description: 'El motivo debe tener al menos 5 caracteres y el valor corregido es requerido.',
+      });
+      return;
+    }
+    setCorrectionSubmitting(true);
+    try {
+      const rec = liveRecords.find(r => r.id === recordId);
+      const originalValue = rec
+        ? correctionField === 'clock_in_at'
+          ? (rec.device_captured_at ?? rec.occurred_at)
+          : correctionField === 'clock_out_at'
+          ? (rec.checkout_at ?? '')
+          : correctionField === 'status'
+          ? rec.status
+          : ''
+        : '';
+
+      const payload = {
+        field_name: correctionField,
+        original_value: originalValue || null,
+        corrected_value: correctionValue.trim(),
+        reason: correctionReason.trim(),
+      };
+
+      let result: StaffAttendanceCorrectionItem;
+      if (liveRequest) {
+        const response = await liveRequest(`/api/v1/staff-attendance/${encodeURIComponent(recordId)}/corrections`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Error al enviar corrección.');
+        }
+        result = (await response.json()) as StaffAttendanceCorrectionItem;
+      } else {
+        result = await correctStaffAttendance(recordId, payload, operationalToken ?? undefined);
+      }
+
+      setCorrectionsByAttendanceId(prev => ({
+        ...prev,
+        [recordId]: [...(prev[recordId] ?? []), result],
+      }));
+      setCorrectingRecordId(null);
+      setCorrectionValue('');
+      setCorrectionReason('');
+      setToast({
+        open: true,
+        type: 'success',
+        title: 'Corrección registrada',
+        description: 'La corrección se registró en la auditoría sin modificar los datos originales.',
+      });
+    } catch (err) {
+      setToast({
+        open: true,
+        type: 'error',
+        title: 'Error al corregir asistencia',
+        description: err instanceof Error ? err.message : 'Error al guardar la corrección.',
+      });
+    } finally {
+      setCorrectionSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (isLive) {
@@ -148,6 +304,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
               id: activeRec.id,
               clockInAt: activeRec.device_captured_at ?? activeRec.occurred_at,
               recordedBy: activeRec.recorded_by,
+              notes: activeRec.notes ?? undefined,
               status: activeRec.status,
               review_required:
                 activeRec.review_required || activeRec.clock_validation_status === 'review_required',
@@ -164,6 +321,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                   clockInAt: latestClosed.device_captured_at ?? latestClosed.occurred_at,
                   clockOutAt: latestClosed.checkout_at,
                   recordedBy: latestClosed.recorded_by,
+                  notes: latestClosed.notes ?? undefined,
                   status: latestClosed.status,
                   review_required:
                     latestClosed.review_required ||
@@ -237,7 +395,71 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     });
   }, [activeStaff, staffStatuses, statusFilter, departmentFilter, searchQuery]);
 
-  async function handleClockIn(staff: StaffAttendancePerson) {
+
+  const hasScheduledShiftToday = useCallback((staff: StaffAttendancePerson): boolean => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayWeekday = (new Date().getDay() + 6) % 7;
+    if (branchSchedules.length > 0) {
+      return branchSchedules.some(s =>
+        s.profile_id === staff.id &&
+        s.start_date <= todayStr &&
+        (!s.end_date || s.end_date >= todayStr) &&
+        (!s.cancelled_from || s.cancelled_from > todayStr) &&
+        s.weekdays.includes(todayWeekday)
+      );
+    }
+    return Boolean(staff.shift && staff.shift !== 'Sin turno' && staff.shift !== 'Descanso');
+  }, [branchSchedules]);
+
+  const colleaguesWithShift = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayWeekday = (new Date().getDay() + 6) % 7;
+    if (branchSchedules.length > 0) {
+      return activeStaff
+        .filter(s => {
+          const isClockedIn = staffStatuses.get(s.id)?.isClockedIn;
+          if (isClockedIn) return false;
+          return branchSchedules.some(series =>
+            series.profile_id === s.id &&
+            series.start_date <= todayStr &&
+            (!series.end_date || series.end_date >= todayStr) &&
+            (!series.cancelled_from || series.cancelled_from > todayStr) &&
+            series.weekdays.includes(todayWeekday)
+          );
+        })
+        .map(s => {
+          const series = branchSchedules.find(series =>
+            series.profile_id === s.id &&
+            series.start_date <= todayStr &&
+            (!series.end_date || series.end_date >= todayStr) &&
+            (!series.cancelled_from || series.cancelled_from > todayStr) &&
+            series.weekdays.includes(todayWeekday)
+          );
+          const timeText = series
+            ? `${series.start_time.slice(0, 5)} - ${series.end_time.slice(0, 5)}`
+            : (s.shift || 'Horario regular');
+          return {
+            staffId: s.id,
+            name: s.name,
+            seriesId: series?.id,
+            displayName: `${s.name} (${timeText})`,
+          };
+        });
+    }
+    return activeStaff
+      .filter(s => {
+        const isClockedIn = staffStatuses.get(s.id)?.isClockedIn;
+        if (isClockedIn) return false;
+        return Boolean(s.shift && s.shift !== 'Sin turno' && s.shift !== 'Descanso');
+      })
+      .map(s => ({
+        staffId: s.id,
+        name: s.name,
+        seriesId: undefined,
+        displayName: `${s.name} (${s.shift})`,
+      }));
+  }, [activeStaff, branchSchedules, staffStatuses]);
+  async function handleClockIn(staff: StaffAttendancePerson, options?: { series_id?: string; covered_profile_id?: string; notes?: string }) {
     if (isLive) {
       try {
         const idempotencyKey =
@@ -247,20 +469,36 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         const deviceCapturedAt = new Date().toISOString();
         const today = deviceCapturedAt.slice(0, 10);
 
-        const payload = {
+        const payload: RecordAttendancePayload = {
           occurrence_date: today,
           device_captured_at: deviceCapturedAt,
           idempotency_key: idempotencyKey,
+          series_id: options?.series_id,
+          covered_profile_id: options?.covered_profile_id,
+          notes: options?.notes ?? (notesByStaffId[staff.id]?.trim() || undefined),
         };
         const record = liveRequest
-          ? await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/profiles/${encodeURIComponent(staff.id)}`, { method: 'POST', body: JSON.stringify(payload) }).then(async response => {
-              if (!response.ok) throw new Error('No se pudo registrar la entrada desde la API.');
+          ? await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/profiles/${encodeURIComponent(staff.id)}`, {
+              method: 'POST',
+              body: JSON.stringify(payload),
+            }).then(async response => {
+              if (!response.ok) {
+                const messages: Record<number, string> = {
+                  401: 'La sesión expiró o fue revocada. Inicia sesión nuevamente.',
+                  403: 'No tienes autorización para realizar esta acción.',
+                  409: 'La solicitud entra en conflicto con el estado actual.',
+                  429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.',
+                  422: 'Revisa los datos enviados e intenta nuevamente.',
+                };
+                throw new Error(messages[response.status] ?? 'No se pudo registrar la entrada desde la API.');
+              }
               return response.json() as Promise<StaffAttendanceItem>;
             })
           : await recordStaffAttendance(
           staff.id,
           payload,
-          operationalToken ?? undefined
+          operationalToken ?? undefined,
+          branchId
         );
 
         setLiveRecords(prev => [record, ...prev.filter(r => r.id !== record.id)]);
@@ -291,7 +529,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       return;
     }
 
-    const note = notesByStaffId[staff.id]?.trim() || '';
+    const note = options?.notes ?? (notesByStaffId[staff.id]?.trim() || '');
 
     if (!transact) return;
     const transactionResult = transact(currentState =>
@@ -323,6 +561,44 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     }
   }
 
+
+  function onClickClockIn(staff: StaffAttendancePerson) {
+    if (!hasScheduledShiftToday(staff)) {
+      const available = colleaguesWithShift.filter(c => c.staffId !== staff.id);
+      setUnscheduledPrompt({
+        staff,
+        selectedOption: available.length > 0 ? 'cover' : 'support',
+        coveredStaffId: available[0]?.staffId ?? '',
+      });
+      return;
+    }
+    void handleClockIn(staff);
+  }
+
+  async function handleConfirmUnscheduled() {
+    if (!unscheduledPrompt) return;
+    setConfirmSubmitting(true);
+    try {
+      const { staff, selectedOption, coveredStaffId } = unscheduledPrompt;
+      if (selectedOption === 'cover') {
+        const colleague = colleaguesWithShift.find(c => c.staffId === coveredStaffId);
+        const coveredColleague = activeStaff.find(s => s.id === coveredStaffId);
+        const coveredName = coveredColleague?.name ?? colleague?.name ?? 'compañero';
+        await handleClockIn(staff, {
+          series_id: colleague?.seriesId,
+          covered_profile_id: coveredStaffId,
+          notes: `Cubriendo turno de ${coveredName}`,
+        });
+      } else {
+        await handleClockIn(staff, {
+          notes: 'Turno de apoyo / extraordinario',
+        });
+      }
+      setUnscheduledPrompt(null);
+    } finally {
+      setConfirmSubmitting(false);
+    }
+  }
   async function handleClockOut(staff: StaffAttendancePerson) {
     if (isLive) {
       const statusInfo = staffStatuses.get(staff.id);
@@ -419,7 +695,9 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         clock_out_at: rec.checkout_at,
         recordedBy: rec.recorded_by,
         recorded_by: rec.recorded_by,
-        notes: rec.review_required
+        notes: rec.notes
+          ? rec.notes
+          : rec.review_required
           ? `[Revisión requerida] Estado: ${rec.status}`
           : rec.status !== 'present'
           ? `Estado: ${rec.status}`
@@ -769,7 +1047,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                         <Button
                           variant="primary"
                           className="staff-btn-clock-in"
-                          onClick={() => handleClockIn(staff)}
+                          onClick={() => onClickClockIn(staff)}
                           aria-label={`Marcar entrada para ${staff.name}`}
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -828,6 +1106,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                   <th scope="col">Hora Salida</th>
                   <th scope="col">Registrado por</th>
                   <th scope="col">Notas</th>
+                  {isLive && <th scope="col">Correcciones</th>}
                 </tr>
               </thead>
               <tbody>
@@ -857,6 +1136,102 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                     </td>
                     <td>{rec.recordedBy ?? rec.recorded_by}</td>
                     <td>{rec.notes ? rec.notes : <span style={{ color: 'var(--color-muted)' }}>—</span>}</td>
+                    {isLive && (
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {(correctionsByAttendanceId[rec.id] ?? []).length > 0 && (
+                            <div style={{ fontSize: '12px', color: 'var(--color-muted)', marginBottom: '4px' }}>
+                              {(correctionsByAttendanceId[rec.id] ?? []).map(c => (
+                                <div key={c.id} style={{ marginBottom: '2px', lineHeight: 1.3 }}>
+                                  <span style={{ fontWeight: 600 }}>{c.field_name}:</span> {c.corrected_value}{' '}
+                                  <span style={{ fontStyle: 'italic' }}>({c.reason})</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleStartCorrection(rec.id)}
+                              style={{ fontSize: '11px', padding: '2px 8px' }}
+                            >
+                              {correctingRecordId === rec.id ? 'Cerrar' : 'Corregir'}
+                            </Button>
+                          </div>
+                          {correctingRecordId === rec.id && (
+                            <form
+                              className="staff-form"
+                              onSubmit={e => {
+                                e.preventDefault();
+                                void handleSubmitCorrection(rec.id);
+                              }}
+                              style={{
+                                marginTop: '8px',
+                                padding: '8px',
+                                background: 'var(--color-canvas, #1a1a1a)',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px',
+                              }}
+                            >
+                              <div className="field">
+                                <label htmlFor={`field-select-${rec.id}`} style={{ fontSize: '11px' }}>Campo</label>
+                                <select
+                                  id={`field-select-${rec.id}`}
+                                  value={correctionField}
+                                  onChange={e => setCorrectionField(e.target.value as any)}
+                                  style={{ fontSize: '12px', padding: '4px' }}
+                                  disabled={correctionSubmitting}
+                                >
+                                  <option value="clock_in_at">Hora Entrada (clock_in_at)</option>
+                                  <option value="clock_out_at">Hora Salida (clock_out_at)</option>
+                                  <option value="status">Estado (status)</option>
+                                  <option value="notes">Notas (notes)</option>
+                                </select>
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`val-input-${rec.id}`} style={{ fontSize: '11px' }}>Valor corregido</label>
+                                <input
+                                  id={`val-input-${rec.id}`}
+                                  type="text"
+                                  required
+                                  value={correctionValue}
+                                  onChange={e => setCorrectionValue(e.target.value)}
+                                  placeholder="Nuevo valor"
+                                  style={{ fontSize: '12px', padding: '4px' }}
+                                  disabled={correctionSubmitting}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`reason-input-${rec.id}`} style={{ fontSize: '11px' }}>Motivo *</label>
+                                <input
+                                  id={`reason-input-${rec.id}`}
+                                  type="text"
+                                  required
+                                  minLength={5}
+                                  value={correctionReason}
+                                  onChange={e => setCorrectionReason(e.target.value)}
+                                  placeholder="Mínimo 5 caracteres"
+                                  style={{ fontSize: '12px', padding: '4px' }}
+                                  disabled={correctionSubmitting}
+                                />
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                <Button
+                                  variant="primary"
+                                  type="submit"
+                                  disabled={correctionSubmitting || !correctionValue.trim() || correctionReason.trim().length < 5}
+                                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                                >
+                                  {correctionSubmitting ? 'Enviando…' : 'Guardar corrección'}
+                                </Button>
+                              </div>
+                            </form>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -868,6 +1243,98 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
           </p>
         )}
       </div>
+
+      {/* Modal Confirmar Entrada para personal sin turno programado */}
+      {unscheduledPrompt && (
+        <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="unscheduled-modal-title">
+          <div className="staff-modal-card" style={{ maxWidth: '440px' }}>
+            <div className="staff-modal-header">
+              <h2 id="unscheduled-modal-title">Confirmar Entrada</h2>
+              <button
+                type="button"
+                className="staff-modal-close"
+                onClick={() => setUnscheduledPrompt(null)}
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ margin: '8px 0 16px', fontSize: '14px', color: 'var(--color-muted)' }}>
+              <strong>{unscheduledPrompt.staff.name}</strong> no tiene turno programado para hoy.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                <input
+                  type="radio"
+                  name="unscheduled-option"
+                  value="cover"
+                  checked={unscheduledPrompt.selectedOption === 'cover'}
+                  disabled={colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).length === 0}
+                  onChange={() => setUnscheduledPrompt(prev => prev ? { ...prev, selectedOption: 'cover' } : null)}
+                  style={{ marginTop: '2px' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontWeight: 600 }}>Cubrir a un compañero</span>
+                  {colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).length > 0 ? (
+                    <div style={{ marginTop: '6px' }}>
+                      <label htmlFor="select-covered-colleague" className="sr-only">Seleccionar compañero a cubrir</label>
+                      <select
+                        id="select-covered-colleague"
+                        value={unscheduledPrompt.coveredStaffId}
+                        disabled={unscheduledPrompt.selectedOption !== 'cover'}
+                        onChange={e => setUnscheduledPrompt(prev => prev ? { ...prev, coveredStaffId: e.target.value } : null)}
+                        style={{ width: '100%', fontSize: '12px', padding: '6px', borderRadius: '4px' }}
+                      >
+                        {colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).map(c => (
+                          <option key={c.staffId} value={c.staffId}>
+                            {c.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '12px', color: 'var(--color-muted)', margin: '4px 0 0' }}>
+                      No hay compañeros con turno pendiente de iniciar hoy.
+                    </p>
+                  )}
+                </div>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                <input
+                  type="radio"
+                  name="unscheduled-option"
+                  value="support"
+                  checked={unscheduledPrompt.selectedOption === 'support'}
+                  onChange={() => setUnscheduledPrompt(prev => prev ? { ...prev, selectedOption: 'support' } : null)}
+                  style={{ marginTop: '2px' }}
+                />
+                <div>
+                  <span style={{ fontWeight: 600 }}>Turno de apoyo / Refuerzo extraordinario (A nadie)</span>
+                  <p style={{ fontSize: '12px', color: 'var(--color-muted)', margin: '2px 0 0' }}>
+                    Registrar asistencia como personal de apoyo sin horario asignado.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="staff-modal-actions">
+              <Button variant="secondary" onClick={() => setUnscheduledPrompt(null)} disabled={confirmSubmitting}>
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => void handleConfirmUnscheduled()}
+                disabled={confirmSubmitting || (unscheduledPrompt.selectedOption === 'cover' && !unscheduledPrompt.coveredStaffId)}
+              >
+                {confirmSubmitting ? 'Confirmando…' : 'Confirmar Entrada'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Feedback */}
       {toast && (

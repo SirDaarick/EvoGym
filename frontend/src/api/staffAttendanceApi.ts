@@ -30,6 +30,7 @@ export interface StaffAttendanceItem {
   clock_validation_status: string;
   review_required: boolean;
   schedule_conflict: boolean;
+  notes?: string | null;
 }
 
 export interface StaffAttendancePage {
@@ -42,13 +43,28 @@ export interface RecordAttendancePayload {
   occurrence_date?: string | null;
   device_captured_at?: string;
   idempotency_key?: string;
+  covered_profile_id?: string | null;
+  notes?: string | null;
 }
+
+export type StaffAttendanceCreatePayload = RecordAttendancePayload;
 
 export interface StaffAttendanceCheckoutItem {
   id: string;
   attendance_id: string;
   recorded_by: string;
   occurred_at: string;
+}
+
+export interface StaffAttendanceCorrectionItem {
+  id: string;
+  attendance_id: string;
+  corrected_by: string;
+  field_name: string;
+  original_value: string;
+  corrected_value: string;
+  reason: string;
+  corrected_at: string;
 }
 
 export interface StaffCorrectionRequest {
@@ -119,10 +135,10 @@ export async function correctStaffAttendance(
   attendanceId: string,
   payload: StaffCorrectionRequest,
   token?: string
-): Promise<unknown> {
+): Promise<StaffAttendanceCorrectionItem> {
   const config = getReceptionConfig();
   const activeToken = token ?? readOperationalToken() ?? undefined;
-  return request<unknown>(
+  return request<StaffAttendanceCorrectionItem>(
     config,
     `/api/v1/staff-attendance/${encodeURIComponent(attendanceId)}/corrections`,
     activeToken,
@@ -130,5 +146,38 @@ export async function correctStaffAttendance(
       method: 'POST',
       body: JSON.stringify(payload),
     }
+  );
+}
+
+export async function getStaffAttendanceCorrections(
+  attendanceId: string,
+  token?: string
+): Promise<StaffAttendanceCorrectionItem[]> {
+  const config = getReceptionConfig();
+  const activeToken = token ?? readOperationalToken() ?? undefined;
+  return request<StaffAttendanceCorrectionItem[]>(
+    config,
+    `/api/v1/staff-attendance/${encodeURIComponent(attendanceId)}/corrections`,
+    activeToken
+  );
+}
+
+export async function listBranchAttendanceCorrections(
+  branchId?: string,
+  businessDate?: string,
+  token?: string
+): Promise<StaffAttendanceCorrectionItem[]> {
+  const config = getReceptionConfig();
+  const activeToken = token ?? readOperationalToken() ?? undefined;
+  const targetBranchId = branchId ?? config.branchId;
+  const params = new URLSearchParams();
+  if (businessDate) {
+    params.set('business_date', businessDate);
+  }
+  const queryString = params.toString() ? `?${params.toString()}` : '';
+  return request<StaffAttendanceCorrectionItem[]>(
+    config,
+    `/api/v1/staff-attendance/branches/${encodeURIComponent(targetBranchId)}/corrections${queryString}`,
+    activeToken
   );
 }
