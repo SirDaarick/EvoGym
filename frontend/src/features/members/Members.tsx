@@ -24,6 +24,8 @@ import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 import { getMemberReload, type MemberReloadResponse } from '../../api/memberReadsApi';
 import type { MemberNoteDTO } from '../../api/membersApi';
 import { readOperationalToken } from '../../api/receptionApi';
+import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 
 export { getMemberStatusInfo };
 
@@ -323,6 +325,7 @@ export function MemberDetail({
     noteSubmitting?: boolean;
     noteError?: string;
     onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+    apiRequest?: AuthenticatedRequest;
   };
 }) {
   if (liveData) return <LiveMemberDetail role={role} {...liveData} />;
@@ -345,6 +348,7 @@ function LiveMemberDetail({
   noteSubmitting,
   noteError,
   onUpdateMember,
+  apiRequest,
 }: {
   role: Role;
   member: Member;
@@ -361,11 +365,13 @@ function LiveMemberDetail({
   noteSubmitting?: boolean;
   noteError?: string;
   onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+  apiRequest?: AuthenticatedRequest;
 }) {
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; error: boolean }>({ message: '', error: false });
   const [isEditing, setIsEditing] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
   const [editPhone, setEditPhone] = useState(member.phone ?? '');
   const [editEmail, setEditEmail] = useState(email ?? '');
@@ -417,7 +423,7 @@ function LiveMemberDetail({
           action={
             <div className="member-hero-actions">
               <Badge tone={statusTone}>
-                {currentPeriod?.access_status ?? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
+                {currentPeriod ? (currentPeriod.access_status === 'eligible' ? 'Elegible' : currentPeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : currentPeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : currentPeriod.access_status) : ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
               </Badge>
               {onCheckIn && (
                 <div className="member-attendance-action">
@@ -425,6 +431,9 @@ function LiveMemberDetail({
                   <div className="member-attendance-feedback" role={feedback.error ? 'alert' : 'status'} aria-label="Resultado de asistencia">{feedback.message}</div>
                 </div>
               )}
+              <Button variant="secondary" onClick={() => setIsCheckoutOpen(prev => !prev)}>
+                Vender membresía
+              </Button>
               {onUpdateMember && (
                 <Button variant="secondary" onClick={handleOpenEdit}>
                   Editar datos
@@ -436,6 +445,14 @@ function LiveMemberDetail({
         />
       </div>
     </div>
+    {isCheckoutOpen && (
+      <LiveMembershipCheckout
+        member={{ id: member.id, name: member.name }}
+        apiRequest={apiRequest}
+        onClose={() => setIsCheckoutOpen(false)}
+        onCompleted={() => void onRefresh?.()}
+      />
+    )}
     {isEditing && (
       <Panel>
         <h3>Editar datos del socio</h3>

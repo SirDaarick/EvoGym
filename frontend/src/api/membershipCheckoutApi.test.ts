@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMember, createMemberNumber, getActiveMembershipPlans, getCurrentRegisterShift, getRegisters, submitMembershipCashSale, submitMembershipTransferSale, type CreateMemberRequest, type MembershipSaleRequest } from './membershipCheckoutApi';
+import { createMember, createMemberNumber, getActiveMembershipPlans, getCurrentRegisterShift, getRegisters, submitMembershipCashSale, submitMembershipTransferSale, type AuthenticatedRequest, type CreateMemberRequest, type MembershipSaleRequest } from './membershipCheckoutApi';
 
 const branchId = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
@@ -175,5 +175,77 @@ describe('membership checkout API', () => {
     });
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { request_id: 'retry-id' } }), { status: 429 }));
     await expect(getRegisters()).rejects.toMatchObject({ status: 429, requestId: 'retry-id' });
+  });
+
+  it('uses injected apiRequest transport, sends headers, and maps network and HTTP errors', async () => {
+    sessionStorage.clear();
+    const saleResponse = {
+      order: { id: 'order-live' },
+      item: { id: 'item-live' },
+      payment: { status: 'confirmed' },
+      membership: { id: 'mem-1', starts_on: '2026-10-28', ends_on: '2026-11-28' },
+      sample_entitlement: null,
+    };
+
+    const mockRequest = vi.fn<AuthenticatedRequest>(async (path, init) => {
+      if (path.includes('membership-sales') && init?.method === 'POST') {
+        return new Response(JSON.stringify(saleResponse), { status: 201 });
+      }
+      if (path.includes('membership-transfer-sales') && init?.method === 'POST') {
+        return new Response(JSON.stringify(saleResponse), { status: 201 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    const cashReq: MembershipSaleRequest = {
+      member_id: 'member-10',
+      plan_version_id: 'plan-v1',
+      source_shift_id: 'shift-10',
+      cash_amount_minor: 50000,
+    };
+    const cashResult = await submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-1', mockRequest);
+    expect(cashResult).toEqual(saleResponse);
+    expect(mockRequest).toHaveBeenCalledWith(
+      '/api/v1/registers/reg-1/membership-sales',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'idemp-cash-1',
+        }),
+        body: JSON.stringify(cashReq),
+      }),
+    );
+
+    const transferResult = await submitMembershipTransferSale('reg-1', { member_id: 'member-10', plan_version_id: 'plan-v1' }, 'idemp-tx-1', mockRequest);
+    expect(transferResult).toEqual(saleResponse);
+    expect(mockRequest).toHaveBeenCalledWith(
+      '/api/v1/registers/reg-1/membership-transfer-sales',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'idemp-tx-1',
+        }),
+      }),
+    );
+
+    // Network error mapping
+    mockRequest.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-2', mockRequest))
+      .rejects.toMatchObject({ kind: 'network' });
+
+    // HTTP error mapping: 403, 409, 422
+    mockRequest.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'FORBIDDEN', message: 'No access' } }), { status: 403 }));
+    await expect(submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-3', mockRequest))
+      .rejects.toMatchObject({ kind: 'http', status: 403 });
+
+    mockRequest.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'SHIFT_CLOSED', message: 'Shift closed' } }), { status: 409 }));
+    await expect(submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-4', mockRequest))
+      .rejects.toMatchObject({ kind: 'http', status: 409 });
+
+    mockRequest.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNPROCESSABLE', message: 'Invalid payload' } }), { status: 422 }));
+    await expect(submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-5', mockRequest))
+      .rejects.toMatchObject({ kind: 'http', status: 422 });
   });
 });
