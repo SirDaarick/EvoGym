@@ -9,6 +9,7 @@ import { Inventory } from '../features/inventory/Inventory';
 import { OwnerManagementPage } from '../features/auth/OwnerManagementPage';
 import { ApiStaffManagement } from '../features/owner/StaffManagement';
 import { PlanCatalog } from '../features/owner/PlanCatalog';
+import { ExpenseReport } from '../features/owner/ExpenseReport';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
@@ -106,6 +107,8 @@ export function ApiProductApp() {
   let content = <UnavailablePage title={pageTitles[pathname] ?? 'Función no disponible'} />;
   if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
     content = <PlanCatalog apiRequest={apiRequest} />;
+  } else if (pathname === '/owner/expenses' && isAdmin && admin.status === 'authenticated') {
+    content = <ExpenseReport apiRequest={apiRequest} />;
   } else if (pathname === '/owner/staff' && canManageEmployees && admin.status === 'authenticated') {
     content = <ApiStaffManagement />;
   } else if (pathname === '/owner/permissions' && isOwner && admin.status === 'authenticated') {

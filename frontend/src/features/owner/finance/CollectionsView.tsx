@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
+import type { PendingMoneyResponse } from '../../../api/pendingMoneyApi';
 import { formatMoney } from '../../../demo/adapter';
 import type { FinanceRow, FinanceSourceFamily, FinanceSourceTotal } from '../../../demo/financeReportSelector';
-import { Badge, EmptyState, Field, Panel } from '../../../shared/ui';
+import { Badge, Button, EmptyState, Field, Notice, Panel } from '../../../shared/ui';
 import { FinanceRankingChart, FinanceSourcesDonutChart } from './FinanceCharts';
 import { FinanceTable } from './FinanceTable';
 import type { FinanceContextData } from './types';
@@ -26,9 +27,29 @@ const dateTime = (value: string) => new Intl.DateTimeFormat('es-MX', {
   timeStyle: 'short',
 }).format(new Date(value));
 
+export interface PendingMoneyBranchOption {
+  id: string;
+  name: string;
+}
+
+export interface LivePendingMoneyViewProps {
+  enabled: boolean;
+  response: PendingMoneyResponse | null;
+  loading: boolean;
+  error: string | null;
+  selectedBranchId: string;
+  branchOptions: PendingMoneyBranchOption[];
+  onBranchChange: (branchId: string) => void;
+  reviewingPaymentId: string | null;
+  reviewError: string | null;
+  onReviewTransfer: (paymentId: string, status: 'confirmed' | 'pending') => void;
+}
+
 type CollectionsViewProps = Pick<FinanceContextData,
   'projection' | 'collectionFilters' | 'setCollectionFilters' |
-  'collectionTable' | 'setCollectionSorting' | 'setCollectionPagination'>;
+  'collectionTable' | 'setCollectionSorting' | 'setCollectionPagination'> & {
+  livePendingMoney?: LivePendingMoneyViewProps;
+};
 
 export function CollectionsView({
   projection,
@@ -37,6 +58,7 @@ export function CollectionsView({
   collectionTable,
   setCollectionSorting,
   setCollectionPagination,
+  livePendingMoney,
 }: CollectionsViewProps) {
   const collections = useMemo(() => projection.rows.filter(isCollectionRow), [projection.rows]);
   const filteredRows = useMemo(() => {
@@ -256,9 +278,81 @@ export function CollectionsView({
             Importes pendientes según el mismo rango y filtros. No son cobros confirmados ni forman parte de los totales anteriores.
           </p>
         </div>
-        <strong>{mxn(pendingMinor)}</strong>
+        <strong>
+          {mxn(livePendingMoney?.enabled ? (livePendingMoney.response?.total_pending_minor ?? 0) : pendingMinor)}
+        </strong>
       </div>
-      {pendingRows.length ? (
+      {livePendingMoney?.enabled ? (
+        <>
+          <label className="finance-granularity" htmlFor="pending-money-branch">
+            Sucursal
+            <select
+              id="pending-money-branch"
+              value={livePendingMoney.selectedBranchId}
+              onChange={event => livePendingMoney.onBranchChange(event.target.value)}
+            >
+              <option value="ALL">Todas las sucursales</option>
+              {livePendingMoney.branchOptions.map(branch => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(livePendingMoney.reviewError || livePendingMoney.error) && (
+            <div role="alert">
+              <Notice tone="error">{livePendingMoney.reviewError ?? livePendingMoney.error}</Notice>
+            </div>
+          )}
+          {livePendingMoney.loading && !livePendingMoney.response ? (
+            <p aria-live="polite">Cargando transferencias y adeudos pendientes...</p>
+          ) : livePendingMoney.response?.items.length ? (
+            <ul className="finance-pending-list">
+              {livePendingMoney.response.items.map(item => (
+                <li key={`${item.item_type}-${item.source_event_id}`} className="pending-item">
+                  <div>
+                    <span>
+                      {item.item_type === 'pending_transfer' ? 'Transferencia' : 'Adeudo en caja'} · {item.member_name} ({item.member_number}) · {item.branch_name} · Orden {item.order_id}
+                    </span>{' '}
+                    {item.item_type === 'pending_transfer' ? (
+                      <Badge tone={item.status === 'pending' ? 'error' : 'warning'}>
+                        {item.status === 'pending' ? 'Fondos pendientes' : 'En revisión'}
+                      </Badge>
+                    ) : (
+                      <Badge tone="warning">Adeudo pendiente</Badge>
+                    )}
+                  </div>
+                  <div>
+                    <strong>{mxn(item.amount_minor)}</strong>
+                    {item.item_type === 'pending_transfer' && (
+                      <div className="finance-budget-actions pending-actions">
+                        <Button
+                          variant="primary"
+                          disabled={livePendingMoney.reviewingPaymentId === item.source_event_id}
+                          onClick={() => livePendingMoney.onReviewTransfer(item.source_event_id, 'confirmed')}
+                        >
+                          Confirmar transferencia
+                        </Button>
+                        {item.status === 'under_review' && (
+                          <Button
+                            variant="secondary"
+                            disabled={livePendingMoney.reviewingPaymentId === item.source_event_id}
+                            onClick={() => livePendingMoney.onReviewTransfer(item.source_event_id, 'pending')}
+                          >
+                            Marcar sin fondos
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No hay transferencias pendientes con estos filtros.</p>
+          )}
+        </>
+      ) : pendingRows.length ? (
         <ul className="finance-pending-list">
           {pendingRows.map(row => (
             <li key={row.id}>

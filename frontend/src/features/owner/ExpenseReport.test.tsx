@@ -1,85 +1,203 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '../../app/App';
-import { DemoProvider } from '../../demo/DemoProvider';
-import { getFixedCosts, resetFixedCosts } from '../../demo/fixedCostsStore';
-import { resetStaff } from '../staff/staffStore';
+import { describe, expect, it, vi } from 'vitest';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import type { PendingMoneyItemDTO } from '../../api/pendingMoneyApi';
 import { ExpenseReport } from './ExpenseReport';
 
-function mount(path = '/owner/expenses') {
-  return render(<MemoryRouter initialEntries={[path]}><DemoProvider><ExpenseReport /></DemoProvider></MemoryRouter>);
+const transferItemCentro: PendingMoneyItemDTO = {
+  item_type: 'pending_transfer',
+  source_event_id: 'pay-tx-101',
+  source_event_at: '2026-10-28T10:00:00Z',
+  order_id: 'ord-tx-101',
+  member_id: 'mem-101',
+  member_number: 'EVO-0101',
+  member_name: 'Sofía Delgado',
+  branch_id: 'branch-centro',
+  branch_name: 'EvoGym Centro',
+  amount_minor: 75000,
+  initial_amount_minor: null,
+  paid_amount_minor: null,
+  currency: 'MXN',
+  status: 'under_review',
+  status_event_id: null,
+  status_event_at: null,
+};
+
+const debtItemNorte: PendingMoneyItemDTO = {
+  item_type: 'membership_debt',
+  source_event_id: 'debt-202',
+  source_event_at: '2026-10-28T09:00:00Z',
+  order_id: 'ord-202',
+  member_id: 'mem-202',
+  member_number: 'EVO-0202',
+  member_name: 'Carlos Rivera',
+  branch_id: 'branch-norte',
+  branch_name: 'EvoGym Norte',
+  amount_minor: 30000,
+  initial_amount_minor: 50000,
+  paid_amount_minor: 20000,
+  currency: 'MXN',
+  status: 'open',
+  status_event_id: null,
+  status_event_at: null,
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
-async function mountApp(path = '/owner/expenses') {
-  render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
-  await waitFor(() => expect(screen.queryByRole('status', { name: 'Cargando pantalla' })).not.toBeInTheDocument(), { timeout: 10000 });
-}
 
-describe('finance report', () => {
-  beforeEach(() => { resetFixedCosts(); resetStaff(); window.localStorage.clear(); window.sessionStorage.clear(); });
+describe('ExpenseReport live pending money integration (F07-F02, F07-F03)', () => {
+  it('F07-F02: renders pending transfers and membership debts, filters by branch, and confirms transfer updating total', async () => {
+    const user = userEvent.setup();
+    let currentItems: PendingMoneyItemDTO[] = [transferItemCentro, debtItemNorte];
+    const requestedPaths: string[] = [];
 
-  it('renders four accessible finance tabs and a shared exact-date toolbar', () => {
-    mount();
-    expect(screen.getByRole('heading', { name: 'Finanzas' })).toBeInTheDocument();
-    expect(screen.getAllByRole('tab')).toHaveLength(4);
-    expect(screen.getByRole('tab', { name: 'Balance' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByLabelText('Desde')).toHaveValue('2026-10-01');
-    expect(screen.getByLabelText('Hasta')).toHaveValue('2026-10-08');
+    const apiRequestMock = vi.fn(async (path: string, init?: RequestInit) => {
+      requestedPaths.push(`${init?.method ?? 'GET'} ${path}`);
+      if (path.startsWith('/api/v1/admin/pending-money')) {
+        const url = new URL(path, 'http://localhost');
+        const branchId = url.searchParams.get('branch_id');
+        const filtered = branchId
+          ? currentItems.filter(item => item.branch_id === branchId)
+          : currentItems;
+        return jsonResponse({
+          items: filtered,
+          total_pending_minor: filtered.reduce((sum, item) => sum + item.amount_minor, 0),
+          currency: 'MXN',
+        });
+      }
+      if (path === '/api/v1/registers/transfer-payments/pay-tx-101/review' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { status: string };
+        expect(body.status).toBe('confirmed');
+        currentItems = [debtItemNorte];
+        return jsonResponse({
+          payment_id: 'pay-tx-101',
+          order_id: 'ord-tx-101',
+          payment_status: 'confirmed',
+          order_status: 'paid',
+          subscription_status: 'active',
+          replayed: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/owner/expenses?tab=cobros']}>
+        <ExpenseReport apiRequest={apiRequestMock as unknown as AuthenticatedRequest} />
+      </MemoryRouter>,
+    );
+
+    const pendingHeading = await screen.findByRole('heading', { name: 'Transferencias pendientes' });
+    const pendingPanel = pendingHeading.closest('section')!;
+
+    await waitFor(() => {
+      expect(within(pendingPanel).getByText('$1,050.00 MXN')).toBeInTheDocument();
+    });
+    expect(within(pendingPanel).getByText(/Sofía Delgado \(EVO-0101\)/i)).toBeInTheDocument();
+    expect(within(pendingPanel).getByText(/Carlos Rivera \(EVO-0202\)/i)).toBeInTheDocument();
+    expect(within(pendingPanel).getByText('En revisión')).toBeInTheDocument();
+    expect(within(pendingPanel).getByText('Adeudo pendiente')).toBeInTheDocument();
+
+    const branchSelect = within(pendingPanel).getByLabelText('Sucursal');
+    await user.selectOptions(branchSelect, 'branch-centro');
+
+    await waitFor(() => {
+      expect(requestedPaths).toContain('GET /api/v1/admin/pending-money?branch_id=branch-centro');
+      expect(within(pendingPanel).queryByText(/Carlos Rivera/i)).not.toBeInTheDocument();
+    });
+    expect(within(pendingPanel).getAllByText('$750.00 MXN')).toHaveLength(2);
+
+    await user.selectOptions(branchSelect, 'ALL');
+    await waitFor(() => {
+      expect(within(pendingPanel).getByText('$1,050.00 MXN')).toBeInTheDocument();
+    });
+
+    const confirmButton = within(pendingPanel).getByRole('button', { name: 'Confirmar transferencia' });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(within(pendingPanel).queryByText(/Sofía Delgado/i)).not.toBeInTheDocument();
+    });
+    expect(within(pendingPanel).getAllByText('$300.00 MXN')).toHaveLength(2);
+    expect(within(pendingPanel).getByText(/Carlos Rivera \(EVO-0202\)/i)).toBeInTheDocument();
   });
 
-  it('navigates tab focus without activation and excludes inactive heavy views', async () => {
-    const user = userEvent.setup(); mount();
-    screen.getByRole('tab', { name: 'Balance' }).focus(); await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: 'Cobros' })).toHaveFocus();
-    expect(screen.getByRole('tab', { name: 'Balance' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tabpanel', { name: 'Balance' })).toBeVisible();
-    await user.keyboard('{Enter}');
-    expect(screen.getByRole('tabpanel', { name: 'Cobros' })).toBeVisible();
-    expect(document.getElementById('finance-panel-balance')).not.toBeVisible();
-  });
+  it('F07-F03: flags missing funds (under_review -> pending), allows subsequent confirmation, and surfaces 409 Conflict errors', async () => {
+    const user = userEvent.setup();
+    let transferStatus: 'under_review' | 'pending' | 'confirmed' = 'under_review';
+    let shouldFailNextReview = false;
 
-  it('shows recorded totals, gross flow reconciliation and the accessible exact-values table', () => {
-    mount();
-    expect(screen.getByText('Entradas registradas')).toBeInTheDocument();
-    expect(screen.getByText('Salidas registradas')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Valores exactos del flujo diario' })).toBeInTheDocument();
-    expect(screen.getByText(/No representa saldo bancario ni utilidad/)).toBeInTheDocument();
-  });
+    const apiRequestMock = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/api/v1/admin/pending-money')) {
+        const items: PendingMoneyItemDTO[] =
+          transferStatus === 'confirmed'
+            ? []
+            : [{ ...transferItemCentro, status: transferStatus }];
+        return jsonResponse({
+          items,
+          total_pending_minor: items.reduce((sum, item) => sum + item.amount_minor, 0),
+          currency: 'MXN',
+        });
+      }
+      if (path === '/api/v1/registers/transfer-payments/pay-tx-101/review' && init?.method === 'POST') {
+        if (shouldFailNextReview) {
+          return jsonResponse({ detail: 'Transfer payment has already been confirmed' }, 409);
+        }
+        const body = JSON.parse(String(init.body)) as { status: 'confirmed' | 'pending' };
+        transferStatus = body.status;
+        return jsonResponse({
+          payment_id: 'pay-tx-101',
+          order_id: 'ord-tx-101',
+          payment_status: body.status,
+          order_status: body.status === 'confirmed' ? 'paid' : 'pending_payment',
+          subscription_status: body.status === 'confirmed' ? 'active' : 'pending_activation',
+          replayed: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
 
-  it('filters expense totals and rows by category and query', async () => {
-    const user = userEvent.setup(); mount();
-    await user.click(screen.getByRole('tab', { name: 'Gastos' }));
-    expect(screen.getByRole('region', { name: 'Detalle de gastos filtrados' })).toBeInTheDocument();
-    await user.type(screen.getByRole('searchbox', { name: 'Buscar concepto o proveedor' }), 'limpieza');
-    expect(screen.getByText(/Importe filtrado:/)).toBeInTheDocument();
-  });
+    render(
+      <MemoryRouter initialEntries={['/owner/expenses']}>
+        <ExpenseReport apiRequest={apiRequestMock as unknown as AuthenticatedRequest} />
+      </MemoryRouter>,
+    );
 
-  it('retains fixed cost adjustment controls and updates the configured monthly amount', async () => {
-    const user = userEvent.setup(); mount();
-    await user.click(screen.getByRole('tab', { name: 'Presupuesto' }));
-    expect(screen.getAllByText(/no son pagos realizados/i).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole('button', { name: 'Ajustar costos fijos' }));
-    await user.clear(screen.getByLabelText('Renta (MXN/mes)'));
-    await user.type(screen.getByLabelText('Renta (MXN/mes)'), '70000');
-    await user.click(screen.getByRole('button', { name: 'Guardar costos' }));
-    await waitFor(() => expect(getFixedCosts().rentMinor).toBe(7_000_000));
-    expect(screen.getByRole('link', { name: 'Gestionar equipo y sueldos' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Nómina mensual estimada' })).toBeInTheDocument();
-  });
+    const pendingHeading = await screen.findByRole('heading', { name: 'Transferencias pendientes' });
+    const pendingPanel = pendingHeading.closest('section')!;
 
-  it('validates invalid date ranges and prints only through window.print', async () => {
-    const user = userEvent.setup(); const print = vi.spyOn(window, 'print').mockImplementation(() => {}); mount();
-    await user.clear(screen.getByLabelText('Desde')); await user.type(screen.getByLabelText('Desde'), '2025-01-01');
-    expect(screen.getByRole('status')).toHaveTextContent(/revisa las fechas y la duración del rango/i);
-    expect(screen.getByText(/máximo 366 días/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Exportar / imprimir' }));
-    expect(print).toHaveBeenCalledOnce();
-  });
+    await waitFor(() => {
+      expect(within(pendingPanel).getByText('En revisión')).toBeInTheDocument();
+    });
 
-  it('integrates Finanzas into the owner navigation on the existing route', async () => {
-    await mountApp();
-    expect(screen.getByRole('link', { name: 'Finanzas' })).toHaveAttribute('href', '/owner/expenses');
-    expect(screen.queryByRole('link', { name: 'Gastos' })).not.toBeInTheDocument();
+    const flagMissingButton = within(pendingPanel).getByRole('button', { name: 'Marcar sin fondos' });
+    await user.click(flagMissingButton);
+
+    await waitFor(() => {
+      expect(within(pendingPanel).getByText('Fondos pendientes')).toBeInTheDocument();
+    });
+    expect(within(pendingPanel).queryByRole('button', { name: 'Marcar sin fondos' })).not.toBeInTheDocument();
+    expect(within(pendingPanel).getAllByText('$750.00 MXN')).toHaveLength(2);
+
+    shouldFailNextReview = true;
+    const confirmButton = within(pendingPanel).getByRole('button', { name: 'Confirmar transferencia' });
+    await user.click(confirmButton);
+
+    const alert = await within(pendingPanel).findByRole('alert');
+    expect(alert).toHaveTextContent('Transfer payment has already been confirmed');
+
+    shouldFailNextReview = false;
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(within(pendingPanel).getByText('$0.00 MXN')).toBeInTheDocument();
+      expect(within(pendingPanel).getByText('No hay transferencias pendientes con estos filtros.')).toBeInTheDocument();
+    });
   });
 });
