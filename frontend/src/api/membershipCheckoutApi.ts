@@ -60,6 +60,38 @@ export interface MembershipSaleResponse {
   sample_entitlement?: Record<string, unknown> | null;
 }
 
+export interface RegisterMemberOpenDebt {
+  debt_id: string;
+  order_id: string;
+  member_id: string;
+  branch_id: string;
+  currency: string;
+  description_snapshot: string;
+  initial_outstanding_minor: number;
+  paid_amount_minor: number;
+  remaining_balance_minor: number;
+  created_at: string;
+}
+
+export interface MembershipDebtPaymentInput {
+  order_id: string;
+  amount_minor: number;
+}
+
+export interface MembershipDebtPaymentReceipt {
+  id: string;
+  debt_id: string;
+  order_id: string;
+  member_id: string;
+  branch_id: string;
+  register_id: string;
+  shift_id: string;
+  amount_minor: number;
+  remaining_balance_minor: number;
+  received_by: string;
+  received_at: string;
+}
+
 export type AuthenticatedRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 export class CheckoutApiHttpError extends OperationalApiHttpError {
@@ -68,6 +100,8 @@ export class CheckoutApiHttpError extends OperationalApiHttpError {
     this.name = 'CheckoutApiHttpError';
   }
 }
+
+export { CheckoutApiHttpError as MembershipCheckoutApiError };
 
 export class CheckoutApiNetworkError extends OperationalApiNetworkError {
   constructor(message = 'No se pudo conectar con el servidor. Intenta nuevamente.') {
@@ -262,3 +296,57 @@ function submitSale(
     body: JSON.stringify(requestBody),
   }, apiRequest);
 }
+
+function isRegisterMemberOpenDebt(value: unknown): value is RegisterMemberOpenDebt {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.debt_id) &&
+    isIdentifier(value.order_id) &&
+    isIdentifier(value.member_id) &&
+    isIdentifier(value.branch_id) &&
+    typeof value.currency === 'string' &&
+    typeof value.description_snapshot === 'string' &&
+    typeof value.initial_outstanding_minor === 'number' &&
+    Number.isSafeInteger(value.initial_outstanding_minor) &&
+    typeof value.paid_amount_minor === 'number' &&
+    Number.isSafeInteger(value.paid_amount_minor) &&
+    typeof value.remaining_balance_minor === 'number' &&
+    Number.isSafeInteger(value.remaining_balance_minor) &&
+    value.remaining_balance_minor > 0 &&
+    typeof value.created_at === 'string'
+  );
+}
+
+export async function listRegisterMemberOpenDebts(
+  registerId: string,
+  memberId: string,
+  apiRequest?: AuthenticatedRequest,
+): Promise<RegisterMemberOpenDebt[]> {
+  const response = await request<unknown>(
+    `/api/v1/registers/${encodeURIComponent(registerId)}/members/${encodeURIComponent(memberId)}/debts`,
+    {},
+    apiRequest,
+  );
+  if (!Array.isArray(response) || !response.every(isRegisterMemberOpenDebt)) {
+    throw new Error('La respuesta de adeudos pendientes no es válida.');
+  }
+  return response;
+}
+
+export function submitMembershipDebtPayment(
+  registerId: string,
+  requestBody: MembershipDebtPaymentInput,
+  idempotencyKey: string,
+  apiRequest?: AuthenticatedRequest,
+): Promise<MembershipDebtPaymentReceipt> {
+  return request<MembershipDebtPaymentReceipt>(
+    `/api/v1/registers/${encodeURIComponent(registerId)}/membership-debt-payments`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(requestBody),
+    },
+    apiRequest,
+  );
+}
+

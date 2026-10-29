@@ -371,12 +371,22 @@ function LiveMemberDetail({
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; error: boolean }>({ message: '', error: false });
   const [isEditing, setIsEditing] = useState(false);
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutModal, setCheckoutModal] = useState<{
+    open: boolean;
+    operation: 'sale' | 'debt_payment';
+    orderId?: string;
+  }>({ open: false, operation: 'sale' });
   const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
   const [editPhone, setEditPhone] = useState(member.phone ?? '');
   const [editEmail, setEditEmail] = useState(email ?? '');
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
+
+  const hasPendingDebt = Boolean(
+    reload.financial.has_pending_balance ||
+    (reload.financial.total_pending_balance_minor ?? 0) > 0 ||
+    reload.financial.debts.length > 0
+  );
 
   // shortcut: entry-only check-in, add exit event when turnstile hardware contract exists
   const visits = reload.recent_visits.map(visit => ({ id: visit.visit_id, memberId: member.id, observedCheckIn: visit.occurred_at, observedCheckOut: visit.occurred_at, autoClosedAt: null }));
@@ -431,9 +441,20 @@ function LiveMemberDetail({
                   <div className="member-attendance-feedback" role={feedback.error ? 'alert' : 'status'} aria-label="Resultado de asistencia">{feedback.message}</div>
                 </div>
               )}
-              <Button variant="secondary" onClick={() => setIsCheckoutOpen(prev => !prev)}>
+              <Button
+                variant="secondary"
+                onClick={() => setCheckoutModal({ open: true, operation: 'sale' })}
+              >
                 Vender membresía
               </Button>
+              {hasPendingDebt && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setCheckoutModal({ open: true, operation: 'debt_payment' })}
+                >
+                  Liquidar adeudo
+                </Button>
+              )}
               {onUpdateMember && (
                 <Button variant="secondary" onClick={handleOpenEdit}>
                   Editar datos
@@ -445,11 +466,13 @@ function LiveMemberDetail({
         />
       </div>
     </div>
-    {isCheckoutOpen && (
+    {checkoutModal.open && (
       <LiveMembershipCheckout
         member={{ id: member.id, name: member.name }}
         apiRequest={apiRequest}
-        onClose={() => setIsCheckoutOpen(false)}
+        initialOperation={checkoutModal.operation}
+        initialOrderId={checkoutModal.orderId}
+        onClose={() => setCheckoutModal(prev => ({ ...prev, open: false }))}
         onCompleted={() => void onRefresh?.()}
       />
     )}
@@ -523,6 +546,7 @@ function LiveMemberDetail({
           role={isAdmin ? 'OWNER' : role}
           reloadState={reload}
           onSwitchToRecord={() => setActiveTab('record')}
+          onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
           liveNotesList={isAdmin ? liveNotesList : undefined}
           onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
           noteSubmitting={noteSubmitting}
@@ -544,6 +568,7 @@ function LiveMemberDetail({
           sales={[]}
           role={isAdmin ? 'OWNER' : role}
           reloadState={reload}
+          onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
           liveNotes={notes}
           liveNotesList={isAdmin ? liveNotesList : undefined}
           onAddLiveNote={isAdmin ? onAddLiveNote : undefined}

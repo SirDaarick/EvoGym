@@ -1004,3 +1004,150 @@ def test_invalid_stored_branch_timezone_fails_closed_without_sale(tmp_path):
             assert session.scalar(select(func.count()).select_from(MembershipPeriod)) == 0
     finally:
         engine.dispose()
+
+
+def test_f06_b01_register_member_open_debts_lifecycle(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_a = _seed_branch(factory, "f06-branch-a", "Branch A")
+        branch_b = _seed_branch(factory, "f06-branch-b", "Branch B")
+        staff_a_id, token_a = _seed_receptionist(factory, branch_a, "f06-a@example.invalid")
+        staff_b_id, token_b = _seed_receptionist(factory, branch_b, "f06-b@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-F06-B01", full_name="F06 Debt Member", phone="5550601")
+            plan = Plan(code="f06-month", name="F06 Month", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id, version_number=1, name="F06 Month v1", price_minor=10000,
+                currency="MXN", duration_value=1, duration_unit="month", is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            reg_a = create_cash_register(session, branch_a, "f06-reg-a", "Register A")
+            reg_b = create_cash_register(session, branch_b, "f06-reg-b", "Register B")
+            open_shift(
+                session, register_id=reg_a.id, opened_by=staff_a_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            open_shift(
+                session, register_id=reg_b.id, opened_by=staff_b_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 0}],
+            )
+            member_id, version_id, reg_a_id, reg_b_id = member.id, version.id, reg_a.id, reg_b.id
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            sale_a1 = client.post(
+                f"/api/v1/registers/{reg_a_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token_a}", "Idempotency-Key": "f06-sale-a1"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 4000},
+            )
+            assert sale_a1.status_code == 201, sale_a1.text
+            order_a1_id = sale_a1.json()["order"]["id"]
+
+            sale_a2 = client.post(
+                f"/api/v1/registers/{reg_a_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token_a}", "Idempotency-Key": "f06-sale-a2"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 7000},
+            )
+            assert sale_a2.status_code == 201, sale_a2.text
+            order_a2_id = sale_a2.json()["order"]["id"]
+
+            sale_b1 = client.post(
+                f"/api/v1/registers/{reg_b_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token_b}", "Idempotency-Key": "f06-sale-b1"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 2000},
+            )
+            assert sale_b1.status_code == 201, sale_b1.text
+
+            debts_path = f"/api/v1/registers/{reg_a_id}/members/{member_id}/debts"
+            debts_res = client.get(debts_path, headers={"Authorization": f"Bearer {token_a}"})
+            assert debts_res.status_code == 200, debts_res.text
+            debts = debts_res.json()
+            assert [d["order_id"] for d in debts] == [order_a1_id, order_a2_id]
+            assert debts[0]["initial_outstanding_minor"] == 6000
+            assert debts[0]["paid_amount_minor"] == 0
+            assert debts[0]["remaining_balance_minor"] == 6000
+            assert debts[0]["description_snapshot"] == "F06 Month v1"
+            assert debts[1]["initial_outstanding_minor"] == 3000
+            assert debts[1]["paid_amount_minor"] == 0
+            assert debts[1]["remaining_balance_minor"] == 3000
+
+            repay_partial = client.post(
+                f"/api/v1/registers/{reg_a_id}/membership-debt-payments",
+                headers={"Authorization": f"Bearer {token_a}", "Idempotency-Key": "f06-repay-a1-partial"},
+                json={"order_id": order_a1_id, "amount_minor": 2500},
+            )
+            assert repay_partial.status_code == 201, repay_partial.text
+
+            after_partial = client.get(debts_path, headers={"Authorization": f"Bearer {token_a}"}).json()
+            assert len(after_partial) == 2
+            assert after_partial[0]["order_id"] == order_a1_id
+            assert after_partial[0]["paid_amount_minor"] == 2500
+            assert after_partial[0]["remaining_balance_minor"] == 3500
+
+            repay_full = client.post(
+                f"/api/v1/registers/{reg_a_id}/membership-debt-payments",
+                headers={"Authorization": f"Bearer {token_a}", "Idempotency-Key": "f06-repay-a1-full"},
+                json={"order_id": order_a1_id, "amount_minor": 3500},
+            )
+            assert repay_full.status_code == 201, repay_full.text
+
+            after_full = client.get(debts_path, headers={"Authorization": f"Bearer {token_a}"}).json()
+            assert [d["order_id"] for d in after_full] == [order_a2_id]
+            assert after_full[0]["remaining_balance_minor"] == 3000
+    finally:
+        engine.dispose()
+
+
+def test_f06_b02_register_member_open_debts_cross_branch_and_inactive_register_denial(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_a = _seed_branch(factory, "f06-denial-a", "Denial Branch A")
+        branch_b = _seed_branch(factory, "f06-denial-b", "Denial Branch B")
+        _staff_a_id, token_a = _seed_receptionist(factory, branch_a, "f06-denial-a@example.invalid")
+        with factory.begin() as session:
+            member = Member(member_number="SOC-F06-B02", full_name="F06 Denial Member", phone="5550602")
+            session.add(member)
+            session.flush()
+            from app.shifts.queries import create_cash_register
+            reg_a = create_cash_register(session, branch_a, "f06-denial-reg-a", "Denial Register A")
+            reg_b = create_cash_register(session, branch_b, "f06-denial-reg-b", "Denial Register B")
+            member_id, reg_a_id, reg_b_id = member.id, reg_a.id, reg_b.id
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            unauth = client.get(f"/api/v1/registers/{reg_a_id}/members/{member_id}/debts")
+            assert unauth.status_code == 401
+
+            cross_branch = client.get(
+                f"/api/v1/registers/{reg_b_id}/members/{member_id}/debts",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert cross_branch.status_code == 403
+
+            missing_register = client.get(
+                f"/api/v1/registers/{uuid4()}/members/{member_id}/debts",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert missing_register.status_code == 404
+
+            missing_member = client.get(
+                f"/api/v1/registers/{reg_a_id}/members/{uuid4()}/debts",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert missing_member.status_code == 404
+
+        with factory.begin() as session:
+            reg = session.get(CashRegister, reg_a_id)
+            reg.status = "inactive"
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            inactive_res = client.get(
+                f"/api/v1/registers/{reg_a_id}/members/{member_id}/debts",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert inactive_res.status_code == 409
+    finally:
+        engine.dispose()
+

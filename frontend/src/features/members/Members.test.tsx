@@ -1059,5 +1059,119 @@ describe('member workflow', () => {
       expect(await screen.findByTestId('balance-warning-alert')).toBeVisible();
       expect(screen.getByText(/Saldo pendiente registrado/)).toBeVisible();
     });
+
+    it('F06: opens Liquidar adeudo from member detail, posts cash debt payment, and clears pending balance warning after reload', async () => {
+      const memberWithDebt = {
+        ...fixtureMember,
+        id: 'member-f06-repay',
+        full_name: 'Sofía Abono',
+        preferred_name: null,
+        status: 'active' as const,
+        pending_balance_minor: 20000,
+        has_pending_balance: true,
+      };
+
+      const reloadWithOpenDebt: memberReadsApi.MemberReloadResponse = {
+        ...fixtureReload,
+        profile: { ...memberWithDebt, organization_id: 'org-1', home_branch_id: 'branch-1' },
+        financial: {
+          has_pending_balance: true,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: null,
+          currency: 'MXN',
+          debts: [],
+        },
+      };
+
+      const reloadAfterSettled: memberReadsApi.MemberReloadResponse = {
+        ...reloadWithOpenDebt,
+        financial: {
+          has_pending_balance: false,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: null,
+          currency: 'MXN',
+          debts: [],
+        },
+      };
+
+      let currentReload = reloadWithOpenDebt;
+      let currentMember = memberWithDebt;
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(currentReload));
+        }
+        if (path === `/api/v1/members/${memberWithDebt.id}`) {
+          return new Response(JSON.stringify(currentMember));
+        }
+        if (path.includes('/api/v1/catalog/plans')) {
+          return new Response(JSON.stringify([]));
+        }
+        if (path === '/api/v1/registers') {
+          return new Response(JSON.stringify([{ id: 'reg-f06-open', name: 'Caja Principal', has_open_shift: true }]));
+        }
+        if (path.includes('/api/v1/shifts/current')) {
+          return new Response(JSON.stringify({ id: 'shift-f06-open', cash_register_id: 'reg-f06-open' }));
+        }
+        if (path === `/api/v1/registers/reg-f06-open/members/${memberWithDebt.id}/debts`) {
+          return new Response(JSON.stringify([
+            {
+              debt_id: 'debt-f06-order-1',
+              order_id: 'order-f06-1',
+              member_id: memberWithDebt.id,
+              branch_id: 'branch-1',
+              currency: 'MXN',
+              description_snapshot: 'Mensualidad Estándar',
+              initial_outstanding_minor: 20000,
+              paid_amount_minor: 0,
+              remaining_balance_minor: 20000,
+              created_at: '2026-10-28T10:00:00Z',
+            },
+          ]));
+        }
+        if (path === '/api/v1/registers/reg-f06-open/membership-debt-payments' && init?.method === 'POST') {
+          currentReload = reloadAfterSettled;
+          currentMember = { ...memberWithDebt, pending_balance_minor: 0, has_pending_balance: false };
+          return new Response(JSON.stringify({
+            id: 'receipt-f06-settled',
+            debt_id: 'debt-f06-order-1',
+            order_id: 'order-f06-1',
+            member_id: memberWithDebt.id,
+            branch_id: 'branch-1',
+            register_id: 'reg-f06-open',
+            shift_id: 'shift-f06-open',
+            amount_minor: 20000,
+            remaining_balance_minor: 0,
+            received_by: 'staff-1',
+            received_at: '2026-10-28T12:00:00Z',
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${memberWithDebt.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByTestId('balance-warning-alert')).toBeVisible();
+      const payDebtBtn = screen.getByRole('button', { name: 'Liquidar adeudo' });
+      await userEvent.click(payDebtBtn);
+
+      expect(await screen.findByRole('heading', { name: /Liquidar adeudo · Sofía Abono/i })).toBeVisible();
+      expect(await screen.findByLabelText('Adeudo pendiente')).toHaveValue('order-f06-1');
+      expect(screen.getByLabelText('Monto a abonar (MXN)')).toHaveValue(200);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar abono en efectivo' }));
+      expect(await screen.findByRole('heading', { name: 'Abono registrado' })).toBeVisible();
+      expect(screen.getByText(/Adeudo liquidado en su totalidad/)).toBeVisible();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+      await waitFor(() => {
+        expect(screen.queryByTestId('balance-warning-alert')).not.toBeInTheDocument();
+      });
+      expect(screen.getByText('Al corriente en pagos')).toBeVisible();
+    });
   });
 });

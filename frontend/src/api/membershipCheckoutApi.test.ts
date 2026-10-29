@@ -1,5 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMember, createMemberNumber, getActiveMembershipPlans, getCurrentRegisterShift, getRegisters, submitMembershipCashSale, submitMembershipTransferSale, type AuthenticatedRequest, type CreateMemberRequest, type MembershipSaleRequest } from './membershipCheckoutApi';
+import {
+  createMember,
+  createMemberNumber,
+  getActiveMembershipPlans,
+  getCurrentRegisterShift,
+  getRegisters,
+  listRegisterMemberOpenDebts,
+  MembershipCheckoutApiError,
+  submitMembershipCashSale,
+  submitMembershipDebtPayment,
+  submitMembershipTransferSale,
+  type AuthenticatedRequest,
+  type CreateMemberRequest,
+  type MembershipSaleRequest,
+  type RegisterMemberOpenDebt,
+} from './membershipCheckoutApi';
 
 const branchId = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
@@ -248,4 +263,77 @@ describe('membership checkout API', () => {
     await expect(submitMembershipCashSale('reg-1', cashReq, 'idemp-cash-5', mockRequest))
       .rejects.toMatchObject({ kind: 'http', status: 422 });
   });
+
+  it('F06-F01: lists branch-scoped open debts and posts register debt payments with Idempotency-Key and error propagation', async () => {
+    const openDebts: RegisterMemberOpenDebt[] = [
+      {
+        debt_id: 'debt-f06-1',
+        order_id: 'order-f06-1',
+        member_id: 'member-f06-1',
+        branch_id: branchId,
+        currency: 'MXN',
+        description_snapshot: 'Mensualidad Pro',
+        initial_outstanding_minor: 6000,
+        paid_amount_minor: 2000,
+        remaining_balance_minor: 4000,
+        created_at: '2026-10-28T10:00:00Z',
+      },
+    ];
+    const receipt = {
+      id: 'receipt-f06-1',
+      debt_id: 'debt-f06-1',
+      order_id: 'order-f06-1',
+      member_id: 'member-f06-1',
+      branch_id: branchId,
+      register_id: 'reg-f06-1',
+      shift_id: 'shift-f06-1',
+      amount_minor: 2500,
+      remaining_balance_minor: 1500,
+      received_by: 'staff-1',
+      received_at: '2026-10-28T11:00:00Z',
+    };
+
+    const mockRequest = vi.fn<AuthenticatedRequest>(async (path, init) => {
+      if (path === '/api/v1/registers/reg-f06-1/members/member-f06-1/debts' && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify(openDebts), { status: 200 });
+      }
+      if (path === '/api/v1/registers/reg-f06-1/membership-debt-payments' && init?.method === 'POST') {
+        return new Response(JSON.stringify(receipt), { status: 201 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    await expect(listRegisterMemberOpenDebts('reg-f06-1', 'member-f06-1', mockRequest)).resolves.toEqual(openDebts);
+    expect(mockRequest).toHaveBeenCalledWith(
+      '/api/v1/registers/reg-f06-1/members/member-f06-1/debts',
+      expect.any(Object),
+    );
+
+    const repayResult = await submitMembershipDebtPayment(
+      'reg-f06-1',
+      { order_id: 'order-f06-1', amount_minor: 2500 },
+      'idemp-debt-f06-1',
+      mockRequest,
+    );
+    expect(repayResult).toEqual(receipt);
+    expect(mockRequest).toHaveBeenCalledWith(
+      '/api/v1/registers/reg-f06-1/membership-debt-payments',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'idemp-debt-f06-1',
+        }),
+        body: JSON.stringify({ order_id: 'order-f06-1', amount_minor: 2500 }),
+      }),
+    );
+
+    mockRequest.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: 'CONFLICT', message: 'Repayment cannot exceed the remaining membership debt.' } }), { status: 409 }),
+    );
+    await expect(
+      submitMembershipDebtPayment('reg-f06-1', { order_id: 'order-f06-1', amount_minor: 9999 }, 'idemp-debt-over', mockRequest),
+    ).rejects.toBeInstanceOf(MembershipCheckoutApiError);
+  });
 });
+

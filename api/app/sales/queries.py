@@ -6,13 +6,14 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Branch, CashRegister, ClassSampleEntitlement, Member, MembershipPeriod, Order, OrderItem, Payment,
     MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
 )
+from app.sales.schemas import RegisterMemberOpenDebtDTO
 
 MAX_MINOR = 2**63 - 1
 
@@ -518,3 +519,64 @@ def post_membership_debt_payment(
     session.add(receipt)
     session.flush()
     return MembershipDebtPaymentResult(receipt, replayed=False)
+
+
+def list_register_member_open_debts(
+    session: Session,
+    *,
+    register_id: UUID,
+    member_id: UUID,
+    authorized_branch_id: UUID | None = None,
+) -> list[RegisterMemberOpenDebtDTO]:
+    """List open membership debts for a member on the specified active branch register."""
+    register = session.scalar(select(CashRegister).where(CashRegister.id == register_id))
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
+        raise CashSaleAccessDenied("Access restricted to staff branch.")
+    if register.status != "active":
+        raise CashSaleConflictError("Cash register is not active.")
+
+    member = session.scalar(select(Member).where(Member.id == member_id))
+    if member is None:
+        raise CashSaleNotFoundError("Member not found.")
+
+    rows = session.execute(
+        select(
+            MembershipDebt,
+            Order,
+            OrderItem.description_snapshot,
+            func.coalesce(func.sum(MembershipDebtPayment.amount_minor), 0).label("paid_minor"),
+        )
+        .join(Order, Order.id == MembershipDebt.order_id)
+        .outerjoin(OrderItem, (OrderItem.order_id == Order.id) & (OrderItem.line_number == 1))
+        .outerjoin(MembershipDebtPayment, MembershipDebtPayment.debt_id == MembershipDebt.id)
+        .where(
+            MembershipDebt.member_id == member.id,
+            Order.branch_id == register.branch_id,
+        )
+        .group_by(MembershipDebt.id, Order.id, OrderItem.description_snapshot)
+        .order_by(Order.created_at.asc(), MembershipDebt.created_at.asc(), MembershipDebt.id.asc())
+    ).all()
+
+    open_debts: list[RegisterMemberOpenDebtDTO] = []
+    for debt, order, description_snapshot, paid_minor in rows:
+        paid = int(paid_minor or 0)
+        remaining = debt.initial_outstanding_minor - paid
+        if remaining > 0:
+            open_debts.append(
+                RegisterMemberOpenDebtDTO(
+                    debt_id=debt.id,
+                    order_id=order.id,
+                    member_id=member.id,
+                    branch_id=order.branch_id,
+                    currency=order.currency,
+                    description_snapshot=description_snapshot or "Membresía",
+                    initial_outstanding_minor=debt.initial_outstanding_minor,
+                    paid_amount_minor=paid,
+                    remaining_balance_minor=remaining,
+                    created_at=debt.created_at,
+                )
+            )
+    return open_debts
+
