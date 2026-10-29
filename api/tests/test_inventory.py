@@ -361,3 +361,281 @@ def test_snapshot_rechecks_receptionist_branch_scope_and_session(tmp_path):
             assert revoked.status_code == 401
     finally:
         engine.dispose()
+
+
+def test_product_commercial_fields_and_patch(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-commercial.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    admin_id = seed_admin(factory)
+    with factory.begin() as session:
+        branch = Branch(code="central", name="Central Branch")
+        session.add(branch)
+        session.flush()
+        branch_id = branch.id
+
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    try:
+        with TestClient(app) as client:
+            headers = approved_admin_headers(client, delivery)
+
+            # 1. GET /api/v1/inventory/branches
+            branches_res = client.get("/api/v1/inventory/branches", headers=headers)
+            assert branches_res.status_code == 200
+            assert any(b["id"] == str(branch_id) for b in branches_res.json())
+
+            # 2. POST /api/v1/inventory/products with category, price_minor, cost_minor, initial_quantity
+            create_res = client.post(
+                "/api/v1/inventory/products",
+                headers=headers,
+                json={
+                    "name": "Electrolito Suero 500ml",
+                    "category": "Bebidas",
+                    "price_minor": 3500,
+                    "cost_minor": 1800,
+                    "initial_quantity": 20,
+                    "initial_branch_id": str(branch_id),
+                },
+            )
+            assert create_res.status_code == 201
+            product = create_res.json()
+            product_id = product["id"]
+            assert product["name"] == "Electrolito Suero 500ml"
+            assert product["category"] == "Bebidas"
+            assert product["price_minor"] == 3500
+            assert product["cost_minor"] == 1800
+            assert product["is_active"] is True
+            assert product["code"]  # auto-generated
+
+            # 3. GET /api/v1/inventory/branches/{branch_id}/stock includes commercial metadata and initialized quantity
+            stock_res = client.get(f"/api/v1/inventory/branches/{branch_id}/stock", headers=headers)
+            assert stock_res.status_code == 200
+            stock_items = stock_res.json()["items"]
+            item = next(it for it in stock_items if it["product_id"] == product_id)
+            assert item["name"] == "Electrolito Suero 500ml"
+            assert item["category"] == "Bebidas"
+            assert item["price_minor"] == 3500
+            assert item["cost_minor"] == 1800
+            assert item["is_active"] is True
+            assert item["initialized"] is True
+            assert item["opening_quantity"] == 20
+            assert item["quantity"] == 20
+            assert item["restocked_quantity"] == 0
+            assert item["waste_quantity"] == 0
+
+            # 4. PATCH /api/v1/inventory/products/{product_id}
+            patch_res = client.patch(
+                f"/api/v1/inventory/products/{product_id}",
+                headers=headers,
+                json={
+                    "price_minor": 4000,
+                    "is_active": False,
+                },
+            )
+            assert patch_res.status_code == 200
+            updated = patch_res.json()
+            assert updated["price_minor"] == 4000
+            assert updated["is_active"] is False
+            assert updated["name"] == "Electrolito Suero 500ml"
+            assert updated["cost_minor"] == 1800
+
+            # Check stock view reflects updated metadata
+            stock_res_2 = client.get(f"/api/v1/inventory/branches/{branch_id}/stock", headers=headers)
+            item_2 = next(it for it in stock_res_2.json()["items"] if it["product_id"] == product_id)
+            assert item_2["price_minor"] == 4000
+            assert item_2["is_active"] is False
+            assert item_2["quantity"] == 20
+    finally:
+        engine.dispose()
+
+
+def test_stock_movements_ledger_invariants_and_branch_scope(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-movements.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    admin_id = seed_admin(factory)
+    with factory.begin() as session:
+        central = Branch(code="central", name="Central Branch")
+        north = Branch(code="north", name="North Branch")
+        staff = StaffUser(login_identifier="central-staff@example.invalid")
+        session.add_all([central, north, staff])
+        session.flush()
+        central_id, north_id, staff_id = central.id, north.id, staff.id
+        session.add_all([
+            RoleGrant(staff_id=staff.id, role="receptionist", scope_kind="branch", branch_id=central.id),
+            StaffCredential(staff_id=staff.id, method="pin", secret_hash=hash_pin("1234")),
+        ])
+        product = Product(
+            code="water-500",
+            name="Agua 500ml",
+            category="Bebidas",
+            price_minor=1500,
+            cost_minor=800,
+            is_active=True,
+            created_by=admin_id,
+        )
+        session.add(product)
+        session.flush()
+        product_id = product.id
+        session.add(StockInitialization(
+            branch_id=central_id,
+            product_id=product_id,
+            quantity=10,
+            initialized_by=admin_id,
+        ))
+
+    staff_token = issue_session(
+        factory, "central-staff@example.invalid", "1234", central_id,
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    ).token
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    try:
+        with TestClient(app) as client:
+            admin_headers = approved_admin_headers(client, delivery)
+            staff_headers = {"Authorization": f"Bearer {staff_token}"}
+
+            # 1. Reception staff can read stock for central branch, but receives 403 on north branch
+            central_stock = client.get(f"/api/v1/inventory/branches/{central_id}/stock", headers=staff_headers)
+            assert central_stock.status_code == 200
+            assert central_stock.json()["items"][0]["quantity"] == 10
+
+            north_stock = client.get(f"/api/v1/inventory/branches/{north_id}/stock", headers=staff_headers)
+            assert north_stock.status_code == 403
+
+            # 2. Restock movement (+5)
+            restock_res = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "restock",
+                    "quantity": 5,
+                    "idempotency_key": "key-restock-1",
+                },
+            )
+            assert restock_res.status_code == 201
+            mov1 = restock_res.json()
+            assert mov1["kind"] == "restock"
+            assert mov1["quantity"] == 5
+            assert mov1["on_hand_quantity"] == 15
+
+            # 3. Idempotent replay of the exact same movement returns 200 and does NOT increment stock
+            replay_res = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "restock",
+                    "quantity": 5,
+                    "idempotency_key": "key-restock-1",
+                },
+            )
+            assert replay_res.status_code == 200
+            assert replay_res.json()["on_hand_quantity"] == 15
+
+            # 4. Conflicting idempotency key with different payload returns 409
+            conflict_res = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "restock",
+                    "quantity": 99,
+                    "idempotency_key": "key-restock-1",
+                },
+            )
+            assert conflict_res.status_code == 409
+
+            # 5. Waste movement (-3) with reason succeeds and leaves on-hand 12
+            waste_res = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "waste",
+                    "quantity": 3,
+                    "reason": "Botella rota en bodega",
+                    "idempotency_key": "key-waste-1",
+                },
+            )
+            assert waste_res.status_code == 201
+            assert waste_res.json()["on_hand_quantity"] == 12
+
+            # 6. Waste without reason is rejected
+            no_reason_res = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "waste",
+                    "quantity": 1,
+                    "idempotency_key": "key-waste-no-reason",
+                },
+            )
+            assert no_reason_res.status_code in (400, 422)
+
+            # 7. Waste exceeding on-hand stock (quantity: 20 > 12) returns 409 Conflict
+            excess_waste = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "waste",
+                    "quantity": 20,
+                    "reason": "Pérdida",
+                    "idempotency_key": "key-waste-excess",
+                },
+            )
+            assert excess_waste.status_code == 409
+
+            # 8. GET /api/v1/inventory/branches/{branch_id}/movements lists movements
+            movs_res = client.get(f"/api/v1/inventory/branches/{central_id}/movements", headers=staff_headers)
+            assert movs_res.status_code == 200
+            movs_data = movs_res.json()
+            assert movs_data["total"] == 2
+            assert len(movs_data["items"]) == 2
+
+            # Verify stock endpoint reflects current calculated stock
+            stock_check = client.get(f"/api/v1/inventory/branches/{central_id}/stock", headers=staff_headers)
+            stock_item = stock_check.json()["items"][0]
+            assert stock_item["opening_quantity"] == 10
+            assert stock_item["restocked_quantity"] == 5
+            assert stock_item["waste_quantity"] == 3
+            assert stock_item["quantity"] == 12
+
+            # 9. Deactivate product and verify movements are rejected with 409
+            client.patch(
+                f"/api/v1/inventory/products/{product_id}",
+                headers=admin_headers,
+                json={"is_active": False},
+            )
+            inactive_mov = client.post(
+                f"/api/v1/inventory/branches/{central_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "restock",
+                    "quantity": 2,
+                    "idempotency_key": "key-restock-inactive",
+                },
+            )
+            assert inactive_mov.status_code == 409
+
+            # 10. Staff cannot record movements for North branch (403)
+            cross_branch = client.post(
+                f"/api/v1/inventory/branches/{north_id}/movements",
+                headers=staff_headers,
+                json={
+                    "product_id": str(product_id),
+                    "kind": "restock",
+                    "quantity": 1,
+                    "idempotency_key": "key-cross-branch",
+                },
+            )
+            assert cross_branch.status_code == 403
+    finally:
+        engine.dispose()

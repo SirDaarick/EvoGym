@@ -372,4 +372,48 @@ describe('API product routes', () => {
     expect(await screen.findByRole('heading', { name: 'Nuevo socio' })).toBeInTheDocument();
     expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/members/new'), expect.any(Object));
   });
+
+  it('mounts live Inventory on /owner/inventory and /reception/inventory without UnavailablePage', async () => {
+    admin.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/movements')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      return new Response('{}');
+    });
+
+    // 1. Owner inventory route
+    render(<MemoryRouter initialEntries={['/owner/inventory']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Gestión y Análisis de Inventario' })).toBeInTheDocument();
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+
+    cleanup();
+
+    // 2. Reception inventory route
+    access.principal = {
+      kind: 'employee',
+      identity: { id: 'emp-1', display_name: 'Receptionist' },
+      branch: { branch_id: 'branch-1', name: 'Central Branch' },
+      session: { purpose: 'desk' },
+    };
+    access.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/reception/inventory']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Inventario' })).toBeInTheDocument();
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+  });
 });
+

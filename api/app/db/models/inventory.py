@@ -37,11 +37,17 @@ class Product(Base):
         CheckConstraint("length(code) BETWEEN 1 AND 64 AND code = lower(trim(code))", name="ck_products_code_normalized"),
         CheckConstraint("length(name) BETWEEN 1 AND 160 AND name = trim(name)", name="ck_products_name_normalized"),
         CheckConstraint("unit = 'piece'", name="ck_products_unit_piece"),
+        CheckConstraint("price_minor >= 0", name="ck_products_price_minor_nonnegative"),
+        CheckConstraint("cost_minor >= 0", name="ck_products_cost_minor_nonnegative"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="General", server_default="General")
+    price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    cost_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="piece", server_default="piece")
     created_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -62,6 +68,31 @@ class StockInitialization(Base):
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     initialized_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
     initialized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class StockMovement(Base):
+    """Append-only ledger of physical stock adjustments (restocks and waste)."""
+
+    __tablename__ = "stock_movements"
+    __table_args__ = (
+        CheckConstraint("kind IN ('restock', 'waste')", name="ck_stock_movements_kind"),
+        CheckConstraint("quantity > 0", name="ck_stock_movements_quantity_positive"),
+        CheckConstraint(
+            "kind != 'waste' OR (reason IS NOT NULL AND length(trim(reason)) > 0)",
+            name="ck_stock_movements_waste_reason",
+        ),
+        UniqueConstraint("branch_id", "idempotency_key", name="uq_stock_movements_branch_idempotency"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False, index=True)
+    product_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    recorded_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class RegisterInventorySnapshot(Base):

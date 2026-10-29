@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { barY, defineChart } from '@tanstack/charts';
 import { Chart } from '@tanstack/charts/react';
 import { scaleBand } from '@tanstack/charts/scales/band';
@@ -31,6 +31,19 @@ import {
   type ProductAnalyticsRow,
   type TopSellerItem,
 } from '../../demo/inventoryAnalyticsSelector';
+import {
+  createCatalogProduct,
+  listBranches,
+  listBranchInventory,
+  listStockMovements,
+  updateCatalogProduct,
+  type AuthenticatedRequest,
+  type BranchItem,
+  type StockItem,
+  type StockMovementItem,
+} from '../../api/inventoryApi';
+import { createEmptyDemoState } from '../../demo/adapter';
+import type { DemoState } from '../../domain/models';
 import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './InventoryAnalytics.css';
 
@@ -43,8 +56,17 @@ const PERIOD_OPTIONS: { id: InventoryPeriod; label: string }[] = [
   { id: 'all', label: 'Todo' },
 ];
 
-export function InventoryAnalytics() {
-  const { state, transact } = useDemo();
+export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedRequest } = {}) {
+  let demoContext: ReturnType<typeof useDemo> | null = null;
+  try {
+    demoContext = useDemo();
+  } catch {
+    demoContext = null;
+  }
+
+  if (!apiRequest && !demoContext) {
+    throw new Error('useDemo requires DemoProvider');
+  }
 
   const [period, setPeriod] = useState<InventoryPeriod>('month');
   const [chartMetric, setChartMetric] = useState<'units' | 'revenue'>('units');
@@ -53,6 +75,13 @@ export function InventoryAnalytics() {
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'currentStock', desc: false },
   ]);
+
+  // Live API state
+  const [branches, setBranches] = useState<BranchItem[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const [liveStock, setLiveStock] = useState<StockItem[]>([]);
+  const [liveMovements, setLiveMovements] = useState<StockMovementItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modals state
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -72,10 +101,81 @@ export function InventoryAnalytics() {
 
   const [confirmToggleProduct, setConfirmToggleProduct] = useState<ProductAnalyticsRow | null>(null);
 
+  const loadData = useCallback(async () => {
+    if (!apiRequest) return;
+    try {
+      let branchId = selectedBranchId;
+      if (!branchId) {
+        const branchList = await listBranches(apiRequest);
+        setBranches(branchList);
+        branchId = branchList[0]?.id ?? '';
+        setSelectedBranchId(branchId);
+      }
+      if (branchId) {
+        const [stockPage, movPage] = await Promise.all([
+          listBranchInventory(apiRequest, branchId),
+          listStockMovements(apiRequest, branchId),
+        ]);
+        setLiveStock(stockPage.items);
+        setLiveMovements(movPage.items);
+      }
+    } catch {
+      // In live mode, error handling is retained on UI
+    }
+  }, [apiRequest, selectedBranchId]);
+
+  useEffect(() => {
+    if (apiRequest) {
+      void loadData();
+    }
+  }, [apiRequest, loadData]);
+
+  // Compute synthesized state for analytics
+  const currentState = useMemo<DemoState>(() => {
+    if (!apiRequest) {
+      return demoContext!.state;
+    }
+    return {
+      ...createEmptyDemoState(),
+      products: liveStock.map(item => {
+        const prodMovements = liveMovements.filter(m => m.product_id === item.product_id);
+        const restocked = prodMovements.filter(m => m.kind === 'restock').reduce((sum, m) => sum + m.quantity, 0);
+        const waste = prodMovements.filter(m => m.kind === 'waste').reduce((sum, m) => sum + m.quantity, 0);
+        const currentQty = item.quantity ?? 0;
+        const opening = currentQty - restocked + waste;
+        return {
+          id: item.product_id,
+          name: item.name,
+          category: item.category || 'General',
+          priceMinor: item.price_minor,
+          costMinor: item.cost_minor,
+          openingQuantity: opening >= 0 ? opening : 0,
+          active: item.is_active,
+          illustrative: true,
+        };
+      }),
+      stockMovements: liveMovements.map(m => ({
+        id: m.id,
+        productId: m.product_id,
+        shiftId: '',
+        kind: m.kind,
+        quantity: m.quantity,
+        recordedAt: m.recorded_at,
+      })),
+      sales: [],
+      shifts: [],
+      counts: [],
+      members: [],
+      cashiers: [],
+      currentShiftId: '',
+      demoClock: new Date().toISOString(),
+    };
+  }, [apiRequest, demoContext, liveStock, liveMovements]);
+
   // Compute analytics via pure selector
   const analytics = useMemo(() => {
-    return getInventoryAnalytics(state, period);
-  }, [state, period]);
+    return getInventoryAnalytics(currentState, period);
+  }, [currentState, period]);
 
   // Filter items in the table
   const filteredProducts = useMemo(() => {
@@ -338,7 +438,7 @@ export function InventoryAnalytics() {
     setIsNewModalOpen(true);
   }
 
-  function handleSaveNewProduct(e: React.FormEvent) {
+  async function handleSaveNewProduct(e: React.FormEvent) {
     e.preventDefault();
     setNewProductError('');
 
@@ -365,20 +465,40 @@ export function InventoryAnalytics() {
       return;
     }
 
-    const result = transact(currentState =>
-      createProduct(currentState, {
-        name: newProductName.trim(),
-        category: newProductCategory.trim() || 'General',
-        priceMinor: Math.round(priceNum * 100),
-        costMinor: Math.round(costNum * 100),
-        openingQuantity: stockNum,
-      })
-    );
-
-    if (result.status === 'ok') {
-      setIsNewModalOpen(false);
+    if (apiRequest) {
+      setIsSubmitting(true);
+      try {
+        await createCatalogProduct(apiRequest, {
+          name: newProductName.trim(),
+          category: newProductCategory.trim() || 'General',
+          price_minor: Math.round(priceNum * 100),
+          cost_minor: Math.round(costNum * 100),
+          initial_quantity: stockNum,
+          initial_branch_id: selectedBranchId || branches[0]?.id,
+        });
+        setIsNewModalOpen(false);
+        await loadData();
+      } catch (err) {
+        setNewProductError(err instanceof Error ? err.message : 'Error al guardar producto.');
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
-      setNewProductError(result.message);
+      const result = demoContext!.transact(state =>
+        createProduct(state, {
+          name: newProductName.trim(),
+          category: newProductCategory.trim() || 'General',
+          priceMinor: Math.round(priceNum * 100),
+          costMinor: Math.round(costNum * 100),
+          openingQuantity: stockNum,
+        })
+      );
+
+      if (result.status === 'ok') {
+        setIsNewModalOpen(false);
+      } else {
+        setNewProductError(result.message);
+      }
     }
   }
 
@@ -391,7 +511,7 @@ export function InventoryAnalytics() {
     setEditError('');
   }
 
-  function handleSaveEditProduct(e: React.FormEvent) {
+  async function handleSaveEditProduct(e: React.FormEvent) {
     e.preventDefault();
     if (!editingProduct) return;
     setEditError('');
@@ -413,26 +533,60 @@ export function InventoryAnalytics() {
       return;
     }
 
-    const result = transact(currentState =>
-      updateProduct(currentState, editingProduct.id, {
-        name: editName.trim(),
-        category: editCategory.trim() || 'General',
-        priceMinor: Math.round(priceNum * 100),
-        costMinor: Math.round(costNum * 100),
-      })
-    );
-
-    if (result.status === 'ok') {
-      setEditingProduct(null);
+    if (apiRequest) {
+      setIsSubmitting(true);
+      try {
+        await updateCatalogProduct(apiRequest, editingProduct.id, {
+          name: editName.trim(),
+          category: editCategory.trim() || 'General',
+          price_minor: Math.round(priceNum * 100),
+          cost_minor: Math.round(costNum * 100),
+        });
+        setEditingProduct(null);
+        await loadData();
+      } catch (err) {
+        setEditError(err instanceof Error ? err.message : 'Error al actualizar producto.');
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
-      setEditError(result.message);
+      const result = demoContext!.transact(state =>
+        updateProduct(state, editingProduct.id, {
+          name: editName.trim(),
+          category: editCategory.trim() || 'General',
+          priceMinor: Math.round(priceNum * 100),
+          costMinor: Math.round(costNum * 100),
+        })
+      );
+
+      if (result.status === 'ok') {
+        setEditingProduct(null);
+      } else {
+        setEditError(result.message);
+      }
     }
   }
 
-  function handleConfirmToggle() {
+  async function handleConfirmToggle() {
     if (!confirmToggleProduct) return;
-    transact(currentState => toggleProductActive(currentState, confirmToggleProduct.id));
-    setConfirmToggleProduct(null);
+
+    if (apiRequest) {
+      setIsSubmitting(true);
+      try {
+        await updateCatalogProduct(apiRequest, confirmToggleProduct.id, {
+          is_active: !confirmToggleProduct.active,
+        });
+        setConfirmToggleProduct(null);
+        await loadData();
+      } catch (err) {
+        // Toggle error handling
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      demoContext!.transact(state => toggleProductActive(state, confirmToggleProduct.id));
+      setConfirmToggleProduct(null);
+    }
   }
 
   // Close modals on Escape key
@@ -871,7 +1025,7 @@ export function InventoryAnalytics() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" variant="primary">
+                <Button type="submit" variant="primary" disabled={isSubmitting}>
                   Guardar producto
                 </Button>
               </div>
@@ -966,7 +1120,7 @@ export function InventoryAnalytics() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" variant="primary">
+                <Button type="submit" variant="primary" disabled={isSubmitting}>
                   Guardar cambios
                 </Button>
               </div>
@@ -1009,6 +1163,7 @@ export function InventoryAnalytics() {
               </Button>
               <Button
                 variant="primary"
+                disabled={isSubmitting}
                 onClick={handleConfirmToggle}
               >
                 {confirmToggleProduct.active ? 'Confirmar desactivación' : 'Confirmar activación'}

@@ -5,6 +5,7 @@ import { useAdminSession } from '../features/auth/AdminSessionProvider';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from './ApiMembers';
 import { ApiStaffAttendance } from './ApiStaffAttendance';
 import { Shifts } from '../features/shifts/Shifts';
+import { Inventory } from '../features/inventory/Inventory';
 import { OwnerManagementPage } from '../features/auth/OwnerManagementPage';
 import { ApiStaffManagement } from '../features/owner/StaffManagement';
 import { PlanCatalog } from '../features/owner/PlanCatalog';
@@ -119,6 +120,8 @@ export function ApiProductApp() {
     content = <ApiStaffAttendance />;
   } else if ((pathname === '/owner/shifts' || pathname === '/reception/shifts') && (isAdmin || principal.kind === 'employee')) {
     content = <Shifts role={role} apiRequest={apiRequest} actorId={principal.identity.id} actorName={principal.identity.display_name} />;
+  } else if ((pathname === '/owner/inventory' || pathname === '/reception/inventory') && (isAdmin || principal.kind === 'employee')) {
+    content = <Inventory role={role} apiRequest={apiRequest} />;
   } else if (pathname === '/owner/staff' && !canManageEmployees) {
     content = <UnavailablePage title="Personal" />;
   }

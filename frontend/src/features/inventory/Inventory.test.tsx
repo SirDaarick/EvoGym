@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { DemoProvider, useDemo } from '../../demo/DemoProvider';
 import { ReceptionHome } from '../reception/ReceptionHome';
@@ -95,5 +95,117 @@ describe('Inventory catalog preview', () => {
     expect(screen.queryByRole('dialog', { name: 'Vista previa de recepción' })).not.toBeInTheDocument();
     expect(screen.getByText('Cantidad recibida').parentElement).toHaveTextContent('1');
     expect(screen.getByLabelText('Persisted state').textContent).toBe(stateBefore);
+  });
+
+  it('loads live stock and submits restock and waste movements via apiRequest', async () => {
+    let stockItems = [
+      {
+        product_id: 'p-1',
+        code: 'suero',
+        name: 'Suero 500ml',
+        category: 'Bebidas',
+        price_minor: 3500,
+        cost_minor: 1800,
+        is_active: true,
+        unit: 'piece',
+        initialized: true,
+        opening_quantity: 20,
+        restocked_quantity: 0,
+        waste_quantity: 0,
+        quantity: 20,
+        initialized_at: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: stockItems, total: stockItems.length }));
+      }
+      if (path === '/api/v1/inventory/branches/branch-1/movements' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        if (body.kind === 'waste' && body.quantity > 25) {
+          return new Response(JSON.stringify({ detail: 'Waste quantity exceeds available stock.' }), { status: 409 });
+        }
+        if (body.kind === 'restock') {
+          stockItems[0].quantity += body.quantity;
+          stockItems[0].restocked_quantity += body.quantity;
+        } else if (body.kind === 'waste') {
+          stockItems[0].quantity -= body.quantity;
+          stockItems[0].waste_quantity += body.quantity;
+        }
+        return new Response(
+          JSON.stringify({
+            id: 'mov-1',
+            branch_id: 'branch-1',
+            product_id: body.product_id,
+            kind: body.kind,
+            quantity: body.quantity,
+            reason: body.reason || null,
+            recorded_by: 'user-1',
+            idempotency_key: body.idempotency_key,
+            recorded_at: '2026-01-02T00:00:00Z',
+            on_hand_quantity: stockItems[0].quantity,
+          }),
+          { status: 201 }
+        );
+      }
+      return new Response('{}');
+    });
+
+    render(<Inventory role="RECEPTION" apiRequest={mockRequest} />);
+
+    // Renders live product with stock 20
+    expect(await screen.findByRole('button', { name: /Seleccionar Suero 500ml/ })).toBeInTheDocument();
+    expect(screen.getByText('Stock: 20')).toBeInTheDocument();
+
+    // Select product and increase quantity
+    const card = screen.getByRole('button', { name: /Seleccionar Suero 500ml/ });
+    fireEvent.click(card);
+    fireEvent.click(screen.getByRole('button', { name: /Aumentar Suero 500ml/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Aumentar Suero 500ml/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Aumentar Suero 500ml/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Aumentar Suero 500ml/ }));
+    // 5 units selected (1 from click + 4 increases = 5)
+    expect(screen.getByLabelText(/Cantidad de Suero 500ml/)).toHaveTextContent('5');
+
+    // Confirm restock
+    const confirmBtn = screen.getByRole('button', { name: 'Confirmar recepción' });
+    expect(confirmBtn).toBeEnabled();
+    fireEvent.click(confirmBtn);
+
+    expect(await screen.findByText('Recepción de 5 unidad(es) confirmada.')).toBeInTheDocument();
+    expect(mockRequest).toHaveBeenCalledWith(
+      '/api/v1/inventory/branches/branch-1/movements',
+      expect.objectContaining({ method: 'POST' })
+    );
+
+    // Stock refreshed to 25
+    expect(await screen.findByText('Stock: 25')).toBeInTheDocument();
+
+    // Switch to waste
+    fireEvent.click(screen.getByRole('button', { name: 'Merma' }));
+    expect(screen.getByRole('button', { name: 'Confirmar merma' })).toBeDisabled();
+
+    // Select 30 units (more than 25)
+    fireEvent.click(card);
+    const increaseBtn = screen.getByRole('button', { name: /Aumentar Suero 500ml/ });
+    for (let i = 0; i < 29; i++) {
+      fireEvent.click(increaseBtn);
+    }
+    expect(screen.getByLabelText(/Cantidad de Suero 500ml/)).toHaveTextContent('30');
+
+    // Enter waste reason
+    const reasonInput = screen.getByLabelText(/Motivo de merma/);
+    fireEvent.change(reasonInput, { target: { value: 'Lote dañado' } });
+
+    // Click confirm merma
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
+
+    // Verifies 409 error banner
+    expect(await screen.findByRole('alert')).toHaveTextContent('Waste quantity exceeds available stock.');
+    expect(screen.getByText('Stock: 25')).toBeInTheDocument();
   });
 });

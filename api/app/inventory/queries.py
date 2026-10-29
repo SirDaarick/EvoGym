@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from uuid import UUID
+import re
+from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
@@ -10,6 +11,7 @@ from app.db.models import (
     RegisterInventorySnapshotItem,
     RegisterInventorySnapshot,
     StockInitialization,
+    StockMovement,
 )
 from app.db.models.shifts import CashRegister, ShiftInventoryReview
 from app.db.models.inventory import normalize_product_code, normalize_product_name
@@ -17,13 +19,108 @@ from app.db.models.inventory import normalize_product_code, normalize_product_na
 MAX_BIGINT = 2**63 - 1
 
 
-def create_product(session: Session, *, code: str, name: str, created_by: UUID, unit: str = "piece") -> Product:
-    normalized_code = normalize_product_code(code)
+class InactiveProductError(Exception):
+    """Cannot record stock movement on an inactive product."""
+
+
+class InsufficientStockError(Exception):
+    """Waste movement would result in negative on-hand stock."""
+
+
+class IdempotencyConflictError(Exception):
+    """Idempotency key has already been used with different parameters."""
+
+
+def list_branches(session: Session) -> list[Branch]:
+    return list(session.scalars(select(Branch).order_by(Branch.name, Branch.code)).all())
+
+
+def create_product(
+    session: Session,
+    *,
+    name: str,
+    created_by: UUID,
+    code: str | None = None,
+    category: str = "General",
+    price_minor: int = 0,
+    cost_minor: int = 0,
+    unit: str = "piece",
+    initial_quantity: int | None = None,
+    initial_branch_id: UUID | None = None,
+) -> Product:
     normalized_name = normalize_product_name(name)
+    if code is not None and code.strip():
+        normalized_code = normalize_product_code(code)
+    else:
+        base_slug = re.sub(r"[^a-z0-9]+", "-", normalized_name.casefold()).strip("-")
+        if not base_slug:
+            base_slug = "prod"
+        normalized_code = f"{base_slug[:48]}-{uuid4().hex[:8]}"
+
     if unit != "piece":
         raise ValueError("Only piece-counted products are supported.")
-    product = Product(code=normalized_code, name=normalized_name, unit=unit, created_by=created_by)
+    if price_minor < 0 or cost_minor < 0:
+        raise ValueError("Price and cost must be nonnegative.")
+
+    product = Product(
+        code=normalized_code,
+        name=normalized_name,
+        category=" ".join(category.split()) if category else "General",
+        price_minor=price_minor,
+        cost_minor=cost_minor,
+        is_active=True,
+        unit=unit,
+        created_by=created_by,
+    )
     session.add(product)
+    session.flush()
+
+    if initial_quantity is not None:
+        target_branch_id = initial_branch_id
+        if target_branch_id is None:
+            target_branch_id = session.scalar(select(Branch.id).order_by(Branch.id))
+        if target_branch_id is not None:
+            initialize_stock(
+                session,
+                branch_id=target_branch_id,
+                product_id=product.id,
+                quantity=initial_quantity,
+                actor_id=created_by,
+            )
+
+    return product
+
+
+def update_product(
+    session: Session,
+    *,
+    product_id: UUID,
+    name: str | None = None,
+    category: str | None = None,
+    price_minor: int | None = None,
+    cost_minor: int | None = None,
+    is_active: bool | None = None,
+) -> Product:
+    product = session.get(Product, product_id)
+    if product is None:
+        raise LookupError("product")
+
+    if name is not None:
+        product.name = normalize_product_name(name)
+    if category is not None:
+        normalized_cat = " ".join(category.split())
+        product.category = normalized_cat if normalized_cat else "General"
+    if price_minor is not None:
+        if price_minor < 0 or price_minor > MAX_BIGINT:
+            raise ValueError("Price must be a nonnegative integer.")
+        product.price_minor = price_minor
+    if cost_minor is not None:
+        if cost_minor < 0 or cost_minor > MAX_BIGINT:
+            raise ValueError("Cost must be a nonnegative integer.")
+        product.cost_minor = cost_minor
+    if is_active is not None:
+        product.is_active = is_active
+
     session.flush()
     return product
 
@@ -32,7 +129,7 @@ def list_products(session: Session, *, offset: int, limit: int) -> tuple[list[Pr
     _validate_page(offset, limit)
     total = session.scalar(select(func.count()).select_from(Product)) or 0
     rows = session.scalars(select(Product).order_by(Product.code, Product.id).offset(offset).limit(limit)).all()
-    return rows, total
+    return list(rows), total
 
 
 def initialize_stock(session: Session, *, branch_id: UUID, product_id: UUID, quantity: int, actor_id: UUID) -> StockInitialization:
@@ -49,15 +146,184 @@ def initialize_stock(session: Session, *, branch_id: UUID, product_id: UUID, qua
     return row
 
 
+def get_on_hand_stock(session: Session, *, branch_id: UUID, product_id: UUID) -> int:
+    init_qty = session.scalar(
+        select(StockInitialization.quantity).where(
+            StockInitialization.branch_id == branch_id,
+            StockInitialization.product_id == product_id,
+        )
+    )
+    if init_qty is None:
+        return 0
+    restocked = (
+        session.scalar(
+            select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
+                StockMovement.branch_id == branch_id,
+                StockMovement.product_id == product_id,
+                StockMovement.kind == "restock",
+            )
+        )
+        or 0
+    )
+    waste = (
+        session.scalar(
+            select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
+                StockMovement.branch_id == branch_id,
+                StockMovement.product_id == product_id,
+                StockMovement.kind == "waste",
+            )
+        )
+        or 0
+    )
+    return int(init_qty) + int(restocked) - int(waste)
+
+
 def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: int):
     _validate_page(offset, limit)
     if session.get(Branch, branch_id) is None:
         raise LookupError("branch")
     total = session.scalar(select(func.count()).select_from(Product)) or 0
-    stmt = (select(Product, StockInitialization)
-            .outerjoin(StockInitialization, (StockInitialization.product_id == Product.id) & (StockInitialization.branch_id == branch_id))
-            .order_by(Product.code, Product.id).offset(offset).limit(limit))
-    return session.execute(stmt).all(), total
+
+    mov_sub = (
+        select(
+            StockMovement.product_id,
+            func.coalesce(
+                func.sum(case((StockMovement.kind == "restock", StockMovement.quantity), else_=0)), 0
+            ).label("restocked"),
+            func.coalesce(
+                func.sum(case((StockMovement.kind == "waste", StockMovement.quantity), else_=0)), 0
+            ).label("waste"),
+        )
+        .where(StockMovement.branch_id == branch_id)
+        .group_by(StockMovement.product_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(
+            Product,
+            StockInitialization,
+            func.coalesce(mov_sub.c.restocked, 0).label("restocked_quantity"),
+            func.coalesce(mov_sub.c.waste, 0).label("waste_quantity"),
+        )
+        .outerjoin(
+            StockInitialization,
+            (StockInitialization.product_id == Product.id) & (StockInitialization.branch_id == branch_id),
+        )
+        .outerjoin(mov_sub, mov_sub.c.product_id == Product.id)
+        .order_by(Product.code, Product.id)
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = session.execute(stmt).all()
+    return rows, total
+
+
+def record_stock_movement(
+    session: Session,
+    *,
+    branch_id: UUID,
+    product_id: UUID,
+    kind: str,
+    quantity: int,
+    actor_id: UUID,
+    idempotency_key: str,
+    reason: str | None = None,
+) -> tuple[StockMovement, int, bool]:
+    """Record a stock movement. Returns (StockMovement, on_hand_quantity, is_new)."""
+    if kind not in ("restock", "waste"):
+        raise ValueError("Movement kind must be 'restock' or 'waste'.")
+    if type(quantity) is not int or quantity <= 0 or quantity > MAX_BIGINT:
+        raise ValueError("Quantity must be a positive integer.")
+    if session.get(Branch, branch_id) is None:
+        raise LookupError("branch")
+
+    product = session.get(Product, product_id)
+    if product is None:
+        raise LookupError("product")
+    if not product.is_active:
+        raise InactiveProductError("Cannot record movements for inactive products.")
+
+    # Idempotent replay check
+    existing = session.scalar(
+        select(StockMovement).where(
+            StockMovement.branch_id == branch_id,
+            StockMovement.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if (
+            existing.product_id != product_id
+            or existing.kind != kind
+            or existing.quantity != quantity
+        ):
+            raise IdempotencyConflictError("Idempotency key already used with different parameters.")
+        on_hand = get_on_hand_stock(session, branch_id=branch_id, product_id=product_id)
+        return existing, on_hand, False
+
+    init_row = session.scalar(
+        select(StockInitialization).where(
+            StockInitialization.branch_id == branch_id,
+            StockInitialization.product_id == product_id,
+        )
+    )
+    if init_row is None:
+        if kind == "restock":
+            init_row = StockInitialization(
+                branch_id=branch_id,
+                product_id=product_id,
+                quantity=0,
+                initialized_by=actor_id,
+                initialized_at=datetime.now(timezone.utc),
+            )
+            session.add(init_row)
+            session.flush()
+        else:
+            raise InsufficientStockError("Stock has not been initialized for this product.")
+
+    current_on_hand = get_on_hand_stock(session, branch_id=branch_id, product_id=product_id)
+    if kind == "waste":
+        if not reason or not reason.strip():
+            raise ValueError("Reason is required for waste stock movements.")
+        if quantity > current_on_hand:
+            raise InsufficientStockError("Waste quantity exceeds available stock.")
+
+    new_on_hand = current_on_hand + quantity if kind == "restock" else current_on_hand - quantity
+    movement = StockMovement(
+        branch_id=branch_id,
+        product_id=product_id,
+        kind=kind,
+        quantity=quantity,
+        reason=reason.strip() if reason else None,
+        recorded_by=actor_id,
+        idempotency_key=idempotency_key,
+        recorded_at=datetime.now(timezone.utc),
+    )
+    session.add(movement)
+    session.flush()
+    return movement, new_on_hand, True
+
+
+def list_stock_movements(
+    session: Session, *, branch_id: UUID, offset: int, limit: int
+) -> tuple[list[StockMovement], int]:
+    _validate_page(offset, limit)
+    if session.get(Branch, branch_id) is None:
+        raise LookupError("branch")
+    total = (
+        session.scalar(
+            select(func.count()).select_from(StockMovement).where(StockMovement.branch_id == branch_id)
+        )
+        or 0
+    )
+    rows = session.scalars(
+        select(StockMovement)
+        .where(StockMovement.branch_id == branch_id)
+        .order_by(StockMovement.recorded_at.desc(), StockMovement.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return list(rows), total
 
 
 def _read_current_inventory_rows(session: Session, branch_id: UUID):

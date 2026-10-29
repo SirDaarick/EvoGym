@@ -22,6 +22,7 @@ from app.db.models.inventory import (
     RegisterInventorySnapshot,
     RegisterInventorySnapshotItem,
     StockInitialization,
+    StockMovement,
 )
 from app.db.models.orders import Order, OrderItem, Payment
 from app.db.models.memberships import MembershipPeriod
@@ -89,6 +90,7 @@ __all__ = [
     "ShiftInventoryReview",
     "ShiftInventoryObservation",
     "StockInitialization",
+    "StockMovement",
     "StaffCredential",
     "StaffDevicePairingCode",
     "StaffEnrollmentCode",
