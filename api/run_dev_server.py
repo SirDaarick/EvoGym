@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -30,7 +31,7 @@ settings = Settings(
     auth_max_concurrent_hashes=4,
     admin_recovery_ttl_seconds=1800,
     admin_recovery_base_url="http://localhost:5174/admin/recovery",
-    cors_allowed_origins="http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
+    cors_allowed_origins="http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5180,http://127.0.0.1:5180",
     _env_file=None
 )
 
@@ -57,4 +58,5 @@ app = create_app(settings, recovery_delivery=delivery)
 delivery.app = app
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")

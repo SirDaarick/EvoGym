@@ -17,12 +17,12 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F01 | Open, operate, and close a cash shift | P0 / A | **Completed** | Authenticated cashier; register/shift contracts |
 | F02 | Register and maintain a member | P0 / A | **Completed** | Authenticated member contract |
 | F03 | Create and publish a membership plan version | P1 / A | **Completed** | Catalog plan contract; owner UI |
-| F04 | Sell a membership | P0 / A | Pending | F01; existing member and published-plan API |
+| F04 | Sell a membership | P0 / A | **Completed** | F01; existing member and published-plan API |
 | F05 | Record a member access/check-in event | P0 / A | **Completed** | Authenticated member-check-in contract |
 | F06 | Pay membership debt at the register | P1 / A | Pending | F01; debt/access decision D-024 |
 | F07 | Review pending money and transfer payments | P1 / A | Pending | Finance permissions; decisions D-017/D-023 |
 | F08 | Manage staff schedule series and attendance corrections | P1 / A | **Completed** | Roster and schedule APIs; existing attendance occurrences |
-| F09 | Set up inventory and record stock movement | P1 / B | D-015; stock-movement semantics |
+| F09 | Set up inventory and record stock movement | P1 / B | **Completed** | D-015; stock-movement semantics |
 | F10 | Sell products and process refunds/returns | P2 / C | F01, F09; sale/refund/accounting decisions |
 | F11 | Manage rentals end to end | P2 / C | Rental lifecycle, inventory and payment rules |
 | F12 | Record and review expenses | P2 / C | Expense ownership, approval and accounting rules |
@@ -97,10 +97,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** consumer `frontend/src/features/reception/LiveMembershipCheckout.tsx:40-105`; API client `frontend/src/api/membershipCheckoutApi.ts:133-157, 201-245`; sale API `api/app/api/sales.py:87-170`; checkout backend schemas `api/app/sales/schemas.py`.
 
 **Tasks:**
-- [ ] Reconcile current checkout request/response DTOs and live auth/session transport.
-- [ ] Mount/reuse the existing API-backed checkout from the authenticated cashier/member flow; do not build a second checkout.
-- [ ] Verify denied sale, invalid selection, wrong branch/register/shift, duplicate key and uncertain network retry.
-- [ ] Verify receipt, payment and membership against persisted records after reload.
+- [x] Reconcile current checkout request/response DTOs and live auth/session transport.
+- [x] Mount/reuse the existing API-backed checkout from the authenticated cashier/member flow; do not build a second checkout.
+- [x] Verify denied sale, invalid selection, wrong branch/register/shift, duplicate key and uncertain network retry.
+- [x] Verify receipt, payment and membership against persisted records after reload.
 
 **Exit:** existing live checkout is reachable to authorized cashiers and remains safe under retries; isolated component tests alone do not pass.
 
@@ -169,10 +169,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** authenticated consumer boundary `frontend/src/app/ApiProductApp.tsx:103-117`; API `api/app/api/inventory.py:46-84` covers product create/list and initial stock setup/list; schemas `api/app/inventory/schemas.py`; models/queries `api/app/db/models/inventory.py`, `api/app/inventory/queries.py`. Do NOT call receiving/adjustments already implemented. Verify D-015 before choosing supported movement types.
 
 **Tasks:**
-- [ ] Read D-015 and current inventory DTO/model/queries; distinguish opening stock from later movement.
-- [ ] Agree units, ledger, negative-stock, reason and audit rules.
-- [ ] Add only the missing API operations demonstrated by the agreed flow.
-- [ ] Mount owner inventory adapter and verify empty, duplicate, invalid, denied, persisted quantity and history.
+- [x] Read D-015 and current inventory DTO/model/queries; distinguish opening stock from later movement.
+- [x] Agree units, ledger, negative-stock, reason and audit rules.
+- [x] Add only the missing API operations demonstrated by the agreed flow.
+- [x] Mount owner inventory adapter and verify empty, duplicate, invalid, denied, persisted quantity and history.
 
 **Exit:** every delivered stock change has durable provenance; local UI state is not stock truth.
 
