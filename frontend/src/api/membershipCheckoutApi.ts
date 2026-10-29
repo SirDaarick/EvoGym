@@ -57,7 +57,42 @@ export interface MembershipSaleResponse {
   item: Record<string, unknown>;
   payment: Record<string, unknown>;
   membership: Record<string, unknown> | null;
+  sample_entitlement?: Record<string, unknown> | null;
 }
+
+export interface RegisterMemberOpenDebt {
+  debt_id: string;
+  order_id: string;
+  member_id: string;
+  branch_id: string;
+  currency: string;
+  description_snapshot: string;
+  initial_outstanding_minor: number;
+  paid_amount_minor: number;
+  remaining_balance_minor: number;
+  created_at: string;
+}
+
+export interface MembershipDebtPaymentInput {
+  order_id: string;
+  amount_minor: number;
+}
+
+export interface MembershipDebtPaymentReceipt {
+  id: string;
+  debt_id: string;
+  order_id: string;
+  member_id: string;
+  branch_id: string;
+  register_id: string;
+  shift_id: string;
+  amount_minor: number;
+  remaining_balance_minor: number;
+  received_by: string;
+  received_at: string;
+}
+
+export type AuthenticatedRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 export class CheckoutApiHttpError extends OperationalApiHttpError {
   constructor(status: number, message: string, code?: string, requestId?: string, issues?: unknown) {
@@ -65,6 +100,8 @@ export class CheckoutApiHttpError extends OperationalApiHttpError {
     this.name = 'CheckoutApiHttpError';
   }
 }
+
+export { CheckoutApiHttpError as MembershipCheckoutApiError };
 
 export class CheckoutApiNetworkError extends OperationalApiNetworkError {
   constructor(message = 'No se pudo conectar con el servidor. Intenta nuevamente.') {
@@ -83,22 +120,35 @@ export class MemberNumberConflictError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const config = getReceptionConfig();
-  const token = readOperationalToken();
-  if (!token) throw new Error('La sesión operativa es obligatoria para consultar o registrar ventas.');
-
+async function request<T>(path: string, init: RequestInit = {}, apiRequest?: AuthenticatedRequest): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${config.apiOrigin}${path}`, {
-      ...init,
-      headers: {
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-        Authorization: `Bearer ${token}`,
-        ...init.headers,
-      },
-    });
-  } catch {
+    if (apiRequest) {
+      response = await apiRequest(path, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...init.headers,
+        },
+      });
+    } else {
+      const config = getReceptionConfig();
+      const token = readOperationalToken();
+      if (!token) throw new Error('La sesión operativa es obligatoria para consultar o registrar ventas.');
+
+      response = await fetch(`${config.apiOrigin}${path}`, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          Authorization: `Bearer ${token}`,
+          ...init.headers,
+        },
+      });
+    }
+  } catch (error) {
+    if (error instanceof CheckoutApiHttpError || error instanceof CheckoutApiNetworkError) {
+      throw error;
+    }
     throw new CheckoutApiNetworkError();
   }
 
@@ -130,8 +180,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function getActiveMembershipPlans(): Promise<ActiveMembershipPlan[]> {
-  const response = await request<unknown>('/api/v1/catalog/plans?kind=membership&status=active');
+export async function getActiveMembershipPlans(apiRequest?: AuthenticatedRequest): Promise<ActiveMembershipPlan[]> {
+  const response = await request<unknown>('/api/v1/catalog/plans?kind=membership&status=active', {}, apiRequest);
   if (!Array.isArray(response) || !response.every(isActiveMembershipPlan)) {
     throw new Error('La respuesta de planes no es válida.');
   }
@@ -198,17 +248,17 @@ export async function createMember(requestBody: CreateMemberRequest): Promise<Cr
   }
 }
 
-export async function getRegisters(): Promise<CheckoutRegister[]> {
-  const response = await request<unknown>('/api/v1/registers');
+export async function getRegisters(apiRequest?: AuthenticatedRequest): Promise<CheckoutRegister[]> {
+  const response = await request<unknown>('/api/v1/registers', {}, apiRequest);
   if (!Array.isArray(response) || !response.every(isCheckoutRegister)) {
     throw new Error('La respuesta de cajas no es válida.');
   }
   return response;
 }
 
-export async function getCurrentRegisterShift(registerId: string): Promise<CurrentRegisterShift> {
+export async function getCurrentRegisterShift(registerId: string, apiRequest?: AuthenticatedRequest): Promise<CurrentRegisterShift> {
   const query = new URLSearchParams({ register_id: registerId });
-  const response = await request<unknown>(`/api/v1/shifts/current?${query}`);
+  const response = await request<unknown>(`/api/v1/shifts/current?${query}`, {}, apiRequest);
   if (!isRecord(response) || !isIdentifier(response.id) || !isIdentifier(response.cash_register_id)) {
     throw new Error('La respuesta del turno no es válida.');
   }
@@ -219,16 +269,18 @@ export function submitMembershipCashSale(
   registerId: string,
   requestBody: MembershipSaleRequest,
   idempotencyKey: string,
+  apiRequest?: AuthenticatedRequest,
 ): Promise<MembershipSaleResponse> {
-  return submitSale(registerId, 'membership-sales', requestBody, idempotencyKey);
+  return submitSale(registerId, 'membership-sales', requestBody, idempotencyKey, apiRequest);
 }
 
 export function submitMembershipTransferSale(
   registerId: string,
   requestBody: MembershipTransferSaleRequest,
   idempotencyKey: string,
+  apiRequest?: AuthenticatedRequest,
 ): Promise<MembershipSaleResponse> {
-  return submitSale(registerId, 'membership-transfer-sales', requestBody, idempotencyKey);
+  return submitSale(registerId, 'membership-transfer-sales', requestBody, idempotencyKey, apiRequest);
 }
 
 function submitSale(
@@ -236,10 +288,65 @@ function submitSale(
   endpoint: 'membership-sales' | 'membership-transfer-sales',
   requestBody: MembershipSaleRequest | MembershipTransferSaleRequest,
   idempotencyKey: string,
+  apiRequest?: AuthenticatedRequest,
 ): Promise<MembershipSaleResponse> {
   return request<MembershipSaleResponse>(`/api/v1/registers/${encodeURIComponent(registerId)}/${endpoint}`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(requestBody),
-  });
+  }, apiRequest);
 }
+
+function isRegisterMemberOpenDebt(value: unknown): value is RegisterMemberOpenDebt {
+  return (
+    isRecord(value) &&
+    isIdentifier(value.debt_id) &&
+    isIdentifier(value.order_id) &&
+    isIdentifier(value.member_id) &&
+    isIdentifier(value.branch_id) &&
+    typeof value.currency === 'string' &&
+    typeof value.description_snapshot === 'string' &&
+    typeof value.initial_outstanding_minor === 'number' &&
+    Number.isSafeInteger(value.initial_outstanding_minor) &&
+    typeof value.paid_amount_minor === 'number' &&
+    Number.isSafeInteger(value.paid_amount_minor) &&
+    typeof value.remaining_balance_minor === 'number' &&
+    Number.isSafeInteger(value.remaining_balance_minor) &&
+    value.remaining_balance_minor > 0 &&
+    typeof value.created_at === 'string'
+  );
+}
+
+export async function listRegisterMemberOpenDebts(
+  registerId: string,
+  memberId: string,
+  apiRequest?: AuthenticatedRequest,
+): Promise<RegisterMemberOpenDebt[]> {
+  const response = await request<unknown>(
+    `/api/v1/registers/${encodeURIComponent(registerId)}/members/${encodeURIComponent(memberId)}/debts`,
+    {},
+    apiRequest,
+  );
+  if (!Array.isArray(response) || !response.every(isRegisterMemberOpenDebt)) {
+    throw new Error('La respuesta de adeudos pendientes no es válida.');
+  }
+  return response;
+}
+
+export function submitMembershipDebtPayment(
+  registerId: string,
+  requestBody: MembershipDebtPaymentInput,
+  idempotencyKey: string,
+  apiRequest?: AuthenticatedRequest,
+): Promise<MembershipDebtPaymentReceipt> {
+  return request<MembershipDebtPaymentReceipt>(
+    `/api/v1/registers/${encodeURIComponent(registerId)}/membership-debt-payments`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(requestBody),
+    },
+    apiRequest,
+  );
+}
+

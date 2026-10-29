@@ -42,6 +42,21 @@ class MembershipDebtPaymentDTO(BaseModel):
     received_at: datetime = Field(validation_alias="created_at")
 
 
+class RegisterMemberOpenDebtDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    debt_id: UUID
+    order_id: UUID
+    member_id: UUID
+    branch_id: UUID
+    currency: str
+    description_snapshot: str
+    initial_outstanding_minor: int
+    paid_amount_minor: int
+    remaining_balance_minor: int
+    created_at: datetime
+
+
 class CashSaleOrderDTO(BaseModel):
     id: UUID
     branch_id: UUID

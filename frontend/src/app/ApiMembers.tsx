@@ -328,6 +328,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
         noteSubmitting,
         noteError,
         onUpdateMember: handleUpdateMember,
+        apiRequest: request,
       }}
     />
   );

@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { PaginationState, SortingState, Updater } from '@tanstack/react-table';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import {
+  createTransferReviewIdempotencyKey,
+  getPendingMoney,
+  reviewTransferPayment,
+  type PendingMoneyResponse,
+} from '../../api/pendingMoneyApi';
+import { createEmptyDemoState } from '../../demo/adapter';
 import { useDemo } from '../../demo/DemoProvider';
 import { getExpenseReport } from '../../demo/expenseReportSelector';
 import { useFixedCosts } from '../../demo/fixedCostsStore';
 import { getCurrentCalendarMonthRange, getFinanceProjection, getPreviousComparableRange, isValidFinanceRange } from '../../demo/financeReportSelector';
+import type { DemoState } from '../../domain/models';
 import { useStaff } from '../staff/staffStore';
 import { BalanceView } from './finance/BalanceView';
 import { BudgetView } from './finance/BudgetView';
-import { CollectionsView } from './finance/CollectionsView';
+import { CollectionsView, type PendingMoneyBranchOption } from './finance/CollectionsView';
 import { ExpensesView } from './finance/ExpensesView';
 import { FinanceToolbar } from './finance/FinanceToolbar';
 import type { CollectionFilters, ExpenseFilters, FinanceTab, FlowGranularity, TableState } from './finance/types';
@@ -20,21 +29,134 @@ const validTab = (value: string | null): value is FinanceTab => tabs.includes(va
 const defaultCollectionTable: TableState = { sorting: [{ id: 'recordedAt', desc: true }], pagination: { pageIndex: 0, pageSize: 20 } };
 const defaultExpenseTable: TableState = { sorting: [{ id: 'recordedAt', desc: true }], pagination: { pageIndex: 0, pageSize: 20 } };
 
-export function ExpenseReport() {
+export interface ExpenseReportProps {
+  apiRequest?: AuthenticatedRequest;
+}
+
+export function ExpenseReport({ apiRequest }: ExpenseReportProps = {}) {
+  if (apiRequest) {
+    return <LiveExpenseReport apiRequest={apiRequest} />;
+  }
+  return <DemoExpenseReport />;
+}
+
+function DemoExpenseReport() {
   const { state } = useDemo();
+  return <ExpenseReportContent state={state} />;
+}
+
+function LiveExpenseReport({ apiRequest }: { apiRequest: AuthenticatedRequest }) {
+  const state = useMemo(() => createEmptyDemoState(), []);
+  return <ExpenseReportContent state={state} apiRequest={apiRequest} />;
+}
+
+function ExpenseReportContent({
+  state,
+  apiRequest,
+}: {
+  state: DemoState;
+  apiRequest?: AuthenticatedRequest;
+}) {
   const [params, setParams] = useSearchParams();
   const fixedCosts = useFixedCosts();
   const staff = useStaff();
   const defaultRange = getCurrentCalendarMonthRange(state.demoClock);
   const range = { from: params.get('from') ?? defaultRange.from, to: params.get('to') ?? defaultRange.to };
   const tabParam = params.get('tab');
-  const active: FinanceTab = validTab(tabParam) ? tabParam : 'balance';
+  const active: FinanceTab = validTab(tabParam) ? tabParam : (apiRequest ? 'cobros' : 'balance');
   const [focusTab, setFocusTab] = useState<FinanceTab>(active);
   const [collectionFilters, setCollectionFiltersState] = useState<CollectionFilters>({ search: '', source: 'all', method: 'all', status: 'all' });
   const [collectionTable, setCollectionTable] = useState<TableState>(defaultCollectionTable);
   const [expenseFilters, setExpenseFiltersState] = useState<ExpenseFilters>({ search: '', category: 'all' });
   const [expenseTable, setExpenseTable] = useState<TableState>(defaultExpenseTable);
   const [granularity, setGranularity] = useState<FlowGranularity>('day');
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('ALL');
+  const [branchOptions, setBranchOptions] = useState<PendingMoneyBranchOption[]>([]);
+  const [pendingMoneyResponse, setPendingMoneyResponse] = useState<PendingMoneyResponse | null>(null);
+  const [pendingMoneyLoading, setPendingMoneyLoading] = useState<boolean>(Boolean(apiRequest));
+  const [pendingMoneyError, setPendingMoneyError] = useState<string | null>(null);
+  const [reviewingPaymentId, setReviewingPaymentId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const reviewIdempotencyKeysRef = useRef<Map<string, string>>(new Map());
+
+  const recordBranchOptions = useCallback((items: PendingMoneyResponse['items']) => {
+    setBranchOptions(current => {
+      const byId = new Map(current.map(option => [option.id, option]));
+      for (const item of items) {
+        if (item.branch_id && item.branch_name && !byId.has(item.branch_id)) {
+          byId.set(item.branch_id, { id: item.branch_id, name: item.branch_name });
+        }
+      }
+      return [...byId.values()];
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!apiRequest) return;
+    let cancelled = false;
+    setPendingMoneyLoading(true);
+    setPendingMoneyError(null);
+    void getPendingMoney({
+      branchId: selectedBranchId === 'ALL' ? undefined : selectedBranchId,
+      apiRequest,
+    })
+      .then(response => {
+        if (cancelled) return;
+        setPendingMoneyResponse(response);
+        recordBranchOptions(response.items);
+      })
+      .catch(error => {
+        if (cancelled) return;
+        setPendingMoneyError(
+          error instanceof Error ? error.message : 'No fue posible cargar las transferencias pendientes.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPendingMoneyLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiRequest, recordBranchOptions, selectedBranchId]);
+
+  const handleReviewTransfer = useCallback(
+    async (paymentId: string, status: 'confirmed' | 'pending') => {
+      if (!apiRequest) return;
+      const keySlot = `${paymentId}:${status}`;
+      let idempotencyKey = reviewIdempotencyKeysRef.current.get(keySlot);
+      if (!idempotencyKey) {
+        idempotencyKey = createTransferReviewIdempotencyKey();
+        reviewIdempotencyKeysRef.current.set(keySlot, idempotencyKey);
+      }
+      setReviewingPaymentId(paymentId);
+      setReviewError(null);
+      try {
+        await reviewTransferPayment(
+          paymentId,
+          { status },
+          idempotencyKey,
+          apiRequest,
+        );
+        reviewIdempotencyKeysRef.current.delete(keySlot);
+        const refreshed = await getPendingMoney({
+          branchId: selectedBranchId === 'ALL' ? undefined : selectedBranchId,
+          apiRequest,
+        });
+        setPendingMoneyResponse(refreshed);
+        recordBranchOptions(refreshed.items);
+      } catch (error) {
+        setReviewError(
+          error instanceof Error ? error.message : 'No fue posible actualizar la transferencia.',
+        );
+      } finally {
+        setReviewingPaymentId(null);
+      }
+    },
+    [apiRequest, recordBranchOptions, selectedBranchId],
+  );
 
   const projection = useMemo(() => getFinanceProjection(state, range), [state, range.from, range.to]);
   const previousRange = useMemo(() => getPreviousComparableRange(range), [range.from, range.to]);
@@ -94,7 +216,24 @@ export function ExpenseReport() {
         ? <CollectionsView projection={projection} collectionFilters={collectionFilters}
           setCollectionFilters={updateCollectionFilters} collectionTable={collectionTable}
           setCollectionSorting={updater => updateSorting(setCollectionTable, updater)}
-          setCollectionPagination={updater => updatePagination(setCollectionTable, updater)} />
+          setCollectionPagination={updater => updatePagination(setCollectionTable, updater)}
+          livePendingMoney={apiRequest ? {
+            enabled: true,
+            response: pendingMoneyResponse,
+            loading: pendingMoneyLoading,
+            error: pendingMoneyError,
+            selectedBranchId,
+            branchOptions,
+            onBranchChange: branchId => {
+              setReviewError(null);
+              setSelectedBranchId(branchId);
+            },
+            reviewingPaymentId,
+            reviewError,
+            onReviewTransfer: (paymentId, status) => {
+              void handleReviewTransfer(paymentId, status);
+            },
+          } : undefined} />
         : active === 'gastos'
           ? <ExpensesView items={expenseReport.items} filters={expenseFilters} onFiltersChange={updateExpenseFilters} table={expenseTable}
             setSorting={updater => updateSorting(setExpenseTable, updater)} setPagination={updater => updatePagination(setExpenseTable, updater)} />

@@ -24,6 +24,8 @@ import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 import { getMemberReload, type MemberReloadResponse } from '../../api/memberReadsApi';
 import type { MemberNoteDTO } from '../../api/membersApi';
 import { readOperationalToken } from '../../api/receptionApi';
+import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 
 export { getMemberStatusInfo };
 
@@ -323,6 +325,7 @@ export function MemberDetail({
     noteSubmitting?: boolean;
     noteError?: string;
     onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+    apiRequest?: AuthenticatedRequest;
   };
 }) {
   if (liveData) return <LiveMemberDetail role={role} {...liveData} />;
@@ -345,6 +348,7 @@ function LiveMemberDetail({
   noteSubmitting,
   noteError,
   onUpdateMember,
+  apiRequest,
 }: {
   role: Role;
   member: Member;
@@ -361,16 +365,28 @@ function LiveMemberDetail({
   noteSubmitting?: boolean;
   noteError?: string;
   onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+  apiRequest?: AuthenticatedRequest;
 }) {
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; error: boolean }>({ message: '', error: false });
   const [isEditing, setIsEditing] = useState(false);
+  const [checkoutModal, setCheckoutModal] = useState<{
+    open: boolean;
+    operation: 'sale' | 'debt_payment';
+    orderId?: string;
+  }>({ open: false, operation: 'sale' });
   const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
   const [editPhone, setEditPhone] = useState(member.phone ?? '');
   const [editEmail, setEditEmail] = useState(email ?? '');
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
+
+  const hasPendingDebt = Boolean(
+    reload.financial.has_pending_balance ||
+    (reload.financial.total_pending_balance_minor ?? 0) > 0 ||
+    reload.financial.debts.length > 0
+  );
 
   // shortcut: entry-only check-in, add exit event when turnstile hardware contract exists
   const visits = reload.recent_visits.map(visit => ({ id: visit.visit_id, memberId: member.id, observedCheckIn: visit.occurred_at, observedCheckOut: visit.occurred_at, autoClosedAt: null }));
@@ -417,13 +433,27 @@ function LiveMemberDetail({
           action={
             <div className="member-hero-actions">
               <Badge tone={statusTone}>
-                {currentPeriod?.access_status ?? ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
+                {currentPeriod ? (currentPeriod.access_status === 'eligible' ? 'Elegible' : currentPeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : currentPeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : currentPeriod.access_status) : ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
               </Badge>
               {onCheckIn && (
                 <div className="member-attendance-action">
                   <Button className="member-attendance-btn" disabled={loading || currentPeriod?.access_status !== 'eligible'} onClick={async () => { setLoading(true); try { const result = await onCheckIn(); setFeedback({ message: result.message, error: !result.ok }); } catch (err) { setFeedback({ message: err instanceof Error ? err.message : 'No se pudo registrar la entrada.', error: true }); } finally { setLoading(false); } }}>Registrar entrada</Button>
                   <div className="member-attendance-feedback" role={feedback.error ? 'alert' : 'status'} aria-label="Resultado de asistencia">{feedback.message}</div>
                 </div>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => setCheckoutModal({ open: true, operation: 'sale' })}
+              >
+                Vender membresía
+              </Button>
+              {hasPendingDebt && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setCheckoutModal({ open: true, operation: 'debt_payment' })}
+                >
+                  Liquidar adeudo
+                </Button>
               )}
               {onUpdateMember && (
                 <Button variant="secondary" onClick={handleOpenEdit}>
@@ -436,6 +466,16 @@ function LiveMemberDetail({
         />
       </div>
     </div>
+    {checkoutModal.open && (
+      <LiveMembershipCheckout
+        member={{ id: member.id, name: member.name }}
+        apiRequest={apiRequest}
+        initialOperation={checkoutModal.operation}
+        initialOrderId={checkoutModal.orderId}
+        onClose={() => setCheckoutModal(prev => ({ ...prev, open: false }))}
+        onCompleted={() => void onRefresh?.()}
+      />
+    )}
     {isEditing && (
       <Panel>
         <h3>Editar datos del socio</h3>
@@ -506,6 +546,7 @@ function LiveMemberDetail({
           role={isAdmin ? 'OWNER' : role}
           reloadState={reload}
           onSwitchToRecord={() => setActiveTab('record')}
+          onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
           liveNotesList={isAdmin ? liveNotesList : undefined}
           onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
           noteSubmitting={noteSubmitting}
@@ -527,6 +568,7 @@ function LiveMemberDetail({
           sales={[]}
           role={isAdmin ? 'OWNER' : role}
           reloadState={reload}
+          onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
           liveNotes={notes}
           liveNotesList={isAdmin ? liveNotesList : undefined}
           onAddLiveNote={isAdmin ? onAddLiveNote : undefined}

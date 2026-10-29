@@ -790,5 +790,388 @@ describe('member workflow', () => {
       });
       expect(await screen.findByText('Socio solicita factura mensual')).toBeInTheDocument();
     });
+
+    it('opens LiveMembershipCheckout from member detail, completes cash sale, and refreshes hero badge and period via reload', async () => {
+      const memberWithoutPlan = {
+        ...fixtureMember,
+        id: 'member-f04-sale',
+        full_name: 'Marcos Venta',
+        preferred_name: null,
+        status: 'inactive' as const,
+      };
+
+      const reloadWithoutPlan = {
+        ...fixtureReload,
+        profile: { ...memberWithoutPlan, organization_id: 'org-1', home_branch_id: 'branch-1' },
+        active_periods: [],
+        financial: {
+          has_pending_balance: false,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: 0,
+          currency: 'MXN' as const,
+          debts: [],
+        },
+      };
+
+      const reloadWithPlan = {
+        ...reloadWithoutPlan,
+        active_periods: [
+          {
+            id: 'period-f04-new',
+            order_item_id: 'item-f04-new',
+            plan_version_id: 'version-f04-1',
+            plan_name: 'Mensual Pro',
+            starts_on: '2026-11-01',
+            ends_on: '2026-11-30',
+            branch_id: 'branch-1',
+            is_current: true,
+            access_status: 'eligible' as const,
+          },
+        ],
+      };
+
+      let currentReload: memberReadsApi.MemberReloadResponse = reloadWithoutPlan;
+
+      const mockCatalogPlan = {
+        id: 'plan-f04-1',
+        name: 'Mensual Pro',
+        current_version: {
+          id: 'version-f04-1',
+          name: 'Mensual Pro v1',
+          price_minor: 65000,
+        },
+      };
+      const mockRegister = {
+        id: 'register-f04-1',
+        name: 'Caja Principal',
+        has_open_shift: true,
+      };
+      const mockShift = {
+        id: 'shift-f04-1',
+        cash_register_id: 'register-f04-1',
+      };
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(currentReload));
+        }
+        if (path === `/api/v1/members/${memberWithoutPlan.id}`) {
+          return new Response(JSON.stringify(memberWithoutPlan));
+        }
+        if (path.includes('/api/v1/catalog/plans')) {
+          return new Response(JSON.stringify([mockCatalogPlan]));
+        }
+        if (path === '/api/v1/registers') {
+          return new Response(JSON.stringify([mockRegister]));
+        }
+        if (path.includes('/api/v1/shifts/current')) {
+          return new Response(JSON.stringify(mockShift));
+        }
+        if (path.includes('/membership-sales') && init?.method === 'POST') {
+          currentReload = reloadWithPlan;
+          return new Response(JSON.stringify({
+            order: { id: 'order-f04' },
+            item: { id: 'item-f04' },
+            payment: { status: 'confirmed' },
+            membership: {
+              id: 'mem-f04',
+              starts_on: '2026-11-01',
+              ends_on: '2026-11-30',
+            },
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${memberWithoutPlan.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+
+      // Verify initial state: inactive status tone/badge, check-in button disabled
+      expect(await screen.findByRole('button', { name: 'Registrar entrada' })).toBeDisabled();
+      expect(screen.getByText('Inactivo')).toBeInTheDocument();
+
+      // Open checkout
+      const sellBtn = screen.getByRole('button', { name: 'Vender membresía' });
+      await userEvent.click(sellBtn);
+
+      // Dialog opens
+      expect(await screen.findByRole('heading', { name: /Venta de membresía · Marcos Venta/i })).toBeVisible();
+
+      // Select plan and register
+      const planSelect = screen.getByLabelText('Plan de membresía');
+      await userEvent.selectOptions(planSelect, mockCatalogPlan.id);
+
+      const regSelect = screen.getByLabelText('Caja abierta');
+      await userEvent.selectOptions(regSelect, mockRegister.id);
+
+      expect(await screen.findByText('Turno abierto confirmado: shift-f04-1')).toBeVisible();
+
+      // Submit cash sale (blank amount pays full)
+      const submitBtn = screen.getByRole('button', { name: 'Cobrar en efectivo' });
+      await userEvent.click(submitBtn);
+
+      // Result screen
+      expect(await screen.findByText('Pago confirmado.')).toBeVisible();
+      expect(screen.getByText('Membresía activada por el backend: 2026-11-01 a 2026-11-30.')).toBeVisible();
+
+      // Close modal
+      await userEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+      // Verify modal is closed
+      expect(screen.queryByRole('heading', { name: /Venta de membresía · Marcos Venta/i })).not.toBeInTheDocument();
+
+      // Verify hero badge updated to "Elegible" and check-in button enabled
+      await waitFor(() => {
+        expect(screen.getAllByText('Elegible').length).toBeGreaterThanOrEqual(1);
+      });
+      expect(screen.getByRole('button', { name: 'Registrar entrada' })).toBeEnabled();
+      expect(screen.getByText(/2026-11-01 al 2026-11-30/)).toBeInTheDocument();
+    });
+
+    it('blocks checkout when no register has an open shift, and displays warning notice and debt badge on partial cash sale', async () => {
+      const memberDebt = {
+        ...fixtureMember,
+        id: 'member-f04-debt',
+        full_name: 'David Deuda',
+        preferred_name: null,
+        status: 'active' as const,
+      };
+
+      const reloadNoDebt = {
+        ...fixtureReload,
+        profile: { ...memberDebt, organization_id: 'org-1', home_branch_id: 'branch-1' },
+        financial: {
+          has_pending_balance: false,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: 0,
+          currency: 'MXN' as const,
+          debts: [],
+        },
+      };
+
+      const reloadWithDebt = {
+        ...reloadNoDebt,
+        financial: {
+          has_pending_balance: true,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: 25000,
+          currency: 'MXN' as const,
+          debts: [
+            {
+              debt_id: 'debt-1',
+              order_id: 'order-f04-debt',
+              branch_id: 'branch-1',
+              currency: 'MXN' as const,
+              initial_outstanding_minor: 25000,
+              remaining_balance_minor: 25000,
+              created_at: '2026-10-28T12:00:00Z',
+            },
+          ],
+        },
+      };
+
+      let currentReload: memberReadsApi.MemberReloadResponse = reloadNoDebt;
+      let registers = [{ id: 'register-closed-1', name: 'Caja Cerrada', has_open_shift: false }];
+
+      const mockCatalogPlan = {
+        id: 'plan-f04-2',
+        name: 'Mensual 500',
+        current_version: {
+          id: 'version-f04-2',
+          name: 'v2',
+          price_minor: 50000,
+        },
+      };
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(currentReload));
+        }
+        if (path === `/api/v1/members/${memberDebt.id}`) {
+          return new Response(JSON.stringify(memberDebt));
+        }
+        if (path.includes('/api/v1/catalog/plans')) {
+          return new Response(JSON.stringify([mockCatalogPlan]));
+        }
+        if (path === '/api/v1/registers') {
+          return new Response(JSON.stringify(registers));
+        }
+        if (path.includes('/api/v1/shifts/current')) {
+          return new Response(JSON.stringify({ id: 'shift-f04-open', cash_register_id: 'register-open-1' }));
+        }
+        if (path.includes('/membership-sales') && init?.method === 'POST') {
+          currentReload = reloadWithDebt;
+          return new Response(JSON.stringify({
+            order: { id: 'order-f04-debt' },
+            item: { id: 'item-f04-debt' },
+            payment: { status: 'confirmed' },
+            membership: {
+              id: 'mem-f04-debt',
+              starts_on: '2026-11-01',
+              ends_on: '2026-11-30',
+            },
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      const { unmount } = render(
+        <MemoryRouter initialEntries={[`/reception/members/${memberDebt.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+
+      // Open checkout with closed registers
+      await userEvent.click(await screen.findByRole('button', { name: 'Vender membresía' }));
+      expect(await screen.findByText('No hay cajas con turno abierto.')).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeDisabled();
+
+      unmount();
+
+      // Now open checkout with an open register
+      registers = [{ id: 'register-open-1', name: 'Caja Abierta', has_open_shift: true }];
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${memberDebt.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Vender membresía' }));
+      await userEvent.selectOptions(await screen.findByLabelText('Plan de membresía'), mockCatalogPlan.id);
+      await userEvent.selectOptions(screen.getByLabelText('Caja abierta'), 'register-open-1');
+
+      // Enter partial cash amount (250 < 500)
+      const cashInput = screen.getByLabelText('Efectivo recibido en MXN (opcional; vacío cobra el precio completo)');
+      await userEvent.type(cashInput, '250');
+      expect(screen.getByText(/El monto en efectivo es menor al precio publicado; se registrará un saldo pendiente informativo/)).toBeVisible();
+
+      // Submit partial sale
+      await userEvent.click(screen.getByRole('button', { name: 'Cobrar en efectivo' }));
+      expect(await screen.findByText('Pago confirmado.')).toBeVisible();
+
+      // Close modal
+      await userEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+
+      // Verify pending balance alert appears in MemberCounterView
+      expect(await screen.findByTestId('balance-warning-alert')).toBeVisible();
+      expect(screen.getByText(/Saldo pendiente registrado/)).toBeVisible();
+    });
+
+    it('F06: opens Liquidar adeudo from member detail, posts cash debt payment, and clears pending balance warning after reload', async () => {
+      const memberWithDebt = {
+        ...fixtureMember,
+        id: 'member-f06-repay',
+        full_name: 'Sofía Abono',
+        preferred_name: null,
+        status: 'active' as const,
+        pending_balance_minor: 20000,
+        has_pending_balance: true,
+      };
+
+      const reloadWithOpenDebt: memberReadsApi.MemberReloadResponse = {
+        ...fixtureReload,
+        profile: { ...memberWithDebt, organization_id: 'org-1', home_branch_id: 'branch-1' },
+        financial: {
+          has_pending_balance: true,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: null,
+          currency: 'MXN',
+          debts: [],
+        },
+      };
+
+      const reloadAfterSettled: memberReadsApi.MemberReloadResponse = {
+        ...reloadWithOpenDebt,
+        financial: {
+          has_pending_balance: false,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: null,
+          currency: 'MXN',
+          debts: [],
+        },
+      };
+
+      let currentReload = reloadWithOpenDebt;
+      let currentMember = memberWithDebt;
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.includes('/reload')) {
+          return new Response(JSON.stringify(currentReload));
+        }
+        if (path === `/api/v1/members/${memberWithDebt.id}`) {
+          return new Response(JSON.stringify(currentMember));
+        }
+        if (path.includes('/api/v1/catalog/plans')) {
+          return new Response(JSON.stringify([]));
+        }
+        if (path === '/api/v1/registers') {
+          return new Response(JSON.stringify([{ id: 'reg-f06-open', name: 'Caja Principal', has_open_shift: true }]));
+        }
+        if (path.includes('/api/v1/shifts/current')) {
+          return new Response(JSON.stringify({ id: 'shift-f06-open', cash_register_id: 'reg-f06-open' }));
+        }
+        if (path === `/api/v1/registers/reg-f06-open/members/${memberWithDebt.id}/debts`) {
+          return new Response(JSON.stringify([
+            {
+              debt_id: 'debt-f06-order-1',
+              order_id: 'order-f06-1',
+              member_id: memberWithDebt.id,
+              branch_id: 'branch-1',
+              currency: 'MXN',
+              description_snapshot: 'Mensualidad Estándar',
+              initial_outstanding_minor: 20000,
+              paid_amount_minor: 0,
+              remaining_balance_minor: 20000,
+              created_at: '2026-10-28T10:00:00Z',
+            },
+          ]));
+        }
+        if (path === '/api/v1/registers/reg-f06-open/membership-debt-payments' && init?.method === 'POST') {
+          currentReload = reloadAfterSettled;
+          currentMember = { ...memberWithDebt, pending_balance_minor: 0, has_pending_balance: false };
+          return new Response(JSON.stringify({
+            id: 'receipt-f06-settled',
+            debt_id: 'debt-f06-order-1',
+            order_id: 'order-f06-1',
+            member_id: memberWithDebt.id,
+            branch_id: 'branch-1',
+            register_id: 'reg-f06-open',
+            shift_id: 'shift-f06-open',
+            amount_minor: 20000,
+            remaining_balance_minor: 0,
+            received_by: 'staff-1',
+            received_at: '2026-10-28T12:00:00Z',
+          }), { status: 201 });
+        }
+        return new Response('{}');
+      });
+
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${memberWithDebt.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByTestId('balance-warning-alert')).toBeVisible();
+      const payDebtBtn = screen.getByRole('button', { name: 'Liquidar adeudo' });
+      await userEvent.click(payDebtBtn);
+
+      expect(await screen.findByRole('heading', { name: /Liquidar adeudo · Sofía Abono/i })).toBeVisible();
+      expect(await screen.findByLabelText('Adeudo pendiente')).toHaveValue('order-f06-1');
+      expect(screen.getByLabelText('Monto a abonar (MXN)')).toHaveValue(200);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar abono en efectivo' }));
+      expect(await screen.findByRole('heading', { name: 'Abono registrado' })).toBeVisible();
+      expect(screen.getByText(/Adeudo liquidado en su totalidad/)).toBeVisible();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+      await waitFor(() => {
+        expect(screen.queryByTestId('balance-warning-alert')).not.toBeInTheDocument();
+      });
+      expect(screen.getByText('Al corriente en pagos')).toBeVisible();
+    });
   });
 });

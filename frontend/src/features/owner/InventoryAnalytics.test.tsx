@@ -230,4 +230,133 @@ describe('InventoryAnalytics owner screen', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('PROPIETARIO · INVENTARIO Y CATÁLOGO')).toBeInTheDocument();
   });
+
+  it('renders live KPI totals and table rows from apiRequest without DemoProvider and wires modals', async () => {
+    let stockItems = [
+      {
+        product_id: 'p-1',
+        code: 'p1',
+        name: 'Suero 500ml',
+        category: 'Bebidas',
+        price_minor: 3500,
+        cost_minor: 1800,
+        is_active: true,
+        unit: 'piece',
+        initialized: true,
+        opening_quantity: 20,
+        restocked_quantity: 5,
+        waste_quantity: 1,
+        quantity: 24,
+        initialized_at: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const mockApiRequest = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: stockItems, total: stockItems.length }));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/movements')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      if (path === '/api/v1/inventory/products' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        if (body.name === 'Conflict Product') {
+          return new Response(JSON.stringify({ detail: 'A product with this code already exists.' }), { status: 409 });
+        }
+        const created = {
+          product_id: 'p-2',
+          code: 'p2',
+          name: body.name,
+          category: body.category || 'General',
+          price_minor: body.price_minor,
+          cost_minor: body.cost_minor || 0,
+          is_active: true,
+          unit: 'piece',
+          initialized: true,
+          opening_quantity: body.initial_quantity || 0,
+          restocked_quantity: 0,
+          waste_quantity: 0,
+          quantity: body.initial_quantity || 0,
+          initialized_at: '2026-01-01T00:00:00Z',
+        };
+        stockItems.push(created);
+        return new Response(JSON.stringify({ ...created, id: created.product_id }), { status: 201 });
+      }
+      if (path === '/api/v1/inventory/products/p-1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body));
+        stockItems = stockItems.map(p => p.product_id === 'p-1' ? { ...p, ...body } : p);
+        return new Response(JSON.stringify({ ...stockItems[0], id: 'p-1' }));
+      }
+      return new Response('{}');
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/owner/inventory']}>
+        <InventoryAnalytics apiRequest={mockApiRequest} />
+      </MemoryRouter>
+    );
+
+    // Live KPI 1: 24 * $35.00 = $840.00 MXN
+    expect(await screen.findByText('$840.00 MXN')).toBeInTheDocument();
+    expect(screen.getByText('Suero 500ml')).toBeInTheDocument();
+    expect(screen.getByText('Bebidas')).toBeInTheDocument();
+
+    // Modal 1: Create product with error retention
+    const newBtn = screen.getByRole('button', { name: 'Nuevo producto' });
+    await userEvent.click(newBtn);
+    const nameInput = screen.getByLabelText(/Nombre del producto/);
+    await userEvent.type(nameInput, 'Conflict Product');
+    const priceInput = screen.getByLabelText(/Precio de venta MXN/);
+    await userEvent.type(priceInput, '50');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar producto' }));
+
+    // Verify 409 error is shown and form retains values
+    expect(await screen.findByText('A product with this code already exists.')).toBeInTheDocument();
+    expect(nameInput).toHaveValue('Conflict Product');
+    expect(priceInput).toHaveValue(50);
+
+    // Now fix name and submit successfully
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Proteína Shake');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar producto' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Nuevo producto' })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText('Proteína Shake')).toBeInTheDocument();
+
+    // Modal 2: Edit product
+    const editBtn = screen.getByLabelText('Editar Suero 500ml');
+    await userEvent.click(editBtn);
+    const editPriceInput = screen.getByLabelText(/Precio de venta MXN/);
+    await userEvent.clear(editPriceInput);
+    await userEvent.type(editPriceInput, '40');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Editar producto' })).not.toBeInTheDocument();
+    });
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      '/api/v1/inventory/products/p-1',
+      expect.objectContaining({ method: 'PATCH' })
+    );
+
+    // Modal 3: Deactivate product
+    const toggleBtn = screen.getByLabelText('Desactivar Suero 500ml');
+    await userEvent.click(toggleBtn);
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar desactivación' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '¿Desactivar producto?' })).not.toBeInTheDocument();
+    });
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      '/api/v1/inventory/products/p-1',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      })
+    );
+  });
 });

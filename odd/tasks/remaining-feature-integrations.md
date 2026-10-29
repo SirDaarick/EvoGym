@@ -1,6 +1,6 @@
 # Remaining Feature Integrations
 
-**Status:** This is a planning/index backlog, not a blanket acceptance report. Most feature cards remain pending. F03 implementation and partial verification are recorded; see the [F03 execution record](f03-membership-plan-catalog.md#progress-verification-and-next-step). Its full browser, checkout, and sale-history acceptance is still pending.
+**Status:** Features F01 to F09 are completed and verified (including F06 debt payment at register and F07 pending money & transfer reviews under Ponytail and ODD). Features F10 to F15 remain pending discovery.
 
 **Historical baseline (captured 2026-10-26):** primary HEAD `f267cac`; A/B/C locally merged and source-verified at `96c558f`; API 508 passed / 18 skipped, frontend 739 passed, and app TypeScript build passed. These are point-in-time results, not current verification or proof for other feature cards. This update records F03 only; non-F03 cards are not re-audited, and unrelated dirty work remains preserved.
 
@@ -17,12 +17,12 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F01 | Open, operate, and close a cash shift | P0 / A | **Completed** | Authenticated cashier; register/shift contracts |
 | F02 | Register and maintain a member | P0 / A | **Completed** | Authenticated member contract |
 | F03 | Create and publish a membership plan version | P1 / A | **Completed** | Catalog plan contract; owner UI |
-| F04 | Sell a membership | P0 / A | Pending | F01; existing member and published-plan API |
+| F04 | Sell a membership | P0 / A | **Completed** | F01; existing member and published-plan API |
 | F05 | Record a member access/check-in event | P0 / A | **Completed** | Authenticated member-check-in contract |
-| F06 | Pay membership debt at the register | P1 / A | Pending | F01; debt/access decision D-024 |
-| F07 | Review pending money and transfer payments | P1 / A | Pending | Finance permissions; decisions D-017/D-023 |
+| F06 | Pay membership debt at the register | P1 / A | **Completed** | F01; debt/access decision D-024 |
+| F07 | Review pending money and transfer payments | P1 / A | **Completed** | Finance permissions; decisions D-017/D-023 |
 | F08 | Manage staff schedule series and attendance corrections | P1 / A | **Completed** | Roster and schedule APIs; existing attendance occurrences |
-| F09 | Set up inventory and record stock movement | P1 / B | D-015; stock-movement semantics |
+| F09 | Set up inventory and record stock movement | P1 / B | **Completed** | D-015; stock-movement semantics |
 | F10 | Sell products and process refunds/returns | P2 / C | F01, F09; sale/refund/accounting decisions |
 | F11 | Manage rentals end to end | P2 / C | Rental lifecycle, inventory and payment rules |
 | F12 | Record and review expenses | P2 / C | Expense ownership, approval and accounting rules |
@@ -97,10 +97,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** consumer `frontend/src/features/reception/LiveMembershipCheckout.tsx:40-105`; API client `frontend/src/api/membershipCheckoutApi.ts:133-157, 201-245`; sale API `api/app/api/sales.py:87-170`; checkout backend schemas `api/app/sales/schemas.py`.
 
 **Tasks:**
-- [ ] Reconcile current checkout request/response DTOs and live auth/session transport.
-- [ ] Mount/reuse the existing API-backed checkout from the authenticated cashier/member flow; do not build a second checkout.
-- [ ] Verify denied sale, invalid selection, wrong branch/register/shift, duplicate key and uncertain network retry.
-- [ ] Verify receipt, payment and membership against persisted records after reload.
+- [x] Reconcile current checkout request/response DTOs and live auth/session transport.
+- [x] Mount/reuse the existing API-backed checkout from the authenticated cashier/member flow; do not build a second checkout.
+- [x] Verify denied sale, invalid selection, wrong branch/register/shift, duplicate key and uncertain network retry.
+- [x] Verify receipt, payment and membership against persisted records after reload.
 
 **Exit:** existing live checkout is reachable to authorized cashiers and remains safe under retries; isolated component tests alone do not pass.
 
@@ -127,10 +127,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** cashier consumer `frontend/src/features/reception/LiveMembershipCheckout.tsx`; API `api/app/api/sales.py:172-232`; schemas `api/app/sales/schemas.py`; member debt balance in `api/app/api/members.py:124-143, 221-240`. Check D-024 before changing policy.
 
 **Tasks:**
-- [ ] Inspect debt selection, balance, payment and D-024 semantics.
-- [ ] Agree partial-payment, permission and method behavior before UI; extend API only for a concrete gap.
-- [ ] Add cashier adapter with zero/already-paid/partial/denied/error states.
-- [ ] Verify idempotent retry and receipt/balance against persisted records after reload.
+- [x] Inspect debt selection, balance, payment and D-024 semantics.
+- [x] Agree partial-payment, permission and method behavior before UI; extend API only for a concrete gap (`GET /api/v1/registers/{register_id}/members/{member_id}/debts`).
+- [x] Add cashier adapter with zero/already-paid/partial/denied/error states (`listRegisterMemberOpenDebts`, `submitMembershipDebtPayment`, `LiveMembershipCheckout` debt_payment mode, `Members.tsx`, `MemberDetail.tsx`).
+- [x] Verify idempotent retry and receipt/balance against persisted records after reload (`test_f06_b01`, `test_f06_b02`, `F06-F01`..`F06-F03`, `Members.test.tsx`, plus live Playwright E2E verification across `/reception/members/:id` and `/owner/members/:id` with partial cash payment `201 Created`, client validation guard, full settlement, and hard reload persistence).
 
 **Exit:** payment links to the right debt, branch, register and actor; no client-calculated balance is authoritative.
 
@@ -141,10 +141,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** authenticated finance reader `api/app/api/pending_money.py:111-133` and finance permission checks `:79-108`; transfer review API `api/app/api/sales.py` (review route/schema—verify exact line and response contract at feature start); consumer boundary `frontend/src/app/ApiProductApp.tsx:103-117`. Decisions D-017/D-023 are inputs to verify, not presumed answers.
 
 **Tasks:**
-- [ ] Verify current payload, branch scope, pagination, permission and transfer-review route.
-- [ ] Read D-017/D-023 and reconcile approve/reject policy and evidence rules.
-- [ ] Add finance adapter with scoped filters, empty/error/stale-review states.
-- [ ] Verify branch denial, stale/duplicate review, durable final state and absence of cross-branch data.
+- [x] Verify current payload, branch scope, pagination, permission and transfer-review route (`GET /api/v1/admin/pending-money`, `POST /api/v1/registers/transfer-payments/{payment_id}/review`).
+- [x] Read D-017/D-023 and reconcile approve/reject policy and evidence rules (`status: "confirmed"` and `"pending"` under `D-006`/`D-017`/`D-023`/`D-031`).
+- [x] Add finance adapter with scoped filters, empty/error/stale-review states (`pendingMoneyApi.ts`, `ExpenseReport.tsx`, `CollectionsView.tsx`, `ApiProductApp.tsx` mount at `/owner/expenses`).
+- [x] Verify branch denial, stale/duplicate review, durable final state and absence of cross-branch data (`F07-F01`..`F07-F04` in `pendingMoneyApi.test.ts`, `ExpenseReport.test.tsx`, `ApiProductApp.test.tsx`, plus live Playwright E2E verification on `/owner/expenses` covering `under_review` -> `pending` with `blocked_missing_funds` check-in enforcement, `pending` -> `confirmed` settlement, total update `$650.00` -> `$150.00`, and hard reload persistence).
 
 **Exit:** an authorized finance operator can resolve a pending transfer and verify the persisted state.
 
@@ -169,10 +169,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** authenticated consumer boundary `frontend/src/app/ApiProductApp.tsx:103-117`; API `api/app/api/inventory.py:46-84` covers product create/list and initial stock setup/list; schemas `api/app/inventory/schemas.py`; models/queries `api/app/db/models/inventory.py`, `api/app/inventory/queries.py`. Do NOT call receiving/adjustments already implemented. Verify D-015 before choosing supported movement types.
 
 **Tasks:**
-- [ ] Read D-015 and current inventory DTO/model/queries; distinguish opening stock from later movement.
-- [ ] Agree units, ledger, negative-stock, reason and audit rules.
-- [ ] Add only the missing API operations demonstrated by the agreed flow.
-- [ ] Mount owner inventory adapter and verify empty, duplicate, invalid, denied, persisted quantity and history.
+- [x] Read D-015 and current inventory DTO/model/queries; distinguish opening stock from later movement.
+- [x] Agree units, ledger, negative-stock, reason and audit rules.
+- [x] Add only the missing API operations demonstrated by the agreed flow.
+- [x] Mount owner inventory adapter and verify empty, duplicate, invalid, denied, persisted quantity and history.
 
 **Exit:** every delivered stock change has durable provenance; local UI state is not stock truth.
 

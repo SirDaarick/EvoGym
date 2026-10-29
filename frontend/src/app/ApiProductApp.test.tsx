@@ -112,6 +112,7 @@ describe('API product routes', () => {
         shift_id: shift.id, confirmed_minor: 0, confirmed_cash_minor: 0, pending_transfer_minor: 0,
         payment_methods: [], activities: [], payments: [], expected_cash_minor: 50000,
       }));
+      if (path.startsWith('/api/v1/inventory/')) return new Response(JSON.stringify({ items: [], total: 0 }));
       return new Response('{}');
     });
 
@@ -137,6 +138,7 @@ describe('API product routes', () => {
       if (path.startsWith('/api/v1/shifts/current?')) return opened ? new Response(JSON.stringify(shift)) : new Response('{}', { status: 404 });
       if (path === '/api/v1/shifts/open' && init?.method === 'POST') { opened = true; return new Response(JSON.stringify(shift), { status: 201 }); }
       if (path.endsWith('/summary')) return new Response(JSON.stringify({ shift_id: shift.id, confirmed_minor: 0, confirmed_cash_minor: 0, pending_transfer_minor: 0, payment_methods: [], activities: [], payments: [], expected_cash_minor: 0 }));
+      if (path.startsWith('/api/v1/inventory/')) return new Response(JSON.stringify({ items: [], total: 0 }));
       return new Response('{}');
     });
 
@@ -372,4 +374,98 @@ describe('API product routes', () => {
     expect(await screen.findByRole('heading', { name: 'Nuevo socio' })).toBeInTheDocument();
     expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/members/new'), expect.any(Object));
   });
+
+  it('mounts live Inventory on /owner/inventory and /reception/inventory without UnavailablePage', async () => {
+    admin.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/movements')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      return new Response('{}');
+    });
+
+    // 1. Owner inventory route
+    render(<MemoryRouter initialEntries={['/owner/inventory']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Gestión y Análisis de Inventario' })).toBeInTheDocument();
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+
+    cleanup();
+
+    // 2. Reception inventory route
+    access.principal = {
+      kind: 'employee',
+      identity: { id: 'emp-1', display_name: 'Receptionist' },
+      branch: { branch_id: 'branch-1', name: 'Central Branch' },
+      session: { purpose: 'desk' },
+    };
+    access.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/reception/inventory']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Inventario' })).toBeInTheDocument();
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+  });
+
+  it('F07-F04: mounts live ExpenseReport on /owner/expenses for Admin and blocks Reception from /owner/expenses', async () => {
+    admin.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/admin/pending-money')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                item_type: 'pending_transfer',
+                source_event_id: 'pay-tx-900',
+                order_id: 'ord-tx-900',
+                member_id: 'mem-900',
+                member_number: 'EVO-0900',
+                member_name: 'Sofía Delgado',
+                branch_id: 'branch-1',
+                branch_name: 'Central',
+                amount_minor: 65000,
+                initial_amount_minor: null,
+                paid_amount_minor: null,
+                currency: 'MXN',
+                status: 'under_review',
+                created_at: '2026-10-28T12:00:00Z',
+              },
+            ],
+            total_pending_minor: 65000,
+            currency: 'MXN',
+          }),
+        );
+      }
+      return new Response('{}');
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Transferencias pendientes' })).toBeInTheDocument();
+    expect(await screen.findByText(/Sofía Delgado \(EVO-0900\)/i)).toBeInTheDocument();
+    expect(admin.request).toHaveBeenCalledWith('/api/v1/admin/pending-money', expect.any(Object));
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+
+    cleanup();
+
+    access.principal = {
+      kind: 'employee',
+      identity: { id: 'emp-1', display_name: 'Receptionist' },
+      branch: { branch_id: 'branch-1', name: 'Central Branch' },
+      session: { purpose: 'desk' },
+    };
+    render(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>);
+    expect(screen.queryByRole('heading', { name: 'Transferencias pendientes' })).not.toBeInTheDocument();
+    expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/admin/pending-money'), expect.anything());
+  });
 });
+

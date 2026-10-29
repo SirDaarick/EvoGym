@@ -243,6 +243,7 @@ export function MemberDetailSections({
   sales = [],
   role = 'RECEPTION',
   reloadState,
+  onPayDebt,
   liveNotes,
   liveNotesList,
   onAddLiveNote,
@@ -262,6 +263,7 @@ export function MemberDetailSections({
   sales?: Sale[];
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
+  onPayDebt?: (orderId?: string) => void;
   liveNotes?: string | null;
   liveNotesList?: MemberNoteDTO[];
   onAddLiveNote?: (body: string) => Promise<void>;
@@ -601,7 +603,7 @@ export function MemberDetailSections({
         )}
       </Panel>
     </div>}
-    {role === 'OWNER' && reloadState?.financial.debts.length ? <Panel><h2>Adeudos pendientes</h2><TableRegion label="Adeudos pendientes"><table className="member-detail-table"><thead><tr><th scope="col">Pedido</th><th scope="col">Fecha</th><th scope="col">Adeudo</th><th scope="col">Saldo restante</th></tr></thead><tbody>{reloadState.financial.debts.map(debt => <tr key={debt.debt_id}><td>{debt.order_id}</td><td>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(debt.created_at))}</td><td>{formatMoney(debt.initial_outstanding_minor)} MXN</td><td>{formatMoney(debt.remaining_balance_minor)} MXN</td></tr>)}</tbody></table></TableRegion></Panel> : null}
+    {role === 'OWNER' && reloadState?.financial.debts.length ? <Panel><h2>Adeudos pendientes</h2><TableRegion label="Adeudos pendientes"><table className="member-detail-table"><thead><tr><th scope="col">Pedido</th><th scope="col">Fecha</th><th scope="col">Adeudo</th><th scope="col">Saldo restante</th>{onPayDebt && <th scope="col">Acción</th>}</tr></thead><tbody>{reloadState.financial.debts.map(debt => <tr key={debt.debt_id}><td>{debt.order_id}</td><td>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(debt.created_at))}</td><td>{formatMoney(debt.initial_outstanding_minor)} MXN</td><td>{formatMoney(debt.remaining_balance_minor)} MXN</td>{onPayDebt && <td><Button variant="secondary" className="button-sm" type="button" onClick={() => onPayDebt(debt.order_id)}>Abonar pedido</Button></td>}</tr>)}</tbody></table></TableRegion></Panel> : null}
     <div className="member-detail-purchases">
       <Panel>
         <div className="member-purchases-header">
@@ -666,6 +668,7 @@ export function MemberCounterView({
   role = 'RECEPTION',
   reloadState,
   onSwitchToRecord,
+  onPayDebt,
   liveNotesList,
   onAddLiveNote,
   noteSubmitting,
@@ -684,6 +687,7 @@ export function MemberCounterView({
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
   onSwitchToRecord?: () => void;
+  onPayDebt?: (orderId?: string) => void;
   liveNotesList?: MemberNoteDTO[];
   onAddLiveNote?: (body: string) => Promise<void>;
   noteSubmitting?: boolean;
@@ -862,12 +866,24 @@ export function MemberCounterView({
                 </div>
               ) : effectiveHasPendingBalance ? (
                 <div className="counter-billing-alert is-warning" role="alert" data-testid="balance-warning-alert">
-                  ⚠️ Saldo pendiente registrado
-                  {isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
-                    <span className="counter-debt-amount" data-testid="admin-debt-amount">
-                      {' · '}Adeudo: {formatMoney(reloadState.financial.total_pending_balance_minor)} MXN
-                    </span>
-                  ) : null}
+                  <span>
+                    ⚠️ Saldo pendiente registrado
+                    {isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
+                      <span className="counter-debt-amount" data-testid="admin-debt-amount">
+                        {' · '}Adeudo: {formatMoney(reloadState.financial.total_pending_balance_minor)} MXN
+                      </span>
+                    ) : null}
+                  </span>
+                  {onPayDebt && (
+                    <button
+                      type="button"
+                      className="counter-card-link-btn"
+                      style={{ marginLeft: '8px' }}
+                      onClick={() => onPayDebt()}
+                    >
+                      Abonar en caja ›
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="counter-billing-status is-settled">

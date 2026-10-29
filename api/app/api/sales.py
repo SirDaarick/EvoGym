@@ -15,6 +15,7 @@ from app.sales.queries import (
     CashSaleConflictError,
     CashSaleNotFoundError,
     InvalidBranchTimezoneError,
+    list_register_member_open_debts,
     post_membership_debt_payment,
     post_membership_cash_sale,
     review_membership_transfer,
@@ -29,6 +30,7 @@ from app.sales.schemas import (
     MembershipDebtPaymentDTO,
     MembershipDebtPaymentRequest,
     MembershipPeriodDTO,
+    RegisterMemberOpenDebtDTO,
     TransferReviewRequest,
 )
 
@@ -167,6 +169,33 @@ def post_cash_membership_sale_endpoint(
             result = _load_result(session, existing, replayed=True)
             response.status_code = 200
             return _sale_dto(result.order, result.item, result.payment, result.membership, result.sample_entitlement)
+
+
+@router.get("/{register_id}/members/{member_id}/debts", response_model=list[RegisterMemberOpenDebtDTO])
+def list_register_member_open_debts_endpoint(
+    register_id: UUID,
+    member_id: UUID,
+    request: Request,
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+) -> list[RegisterMemberOpenDebtDTO]:
+    """List open membership debts for a member on the specified active branch register."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    try:
+        with factory() as session:
+            return list_register_member_open_debts(
+                session,
+                register_id=register_id,
+                member_id=member_id,
+                authorized_branch_id=principal.branch_id if not principal.is_admin else None,
+            )
+    except CashSaleNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except CashSaleAccessDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except CashSaleConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/{register_id}/membership-debt-payments", response_model=MembershipDebtPaymentDTO, status_code=201)
