@@ -33,6 +33,28 @@ export type StaffAttendancePerson = Pick<StaffProfile, 'id' | 'name' | 'active' 
 type DepartmentFilter = 'all' | 'Entrenador' | 'Mantenimiento' | 'Staff';
 type StatusFilter = 'all' | 'in-turn' | 'out';
 
+export function matchesDepartmentFilter(staffDept: string | undefined, filter: DepartmentFilter): boolean {
+  if (filter === 'all') return true;
+  const dept = (staffDept ?? 'Staff').toLowerCase();
+  if (filter === 'Staff') {
+    return dept === 'staff' || dept.startsWith('recepc');
+  }
+  if (filter === 'Entrenador') {
+    return dept.startsWith('entrena');
+  }
+  if (filter === 'Mantenimiento') {
+    return dept.startsWith('manten');
+  }
+  return false;
+}
+
+export function getDepartmentClass(department?: string): 'trainer' | 'maintenance' | 'staff' {
+  const d = (department ?? 'Staff').toLowerCase();
+  if (d.startsWith('entrena')) return 'trainer';
+  if (d.startsWith('manten')) return 'maintenance';
+  return 'staff';
+}
+
 function formatClockTime(isoString?: string | null): string {
   if (!isoString) return '--:--';
   try {
@@ -377,13 +399,16 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       if (statusFilter === 'out' && isClockedIn) return false;
 
       // Department filter
-      const dept = staff.department ?? 'Staff';
-      if (departmentFilter !== 'all' && dept !== departmentFilter) return false;
+      if (!matchesDepartmentFilter(staff.department, departmentFilter)) return false;
 
       // Search query
       if (q) {
         const matchesName = staff.name.toLowerCase().includes(q);
-        const matchesDept = dept.toLowerCase().includes(q);
+        const deptStr = (staff.department ?? 'Staff').toLowerCase();
+        const matchesDept =
+          deptStr.includes(q) ||
+          (deptStr.startsWith('recepc') && 'staff'.includes(q)) ||
+          (deptStr === 'staff' && 'recepción'.includes(q));
         const matchesShift = staff.shift?.toLowerCase().includes(q) ?? false;
         if (!matchesName && !matchesDept && !matchesShift) return false;
       }
@@ -854,12 +879,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
             const isClockedIn = Boolean(status?.isClockedIn);
             const activeRecord = status?.activeRecord;
             const dept = staff.department ?? 'Staff';
-            const deptClass =
-              dept === 'Entrenador'
-                ? 'trainer'
-                : dept === 'Mantenimiento'
-                ? 'maintenance'
-                : 'staff';
+            const deptClass = getDepartmentClass(staff.department);
 
             const todayStr = new Date().toISOString().slice(0, 10);
             const todayWeekday = (new Date().getDay() + 6) % 7;

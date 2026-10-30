@@ -247,7 +247,15 @@ export function UnscheduledClockInModal({
                   alignItems: 'center',
                 }}
               >
-                
+                <span style={{ color: coveredStaffId ? 'var(--color-ink)' : 'var(--color-muted)' }}>
+                  {coveredStaffId ? (
+                    <>
+                      Cubriendo a: <strong>{availableColleagues.find(c => c.staffId === coveredStaffId)?.name}</strong>
+                    </>
+                  ) : (
+                    'Selecciona un compañero de la lista para continuar.'
+                  )}
+                </span>
                 {coveredStaffId && (
                   <button
                     type="button"
