@@ -941,27 +941,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
 
                     {/* Server-accepted marks indicator: present, late, review_pending */}
                     {activeRecord?.status && (
-                      <span
-                        className={`staff-status-badge mark-${activeRecord.status}`}
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          backgroundColor:
-                            activeRecord.status === 'late'
-                              ? '#FEE2E2'
-                              : activeRecord.status === 'review_pending'
-                              ? '#FEF3C7'
-                              : '#DCFCE7',
-                          color:
-                            activeRecord.status === 'late'
-                              ? '#991B1B'
-                              : activeRecord.status === 'review_pending'
-                              ? '#92400E'
-                              : '#166534',
-                          fontWeight: 500,
-                        }}
-                      >
+                      <span className={`staff-status-badge mark-${activeRecord.status}`}>
                         {activeRecord.status}
                       </span>
                     )}
@@ -971,15 +951,6 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                       <span
                         className="staff-status-badge review-required"
                         data-testid="review-required-badge"
-                        style={{
-                          backgroundColor: '#FEF3C7',
-                          color: '#92400E',
-                          border: '1px solid #FCD34D',
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          fontWeight: 600,
-                        }}
                         title="Requiere revisión de horario o validación de reloj"
                       >
                         Revisión requerida
