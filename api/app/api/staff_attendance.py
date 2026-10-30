@@ -33,7 +33,7 @@ class StaffAttendanceItem(BaseModel):
     branch_id: UUID
     full_name: str
     position: str
-    recorded_by: UUID
+    recorded_by: str
     occurred_at: datetime
     business_date: date
     status: str | None = None
@@ -163,11 +163,51 @@ def _record_notes(
         return "Turno de apoyo / extraordinario"
     return None
 
+def _resolve_single_recorder_name(session, staff_user_id: UUID, branch_id: UUID | None = None) -> str:
+    if branch_id:
+        p = session.scalar(
+            select(StaffRosterProfile).where(
+                StaffRosterProfile.staff_user_id == staff_user_id,
+                StaffRosterProfile.branch_id == branch_id,
+                StaffRosterProfile.is_active.is_(True),
+            )
+        )
+        if p and p.full_name:
+            return p.full_name
+    p = session.scalar(
+        select(StaffRosterProfile).where(
+            StaffRosterProfile.staff_user_id == staff_user_id,
+            StaffRosterProfile.is_active.is_(True),
+        )
+    )
+    if p and p.full_name:
+        return p.full_name
+    return str(staff_user_id)
+
+
+def _resolve_recorder_names(session, staff_user_ids: set[UUID], branch_ids: list[UUID] | None = None) -> dict[UUID, str]:
+    if not staff_user_ids:
+        return {}
+    profiles = session.scalars(
+        select(StaffRosterProfile).where(
+            StaffRosterProfile.staff_user_id.in_(staff_user_ids),
+            StaffRosterProfile.is_active.is_(True),
+        )
+    ).all()
+    names: dict[UUID, str] = {}
+    for p in profiles:
+        if p.staff_user_id is not None:
+            if p.staff_user_id not in names or (branch_ids and p.branch_id in branch_ids):
+                names[p.staff_user_id] = p.full_name
+    return {uid: names.get(uid, str(uid)) for uid in staff_user_ids}
+
+
 def _item(
     record: StaffAttendanceRecord,
     profile: StaffRosterProfile,
     checkout: StaffAttendanceCheckout | None = None,
     notes: str | None = None,
+    recorder_name: str | None = None,
 ) -> StaffAttendanceItem:
     occurred_at = record.occurred_at
     if occurred_at.tzinfo is None:
@@ -187,7 +227,7 @@ def _item(
         branch_id=record.branch_id,
         full_name=profile.full_name,
         position=profile.position,
-        recorded_by=record.recorded_by,
+        recorded_by=recorder_name or str(record.recorded_by),
         occurred_at=occurred_at.astimezone(timezone.utc),
         business_date=record.business_date,
         status=record.status,
@@ -301,6 +341,9 @@ def list_staff_attendance(
             else {}
         )
 
+        recorder_ids = {record.recorded_by for record, _ in rows}
+        recorder_names = _resolve_recorder_names(session, recorder_ids, branch_ids)
+
         def _row_notes(rec, prof):
             if rec.series_id and rec.series_id in series_by_id:
                 s = series_by_id[rec.series_id]
@@ -314,7 +357,13 @@ def list_staff_attendance(
 
         return StaffAttendancePage(
             items=[
-                _item(record, profile, checkouts_by_attendance_id.get(record.id), notes=_row_notes(record, profile))
+                _item(
+                    record,
+                    profile,
+                    checkouts_by_attendance_id.get(record.id),
+                    notes=_row_notes(record, profile),
+                    recorder_name=recorder_names.get(record.recorded_by),
+                )
                 for record, profile in rows
             ],
             total=total,
@@ -403,7 +452,8 @@ def record_staff_attendance(
                             StaffAttendanceCheckout.attendance_id == existing_by_key.id
                         )
                     )
-                    return _item(existing_by_key, profile, checkout)
+                    rec_name = _resolve_single_recorder_name(session, existing_by_key.recorded_by, branch.id)
+                    return _item(existing_by_key, profile, checkout, recorder_name=rec_name)
 
             # 2. Existing scheduled series occurrence lookup
             if eff_series_id is not None and occ_date is not None:
@@ -424,7 +474,8 @@ def record_staff_attendance(
                             StaffAttendanceCheckout.attendance_id == existing_series_rec.id
                         )
                     )
-                    return _item(existing_series_rec, profile, checkout, notes=_record_notes(session, existing_series_rec, profile, explicit_notes=payload.notes if payload else None))
+                    rec_name = _resolve_single_recorder_name(session, existing_series_rec.recorded_by, branch.id)
+                    return _item(existing_series_rec, profile, checkout, notes=_record_notes(session, existing_series_rec, profile, explicit_notes=payload.notes if payload else None), recorder_name=rec_name)
 
             # 3. Existing ad-hoc / legacy lookup (when neither series_id nor idempotency_key is supplied)
             if eff_series_id is None and eff_idempotency_key is None:
@@ -436,7 +487,8 @@ def record_staff_attendance(
                             StaffAttendanceCheckout.attendance_id == existing.id
                         )
                     )
-                    return _item(existing, profile, checkout, notes=_record_notes(session, existing, profile, explicit_notes=payload.notes if payload else None))
+                    rec_name = _resolve_single_recorder_name(session, existing.recorded_by, branch.id)
+                    return _item(existing, profile, checkout, notes=_record_notes(session, existing, profile, explicit_notes=payload.notes if payload else None), recorder_name=rec_name)
 
             if not profile.is_active:
                 raise HTTPException(409, "Inactive staff cannot be marked for attendance.")
@@ -581,9 +633,11 @@ def record_staff_attendance(
                         StaffAttendanceCheckout.attendance_id == existing.id
                     )
                 )
-                return _item(existing, profile, checkout)
+                rec_name = _resolve_single_recorder_name(session, existing.recorded_by, branch.id)
+                return _item(existing, profile, checkout, recorder_name=rec_name)
 
-            return _item(record, profile, notes=eff_notes)
+            rec_name = _resolve_single_recorder_name(session, principal.staff_id, branch.id)
+            return _item(record, profile, notes=eff_notes, recorder_name=rec_name)
 
     except Exception as e:
         import traceback
