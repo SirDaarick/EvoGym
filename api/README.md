@@ -58,7 +58,24 @@ Browser clients are cross-origin only when `EVOGYM_CORS_ALLOWED_ORIGINS` is expl
 
 ### Expense evidence and reception funds
 
-The development compose file defines a loopback-only MinIO service and a private `evogym-expenses` bucket bootstrap. Configure both endpoints according to where the API and browser run; for an API running on the host, both can use `http://127.0.0.1:9000`. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501. Cloudflare R2 requires its own bucket, credentials and browser-origin CORS configuration; those are not supplied here.
+The development compose file defines a loopback-only MinIO service for the private `evogym-expenses` bucket. Configure both endpoints according to where the API and browser run; for an API running on the host, both can use `http://127.0.0.1:9000`. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501. Cloudflare R2 requires its own bucket, credentials and browser-origin CORS configuration; those are not supplied here.
+
+If the container registry blocks the MinIO image, import it once from a machine with registry access:
+
+```powershell
+# On a machine with Docker Hub access
+docker pull minio/minio:RELEASE.2025-04-22T22-12-26Z
+docker save -o minio.tar minio/minio:RELEASE.2025-04-22T22-12-26Z
+# Copy minio.tar to this machine, then load and start it
+docker load -i minio.tar
+docker compose up -d minio_dev
+```
+
+Create the bucket once with the API's own client, which uses the same settings:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\bootstrap_evidence_bucket.py
+```
 
 Money left by an administrator at reception for a later purchase is a shift cash contribution. Record the later purchase as a shift expense; do not also record the contribution as a business expense, which would count it twice.
 

@@ -30,14 +30,6 @@ services:
     volumes:
       - evogym_minio_dev_data:/data
 
-  minio_bootstrap:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      - minio_dev
-    entrypoint: >-
-      /bin/sh -c 'until mc alias set local http://minio_dev:9000 evogym_dev evogym_dev_password; do sleep 2; done;
-      mc mb --ignore-existing local/evogym-expenses'
-
 volumes:
   evogym_postgres_dev_data:
     name: evogym_postgres_dev_data
