@@ -39,6 +39,7 @@ from app.db.models.memberships import MembershipPeriod
 from app.db.models.payment_review_events import PaymentReviewEvent
 from app.db.models.membership_debts import MembershipDebt
 from app.db.models.membership_debt_payments import MembershipDebtPayment
+from app.db.models.expenses import Expense, ShiftCashContribution
 from app.db.models.member_access_decisions import MemberAccessDecision
 from app.db.models.member_check_ins import MemberCheckIn
 from app.db.models.class_samples import ClassSampleCheckIn, ClassSampleEntitlement
@@ -78,6 +79,8 @@ __all__ = [
     "MembershipPeriod",
     "MembershipDebt",
     "MembershipDebtPayment",
+    "Expense",
+    "ShiftCashContribution",
     "MemberAccessDecision",
     "MemberCheckIn",
     "ClassSampleEntitlement",

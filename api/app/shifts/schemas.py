@@ -249,6 +249,9 @@ class ShiftSummaryDTO(BaseModel):
     activities: list[dict[str, int | str]]
     payments: list[ShiftSummaryPaymentDTO]
     expected_cash_minor: int
+    expense_minor: int
+    expense_count: int
+    extra_minor: int
 
     @field_validator("shift_id", mode="before")
     @classmethod

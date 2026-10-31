@@ -20,7 +20,7 @@ from app.inventory.queries import capture_register_inventory_snapshot
 from app.rentals.payments import RentalConflictError, active_rental_id
 from app.rentals.queries import (
     apply_card_attempt, begin_card_attempt, confirm_cancellation, create_rental,
-    preview_cancellation, record_receivable_payment, renew_rental, review_transfer,
+    preview_cancellation, record_receivable_payment, renew_rental, review_rental_transfer,
 )
 from app.rentals.schemas import TenderComponentInput
 from app.shifts.queries import open_shift
@@ -162,7 +162,7 @@ def test_rental_migration_0048_preserves_assets_on_postgres(monkeypatch):
                 column["name"] for column in inspect(engine).get_columns("payments")}
             with engine.connect() as connection:
                 assert connection.execute(text("SELECT code FROM rental_assets")).scalar_one() == "legacy-glove"
-                assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0048_rental_lifecycle"
+                assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0049_expenses"
         finally:
             engine.dispose()
     finally:
@@ -323,7 +323,7 @@ def test_concurrent_transfer_review_and_cancellation_do_not_resurrect_cancelled_
         barrier.wait()
         try:
             with factory.begin() as session:
-                review_transfer(session, payment_id=payment_id, actor_id=staff_id,
+                review_rental_transfer(session, payment_id=payment_id, actor_id=staff_id,
                                 status="confirmed", idempotency_key="review-race")
             return "reviewed"
         except (RentalConflictError, ValueError):
