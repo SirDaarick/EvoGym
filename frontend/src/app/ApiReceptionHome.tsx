@@ -387,5 +387,23 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
         }}
       />
     )}
+    {registerId && (
+      <>
+        <GuantesModal
+          isOpen={isGuantesOpen}
+          onClose={() => setIsGuantesOpen(false)}
+          apiRequest={request}
+          registerId={registerId}
+          branchId={currentBranchId || branches[0]?.id}
+        />
+        <CasillerosModal
+          isOpen={isCasillerosOpen}
+          onClose={() => setIsCasillerosOpen(false)}
+          apiRequest={request}
+          registerId={registerId}
+          branchId={currentBranchId || branches[0]?.id}
+        />
+      </>
+    )}
   </>;
 }
