@@ -77,6 +77,16 @@ Create the bucket once with the API's own client, which uses the same settings:
 .\.venv\Scripts\python.exe scripts\bootstrap_evidence_bucket.py
 ```
 
+If the registry blocks the MinIO image and no tarball is available, any S3-compatible server works with the same API code. SeaweedFS is reachable from registries that serve it:
+
+```powershell
+docker run -d --name evogym-s3 -p 8333:8333 -p 8888:8888 -p 8080:8080 chrislusf/seaweedfs:latest server -s3
+$env:EVOGYM_EVIDENCE_S3_ENDPOINT='http://127.0.0.1:8333'
+$env:EVOGYM_EVIDENCE_PUBLIC_ENDPOINT='http://127.0.0.1:8333'
+```
+
+The evidence settings are read by the API process, so export them before starting it or place them in `api/.env`.
+
 Money left by an administrator at reception for a later purchase is a shift cash contribution. Record the later purchase as a shift expense; do not also record the contribution as a business expense, which would count it twice.
 
 ### Staff PIN sessions

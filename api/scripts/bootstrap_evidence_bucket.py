@@ -1,7 +1,7 @@
 """Create the private expense evidence bucket in a local S3-compatible server.
 
 Usage (from api/):
-    .\.venv\Scripts\python.exe scripts/bootstrap_evidence_bucket.py
+    .venv/Scripts/python.exe scripts/bootstrap_evidence_bucket.py
 
 Reads the same EVOGYM_EVIDENCE_* settings as the API, so the bucket, region and
 credentials always match the ones the API will use.
