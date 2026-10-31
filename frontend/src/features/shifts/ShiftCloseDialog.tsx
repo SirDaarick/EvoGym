@@ -46,8 +46,6 @@ interface CloseDialogViewProps {
   difference: number | null;
   review: Pick<CloseReview, 'countedCashMinor' | 'expectedCashMinor'> | null;
   formError: string;
-  draftSaved: boolean;
-  savedLabel: string;
   canSubmit: boolean;
   storageNotice?: ReactNode;
   onClose: () => void;
@@ -227,7 +225,7 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
 
   return <ShiftCloseDialogView isOpen={isOpen} shiftName={shiftName} expectedCashMinor={expectedCashMinor} expectedCashBreakdown={expectedCashBreakdown}
     dialogRef={dialogRef} draft={draft} mode={mode} entryMode={entryMode} counts={counts} actualTotal={actualTotal} difference={difference} review={review}
-    formError={formError} draftSaved={false} savedLabel="Pendiente de registrar" canSubmit={true} onClose={closeDialog} onSubmit={prepareReview}
+    formError={formError} canSubmit={true} onClose={closeDialog} onSubmit={prepareReview}
     onUpdateDraft={updateDraft} onSetEntryMode={setEntryMode} onChangeDenomination={changeDenomination} onIncrement={increment} onDecrement={decrement}
     onConfirm={() => void confirmClose()} onBackToCount={() => { setReview(null); setFormError(''); }} />;
 }
@@ -382,9 +380,6 @@ function DemoShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, e
   }
 
   const isBlocked = demo.persistenceStatus === 'blocked';
-  const savedLabel = !persistenceReady
-    ? persistenceUnsafe ? 'Guardado no disponible' : 'Conectando almacenamiento…'
-    : draftSaved ? 'Guardado' : 'No se pudo guardar';
   const storageMessage = !persistenceReady
     ? demo.persistenceStatus === 'error'
       ? 'No se pudo guardar el conteo. ' + (demo.persistenceError ?? 'El cierre está deshabilitado.')
@@ -400,7 +395,7 @@ function DemoShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, e
   return <ShiftCloseDialogView
     isOpen={isOpen} shiftName={shiftName} expectedCashMinor={expectedCashMinor} expectedCashBreakdown={expectedCashBreakdown}
     dialogRef={dialogRef} draft={draft} mode={mode} entryMode={entryMode} counts={counts} actualTotal={actualTotal} difference={difference}
-    review={review} formError={formError} draftSaved={draftSaved} savedLabel={savedLabel} canSubmit={persistenceReady && draftSaved}
+    review={review} formError={formError} canSubmit={persistenceReady && draftSaved}
     storageNotice={storageMessage ? <div role="alert" className="shift-close-storage-alert"><Notice tone="error">{storageMessage}</Notice>{draft && demo.persistenceStatus === 'error' && <Button type="button" variant="secondary" onClick={retryDraftSave}>Reintentar guardado</Button>}{isBlocked && <div className="shift-close-blocked-actions"><Button type="button" variant="secondary" onClick={async () => { const ok = await demo.retryPersistence({ force: true }); if (ok && draft) setDraftSaved(demo.saveDraft(shiftId, draft)); }}>Tomar control de esta pestaña</Button><Button type="button" variant="secondary" onClick={async () => { const ok = await demo.retryPersistence({ force: false }); if (ok && draft) setDraftSaved(demo.saveDraft(shiftId, draft)); }}>Reintentar</Button></div>}</div> : null}
     onClose={closeDialog} onSubmit={prepareReview} onUpdateDraft={updateDraft} onSetEntryMode={setEntryMode}
     onChangeDenomination={(valueMinor: number, value: string, currentMode: 'units' | 'amount') => {
@@ -426,7 +421,7 @@ function DemoShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, e
 }
 
 
-function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCashBreakdown, dialogRef, draft, mode, entryMode, counts, actualTotal, difference, review, formError, draftSaved, savedLabel, canSubmit, storageNotice, onClose, onSubmit, onUpdateDraft, onSetEntryMode, onChangeDenomination, onIncrement, onDecrement, onConfirm, onBackToCount }: CloseDialogViewProps) {
+function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCashBreakdown, dialogRef, draft, mode, entryMode, counts, actualTotal, difference, review, formError, canSubmit, storageNotice, onClose, onSubmit, onUpdateDraft, onSetEntryMode, onChangeDenomination, onIncrement, onDecrement, onConfirm, onBackToCount }: CloseDialogViewProps) {
   if (!isOpen) return null;
   return (
     <dialog
@@ -454,9 +449,6 @@ function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCa
                 <section className="shift-close-count-card clay-card" aria-labelledby="shift-close-count-heading">
                   <div className="shift-close-card-heading">
                     <h3 id="shift-close-count-heading">Conteo de efectivo</h3>
-                    <span className={`shift-close-save ${draftSaved ? 'is-saved' : 'is-unsaved'}`} role="status" aria-live="polite">
-                      {savedLabel}
-                    </span>
                   </div>
 
                   <div className="shift-close-controls-row">

@@ -49,15 +49,14 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/docs': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:8000',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
       '/openapi.json': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:8000',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
     },
   },
   test: { pool: 'threads', environment: 'jsdom', setupFiles: ['./src/test/setup.ts'], css: true },
 });
-

@@ -114,6 +114,10 @@
   cursor: default;
 }
 
+.rubber-segment__label-copy::before {
+  content: attr(data-label);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rubber-segment__item {
     transition: opacity 160ms ease;

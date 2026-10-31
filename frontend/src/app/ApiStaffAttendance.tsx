@@ -11,6 +11,7 @@ interface RosterItem {
   full_name: string;
   position: string;
   is_active: boolean;
+  expected_entry_time?: string | null;
 }
 
 export function ApiStaffAttendance() {
@@ -31,8 +32,12 @@ export function ApiStaffAttendance() {
       if (!response.ok) throw new Error(response.status === 403 ? 'Tu perfil no tiene permiso para consultar el roster.' : 'No se pudo cargar el personal desde la API.');
       const roster = (await response.json() as { items: RosterItem[] }).items;
       if (!cancelled) setStaff(roster.map(item => ({
-        id: item.id, name: item.full_name, active: item.is_active, avatarInitials: item.full_name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase(),
+        id: item.id,
+        name: item.full_name,
+        active: item.is_active,
+        avatarInitials: item.full_name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase(),
         department: item.position,
+        shift: item.expected_entry_time ? `${item.expected_entry_time.slice(0, 5)} hrs` : undefined,
       })));
     }).catch(reason => {
       if (!cancelled) {

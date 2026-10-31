@@ -29,6 +29,7 @@ export interface RubberSegmentProps {
   disabled?: boolean;
   className?: string;
   'aria-label'?: string;
+  style?: CSSProperties;
 }
 
 type Slot = { l: number; r: number };
@@ -102,7 +103,8 @@ const RubberSegment: React.FC<RubberSegmentProps> = ({
   draggable = true,
   disabled = false,
   className = '',
-  'aria-label': ariaLabel = 'Segmented control'
+  'aria-label': ariaLabel = 'Segmented control',
+  style
 }) => {
   const list = items.map(item => (typeof item === 'string' ? { value: item, label: item } : item));
   const [inner, setInner] = useState<string | undefined>(defaultValue ?? list[0]?.value);
@@ -352,6 +354,7 @@ const RubberSegment: React.FC<RubberSegmentProps> = ({
       className={`rubber-segment${className ? ` ${className}` : ''}`}
       style={
         {
+          ...style,
           '--rs-track': trackColor,
           '--rs-thumb': thumbColor,
           '--rs-ink': textColor,
@@ -384,6 +387,14 @@ const RubberSegment: React.FC<RubberSegmentProps> = ({
           className="rubber-segment__item"
           onPointerDown={e => handlePointerDown(e, i)}
           onKeyDown={handleKeyDown}
+          onClick={() => {
+            if (disabled) return;
+            if (i !== committed.current) {
+              const from = committed.current;
+              commit(i);
+              travel(from, i);
+            }
+          }}
         >
           {item.icon}
           {item.label}
@@ -393,7 +404,11 @@ const RubberSegment: React.FC<RubberSegmentProps> = ({
         {list.map(item => (
           <span key={item.value} className="rubber-segment__item rubber-segment__copy">
             {item.icon}
-            {item.label}
+            {typeof item.label === 'string' ? (
+              <span data-label={item.label} className="rubber-segment__label-copy" />
+            ) : (
+              item.label
+            )}
           </span>
         ))}
       </motion.div>

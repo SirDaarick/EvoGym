@@ -134,6 +134,10 @@ with TestClient(app) as client:
     assert resp.status_code == 201, resp.text
     membership_period_id = resp.json()["membership"]["id"]
 
+# 7. Seed Additional Receptionists & Schedules
+from seed_receptionists import seed as seed_more_staff
+seed_more_staff(session_factory=factory)
+
 issued_pairing = issue_device_pairing_code(factory, admin_id, staff_id, ttl_seconds=86400)
 
 print("=" * 60)

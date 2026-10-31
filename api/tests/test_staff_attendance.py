@@ -797,3 +797,38 @@ def test_shift_covering_and_adhoc_support_shift(tmp_path, monkeypatch):
             assert "apoyo" in (data_adhoc.get("notes") or "")
     finally:
         engine.dispose()
+
+
+def test_attendance_recorded_by_resolves_roster_name(tmp_path):
+    url, engine, factory, branch_a_id, branch_b_id, desk_token, branch_admin_token = _setup(tmp_path)
+    profile_id, unmarked_id, other_profile_id, inactive_id = _create_profiles(factory, branch_a_id, branch_b_id)
+    with factory.begin() as session:
+        receptionist_user = session.scalar(select(StaffUser).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
+        receptionist_profile = StaffRosterProfile(
+            branch_id=branch_a_id,
+            staff_user_id=receptionist_user.id,
+            full_name="Sheila Recepción",
+            position="Recepción",
+        )
+        session.add(receptionist_profile)
+
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            marked = client.post(
+                f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}",
+                headers=desk,
+                json={"device_captured_at": "2026-10-23T15:00:00Z"},
+            )
+            assert marked.status_code == 201
+            assert marked.json()["recorded_by"] == "Sheila Recepción"
+
+            # Check list endpoint also resolves name
+            page = client.get(
+                f"/api/v1/staff-attendance?branch_id={branch_a_id}&business_date=2026-10-23",
+                headers=desk,
+            )
+            assert page.status_code == 200
+            assert page.json()["items"][0]["recorded_by"] == "Sheila Recepción"
+    finally:
+        engine.dispose()

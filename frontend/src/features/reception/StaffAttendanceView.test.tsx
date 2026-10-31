@@ -126,12 +126,30 @@ describe('StaffAttendanceView', () => {
     const user = userEvent.setup();
     renderView();
 
+    // 1. Filter by Mantenimiento
     const maintenancePill = screen.getByRole('button', { name: 'Mantenimiento' });
     await user.click(maintenancePill);
 
     expect(screen.getByTestId('staff-card-staff-silvia')).toBeInTheDocument();
     expect(screen.getByTestId('staff-card-staff-alan')).toBeInTheDocument();
     expect(screen.queryByTestId('staff-card-staff-mikel')).not.toBeInTheDocument();
+
+    // 2. Filter by Staff / Recepción
+    const staffPill = screen.getByRole('button', { name: 'Staff / Recepción' });
+    await user.click(staffPill);
+
+    expect(screen.getByTestId('staff-card-staff-maho')).toBeInTheDocument();
+    expect(screen.getByTestId('staff-card-staff-sheila')).toBeInTheDocument();
+    expect(screen.queryByTestId('staff-card-staff-silvia')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('staff-card-staff-mikel')).not.toBeInTheDocument();
+
+    // 3. Filter by Entrenadores
+    const trainerPill = screen.getByRole('button', { name: 'Entrenadores' });
+    await user.click(trainerPill);
+
+    expect(screen.getByTestId('staff-card-staff-mikel')).toBeInTheDocument();
+    expect(screen.queryByTestId('staff-card-staff-silvia')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('staff-card-staff-reception')).not.toBeInTheDocument();
   });
 
   it('filters employees by status pills (En turno / Fuera del gym)', async () => {
@@ -627,8 +645,15 @@ describe('StaffAttendanceView', () => {
       expect(selectDropdown).toBeInTheDocument();
       expect(screen.getByText('Bob (08:00 - 16:00)')).toBeInTheDocument();
 
-      // Confirm covering Bob
+      // Confirm button is disabled until a colleague is chosen
       const confirmBtn = screen.getByRole('button', { name: 'Confirmar Entrada' });
+      expect(confirmBtn).toBeDisabled();
+
+      // Select Bob to cover in AnimatedList
+      await user.click(screen.getByText('Bob (08:00 - 16:00)'));
+      expect(confirmBtn).toBeEnabled();
+
+      // Confirm covering Bob
       await user.click(confirmBtn);
 
       // Verify success feedback and API payload

@@ -47,6 +47,10 @@ interface AnimatedListProps {
   onSelectedIndexChange?: (index: number) => void;
   id?: string;
   listboxId?: string;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
+  'aria-label'?: string;
+  'aria-labelledby'?: string;
   tabIndex?: number;
   onItemSelect?: (item: AnimatedListItem, index: number) => void;
   renderItem?: (item: AnimatedListItem, index: number, isSelected: boolean) => ReactNode;
@@ -169,6 +173,10 @@ const AnimatedList = ({
   onSelectedIndexChange,
   id: customId,
   listboxId,
+  ariaLabel,
+  ariaLabelledBy,
+  'aria-label': ariaLabelProp,
+  'aria-labelledby': ariaLabelledByProp,
   tabIndex = 0,
   onItemSelect,
   renderItem,
@@ -577,6 +585,8 @@ const AnimatedList = ({
         id={listboxId}
         className={`animated-list__viewport${displayScrollbar ? '' : ' animated-list__viewport--bare'}`}
         role="listbox"
+        aria-label={ariaLabel ?? ariaLabelProp}
+        aria-labelledby={ariaLabelledBy ?? ariaLabelledByProp}
         tabIndex={tabIndex}
         aria-activedescendant={selected >= 0 && selected < effectiveItems.length ? `${baseId}-${selected}` : undefined}
         style={{

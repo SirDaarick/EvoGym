@@ -24,6 +24,7 @@ import type { RecordAttendancePayload } from '../../api/staffAttendanceApi';
 import { createEmptyDemoState } from '../../demo/adapter';
 import { Button, EmptyState, PageHeader } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
+import { UnscheduledClockInModal } from './UnscheduledClockInModal';
 import { getSelectedStaff, useStaff, type StaffProfile } from '../staff/staffStore';
 import './StaffAttendanceView.css';
 
@@ -31,6 +32,28 @@ export type StaffAttendancePerson = Pick<StaffProfile, 'id' | 'name' | 'active' 
 
 type DepartmentFilter = 'all' | 'Entrenador' | 'Mantenimiento' | 'Staff';
 type StatusFilter = 'all' | 'in-turn' | 'out';
+
+export function matchesDepartmentFilter(staffDept: string | undefined, filter: DepartmentFilter): boolean {
+  if (filter === 'all') return true;
+  const dept = (staffDept ?? 'Staff').toLowerCase();
+  if (filter === 'Staff') {
+    return dept === 'staff' || dept.startsWith('recepc');
+  }
+  if (filter === 'Entrenador') {
+    return dept.startsWith('entrena');
+  }
+  if (filter === 'Mantenimiento') {
+    return dept.startsWith('manten');
+  }
+  return false;
+}
+
+export function getDepartmentClass(department?: string): 'trainer' | 'maintenance' | 'staff' {
+  const d = (department ?? 'Staff').toLowerCase();
+  if (d.startsWith('entrena')) return 'trainer';
+  if (d.startsWith('manten')) return 'maintenance';
+  return 'staff';
+}
 
 function formatClockTime(isoString?: string | null): string {
   if (!isoString) return '--:--';
@@ -110,14 +133,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   // Branch schedules for shift detection
   const [branchSchedules, setBranchSchedules] = useState<StaffScheduleSeriesItem[]>([]);
 
-  // Modal for unscheduled staff clock-in
-  interface UnscheduledPromptState {
-    staff: StaffAttendancePerson;
-    selectedOption: 'cover' | 'support';
-    coveredStaffId: string;
-  }
-  const [unscheduledPrompt, setUnscheduledPrompt] = useState<UnscheduledPromptState | null>(null);
-  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  // Pending clock-in for unscheduled staff member
+  const [unscheduledStaff, setUnscheduledStaff] = useState<StaffAttendancePerson | null>(null);
 
   const fetchLiveAttendance = useCallback(async () => {
     if (!operationalToken && !liveRequest) return;
@@ -154,7 +171,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         try {
           const schedRes = await liveRequest(`/api/v1/staff-schedules/branches/${encodeURIComponent(branchId ?? '')}`);
           if (schedRes.ok) {
-            seriesList = (await schedRes.json()) as StaffScheduleSeriesItem[];
+            const data = await schedRes.json();
+            seriesList = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
           }
         } catch {
           // ignore schedule load error
@@ -167,13 +185,14 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
             headers: { Authorization: `Bearer ${operationalToken}` },
           });
           if (schedRes.ok) {
-            seriesList = (await schedRes.json()) as StaffScheduleSeriesItem[];
+            const data = await schedRes.json();
+            seriesList = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
           }
         } catch {
           // ignore schedule load error
         }
       }
-      setBranchSchedules(seriesList);
+      setBranchSchedules(Array.isArray(seriesList) ? seriesList : []);
       setLiveRecords(records);
       const corrMap: Record<string, StaffAttendanceCorrectionItem[]> = {};
       correctionsList.forEach(c => {
@@ -380,13 +399,16 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       if (statusFilter === 'out' && isClockedIn) return false;
 
       // Department filter
-      const dept = staff.department ?? 'Staff';
-      if (departmentFilter !== 'all' && dept !== departmentFilter) return false;
+      if (!matchesDepartmentFilter(staff.department, departmentFilter)) return false;
 
       // Search query
       if (q) {
         const matchesName = staff.name.toLowerCase().includes(q);
-        const matchesDept = dept.toLowerCase().includes(q);
+        const deptStr = (staff.department ?? 'Staff').toLowerCase();
+        const matchesDept =
+          deptStr.includes(q) ||
+          (deptStr.startsWith('recepc') && 'staff'.includes(q)) ||
+          (deptStr === 'staff' && 'recepción'.includes(q));
         const matchesShift = staff.shift?.toLowerCase().includes(q) ?? false;
         if (!matchesName && !matchesDept && !matchesShift) return false;
       }
@@ -399,7 +421,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   const hasScheduledShiftToday = useCallback((staff: StaffAttendancePerson): boolean => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const todayWeekday = (new Date().getDay() + 6) % 7;
-    if (branchSchedules.length > 0) {
+    const safeSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
+    if (safeSchedules.length > 0) {
       return branchSchedules.some(s =>
         s.profile_id === staff.id &&
         s.start_date <= todayStr &&
@@ -408,7 +431,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         s.weekdays.includes(todayWeekday)
       );
     }
-    return Boolean(staff.shift && staff.shift !== 'Sin turno' && staff.shift !== 'Descanso');
+    return Boolean(staff.shift && !staff.shift.toLowerCase().startsWith('sin turno') && !staff.shift.toLowerCase().startsWith('descanso'));
   }, [branchSchedules]);
 
   const colleaguesWithShift = useMemo(() => {
@@ -450,7 +473,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       .filter(s => {
         const isClockedIn = staffStatuses.get(s.id)?.isClockedIn;
         if (isClockedIn) return false;
-        return Boolean(s.shift && s.shift !== 'Sin turno' && s.shift !== 'Descanso');
+        return Boolean(s.shift && !s.shift.toLowerCase().startsWith('sin turno') && !s.shift.toLowerCase().startsWith('descanso'));
       })
       .map(s => ({
         staffId: s.id,
@@ -564,40 +587,10 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
 
   function onClickClockIn(staff: StaffAttendancePerson) {
     if (!hasScheduledShiftToday(staff)) {
-      const available = colleaguesWithShift.filter(c => c.staffId !== staff.id);
-      setUnscheduledPrompt({
-        staff,
-        selectedOption: available.length > 0 ? 'cover' : 'support',
-        coveredStaffId: available[0]?.staffId ?? '',
-      });
+      setUnscheduledStaff(staff);
       return;
     }
     void handleClockIn(staff);
-  }
-
-  async function handleConfirmUnscheduled() {
-    if (!unscheduledPrompt) return;
-    setConfirmSubmitting(true);
-    try {
-      const { staff, selectedOption, coveredStaffId } = unscheduledPrompt;
-      if (selectedOption === 'cover') {
-        const colleague = colleaguesWithShift.find(c => c.staffId === coveredStaffId);
-        const coveredColleague = activeStaff.find(s => s.id === coveredStaffId);
-        const coveredName = coveredColleague?.name ?? colleague?.name ?? 'compañero';
-        await handleClockIn(staff, {
-          series_id: colleague?.seriesId,
-          covered_profile_id: coveredStaffId,
-          notes: `Cubriendo turno de ${coveredName}`,
-        });
-      } else {
-        await handleClockIn(staff, {
-          notes: 'Turno de apoyo / extraordinario',
-        });
-      }
-      setUnscheduledPrompt(null);
-    } finally {
-      setConfirmSubmitting(false);
-    }
   }
   async function handleClockOut(staff: StaffAttendancePerson) {
     if (isLive) {
@@ -886,12 +879,22 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
             const isClockedIn = Boolean(status?.isClockedIn);
             const activeRecord = status?.activeRecord;
             const dept = staff.department ?? 'Staff';
-            const deptClass =
-              dept === 'Entrenador'
-                ? 'trainer'
-                : dept === 'Mantenimiento'
-                ? 'maintenance'
-                : 'staff';
+            const deptClass = getDepartmentClass(staff.department);
+
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const todayWeekday = (new Date().getDay() + 6) % 7;
+            const safeBranchSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
+            const todaySeries = safeBranchSchedules.find(s =>
+              s.profile_id === staff.id &&
+              s.start_date <= todayStr &&
+              (!s.end_date || s.end_date >= todayStr) &&
+              (!s.cancelled_from || s.cancelled_from > todayStr) &&
+              s.weekdays.includes(todayWeekday)
+            );
+            const hasAnySchedule = safeBranchSchedules.some(s => s.profile_id === staff.id);
+            const displayShift = safeBranchSchedules.length > 0 && hasAnySchedule
+              ? (todaySeries ? `${todaySeries.start_time.slice(0, 5)} - ${todaySeries.end_time.slice(0, 5)}` : 'Descanso hoy')
+              : staff.shift;
 
             return (
               <div
@@ -914,7 +917,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                         <span className={`staff-dept-badge ${deptClass}`}>
                           {dept}
                         </span>
-                        {staff.shift && <span className="staff-shift-label">· {staff.shift}</span>}
+                        {displayShift && <span className="staff-shift-label">· {displayShift}</span>}
                       </div>
                     </div>
                   </div>
@@ -938,27 +941,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
 
                     {/* Server-accepted marks indicator: present, late, review_pending */}
                     {activeRecord?.status && (
-                      <span
-                        className={`staff-status-badge mark-${activeRecord.status}`}
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          backgroundColor:
-                            activeRecord.status === 'late'
-                              ? '#FEE2E2'
-                              : activeRecord.status === 'review_pending'
-                              ? '#FEF3C7'
-                              : '#DCFCE7',
-                          color:
-                            activeRecord.status === 'late'
-                              ? '#991B1B'
-                              : activeRecord.status === 'review_pending'
-                              ? '#92400E'
-                              : '#166534',
-                          fontWeight: 500,
-                        }}
-                      >
+                      <span className={`staff-status-badge mark-${activeRecord.status}`}>
                         {activeRecord.status}
                       </span>
                     )}
@@ -968,15 +951,6 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                       <span
                         className="staff-status-badge review-required"
                         data-testid="review-required-badge"
-                        style={{
-                          backgroundColor: '#FEF3C7',
-                          color: '#92400E',
-                          border: '1px solid #FCD34D',
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '9999px',
-                          fontWeight: 600,
-                        }}
                         title="Requiere revisión de horario o validación de reloj"
                       >
                         Revisión requerida
@@ -1245,96 +1219,16 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       </div>
 
       {/* Modal Confirmar Entrada para personal sin turno programado */}
-      {unscheduledPrompt && (
-        <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="unscheduled-modal-title">
-          <div className="staff-modal-card" style={{ maxWidth: '440px' }}>
-            <div className="staff-modal-header">
-              <h2 id="unscheduled-modal-title">Confirmar Entrada</h2>
-              <button
-                type="button"
-                className="staff-modal-close"
-                onClick={() => setUnscheduledPrompt(null)}
-                aria-label="Cerrar"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p style={{ margin: '8px 0 16px', fontSize: '14px', color: 'var(--color-muted)' }}>
-              <strong>{unscheduledPrompt.staff.name}</strong> no tiene turno programado para hoy.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
-                <input
-                  type="radio"
-                  name="unscheduled-option"
-                  value="cover"
-                  checked={unscheduledPrompt.selectedOption === 'cover'}
-                  disabled={colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).length === 0}
-                  onChange={() => setUnscheduledPrompt(prev => prev ? { ...prev, selectedOption: 'cover' } : null)}
-                  style={{ marginTop: '2px' }}
-                />
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontWeight: 600 }}>Cubrir a un compañero</span>
-                  {colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).length > 0 ? (
-                    <div style={{ marginTop: '6px' }}>
-                      <label htmlFor="select-covered-colleague" className="sr-only">Seleccionar compañero a cubrir</label>
-                      <select
-                        id="select-covered-colleague"
-                        value={unscheduledPrompt.coveredStaffId}
-                        disabled={unscheduledPrompt.selectedOption !== 'cover'}
-                        onChange={e => setUnscheduledPrompt(prev => prev ? { ...prev, coveredStaffId: e.target.value } : null)}
-                        style={{ width: '100%', fontSize: '12px', padding: '6px', borderRadius: '4px' }}
-                      >
-                        {colleaguesWithShift.filter(c => c.staffId !== unscheduledPrompt.staff.id).map(c => (
-                          <option key={c.staffId} value={c.staffId}>
-                            {c.displayName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '12px', color: 'var(--color-muted)', margin: '4px 0 0' }}>
-                      No hay compañeros con turno pendiente de iniciar hoy.
-                    </p>
-                  )}
-                </div>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
-                <input
-                  type="radio"
-                  name="unscheduled-option"
-                  value="support"
-                  checked={unscheduledPrompt.selectedOption === 'support'}
-                  onChange={() => setUnscheduledPrompt(prev => prev ? { ...prev, selectedOption: 'support' } : null)}
-                  style={{ marginTop: '2px' }}
-                />
-                <div>
-                  <span style={{ fontWeight: 600 }}>Turno de apoyo / Refuerzo extraordinario (A nadie)</span>
-                  <p style={{ fontSize: '12px', color: 'var(--color-muted)', margin: '2px 0 0' }}>
-                    Registrar asistencia como personal de apoyo sin horario asignado.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            <div className="staff-modal-actions">
-              <Button variant="secondary" onClick={() => setUnscheduledPrompt(null)} disabled={confirmSubmitting}>
-                Cancelar
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => void handleConfirmUnscheduled()}
-                disabled={confirmSubmitting || (unscheduledPrompt.selectedOption === 'cover' && !unscheduledPrompt.coveredStaffId)}
-              >
-                {confirmSubmitting ? 'Confirmando…' : 'Confirmar Entrada'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <UnscheduledClockInModal
+        isOpen={Boolean(unscheduledStaff)}
+        staff={unscheduledStaff}
+        colleaguesWithShift={colleaguesWithShift}
+        onClose={() => setUnscheduledStaff(null)}
+        onConfirm={async payload => {
+          if (!unscheduledStaff) return;
+          await handleClockIn(unscheduledStaff, payload);
+        }}
+      />
 
       {/* Toast Feedback */}
       {toast && (

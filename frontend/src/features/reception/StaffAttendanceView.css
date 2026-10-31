@@ -219,14 +219,15 @@
   box-shadow: 0 10px 24px rgba(35, 29, 31, 0.08);
 }
 
-.staff-card-item.in-turn {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: linear-gradient(to bottom, var(--color-surface), color-mix(in srgb, #22C55E 3%, var(--color-surface)));
-}
-
+.staff-card-item.in-turn,
 [data-theme='dark'] .staff-card-item.in-turn {
   border-color: rgba(34, 197, 94, 0.3);
   background: linear-gradient(to bottom, var(--color-surface), rgba(34, 197, 94, 0.05));
+}
+
+[data-theme='light'] .staff-card-item.in-turn {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: linear-gradient(to bottom, var(--color-surface), color-mix(in srgb, #22C55E 3%, var(--color-surface)));
 }
 
 .staff-card-head {
@@ -309,40 +310,43 @@
   letter-spacing: 0.3px;
 }
 
-.staff-dept-badge.trainer {
-  background: #FFF3E7;
-  color: #C2410C;
-  border: 1px solid #FDBA74;
-}
-
+.staff-dept-badge.trainer,
 [data-theme='dark'] .staff-dept-badge.trainer {
   background: #3A2416;
   color: #FDBA74;
-  border-color: #6E3F1F;
+  border: 1px solid #6E3F1F;
 }
 
-.staff-dept-badge.maintenance {
-  background: #EFF6FF;
-  color: #1D4ED8;
-  border: 1px solid #BFDBFE;
+[data-theme='light'] .staff-dept-badge.trainer {
+  background: #FFF3E7;
+  color: #C2410C;
+  border-color: #FDBA74;
 }
 
+.staff-dept-badge.maintenance,
 [data-theme='dark'] .staff-dept-badge.maintenance {
   background: #172554;
   color: #93C5FD;
-  border-color: #1E3A8A;
+  border: 1px solid #1E3A8A;
 }
 
-.staff-dept-badge.staff {
-  background: #FAF5FF;
-  color: #7E22CE;
-  border: 1px solid #E9D5FF;
+[data-theme='light'] .staff-dept-badge.maintenance {
+  background: #EFF6FF;
+  color: #1D4ED8;
+  border-color: #BFDBFE;
 }
 
+.staff-dept-badge.staff,
 [data-theme='dark'] .staff-dept-badge.staff {
   background: #2E1065;
   color: #D8B4FE;
-  border-color: #581C87;
+  border: 1px solid #581C87;
+}
+
+[data-theme='light'] .staff-dept-badge.staff {
+  background: #FAF5FF;
+  color: #7E22CE;
+  border-color: #E9D5FF;
 }
 
 .staff-shift-label {
@@ -362,22 +366,91 @@
   flex-shrink: 0;
 }
 
-.staff-status-badge.in-turn {
-  background: #DCFCE7;
-  color: #15803D;
-  border: 1px solid #86EFAC;
-}
-
+.staff-status-badge.in-turn,
 [data-theme='dark'] .staff-status-badge.in-turn {
   background: #14532D;
   color: #86EFAC;
-  border-color: #166534;
+  border: 1px solid #166534;
+}
+
+[data-theme='light'] .staff-status-badge.in-turn {
+  background: #DCFCE7;
+  color: #15803D;
+  border-color: #86EFAC;
 }
 
 .staff-status-badge.out {
   background: var(--color-canvas);
   color: var(--color-muted);
   border: 1px solid var(--color-divider);
+}
+
+/* Server status mark: late */
+.staff-status-badge.mark-late,
+[data-theme='dark'] .staff-status-badge.mark-late {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: #391B1B;
+  color: #FF8B8B;
+  border: 1px solid #772828;
+}
+
+[data-theme='light'] .staff-status-badge.mark-late {
+  background: #FEE2E2;
+  color: #991B1B;
+  border-color: #FECACA;
+}
+
+/* Server status mark: review_pending */
+.staff-status-badge.mark-review_pending,
+[data-theme='dark'] .staff-status-badge.mark-review_pending {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: #3A2416;
+  color: #FDBA74;
+  border: 1px solid #6E3F1F;
+}
+
+[data-theme='light'] .staff-status-badge.mark-review_pending {
+  background: #FEF3C7;
+  color: #92400E;
+  border-color: #FDE68A;
+}
+
+/* Server status mark: present */
+.staff-status-badge.mark-present,
+[data-theme='dark'] .staff-status-badge.mark-present {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: #14532D;
+  color: #86EFAC;
+  border: 1px solid #166534;
+}
+
+[data-theme='light'] .staff-status-badge.mark-present {
+  background: #DCFCE7;
+  color: #166534;
+  border-color: #BBF7D0;
+}
+
+/* Review Required Badge */
+.staff-status-badge.review-required,
+[data-theme='dark'] .staff-status-badge.review-required {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: #3A2416;
+  color: #FDBA74;
+  border: 1px solid #6E3F1F;
+}
+
+[data-theme='light'] .staff-status-badge.review-required {
+  background: #FEF3C7;
+  color: #92400E;
+  border-color: #FCD34D;
 }
 
 /* Active Status Box */
