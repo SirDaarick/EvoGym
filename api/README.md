@@ -51,6 +51,16 @@ Browser clients are cross-origin only when `EVOGYM_CORS_ALLOWED_ORIGINS` is expl
 | `EVOGYM_DEBUG` | `false` | Validated development/test flag; framework exception-detail pages remain disabled |
 | `EVOGYM_DATABASE_URL` | unset | Optional `SecretStr`; an engine is created only during app lifespan when configured, and connects only for readiness or explicit database work |
 | `EVOGYM_STAFF_SESSION_TTL_SECONDS` | unset | Required for staff PIN sessions; server-owned expiry bounded to 60–86400 seconds |
+| `EVOGYM_EVIDENCE_S3_ENDPOINT` | unset | S3-compatible endpoint reachable by the API |
+| `EVOGYM_EVIDENCE_PUBLIC_ENDPOINT` | unset | S3-compatible endpoint reachable by the browser |
+| `EVOGYM_EVIDENCE_S3_BUCKET` | unset | Private bucket for expense evidence |
+| `EVOGYM_EVIDENCE_S3_ACCESS_KEY` / `EVOGYM_EVIDENCE_S3_SECRET_KEY` | unset | S3 credentials; provide through a protected environment or secret store |
+
+### Expense evidence and reception funds
+
+The development compose file defines a loopback-only MinIO service and a private `evogym-expenses` bucket bootstrap. Configure both endpoints according to where the API and browser run; for an API running on the host, both can use `http://127.0.0.1:9000`. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501. Cloudflare R2 requires its own bucket, credentials and browser-origin CORS configuration; those are not supplied here.
+
+Money left by an administrator at reception for a later purchase is a shift cash contribution. Record the later purchase as a shift expense; do not also record the contribution as a business expense, which would count it twice.
 
 ### Staff PIN sessions
 
