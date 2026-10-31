@@ -146,7 +146,7 @@ class OrderItem(Base):
 
 
 class Payment(Base):
-    """Cash settlement, pending transfer, or Point card payment linked to a canonical order."""
+    """Cash settlement, pending transfer, or Point card payment owned by an order or rental charge."""
 
     __tablename__ = "payments"
     __table_args__ = (
@@ -158,11 +158,40 @@ class Payment(Base):
             name="ck_payments_method_status",
         ),
         CheckConstraint("amount_minor >= 0", name="ck_payments_amount_nonnegative"),
+        CheckConstraint(
+            "(order_id IS NOT NULL AND rental_charge_id IS NULL) OR "
+            "(order_id IS NULL AND rental_charge_id IS NOT NULL)",
+            name="ck_payments_exactly_one_owner",
+        ),
+        CheckConstraint(
+            "idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 128",
+            name="ck_payments_idempotency_key_length",
+        ),
+        CheckConstraint(
+            "request_fingerprint IS NULL OR length(request_fingerprint) = 64",
+            name="ck_payments_fingerprint_length",
+        ),
         UniqueConstraint("order_id", name="uq_payments_order"),
+        UniqueConstraint("received_by", "idempotency_key", name="uq_payments_received_by_idempotency"),
+        Index("ix_payments_rental_receipt_id", "rental_receipt_id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    order_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    order_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), nullable=True
+    )
+    rental_charge_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("rental_charges.id", ondelete="RESTRICT"), nullable=True
+    )
+    rental_receipt_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("rental_receipts.id", ondelete="RESTRICT"), nullable=True
+    )
+    register_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("cash_registers.id", ondelete="RESTRICT"), nullable=True
+    )
+    shift_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="RESTRICT"), nullable=True
+    )
     method: Mapped[str] = mapped_column(String(24), nullable=False, default="cash", server_default="cash")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="confirmed", server_default="confirmed")
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -176,8 +205,10 @@ class Payment(Base):
     card_brand: Mapped[str | None] = mapped_column(String(32), nullable=True)
     card_last_four: Mapped[str | None] = mapped_column(String(4), nullable=True)
     authorization_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    order: Mapped[Order] = relationship(back_populates="payment")
+    order: Mapped[Order | None] = relationship(back_populates="payment")
     terminal: Mapped["PaymentTerminal | None"] = relationship(lazy="selectin")
 
 

@@ -13,6 +13,7 @@ from app.db.models.membership_debts import MembershipDebt
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.memberships import MembershipPeriod
 from app.db.models.orders import Order, OrderItem
+from app.db.models.rentals import Rental, RentalAsset
 from app.members.read_schemas import (
     ClassSampleReadDTO,
     MemberDebtItemDTO,
@@ -20,8 +21,10 @@ from app.members.read_schemas import (
     MemberPeriodReadDTO,
     MemberProfileDTO,
     MemberReloadResponseDTO,
+    MemberRentalDebtItemDTO,
     MemberVisitLogDTO,
 )
+from app.rentals.payments import rental_outstanding_minor
 from app.memberships.eligibility import MembershipAccessStatus, evaluate_membership_access
 
 _DEFAULT_ORG_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -258,7 +261,29 @@ def get_member_reload_data(
                 )
             )
 
-    has_pending_balance = total_remaining_minor > 0
+    rental_rows = session.execute(
+        select(Rental, RentalAsset)
+        .join(RentalAsset, RentalAsset.id == Rental.asset_id)
+        .where(Rental.member_id == member_id, Rental.status.in_(("active", "returned", "released")))
+        .order_by(Rental.created_at.asc(), Rental.id)
+    ).all()
+    rental_items: list[MemberRentalDebtItemDTO] = []
+    rental_pending_minor = 0
+    for rental, asset in rental_rows:
+        outstanding = rental_outstanding_minor(session, rental)
+        if outstanding <= 0:
+            continue
+        rental_pending_minor += outstanding
+        rental_items.append(MemberRentalDebtItemDTO(
+            rental_id=rental.id,
+            branch_id=rental.branch_id,
+            kind=rental.kind,
+            asset_code=asset.code,
+            outstanding_minor=outstanding,
+            created_at=_ensure_utc(rental.created_at or datetime.now(timezone.utc)),
+        ))
+
+    has_pending_balance = total_remaining_minor > 0 or rental_pending_minor > 0
     credit_balance_minor = getattr(member, "credit_balance_minor", 0) or 0
 
     if principal_is_admin:
@@ -268,6 +293,8 @@ def get_member_reload_data(
             total_pending_balance_minor=total_remaining_minor,
             currency="MXN",
             debts=debt_items,
+            rental_pending_balance_minor=rental_pending_minor,
+            rental_debts=rental_items,
         )
     else:
         # D-012 Receptionist Projection: Boolean warning only, centavos and itemized debts hidden
@@ -277,6 +304,8 @@ def get_member_reload_data(
             total_pending_balance_minor=None,
             currency="MXN",
             debts=[],
+            rental_pending_balance_minor=None,
+            rental_debts=[],
         )
 
     # 5. Recent Visits (Strictly partitioned by branch per D-001)

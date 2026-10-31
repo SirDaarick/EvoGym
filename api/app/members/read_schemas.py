@@ -76,6 +76,19 @@ class MemberDebtItemDTO(BaseModel):
     created_at: datetime = Field(..., description="UTC ISO creation instant")
 
 
+class MemberRentalDebtItemDTO(BaseModel):
+    """Outstanding rental receivable projected to administrators."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    rental_id: UUID
+    branch_id: UUID
+    kind: Literal["glove", "locker"]
+    asset_code: str
+    outstanding_minor: int = Field(..., ge=0)
+    created_at: datetime
+
+
 class MemberFinancialSummaryDTO(BaseModel):
     """Financial status projection partitioned by role visibility (D-012)."""
 
@@ -89,6 +102,12 @@ class MemberFinancialSummaryDTO(BaseModel):
     currency: Literal["MXN"] = Field(default="MXN")
     debts: list[MemberDebtItemDTO] = Field(
         default_factory=list, description="Itemized debt list; empty for Receptionist"
+    )
+    rental_pending_balance_minor: int | None = Field(
+        default=None, ge=0, description="Outstanding rental receivable; None for Receptionist"
+    )
+    rental_debts: list[MemberRentalDebtItemDTO] = Field(
+        default_factory=list, description="Itemized rental receivables; empty for Receptionist"
     )
 
 

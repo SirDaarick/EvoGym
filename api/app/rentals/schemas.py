@@ -1,9 +1,12 @@
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from app.db.models.inventory import normalize_product_code
+
+TenderMethod = Literal["cash", "transfer"]
 
 
 class RentalAssetInput(BaseModel):
@@ -61,8 +64,199 @@ class RentalAssetPatch(BaseModel):
 class RentalAssetDTO(RentalAssetInput):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    active_rental_id: UUID | None = None
 
 
 class RentalAssetPage(BaseModel):
     items: list[RentalAssetDTO]
     total: int
+
+
+class TenderComponentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    method: TenderMethod
+    amount_minor: StrictInt = Field(gt=0, le=2**63 - 1)
+
+
+class RentalCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    branch_id: UUID
+    asset_id: UUID
+    member_id: UUID
+    register_id: UUID
+    components: list[TenderComponentInput] = Field(default_factory=list, max_length=8)
+    expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    accepted_shortfall_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+
+
+class RentalRenewalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    register_id: UUID
+    components: list[TenderComponentInput] = Field(default_factory=list, max_length=8)
+    expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    accepted_shortfall_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+
+
+class ReceivablePaymentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    register_id: UUID
+    method: TenderMethod
+    amount_minor: StrictInt = Field(gt=0, le=2**63 - 1)
+
+
+class CancellationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    register_id: UUID
+    preview_token: str = Field(min_length=64, max_length=64)
+    refund_amount_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    refund_method: Literal["cash", "card"]
+    reason: str = Field(min_length=1, max_length=240)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Reason must contain 1 to 240 characters.")
+        return value
+
+
+class CardAttemptInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    register_id: UUID
+    amount_minor: StrictInt = Field(gt=0, le=2**63 - 1)
+    terminal_id: UUID | None = None
+
+
+class RentalChargeDTO(BaseModel):
+    id: UUID
+    charge_kind: Literal["initial", "renewal"]
+    amount_minor: int
+    starts_on: date
+    ends_on: date
+    outstanding_minor: int
+
+
+class RentalDTO(BaseModel):
+    id: UUID
+    branch_id: UUID
+    asset_id: UUID
+    asset_code: str
+    member_id: UUID
+    member_name: str
+    member_number: str
+    kind: Literal["glove", "locker"]
+    status: Literal["active", "returned", "released", "cancelled"]
+    starts_on: date | None = None
+    ends_on: date | None = None
+    paid_minor: int
+    outstanding_minor: int
+    cancelled_debt_minor: int = 0
+    assigned_by_name: str
+    charges: list[RentalChargeDTO] = Field(default_factory=list)
+    created_at: datetime
+
+
+class RentalPage(BaseModel):
+    items: list[RentalDTO]
+    total: int
+
+
+class ReceivableAllocationDTO(BaseModel):
+    charge_id: UUID
+    amount_minor: int
+
+
+class ReceivablePaymentDTO(BaseModel):
+    id: UUID
+    rental_id: UUID
+    charge_id: UUID
+    method: TenderMethod
+    status: str
+    amount_minor: int
+    remaining_minor: int
+    allocations: list[ReceivableAllocationDTO] = Field(default_factory=list)
+
+
+class CancellationPeriodDTO(BaseModel):
+    charge_id: UUID
+    amount_minor: int
+    starts_on: date
+    ends_on: date
+    outstanding_minor: int
+
+
+class CancellationPreviewDTO(BaseModel):
+    can_cancel: bool
+    preview_token: str
+    settled_minor: int
+    max_refundable_minor: int
+    suggested_refund_minor: int
+    outstanding_minor: int
+    cancelled_debt_minor: int
+    periods: list[CancellationPeriodDTO] = Field(default_factory=list)
+
+
+class RentalCancellationDTO(BaseModel):
+    id: UUID
+    rental_id: UUID
+    member_id: UUID
+    member_name: str
+    member_number: str
+    asset_id: UUID
+    asset_code: str
+    actor_id: UUID
+    actor_name: str | None = None
+    reason: str
+    refund_method: Literal["cash", "card"]
+    refund_amount_minor: int
+    suggested_refund_minor: int
+    settled_minor: int
+    cancelled_debt_minor: int
+    reviewed: bool
+    reviewed_by: UUID | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class RentalAlertPage(BaseModel):
+    items: list[RentalCancellationDTO]
+    total: int
+
+
+class CardAttemptDTO(BaseModel):
+    id: UUID
+    rental_id: UUID
+    charge_id: UUID
+    amount_minor: int
+    status: Literal["pending", "confirmed", "failed", "unknown", "cancelled"]
+    payment_id: UUID | None = None
+    failure_reason: str | None = None
+    created_at: datetime
+
+
+class TransferReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["confirmed", "pending"]
+
+
+class RentalTransferReviewDTO(BaseModel):
+    payment_id: UUID
+    rental_id: UUID
+    status: Literal["pending", "confirmed"]
+    amount_minor: int
+
+
+class MemberReceivableDTO(BaseModel):
+    rental_id: UUID
+    branch_id: UUID
+    kind: Literal["glove", "locker"]
+    asset_code: str
+    outstanding_minor: int
+    created_at: datetime
+
+
+class MemberReceivablePage(BaseModel):
+    items: list[MemberReceivableDTO]
+    total_outstanding_minor: int
