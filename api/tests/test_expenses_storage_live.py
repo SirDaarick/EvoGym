@@ -52,6 +52,44 @@ def test_presigned_upload_and_read_work_against_a_real_server():
         assert response.read() == body
 
 
+def test_browser_upload_is_allowed_by_cors(tmp_path):
+    """The browser PUTs the photo directly, so the storage must answer the preflight."""
+    settings = _settings()
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "cors", "Cors Register")
+            register_id = register.id
+            open_shift(session, register_id=register_id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 2}])
+        app = create_app(configured_settings(
+            url,
+            evidence_s3_endpoint=settings.evidence_s3_endpoint,
+            evidence_public_endpoint=settings.evidence_public_endpoint,
+            evidence_s3_bucket=settings.evidence_s3_bucket,
+            evidence_s3_access_key=settings.evidence_s3_access_key,
+            evidence_s3_secret_key=settings.evidence_s3_secret_key,
+        ))
+        headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "cors"}
+        with TestClient(app) as client:
+            upload = client.post("/api/v1/expenses/evidence-uploads", headers=headers,
+                                 json={"branch_id": str(branch_id), "content_type": "image/webp", "file_size_bytes": 4})
+            assert upload.status_code == 200, upload.text
+        upload_url = upload.json()["upload_url"]
+        preflight = urllib.request.Request(
+            upload_url, method="OPTIONS",
+            headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "PUT",
+                     "Access-Control-Request-Headers": "content-type"})
+        with urllib.request.urlopen(preflight, timeout=30) as response:
+            assert response.status == 200
+            assert response.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"
+            assert "PUT" in (response.headers.get("Access-Control-Allow-Methods") or "")
+    finally:
+        engine.dispose()
+
+
 def test_expense_keeps_the_key_private_and_reads_through_a_signed_url(tmp_path):
     """A receipt is stored by key and only exposed as a short-lived signed URL."""
     settings = _settings()

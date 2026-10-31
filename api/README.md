@@ -58,34 +58,24 @@ Browser clients are cross-origin only when `EVOGYM_CORS_ALLOWED_ORIGINS` is expl
 
 ### Expense evidence and reception funds
 
-The development compose file defines a loopback-only MinIO service for the private `evogym-expenses` bucket. Configure both endpoints according to where the API and browser run; for an API running on the host, both can use `http://127.0.0.1:9000`. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501. Cloudflare R2 requires its own bucket, credentials and browser-origin CORS configuration; those are not supplied here.
+Expense evidence lives in an S3-compatible bucket. The API only speaks the S3 API, so the same code and settings serve the local emulator, MinIO and Cloudflare R2; only the `EVOGYM_EVIDENCE_*` values change.
 
-If the container registry blocks the MinIO image, import it once from a machine with registry access:
-
-```powershell
-# On a machine with Docker Hub access
-docker pull minio/minio:RELEASE.2025-04-22T22-12-26Z
-docker save -o minio.tar minio/minio:RELEASE.2025-04-22T22-12-26Z
-# Copy minio.tar to this machine, then load and start it
-docker load -i minio.tar
-docker compose up -d minio_dev
-```
-
-Create the bucket once with the API's own client, which uses the same settings:
+Start the local emulator and create the private `evogym-expenses` bucket:
 
 ```powershell
+docker compose up -d s3_dev
+cd api
+$env:EVOGYM_EVIDENCE_S3_ENDPOINT='http://127.0.0.1:8333'
+$env:EVOGYM_EVIDENCE_PUBLIC_ENDPOINT='http://127.0.0.1:8333'
+$env:EVOGYM_EVIDENCE_S3_BUCKET='evogym-expenses'
+$env:EVOGYM_EVIDENCE_S3_ACCESS_KEY='evogym_dev'
+$env:EVOGYM_EVIDENCE_S3_SECRET_KEY='evogym_dev_password'
 .\.venv\Scripts\python.exe scripts\bootstrap_evidence_bucket.py
 ```
 
-If the registry blocks the MinIO image and no tarball is available, any S3-compatible server works with the same API code. SeaweedFS is reachable from registries that serve it:
+The browser and the API must reach the same public endpoint, so set `EVOGYM_EVIDENCE_PUBLIC_ENDPOINT` to the address the browser uses. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501.
 
-```powershell
-docker run -d --name evogym-s3 -p 8333:8333 -p 8888:8888 -p 8080:8080 chrislusf/seaweedfs:latest server -s3
-$env:EVOGYM_EVIDENCE_S3_ENDPOINT='http://127.0.0.1:8333'
-$env:EVOGYM_EVIDENCE_PUBLIC_ENDPOINT='http://127.0.0.1:8333'
-```
-
-The evidence settings are read by the API process, so export them before starting it or place them in `api/.env`.
+For Cloudflare R2, create the bucket and an API token, allow the browser origin in the bucket CORS policy, and set the same variables to the R2 endpoint, bucket, access key and secret. The emulator image can differ; the API code does not.
 
 Money left by an administrator at reception for a later purchase is a shift cash contribution. Record the later purchase as a shift expense; do not also record the contribution as a business expense, which would count it twice.
 
