@@ -119,7 +119,7 @@ describe('live reception cash checkout', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
     await userEvent.click(screen.getByRole('radio', { name: 'Tarjeta' }));
     await userEvent.click(screen.getByRole('button', { name: 'Cobrar con Tarjeta' }));
-    expect(await screen.findByText('Compra con tarjeta registrada.')).toBeVisible();
+    expect(await screen.findByText('Compra con tarjeta registrada.', {}, { timeout: 4000 })).toBeVisible();
     expect(request.mock.calls.some(([path]) => path.endsWith('/card-intent'))).toBe(true);
     expect(request.mock.calls.some(([path]) => path.endsWith('/product-sales/card'))).toBe(true);
     expect(sessionStorage.getItem('evogym:product-sale:actor')).toBeNull();

@@ -20,6 +20,8 @@ import { formatMoney } from '../demo/adapter';
 import { MobileDetailPanel } from '../shared/MobileDetailPanel';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { DevolucionesModal } from '../features/reception/DevolucionesModal';
+import { GuantesModal } from '../features/reception/GuantesModal';
+import { CasillerosModal } from '../features/reception/CasillerosModal';
 
 type Intent = { key: string; registerId: string; payload: ProductSaleInput };
 type Member = { id: string; full_name: string; phone: string };
@@ -47,7 +49,10 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
   const [isDevolucionesOpen, setIsDevolucionesOpen] = useState(false);
+  const [isGuantesOpen, setIsGuantesOpen] = useState(false);
+  const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
   const [activeCardIntentId, setActiveCardIntentId] = useState<string | null>(null);
+  const currentBranchId = registers.find(register => register.id === registerId)?.branch_id;
 
   useEffect(() => {
     let active = true;
@@ -306,7 +311,27 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
     <div className="reception-checkout">
       <div className="reception-products-column">
         <div className="reception-shortcuts-container"><div className="reception-clay-actions" role="group" aria-label="Acciones operativas rápidas">
-          {([['gasto', 'Gasto'], ['extra', 'Extra'], ['guantes', 'Guantes'], ['suplementos', 'Suplementos'], ['casilleros', 'Casilleros']] as const).map(([key, label]) => <Button key={key} variant="secondary" className="shortcut-clay-btn" disabled title="Aún no disponible">{shortcutIcons[key]}<span>{label}</span></Button>)}
+          {([['gasto', 'Gasto'], ['extra', 'Extra'], ['guantes', 'Guantes'], ['suplementos', 'Suplementos'], ['casilleros', 'Casilleros']] as const).map(([key, label]) => {
+            const isGuantes = key === 'guantes';
+            const isCasilleros = key === 'casilleros';
+            const isAvailable = (isGuantes || isCasilleros) && Boolean(registerId && currentBranchId);
+            return (
+              <Button
+                key={key}
+                variant="secondary"
+                className="shortcut-clay-btn"
+                disabled={!isAvailable && (isGuantes || isCasilleros ? !registerId : true)}
+                title={isGuantes || isCasilleros ? (registerId ? `Abrir ${label}` : 'Selecciona una caja primero') : 'Aún no disponible'}
+                onClick={() => {
+                  if (isGuantes) setIsGuantesOpen(true);
+                  if (isCasilleros) setIsCasillerosOpen(true);
+                }}
+              >
+                {shortcutIcons[key]}
+                <span>{label}</span>
+              </Button>
+            );
+          })}
         </div></div>
         <Panel className="product-catalog-panel">
           <div className="product-catalog-header-row"><div><h2>Productos disponibles</h2><p className="muted">Selecciona productos y ajusta las cantidades antes de revisar el cobro.</p></div>

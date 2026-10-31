@@ -45,6 +45,8 @@ import {
 import { createEmptyDemoState } from '../../demo/adapter';
 import type { DemoState } from '../../domain/models';
 import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
+import { GuantesModal } from '../reception/GuantesModal';
+import { CasillerosModal } from '../reception/CasillerosModal';
 import './InventoryAnalytics.css';
 
 type FilterPillOption = 'all' | 'active' | 'lowStock' | 'zeroSales' | 'inactive';
@@ -84,6 +86,8 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modals state
+  const [isGuantesOpen, setIsGuantesOpen] = useState(false);
+  const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [newProductName, setNewProductName] = useState('');
   const [newProductCategory, setNewProductCategory] = useState('');
@@ -610,14 +614,30 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
         title="Gestión y Análisis de Inventario"
         description="Control de catálogo de productos, existencias en tiempo real, rotación de inventario y análisis de ventas."
         action={
-          <Button
-            variant="primary"
-            onClick={handleOpenNewModal}
-            aria-label="Nuevo producto"
-          >
-            <HugeiconsIcon icon={Add01Icon} size={16} aria-hidden="true" />
-            <span>Nuevo producto</span>
-          </Button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <Button
+              variant="secondary"
+              onClick={() => setIsGuantesOpen(true)}
+              aria-label="Gestión de Guantes"
+            >
+              <span>Gestión de Guantes</span>
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setIsCasillerosOpen(true)}
+              aria-label="Gestión de Casilleros"
+            >
+              <span>Gestión de Casilleros</span>
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleOpenNewModal}
+              aria-label="Nuevo producto"
+            >
+              <HugeiconsIcon icon={Add01Icon} size={16} aria-hidden="true" />
+              <span>Nuevo producto</span>
+            </Button>
+          </div>
         }
       />
 
@@ -1172,6 +1192,21 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
           </div>
         </div>
       )}
+
+      <GuantesModal
+        isOpen={isGuantesOpen}
+        onClose={() => setIsGuantesOpen(false)}
+        apiRequest={apiRequest}
+        branchId={selectedBranchId || branches[0]?.id}
+        isAdmin={true}
+      />
+      <CasillerosModal
+        isOpen={isCasillerosOpen}
+        onClose={() => setIsCasillerosOpen(false)}
+        apiRequest={apiRequest}
+        branchId={selectedBranchId || branches[0]?.id}
+        isAdmin={true}
+      />
     </div>
   );
 }

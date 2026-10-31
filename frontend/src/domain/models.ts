@@ -167,6 +167,7 @@ export interface GloveItem {
   assignedAt?: string | null;
   paymentMethod?: PaymentMethod | null;
   paymentStatus?: 'paid' | 'pending' | null;
+  rentalId?: string | null;
 }
 
 export interface GloveRentalRecord {
@@ -196,6 +197,7 @@ export interface LockerItem {
   expiresAt?: string | null;
   paymentMethod?: PaymentMethod | null;
   paymentStatus?: 'paid' | 'pending' | null;
+  rentalId?: string | null;
 }
 
 export interface LockerRentalRecord {
