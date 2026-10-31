@@ -220,7 +220,9 @@ export function GuantesModal({
     : (demo?.state.gloves ?? []);
 
   const selectedGlove: GloveItem | undefined =
-    gloves.find(g => g.id === selectedGloveId) ?? gloves[0];
+    gloves.find(g => g.id === selectedGloveId) ??
+    gloves.find(g => g.status === 'available') ??
+    gloves[0];
 
   const assignedMember = isLive
     ? selectedLiveMember

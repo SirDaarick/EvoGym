@@ -305,8 +305,10 @@ def record_receivable_payment(
 
 def receivable_dto(session: Session, receipt: RentalReceipt) -> ReceivablePaymentDTO:
     allocations = session.scalars(
-        select(Payment).where(Payment.rental_receipt_id == receipt.id)
-        .order_by(Payment.received_at, Payment.id)
+        select(Payment)
+        .outerjoin(RentalCharge, Payment.rental_charge_id == RentalCharge.id)
+        .where(Payment.rental_receipt_id == receipt.id)
+        .order_by(RentalCharge.starts_on, RentalCharge.created_at, Payment.received_at, Payment.id)
     ).all()
     if not allocations:
         raise RentalNotFoundError("Rental receipt allocations are unavailable.")

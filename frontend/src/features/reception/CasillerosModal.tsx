@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { LockerItem, PaymentMethod } from '../../domain/models';
+import type { LockerItem, LockerStatus, PaymentMethod } from '../../domain/models';
 import type { GimiAlert } from '../../domain/gimi';
 import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney } from '../../demo/adapter';
@@ -259,11 +259,18 @@ export function CasillerosModal({
   const lockers: LockerItem[] = isLive
     ? liveAssets.map((asset, index) => {
         const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
+        const lockerStatus: LockerStatus = activeRental
+          ? 'assigned'
+          : asset.status === 'employee'
+          ? 'employee'
+          : asset.status === 'out_of_service'
+          ? 'out_of_service'
+          : 'available';
         return {
           id: asset.id,
           number: asset.locker_number ?? (index + 1),
           code: asset.code,
-          status: activeRental ? 'assigned' : 'available',
+          status: lockerStatus,
           monthlyPriceMinor: asset.price_minor,
           assignedMemberId: activeRental?.member_id ?? null,
           assignedMemberName: activeRental?.member_name ?? null,
@@ -277,7 +284,9 @@ export function CasillerosModal({
     : (demo?.state.lockers ?? []);
 
   const selectedLocker: LockerItem | undefined =
-    lockers.find(l => l.id === selectedLockerId) ?? lockers[0];
+    lockers.find(l => l.id === selectedLockerId) ??
+    lockers.find(l => l.status === 'available') ??
+    lockers[0];
 
   const assignedMember = isLive
     ? selectedLiveMember

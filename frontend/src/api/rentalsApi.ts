@@ -10,6 +10,7 @@ export interface RentalAssetDTO {
   branch_id: string;
   kind: RentalKind;
   code: string;
+  status: 'available' | 'employee' | 'out_of_service';
   locker_number: number | null;
   color: string | null;
   ounces: number | null;

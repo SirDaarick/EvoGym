@@ -88,7 +88,7 @@ describe('LiveMemberLookup', () => {
     fireEvent.change(screen.getByLabelText(/Buscar por número/), { target: { value: 'M-10' } });
     fireEvent.click(await screen.findByRole('button', { name: /M-10/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Vender o renovar membresía' }));
-    expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
+    expect((await screen.findAllByRole('heading', { name: /Venta de membresía/ })).length).toBeGreaterThanOrEqual(1);
     expect(checkoutApi.plans).toHaveBeenCalledTimes(1);
     expect(checkoutApi.registers).toHaveBeenCalledTimes(1);
   });

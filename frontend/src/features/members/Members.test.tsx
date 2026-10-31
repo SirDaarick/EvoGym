@@ -7,6 +7,7 @@ import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { MemberDetail } from './Members';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from '../../app/ApiMembers';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 
 async function mount(path = '/reception/members') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
