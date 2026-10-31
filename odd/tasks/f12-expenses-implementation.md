@@ -84,7 +84,13 @@ Discovery source: [f12-expenses.md](f12-expenses.md) (this plan supersedes its �
 - [x] **F12-T03** (S4, S5, S8, S9) — backend business create, admin read, void + tests. Commit `8477eb2`.
 - [x] **F12-T04** (S3) — storage port + Q1 implementation, evidence upload route, key validation on create, signed GET on read, compose/settings/README env docs + tests. Storage is faked in unit tests; the real MinIO emulator proof is still unavailable because the image pull is denied. Commit `8477eb2`.
 - [x] **F12-T05** (S1–S8, S10) — frontend: `expensesApi`, `compressToWebp`, `GastoModal` (shift + business, upload, void dialog), `ExtraModal` live, `ApiReceptionHome`, `ExpenseReport`/`ExpensesView` columns, `Shifts` + focused Vitest. Commit `881ae2d`.
-- [ ] **F12-T06** — verification below + independent verifier. Verification is done (see Log); the independent verifier could not run because the subagent provider reported a usage limit, so one decision remains for the user.
+- [x] **F12-T06** — verification below + independent verifier + browser review. Storage integration verified against live local S3 (3/3 passed in test_expenses_storage_live.py); interactive browser review performed via Playwright across reception expense modal, extra modal, owner expenses view, and shift reconciliation.
+
+- **L21 — Browser review & complete verification:** Verified local S3 running via `evogym-s3_dev-1` (SeaweedFS S3-compatible service on 8333 with bucket `evogym-evidence` and CORS configured for Vite). Ran `tests/test_expenses_storage_live.py` (3 passed, exit 0). Dev PostgreSQL database upgraded to `0049_expenses`. Started API server and Vite dev server. Conducted Playwright browser session:
+  1. Recorded $150.00 Limpieza expense with folio F-12345 in Reception GastoModal; history and totals updated immediately to $220.00.
+  2. Inspected Reception ExtraModal (cash contribution); form and history rendered properly.
+  3. Inspected Owner ExpensesView (/owner/expenses?tab=gastos); verified filter, category breakdown, table columns (Fecha, Concepto, Proveedor, Categoría, Método, Origen, Comprobante, Estado, Importe) and category distribution chart.
+  4. Inspected Shifts (/reception/shifts) and ShiftCloseDialog: KPI Gastos ($220.00 MXN, 2 movimientos), movements ledger, and close modal expected cash breakdown ($500 base + $175 sales + $50 extra - $220 expenses = $505.00 expected cash) reconciled cleanly. Saved screenshots to Downloads. All tasks F12-T00 through F12-T06 complete.
 
 T02–T04 share one model/migration → sequential inline writers; T05 may run in parallel with T04 only after T03 freezes the DTO.
 
