@@ -22,6 +22,8 @@ import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { DevolucionesModal } from '../features/reception/DevolucionesModal';
 import { GuantesModal } from '../features/reception/GuantesModal';
 import { CasillerosModal } from '../features/reception/CasillerosModal';
+import { ExtraModal } from '../features/reception/ExtraModal';
+import { GastoModal } from '../features/reception/GastoModal';
 
 type Intent = { key: string; registerId: string; payload: ProductSaleInput };
 type Member = { id: string; full_name: string; phone: string };
@@ -51,6 +53,8 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
   const [isDevolucionesOpen, setIsDevolucionesOpen] = useState(false);
   const [isGuantesOpen, setIsGuantesOpen] = useState(false);
   const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
+  const [isExtraOpen, setIsExtraOpen] = useState(false);
+  const [isGastoOpen, setIsGastoOpen] = useState(false);
   const [activeCardIntentId, setActiveCardIntentId] = useState<string | null>(null);
   const currentBranchId = registers.find(register => register.id === registerId)?.branch_id;
 
@@ -314,17 +318,21 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
           {([['gasto', 'Gasto'], ['extra', 'Extra'], ['guantes', 'Guantes'], ['suplementos', 'Suplementos'], ['casilleros', 'Casilleros']] as const).map(([key, label]) => {
             const isGuantes = key === 'guantes';
             const isCasilleros = key === 'casilleros';
-            const isAvailable = (isGuantes || isCasilleros) && Boolean(registerId && currentBranchId);
+            const isExtra = key === 'extra';
+            const isGasto = key === 'gasto';
+            const isAvailable = (isGuantes || isCasilleros || isExtra || isGasto) && Boolean(registerId && currentBranchId);
             return (
               <Button
                 key={key}
                 variant="secondary"
                 className="shortcut-clay-btn"
-                disabled={!isAvailable && (isGuantes || isCasilleros ? !registerId : true)}
-                title={isGuantes || isCasilleros ? (registerId ? `Abrir ${label}` : 'Selecciona una caja primero') : 'Aún no disponible'}
+                disabled={!isAvailable}
+                title={isGuantes || isCasilleros || isExtra || isGasto ? (isAvailable ? `Abrir ${label}` : 'Selecciona una caja primero') : 'Aún no disponible'}
                 onClick={() => {
                   if (isGuantes) setIsGuantesOpen(true);
                   if (isCasilleros) setIsCasillerosOpen(true);
+                  if (isExtra) setIsExtraOpen(true);
+                  if (isGasto) setIsGastoOpen(true);
                 }}
               >
                 {shortcutIcons[key]}
@@ -389,6 +397,8 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
     )}
     {registerId && (
       <>
+        <ExtraModal isOpen={isExtraOpen} onClose={() => setIsExtraOpen(false)} apiRequest={request} registerId={registerId} />
+        <GastoModal isOpen={isGastoOpen} onClose={() => setIsGastoOpen(false)} apiRequest={request} registerId={registerId} branchId={currentBranchId} />
         <GuantesModal
           isOpen={isGuantesOpen}
           onClose={() => setIsGuantesOpen(false)}

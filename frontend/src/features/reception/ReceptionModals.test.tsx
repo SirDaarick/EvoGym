@@ -171,6 +171,7 @@ describe('Reception Modals (Casilleros, Suplementos, Gasto, Extra)', () => {
       await userEvent.type(screen.getByLabelText('Concepto *'), 'Insumos de limpieza turno tarde');
       await userEvent.type(screen.getByLabelText('Nombre *'), 'Don Chente Limpieza');
       await userEvent.type(screen.getByLabelText('Saldo / Monto *'), '120.50');
+      await userEvent.selectOptions(screen.getByLabelText('Categoría *'), 'limpieza');
 
       await userEvent.click(screen.getByRole('button', { name: 'Agregar' }));
 

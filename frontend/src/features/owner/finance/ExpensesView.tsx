@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { barX, defineChart } from '@tanstack/charts';
 import { Chart } from '@tanstack/charts/react';
 import { scaleBand } from '@tanstack/charts/scales/band';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
 import { formatMoney } from '../../../demo/adapter';
 import { EXPENSE_CATEGORIES, type ExpenseCategoryKey, type ExpenseReportItem } from '../../../demo/expenseReportSelector';
-import { EmptyState, Field, Panel } from '../../../shared/ui';
+import { Badge, Button, EmptyState, Field, Panel } from '../../../shared/ui';
 import { FinanceTable } from './FinanceTable';
 import type { ExpenseFilters, TableState } from './types';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -19,9 +19,17 @@ interface ExpensesViewProps {
   table: TableState;
   setSorting: (updater: import('@tanstack/react-table').Updater<import('@tanstack/react-table').SortingState>) => void;
   setPagination: (updater: import('@tanstack/react-table').Updater<import('@tanstack/react-table').PaginationState>) => void;
+  onAdd?: () => void;
+  onVoid?: (id: string, reason: string) => Promise<void>;
+  branches?: { id: string; name: string }[];
+  selectedBranchId?: string;
+  onBranchChange?: (id: string) => void;
 }
 
-export function ExpensesView({ items, filters, onFiltersChange, table, setSorting, setPagination }: ExpensesViewProps) {
+export function ExpensesView({ items, filters, onFiltersChange, table, setSorting, setPagination, onAdd, onVoid, branches = [], selectedBranchId = 'ALL', onBranchChange }: ExpensesViewProps) {
+  const [voidTarget, setVoidTarget] = useState<ExpenseReportItem | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState('');
   const filteredItems = useMemo(() => {
     const needle = filters.search.trim().toLocaleLowerCase('es-MX');
     return items.filter(item => {
@@ -33,10 +41,11 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
       return matchesSearch && matchesCategory;
     });
   }, [items, filters]);
-  const totalMinor = filteredItems.reduce((total, item) => total + item.amountMinor, 0);
+  const totalMinor = filteredItems.reduce((total, item) => total + (item.voided ? 0 : item.amountMinor), 0);
   const categories = useMemo(() => {
     const sums = new Map<ExpenseCategoryKey, { totalMinor: number; count: number }>();
     for (const item of filteredItems) {
+      if (item.voided) continue;
       const value = sums.get(item.categoryKey) ?? { totalMinor: 0, count: 0 };
       value.totalMinor += item.amountMinor;
       value.count++;
@@ -53,9 +62,14 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
     { accessorKey: 'recordedAt', header: 'Fecha', cell: ({ row }) => row.original.formattedDate },
     { accessorKey: 'concept', header: 'Concepto' },
     { accessorKey: 'payeeName', header: 'Proveedor' },
-    { accessorKey: 'category', header: 'Categoría inferida' },
+    { accessorKey: 'category', header: 'Categoría' },
+    { accessorKey: 'method', header: 'Método', cell: ({ row }) => ({ cash: 'Efectivo', transfer: 'Transferencia', card: 'Tarjeta' }[row.original.method ?? 'cash']) },
+    { accessorKey: 'origin', header: 'Origen', cell: ({ row }) => row.original.origin === 'business' ? 'Negocio' : 'Turno' },
+    { id: 'voucher', header: 'Comprobante', cell: ({ row }) => <>{row.original.voucherReference || '—'} {row.original.evidenceUrl && <a href={row.original.evidenceUrl} target="_blank" rel="noreferrer">Ver foto</a>}</> },
+    { id: 'status', header: 'Estado', cell: ({ row }) => row.original.voided ? <Badge tone="warning">Anulado</Badge> : <Badge tone="success">Activo</Badge> },
+    ...(onVoid ? [{ id: 'void', header: 'Acción', cell: ({ row }: { row: { original: ExpenseReportItem } }) => !row.original.voided && <Button variant="secondary" onClick={() => { setVoidTarget(row.original); setVoidReason(''); setVoidError(''); }}>Anular</Button> }] : []),
     { accessorKey: 'amountMinor', header: 'Importe (MXN)', cell: ({ getValue }) => mxn(Number(getValue())) },
-  ], []);
+  ], [onVoid]);
   return <div className="finance-view finance-expenses-view">
     <section className="finance-kpis" aria-label="Gastos filtrados">
       <Panel className="finance-kpi">
@@ -65,7 +79,7 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
       </Panel>
       <Panel className="finance-kpi">
         <span>Registros filtrados</span>
-        <strong>{filteredItems.length}</strong>
+        <strong>{filteredItems.filter(item => !item.voided).length}</strong>
         <small>Sobre todos los movimientos que cumplen los filtros</small>
       </Panel>
     </section>
@@ -73,14 +87,12 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
       <div className="finance-section-heading">
         <div>
           <p className="eyebrow">SALIDAS REGISTRADAS</p>
-          <h2>Gastos en efectivo registrados</h2>
-          <p className="muted">
-            La categoría es una sugerencia inferida del concepto y no reemplaza una clasificación contable.
-          </p>
+          <h2>Gastos registrados</h2>
         </div>
-        <strong>Importe filtrado: {mxn(totalMinor)}</strong>
+        <strong>Importe filtrado: {mxn(totalMinor)}</strong>{onAdd && <Button onClick={onAdd}>Registrar gasto</Button>}
       </div>
       <div className="finance-filter-grid">
+        {onBranchChange && <label htmlFor="expense-branch-filter">Sucursal<select id="expense-branch-filter" value={selectedBranchId} onChange={event => onBranchChange(event.target.value)}><option value="ALL">Todas</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
         <Field
           id="expense-search"
           label="Buscar concepto o proveedor"
@@ -130,7 +142,7 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
               <th>Fecha</th>
               <th>Concepto</th>
               <th>Proveedor</th>
-              <th>Categoría inferida</th>
+              <th>Categoría</th><th>Método</th><th>Origen</th><th>Comprobante</th><th>Estado</th>
               <th>Importe MXN</th>
             </tr>
           </thead>
@@ -141,6 +153,7 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
                 <td>{item.concept}</td>
                 <td>{item.payeeName}</td>
                 <td>{item.category}</td>
+                <td>{item.method ?? 'cash'}</td><td>{item.origin === 'business' ? 'Negocio' : 'Turno'}</td><td>{item.voucherReference || '—'}</td><td>{item.voided ? 'Anulado' : 'Activo'}</td>
                 <td>{mxn(item.amountMinor)}</td>
               </tr>
             ))}
@@ -152,7 +165,7 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
       <div className="finance-section-heading">
         <div>
           <p className="eyebrow">DISTRIBUCIÓN</p>
-          <h2>Importe por categoría inferida</h2>
+          <h2>Importe por categoría</h2>
           <p className="muted">Totales calculados sobre la misma lista filtrada.</p>
         </div>
       </div>
@@ -160,7 +173,7 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
         <Chart
           definition={chart}
           height={Math.max(180, categories.length * 42)}
-          ariaLabel="Gastos filtrados por categoría inferida"
+          ariaLabel="Gastos filtrados por categoría"
         />
       ) : <p>Sin categorías con importe en este periodo.</p>}
       {categories.length > 0 && (
@@ -175,5 +188,11 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
         </ul>
       )}
     </Panel>
+    {voidTarget && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="owner-void-title"><div className="staff-modal-card">
+      <h2 id="owner-void-title">Anular gasto</h2><p>{voidTarget.concept} · {mxn(voidTarget.amountMinor)}</p>
+      <form onSubmit={async event => { event.preventDefault(); if (!onVoid || !voidReason.trim()) return; try { await onVoid(voidTarget.id, voidReason.trim()); setVoidTarget(null); } catch (error) { setVoidError(error instanceof Error ? error.message : 'No se pudo anular el gasto.'); } }}>
+        <div className="field"><label htmlFor="owner-void-reason">Motivo *</label><textarea id="owner-void-reason" value={voidReason} onChange={event => setVoidReason(event.target.value)} required /></div>
+        {voidError && <p role="alert">{voidError}</p>}<Button type="submit">Confirmar anulación</Button><Button variant="secondary" onClick={() => setVoidTarget(null)}>Cancelar</Button>
+      </form></div></div>}
   </div>;
 }

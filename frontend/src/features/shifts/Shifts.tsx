@@ -491,9 +491,8 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     confirmedMinor: summary?.confirmed_minor,
     operationCount: summary?.activities.reduce((total, item) => total + item.count, 0) ?? 'Sin registrar',
     pendingTransferMinor: summary?.pending_transfer_minor,
-    expenseMinor: undefined,
-    expenseCount: 'Sin registrar',
-    expenseDescription: 'Movimientos no disponibles en esta integración',
+    expenseMinor: summary?.expense_minor,
+    expenseCount: summary?.expense_count ?? 'Sin registrar',
     expectedCashMinor: summary?.expected_cash_minor,
     dataLoaded: summaryLoaded,
     paymentMethods: summary?.payment_methods.map(item => ({ method: item.method, count: item.count, amountMinor: item.amount_minor })) ?? [],
@@ -540,6 +539,6 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     dashboard={dashboardViewData} message={!loading ? message : ''} error={error} onOpen={() => void startOpening()} onClose={() => setCloseModalOpen(true)}
     onSellMembership={() => setMembershipModalOpen(true)}
     membershipDialog={membershipModalOpen ? <LiveMembershipCheckout apiRequest={apiRequest} onClose={() => setMembershipModalOpen(false)} onCompleted={async () => { setMembershipModalOpen(false); await reloadRegister(registerId, false); }} /> : null}
-    closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor }} apiRequest={apiRequest} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
+    closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor, extrasMinor: summary.extra_minor, expensesMinor: summary.expense_minor }} apiRequest={apiRequest} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
     openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={confirmOpening} /> : null} />;
 }

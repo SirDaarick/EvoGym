@@ -110,7 +110,8 @@ describe('API product routes', () => {
       if (path.startsWith('/api/v1/shifts/current?')) return new Response(JSON.stringify(shift));
       if (path.endsWith('/summary')) return new Response(JSON.stringify({
         shift_id: shift.id, confirmed_minor: 0, confirmed_cash_minor: 0, pending_transfer_minor: 0,
-        payment_methods: [], activities: [], payments: [], expected_cash_minor: 50000,
+        payment_methods: [], activities: [], payments: [], expected_cash_minor: 51000,
+        expense_minor: 2500, expense_count: 2, extra_minor: 3500,
       }));
       if (path.startsWith('/api/v1/inventory/')) return new Response(JSON.stringify({ items: [], total: 0 }));
       return new Response('{}');
@@ -121,6 +122,16 @@ describe('API product routes', () => {
     expect(await screen.findByText(/4 piezas · esperado al abrir: 5 piezas · Motivo: Diferencia verificada/)).toBeInTheDocument();
     expect(screen.getByText(/2 botellas · esperado al abrir: Sin registrar/)).toBeInTheDocument();
     expect(screen.queryByText(/stock actual/i)).not.toBeInTheDocument();
+    expect(await screen.findByText('$25.00 MXN')).toBeInTheDocument();
+    expect(screen.getByText('2 movimientos')).toBeInTheDocument();
+    vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.open = true; });
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar turno' }));
+    await userEvent.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+    await userEvent.type(screen.getByLabelText('Efectivo contado (MXN)'), '510');
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    const dialog = screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    expect(within(dialog).getByText('$35.00 MXN')).toBeInTheDocument();
+    expect(within(dialog).getByText('−$25.00 MXN')).toBeInTheDocument();
   });
 
   it('opens from the authenticated route with an explicit zero manual total and the captured snapshot', async () => {
@@ -468,4 +479,3 @@ describe('API product routes', () => {
     expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/admin/pending-money'), expect.anything());
   });
 });
-
