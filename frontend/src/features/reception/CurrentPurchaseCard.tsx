@@ -326,6 +326,18 @@ export function CurrentPurchaseCard({
     }
 
     if (singleMethod === 'card') {
+      if (useLiveCardIntent) {
+        onConfirmPayment?.(
+          {
+            mode: 'single',
+            method: 'card',
+            shortfallMinor: 0,
+            isOvertime,
+          },
+          forcePendingShortfall
+        );
+        return;
+      }
       setIsPointModalOpen(true);
       return;
     }

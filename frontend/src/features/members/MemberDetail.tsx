@@ -459,8 +459,8 @@ export function MemberDetailSections({
           </Panel>
         </div>
         <div className="member-detail-rentals"><Panel><h2>{liveApi ? 'Rentas' : 'Rentas actuales'}</h2><div className="member-rental-grid">
-      <RentalCard title="Guantes" code={glove?.code} now={now} assigned={liveApi ? null : Boolean(glove)} />
-      <RentalCard title="Casillero" code={locker?.code} expiresAt={locker?.expiresAt} now={now} assigned={liveApi ? null : Boolean(locker)} />
+      <RentalCard title="Guantes" code={glove?.code} now={now} assigned={glove ? true : (liveApi ? null : false)} />
+      <RentalCard title="Casillero" code={locker?.code} expiresAt={locker?.expiresAt} now={now} assigned={locker ? true : (liveApi ? null : false)} />
       </div></Panel></div>
       </div>
       <div className="member-detail-right-column">

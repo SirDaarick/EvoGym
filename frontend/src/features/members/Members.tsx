@@ -7,7 +7,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { ColumnDef, SortingState } from '@tanstack/react-table';
-import type { DemoState, Member, Role } from '../../domain/models';
+import type { DemoState, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, Member, PaymentMethod, Role } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
 import { DemoProvider, useDemo } from '../../demo/DemoProvider';
 import { addMember } from '../../demo/operations';
@@ -23,9 +23,10 @@ import { NewMemberRegistration } from './NewMemberRegistration';
 import { OwnerMemberAnalytics } from '../owner/OwnerMemberAnalytics';
 import { getMemberReload, type MemberReloadResponse } from '../../api/memberReadsApi';
 import type { MemberNoteDTO } from '../../api/membersApi';
-import { readOperationalToken } from '../../api/receptionApi';
+import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi';
 import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import { listRentals, type RentalDTO } from '../../api/rentalsApi';
 
 export { getMemberStatusInfo };
 
@@ -393,6 +394,134 @@ function LiveMemberDetail({
   const currentPeriod = reload.active_periods.find(period => period.is_current) ?? reload.active_periods[0];
   const statusTone = currentPeriod?.access_status === 'eligible' || (!currentPeriod && status === 'active') ? 'success' : currentPeriod ? 'warning' : 'neutral';
 
+  const [memberRentals, setMemberRentals] = useState<RentalDTO[]>([]);
+
+  const branchId =
+    reload.profile.home_branch_id ||
+    currentPeriod?.branch_id ||
+    (() => {
+      try {
+        return getReceptionConfig().branchId;
+      } catch {
+        return (import.meta.env.VITE_BRANCH_ID as string) || '';
+      }
+    })();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!apiRequest || !branchId || !member.id) return;
+    listRentals(apiRequest, branchId, { memberId: member.id })
+      .then(res => {
+        if (!cancelled && res && Array.isArray(res.items)) {
+          setMemberRentals(res.items);
+        } else if (!cancelled) {
+          setMemberRentals([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMemberRentals([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiRequest, branchId, member.id, reload]);
+
+  const safeRentals = useMemo(() => Array.isArray(memberRentals) ? memberRentals : [], [memberRentals]);
+
+  const gloves: GloveItem[] = useMemo(() => {
+    const map = new Map<string, GloveItem>();
+    for (const r of safeRentals.filter(item => item && item.kind === 'glove')) {
+      if (!map.has(r.asset_id)) {
+        map.set(r.asset_id, {
+          id: r.asset_id,
+          code: r.asset_code,
+          color: '',
+          ounces: 0,
+          priceMinor: (r.paid_minor ?? 0) + (r.outstanding_minor ?? 0),
+          status: r.status === 'active' ? 'rented' : 'available',
+          assignedMemberId: r.status === 'active' ? member.id : null,
+          assignedMemberName: r.status === 'active' ? member.name : null,
+          assignedAt: r.created_at,
+          paymentStatus: (r.outstanding_minor ?? 0) > 0 ? 'pending' : 'paid',
+          rentalId: r.id,
+        });
+      } else if (r.status === 'active') {
+        const existing = map.get(r.asset_id)!;
+        existing.status = 'rented';
+        existing.assignedMemberId = member.id;
+        existing.assignedMemberName = member.name;
+        existing.rentalId = r.id;
+      }
+    }
+    return Array.from(map.values());
+  }, [safeRentals, member.id, member.name]);
+
+  const lockers: LockerItem[] = useMemo(() => {
+    const map = new Map<string, LockerItem>();
+    for (const r of safeRentals.filter(item => item && item.kind === 'locker')) {
+      if (!map.has(r.asset_id)) {
+        map.set(r.asset_id, {
+          id: r.asset_id,
+          number: parseInt((r.asset_code ?? '').replace(/\D/g, ''), 10) || 1,
+          code: r.asset_code,
+          status: r.status === 'active' ? 'assigned' : 'available',
+          monthlyPriceMinor: (r.paid_minor ?? 0) + (r.outstanding_minor ?? 0),
+          assignedMemberId: r.status === 'active' ? member.id : null,
+          assignedMemberName: r.status === 'active' ? member.name : null,
+          assignedAt: r.created_at,
+          expiresAt: r.ends_on,
+          paymentStatus: (r.outstanding_minor ?? 0) > 0 ? 'pending' : 'paid',
+          rentalId: r.id,
+        });
+      } else if (r.status === 'active') {
+        const existing = map.get(r.asset_id)!;
+        existing.status = 'assigned';
+        existing.assignedMemberId = member.id;
+        existing.assignedMemberName = member.name;
+        existing.expiresAt = r.ends_on;
+        existing.rentalId = r.id;
+      }
+    }
+    return Array.from(map.values());
+  }, [safeRentals, member.id, member.name]);
+
+  const gloveRentals: GloveRentalRecord[] = useMemo(() => {
+    return safeRentals
+      .filter(r => r && r.kind === 'glove')
+      .map(r => ({
+        id: r.id,
+        gloveId: r.asset_id,
+        memberId: member.id,
+        memberName: member.name,
+        shiftId: '',
+        priceMinor: (r.paid_minor ?? 0) + (r.outstanding_minor ?? 0),
+        method: 'cash' as PaymentMethod,
+        status: (r.outstanding_minor ?? 0) > 0 ? 'pending' : 'paid',
+        rentedAt: r.created_at,
+        returnedAt: r.status === 'returned' ? r.created_at : null,
+      }));
+  }, [safeRentals, member.id, member.name]);
+
+  const lockerRentals: LockerRentalRecord[] = useMemo(() => {
+    return safeRentals
+      .filter(r => r && r.kind === 'locker')
+      .map(r => ({
+        id: r.id,
+        lockerId: r.asset_id,
+        memberId: member.id,
+        memberName: member.name,
+        shiftId: '',
+        priceMinor: (r.paid_minor ?? 0) + (r.outstanding_minor ?? 0),
+        method: 'cash' as PaymentMethod,
+        status: (r.outstanding_minor ?? 0) > 0 ? 'pending' : 'paid',
+        rentedAt: r.created_at,
+        expiresAt: r.ends_on || r.created_at,
+        releasedAt: r.status === 'released' ? r.created_at : null,
+      }));
+  }, [safeRentals, member.id, member.name]);
+
   function handleOpenEdit() {
     setEditFullName(legalFullName ?? member.name);
     setEditPhone(member.phone ?? '');
@@ -536,10 +665,10 @@ function LiveMemberDetail({
           member={member}
           now={reload.server_time}
           visits={visits}
-          gloves={[]}
-          gloveRentals={[]}
-          lockers={[]}
-          lockerRentals={[]}
+          gloves={gloves}
+          gloveRentals={gloveRentals}
+          lockers={lockers}
+          lockerRentals={lockerRentals}
           payments={[]}
           supplementSales={[]}
           sales={[]}
@@ -559,10 +688,10 @@ function LiveMemberDetail({
           member={member}
           now={reload.server_time}
           visits={visits}
-          gloves={[]}
-          gloveRentals={[]}
-          lockers={[]}
-          lockerRentals={[]}
+          gloves={gloves}
+          gloveRentals={gloveRentals}
+          lockers={lockers}
+          lockerRentals={lockerRentals}
           payments={[]}
           supplementSales={[]}
           sales={[]}

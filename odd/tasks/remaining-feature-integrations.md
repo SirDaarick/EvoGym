@@ -24,8 +24,8 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F08 | Manage staff schedule series and attendance corrections | P1 / A | **Completed** | Roster and schedule APIs; existing attendance occurrences |
 | F09 | Set up inventory and record stock movement | P1 / B | **Completed** | D-015; stock-movement semantics |
 | F10 | Sell products and process refunds/returns | P2 / C | **Completed** | F01, F09; sale/refund/accounting decisions |
-| F11 | Manage rentals end to end | P2 / C | Rental lifecycle, inventory and payment rules |
-| F12 | Record and review expenses | P2 / C | Expense ownership, approval and accounting rules |
+| F11 | Manage rentals end to end | P2 / C | **Completed** | Rental lifecycle, inventory and payment rules |
+| F12 | Record and review expenses | P2 / C | **Discovery completed** ([f12-expenses.md](f12-expenses.md)) | Expense ownership, approval and accounting rules |
 | F13 | Run payroll | P2 / C | Payroll domain, legal/pay-period rules, permissions |
 | F14 | Review a member account history | P2 / C | Member detail and individually confirmed history sources |
 | F15 | Review one named owner daily operations summary | P2 / C | Named owner, metric definitions and source domains |
@@ -206,13 +206,13 @@ At feature start, verify each cited contract and route against current source. E
 
 ### F12 — Record and review expenses (P2, C)
 
-**Discovery first:** resolve categories, branch/entity scope, evidence storage, approval thresholds, correction/voiding and cash-close/reporting effects. No expense router is confirmed by the supplied baseline; verify domain contracts before concluding absence.
+**Discovery completed:** Detailed architecture and domain specification documented in [f12-expenses.md](f12-expenses.md).
 
 **Source anchors:** finance permission boundary `api/app/api/pending_money.py:79-108`; authenticated consumer boundary `frontend/src/app/ApiProductApp.tsx:103-117`.
 
 **Tasks:**
-- [ ] Name expense owner and define category, approval and accounting behavior.
-- [ ] Specify amount/currency/date/minor-unit semantics and evidence retention.
+- [x] Name expense owner and define category, approval and accounting behavior (Immediate shift deduction, sealed upon close, 5 standard categories).
+- [x] Specify amount/currency/date/minor-unit semantics and evidence retention (Integer minor-unit cents MXN, voucher reference + client-compressed WebP to Cloudflare R2 pre-signed URLs).
 - [ ] Define API and owner/finance UI only after the decisions above.
 - [ ] Verify permissions, invalid/duplicate amount, approve/reject, retained evidence and persisted reporting impact.
 

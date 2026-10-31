@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 from sqlalchemy import func, select
 
 from app.auth.admin import validate_admin_session
@@ -13,7 +13,9 @@ from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.auth.sessions import validate_session
 from app.db.models import (
     Branch, Member, MembershipDebt, MembershipDebtPayment, Order, Payment, PaymentReviewEvent,
+    Rental, RentalCharge,
 )
+from app.rentals.payments import charge_collectable_minor, charges_for_rental, rental_outstanding_minor
 
 router = APIRouter(prefix="/api/v1/admin/pending-money", tags=["finance"])
 _bearer = HTTPBearer(auto_error=False)
@@ -33,7 +35,7 @@ class PendingMoneyItem(BaseModel):
     member_id: UUID
     member_number: str
     member_name: str
-    order_id: UUID
+    order_id: UUID | None
     amount_minor: int
     currency: str
     source_event_id: UUID
@@ -43,6 +45,17 @@ class PendingMoneyItem(BaseModel):
     status_event_at: datetime | None
     initial_amount_minor: int | None = None
     paid_amount_minor: int | None = None
+    rental_id: UUID | None = None
+    rental_charge_id: UUID | None = None
+
+    @model_serializer(mode="wrap")
+    def _strip_unset_rental_fields(self, handler):
+        data = handler(self)
+        if data.get("rental_id") is None:
+            data.pop("rental_id", None)
+        if data.get("rental_charge_id") is None:
+            data.pop("rental_charge_id", None)
+        return data
 
 
 class PendingMoneyResponse(BaseModel):
@@ -183,6 +196,53 @@ def list_pending_money(
                 status_event_at=last_payment.created_at if last_payment else None,
                 initial_amount_minor=debt.initial_outstanding_minor,
                 paid_amount_minor=paid_amount,
+            ))
+
+        rental_rows = session.execute(
+            select(Rental, Member)
+            .join(Member, Rental.member_id == Member.id)
+            .where(Rental.branch_id.in_(branch_ids), Rental.status.in_(("active", "returned", "released")))
+            .order_by(Rental.created_at, Rental.id)
+        ).all()
+        for rental, member in rental_rows:
+            charges = charges_for_rental(session, rental.id)
+            collectable = sum(charge_collectable_minor(session, charge) for charge in charges)
+            if collectable <= 0:
+                continue
+            initial = sum(charge.amount_minor for charge in charges)
+            items.append(PendingMoneyItem(
+                item_type="rental_receivable", branch_id=rental.branch_id,
+                branch_name=branch_names[rental.branch_id], member_id=member.id,
+                member_number=member.member_number, member_name=member.full_name,
+                order_id=None, rental_id=rental.id,
+                amount_minor=collectable, currency="MXN",
+                source_event_id=charges[-1].id if charges else rental.id,
+                source_event_at=charges[-1].created_at if charges else rental.created_at,
+                status="outstanding", status_event_id=None, status_event_at=None,
+                initial_amount_minor=initial, paid_amount_minor=initial - collectable,
+            ))
+
+        rental_transfers = session.execute(
+            select(Payment, Rental, Member)
+            .join(RentalCharge, RentalCharge.id == Payment.rental_charge_id)
+            .join(Rental, Rental.id == RentalCharge.rental_id)
+            .join(Member, Rental.member_id == Member.id)
+            .where(
+                Rental.branch_id.in_(branch_ids),
+                Payment.method == "transfer",
+                Payment.status.in_(("under_review", "pending")),
+            )
+            .order_by(Payment.received_at, Payment.id)
+        ).all()
+        for payment, rental, member in rental_transfers:
+            items.append(PendingMoneyItem(
+                item_type="pending_transfer", branch_id=rental.branch_id,
+                branch_name=branch_names[rental.branch_id], member_id=member.id,
+                member_number=member.member_number, member_name=member.full_name,
+                order_id=None, rental_id=rental.id, rental_charge_id=payment.rental_charge_id,
+                amount_minor=payment.amount_minor, currency="MXN",
+                source_event_id=payment.id, source_event_at=payment.received_at,
+                status=payment.status, status_event_id=None, status_event_at=None,
             ))
 
         items.sort(key=lambda item: (item.source_event_at, str(item.source_event_id)))

@@ -7,6 +7,7 @@ import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { MemberDetail } from './Members';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from '../../app/ApiMembers';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 
 async function mount(path = '/reception/members') {
   render(<MemoryRouter initialEntries={[path]}><DemoProvider><App /></DemoProvider></MemoryRouter>);
@@ -1172,6 +1173,118 @@ describe('member workflow', () => {
         expect(screen.queryByTestId('balance-warning-alert')).not.toBeInTheDocument();
       });
       expect(screen.getByText('Al corriente en pagos')).toBeVisible();
+    });
+
+    it('F11: displays active glove and locker rentals in member counter view and expediente tabs', async () => {
+      const rentalMember = {
+        id: 'member-f11-rental',
+        member_number: 'M-F11-001',
+        full_name: 'Roberto Guante',
+        preferred_name: null,
+        phone: '555-111-2222',
+        email: 'roberto@example.com',
+        joined_on: '2026-09-01',
+        status: 'active',
+        home_branch_id: 'branch-1',
+        notes: null,
+      };
+
+      const mockRequest = vi.fn<AuthenticatedRequest>(async (path) => {
+        if (path === `/api/v1/members/${rentalMember.id}`) {
+          return new Response(JSON.stringify(rentalMember));
+        }
+        if (path === `/api/v1/members/${rentalMember.id}/reload?visit_limit=12`) {
+          return new Response(JSON.stringify({
+            profile: rentalMember,
+            active_periods: [{
+              id: 'period-1',
+              order_item_id: 'item-1',
+              plan_version_id: 'plan-1',
+              plan_name: 'Plan Mensual',
+              starts_on: '2026-10-01',
+              ends_on: '2026-10-31',
+              branch_id: 'branch-1',
+              is_current: true,
+              access_status: 'eligible',
+            }],
+            class_samples: [],
+            financial: {
+              credit_balance_minor: 0,
+              has_pending_balance: false,
+              total_pending_balance_minor: 0,
+              debts: [],
+            },
+            recent_visits: [],
+            server_time: '2026-10-31T12:00:00Z',
+          }));
+        }
+        if (typeof path === 'string' && path.startsWith('/api/v1/rentals?')) {
+          return new Response(JSON.stringify({
+            items: [
+              {
+                id: 'rental-glove-1',
+                branch_id: 'branch-1',
+                asset_id: 'asset-glove-1',
+                asset_code: '#07',
+                member_id: rentalMember.id,
+                member_name: rentalMember.full_name,
+                member_number: rentalMember.member_number,
+                kind: 'glove',
+                status: 'active',
+                starts_on: null,
+                ends_on: null,
+                paid_minor: 2500,
+                outstanding_minor: 0,
+                cancelled_debt_minor: 0,
+                assigned_by_name: 'Valeria M.',
+                charges: [],
+                created_at: '2026-10-31T10:00:00Z',
+              },
+              {
+                id: 'rental-locker-1',
+                branch_id: 'branch-1',
+                asset_id: 'asset-locker-1',
+                asset_code: '#14',
+                member_id: rentalMember.id,
+                member_name: rentalMember.full_name,
+                member_number: rentalMember.member_number,
+                kind: 'locker',
+                status: 'active',
+                starts_on: '2026-10-01',
+                ends_on: '2026-11-30',
+                paid_minor: 15000,
+                outstanding_minor: 0,
+                cancelled_debt_minor: 0,
+                assigned_by_name: 'Valeria M.',
+                charges: [],
+                created_at: '2026-10-01T10:00:00Z',
+              },
+            ],
+            total: 2,
+          }));
+        }
+        return new Response('{}');
+      });
+
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${rentalMember.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+        </MemoryRouter>,
+      );
+
+      // Mostrador tab (active by default)
+      expect(await screen.findByText('Roberto Guante')).toBeVisible();
+      expect(await screen.findByText('Identificador #07')).toBeVisible();
+      expect(screen.getByText(/Identificador #14/)).toBeVisible();
+
+      // Switch to Expediente tab
+      const expedienteTab = screen.getByRole('tab', { name: 'Expediente' });
+      await userEvent.click(expedienteTab);
+
+      // Verify active rental cards
+      expect(await screen.findByRole('heading', { name: 'Rentas' })).toBeVisible();
+      expect(screen.getByText('Renta de guantes · #07')).toBeVisible();
+      expect(screen.getByText('Renta de casillero · #14')).toBeVisible();
     });
   });
 });

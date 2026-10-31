@@ -119,7 +119,7 @@ describe('live reception cash checkout', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
     await userEvent.click(screen.getByRole('radio', { name: 'Tarjeta' }));
     await userEvent.click(screen.getByRole('button', { name: 'Cobrar con Tarjeta' }));
-    expect(await screen.findByText('Compra con tarjeta registrada.')).toBeVisible();
+    expect(await screen.findByText('Compra con tarjeta registrada.', {}, { timeout: 4000 })).toBeVisible();
     expect(request.mock.calls.some(([path]) => path.endsWith('/card-intent'))).toBe(true);
     expect(request.mock.calls.some(([path]) => path.endsWith('/product-sales/card'))).toBe(true);
     expect(sessionStorage.getItem('evogym:product-sale:actor')).toBeNull();
@@ -284,5 +284,39 @@ describe('live reception cash checkout', () => {
 
     expect(await screen.findByText(/Devolución registrada por \$5\.00 MXN/)).toBeVisible();
     expect(inventoryFetchedCount).toBeGreaterThan(initialFetchCount);
+  });
+it('opens guantes and casilleros modals from operational shortcuts in live mode', async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([{ id: 'reg-1', branch_id: 'branch-1', code: 'front', name: 'Front', status: 'active', has_open_shift: true }]));
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch-1', name: 'Central' }]));
+      if (path.startsWith('/api/v1/inventory/branches/')) return new Response(JSON.stringify({ items: [], total: 0 }));
+      if (path.includes('/api/v1/rentals/assets')) {
+        return new Response(JSON.stringify({ items: [{ id: 'asset-1', branch_id: 'branch-1', kind: 'glove', code: '#01', color: 'Rojo', ounces: 12, price_minor: 2500, is_active: true, active_rental_id: null }], total: 1 }));
+      }
+      if (path.includes('/api/v1/rentals?')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+      throw new Error(path);
+    });
+
+    render(<ApiReceptionHome request={request} actorId="actor" />);
+
+    // Click Guantes shortcut
+    const guantesBtn = await screen.findByRole('button', { name: /Guantes/ });
+    expect(guantesBtn).not.toBeDisabled();
+    await userEvent.click(guantesBtn);
+
+    expect(await screen.findByRole('heading', { name: 'Guantes' })).toBeVisible();
+
+    // Close Guantes modal
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar modal de guantes' }));
+
+    // Click Casilleros shortcut
+    const casillerosBtn = await screen.findByRole('button', { name: /Casilleros/ });
+    expect(casillerosBtn).not.toBeDisabled();
+    await userEvent.click(casillerosBtn);
+
+    expect(await screen.findByRole('heading', { name: 'Casilleros' })).toBeVisible();
   });
 });

@@ -147,6 +147,8 @@ def test_admin_pending_money_lists_pending_transfers_and_outstanding_debt(tmp_pa
             }
             assert all(item["amount_minor"] == 12000 for item in transfer_items)
             assert all(item["status_event_id"] for item in transfer_items)
+            assert all("rental_id" not in item and "rental_charge_id" not in item
+                       for item in payload["items"])
             debt_item = next(item for item in payload["items"] if item["item_type"] == "membership_debt")
             assert debt_item["amount_minor"] == 3500
             assert debt_item["initial_amount_minor"] == 7000

@@ -30,6 +30,13 @@ import {
   type AdminSecurityAlert,
 } from '../../api/adminSecurityAlertsApi';
 import { useAdminSession } from '../auth/AdminSessionProvider';
+import { createEmptyDemoState } from '../../demo/adapter';
+import { listBranches, type AuthenticatedRequest, type BranchItem } from '../../api/inventoryApi';
+import {
+  listRentalAlerts,
+  reviewRentalAlert,
+  type RentalCancellationDTO,
+} from '../../api/rentalsApi';
 import './AlertCenter.css';
 
 const PERIOD_OPTIONS: { id: 'today' | 'week' | 'month' | 'all'; label: string }[] = [
@@ -72,15 +79,99 @@ function formatDateTime(timestamp: string): string {
   }
 }
 
-export function AlertCenter() {
-  const { state } = useDemo();
+export interface AlertCenterProps {
+  apiRequest?: AuthenticatedRequest;
+  branchId?: string;
+}
+
+export function AlertCenter({ apiRequest: explicitRequest, branchId: explicitBranchId }: AlertCenterProps = {}) {
+  let demoContext: ReturnType<typeof useDemo> | null = null;
+  try {
+    demoContext = useDemo();
+  } catch {
+    demoContext = null;
+  }
+  const adminSession = useOptionalAdminSession();
+  const effectiveRequest = explicitRequest || (adminSession?.status === 'authenticated' ? adminSession.request : undefined);
+
+  if (!effectiveRequest && !demoContext) {
+    throw new Error('useDemo requires DemoProvider');
+  }
+
+  const state = demoContext?.state ?? createEmptyDemoState();
   const [period, setPeriod] = useState<AlertPeriod>('today');
-  const [selectedCategory, setSelectedCategory] = useState<AlertCategory | 'all' | 'security'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<AlertCategory | 'all' | 'security' | 'rentals'>('all');
   const [activeLegendCategory, setActiveLegendCategory] = useState<AlertCategory | null>(null);
   const [sorting, setSorting] = useState<SortingState>([{ id: 'timestamp', desc: true }]);
 
+  // Live branch and rental alerts
+  const [branches, setBranches] = useState<BranchItem[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(explicitBranchId ?? '');
+  const [rentalAlerts, setRentalAlerts] = useState<RentalCancellationDTO[]>([]);
+  const [rentalLoading, setRentalLoading] = useState(false);
+  const [rentalMutatingId, setRentalMutatingId] = useState<string | null>(null);
+  const [rentalError, setRentalError] = useState('');
+  const rentalOperation = useRef(0);
+
+  useEffect(() => {
+    if (!effectiveRequest || selectedBranchId) return;
+    let active = true;
+    void listBranches(effectiveRequest)
+      .then(list => {
+        if (!active) return;
+        setBranches(list);
+        if (list.length > 0 && !selectedBranchId) {
+          setSelectedBranchId(list[0].id);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [effectiveRequest, selectedBranchId]);
+
+  const refreshRentalAlerts = useCallback(async () => {
+    if (!effectiveRequest || !selectedBranchId) {
+      setRentalAlerts([]);
+      return;
+    }
+    const current = ++rentalOperation.current;
+    setRentalLoading(true);
+    setRentalError('');
+    try {
+      const page = await listRentalAlerts(effectiveRequest, selectedBranchId);
+      if (rentalOperation.current !== current) return;
+      setRentalAlerts(page.items);
+    } catch {
+      if (rentalOperation.current !== current) return;
+      setRentalAlerts([]);
+      setRentalError('No se pudieron cargar las alertas de cancelaciones.');
+    } finally {
+      if (rentalOperation.current === current) setRentalLoading(false);
+    }
+  }, [effectiveRequest, selectedBranchId]);
+
+  useEffect(() => {
+    void refreshRentalAlerts();
+  }, [refreshRentalAlerts]);
+
+  const handleReviewAlert = async (alertId: string) => {
+    if (!effectiveRequest || rentalMutatingId) return;
+    const current = ++rentalOperation.current;
+    setRentalMutatingId(alertId);
+    setRentalError('');
+    try {
+      const updated = await reviewRentalAlert(effectiveRequest, alertId);
+      if (rentalOperation.current !== current) return;
+      setRentalAlerts(prev => prev.map(a => (a.id === alertId ? updated : a)));
+    } catch {
+      if (rentalOperation.current !== current) return;
+      setRentalError('No se pudo confirmar la revisión de la alerta. Intenta de nuevo.');
+    } finally {
+      if (rentalOperation.current === current) setRentalMutatingId(null);
+    }
+  };
   // Admin security alerts integration
-  const adminSession = useOptionalAdminSession();
   const [securityAlerts, setSecurityAlerts] = useState<AdminSecurityAlert[]>([]);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [securityMutating, setSecurityMutating] = useState(false);
@@ -390,6 +481,38 @@ export function AlertCenter() {
           </button>
         </Panel>
 
+        {/* KPI 5: Rental Cancellations */}
+        <Panel className={`alert-kpi-card ${selectedCategory === 'rentals' ? 'alert-kpi-active' : ''}`}>
+          <div className="alert-kpi-header">
+            <span className="alert-kpi-title">Cancelaciones de casilleros</span>
+            <span className="alert-kpi-icon icon-warning">
+              <HugeiconsIcon icon={Alert01Icon} size={20} />
+            </span>
+          </div>
+          <p className="alert-kpi-value">{rentalAlerts.length}</p>
+          <p className="alert-kpi-note">
+            {rentalAlerts.filter(a => !a.reviewed).length === 1
+              ? '1 cancelación pendiente de revisión.'
+              : `${rentalAlerts.filter(a => !a.reviewed).length} cancelaciones pendientes de revisión.`}
+          </p>
+          <button
+            type="button"
+            className="alert-kpi-link"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              textAlign: 'left',
+              font: 'inherit',
+              color: 'var(--color-primary)',
+              cursor: 'pointer',
+            }}
+            onClick={() => setSelectedCategory('rentals')}
+          >
+            Ver cancelaciones →
+          </button>
+        </Panel>
+
         {/* Donut Chart Panel */}
         <Panel className="alert-chart-card">
           <h2>Distribución por categoría</h2>
@@ -500,10 +623,103 @@ export function AlertCenter() {
               <span>Seguridad / Bloqueos</span>
               <span className="alert-pill-count">{securityAlerts.length}</span>
             </button>
+            <button
+              type="button"
+              className={`alert-filter-pill ${selectedCategory === 'rentals' ? 'active' : ''}`}
+              aria-pressed={selectedCategory === 'rentals'}
+              onClick={() => setSelectedCategory('rentals')}
+            >
+              <span>Cancelaciones de casilleros</span>
+              <span className="alert-pill-count">{rentalAlerts.length}</span>
+            </button>
           </div>
         </div>
 
-        {selectedCategory === 'security' ? (
+        {selectedCategory === 'rentals' ? (
+          rentalAlerts.length === 0 ? (
+            <EmptyState title="Sin cancelaciones de casilleros">
+              No hay alertas de cancelación de casilleros pendientes o registradas en esta sucursal.
+            </EmptyState>
+          ) : (
+            <TableRegion label="Cancelaciones de casilleros">
+              {rentalError && (
+                <p role="alert" style={{ color: 'var(--color-danger, #A32222)', padding: '8px 16px', margin: 0 }}>
+                  {rentalError}
+                </p>
+              )}
+              <table className="alert-table">
+                <caption>
+                  Cancelaciones de casilleros registradas por recepción con cálculo proporcional y saldo devuelto.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Fecha / Hora</th>
+                    <th scope="col">Socio</th>
+                    <th scope="col">Casillero</th>
+                    <th scope="col">Operador</th>
+                    <th scope="col">Motivo</th>
+                    <th scope="col">Reembolso</th>
+                    <th scope="col">Deuda cancelada</th>
+                    <th scope="col" style={{ textAlign: 'right' }}>Revisión</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rentalAlerts.map(alert => (
+                    <tr key={alert.id}>
+                      <td>
+                        <time dateTime={alert.created_at}>{formatDateTime(alert.created_at)}</time>
+                      </td>
+                      <td>
+                        <div className="alert-detail-cell">
+                          <span className="alert-detail-title">{alert.member_name}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--color-muted)' }}>#{alert.member_number}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <strong>{alert.asset_code}</strong>
+                      </td>
+                      <td>
+                        <span>{alert.actor_name || alert.actor_id}</span>
+                      </td>
+                      <td>
+                        <span>{alert.reason}</span>
+                      </td>
+                      <td>
+                        <span className="alert-impact-cell impact-warning">
+                          {formatMoney(alert.refund_amount_minor)} MXN ({alert.refund_method === 'cash' ? 'Efectivo' : 'Tarjeta'})
+                        </span>
+                      </td>
+                      <td>
+                        <span>{formatMoney(alert.cancelled_debt_minor)} MXN</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {alert.reviewed ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                            <Badge tone="neutral">Revisado</Badge>
+                            {alert.reviewed_at && (
+                              <span style={{ fontSize: '11px', color: 'var(--color-muted)' }}>
+                                {formatDateTime(alert.reviewed_at)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            disabled={rentalMutatingId === alert.id}
+                            onClick={() => void handleReviewAlert(alert.id)}
+                            aria-label={`Marcar como revisado ${alert.asset_code}`}
+                          >
+                            {rentalMutatingId === alert.id ? 'Guardando…' : 'Marcar como revisado'}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableRegion>
+          )
+        ) : selectedCategory === 'security' ? (
           securityAlerts.length === 0 ? (
             <EmptyState title="Sin bloqueos de seguridad">
               No hay cuentas de personal bloqueadas en este momento.
