@@ -15,6 +15,7 @@ from app.db.models.staff_schedules import StaffScheduleException, StaffScheduleS
 from app.db.models.enrollment import StaffEnrollmentCode
 from app.db.models.devices import StaffDevicePairingCode, StaffPairedDevice
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
+from app.db.models.rentals import RentalAsset
 from app.db.models.catalog import Plan, PlanVersion, PlanVersionService, Service
 from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount, ShiftClosingDenominationCount, ShiftInventoryReview, ShiftInventoryObservation
 from app.db.models.inventory import (
@@ -61,6 +62,7 @@ __all__ = [
     "Member",
     "MemberEligibilityRecord",
     "MemberNote",
+    "RentalAsset",
     "MembershipPeriod",
     "MembershipDebt",
     "MembershipDebtPayment",

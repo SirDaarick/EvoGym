@@ -40,6 +40,7 @@ from app.api.pending_money import router as pending_money_router
 from app.api.membership_access import router as membership_access_router
 from app.api.member_check_ins import router as member_check_ins_router
 from app.api.member_reads import router as member_reads_router
+from app.api.rentals import router as rentals_router
 
 
 class _AuthRateLimiter:
@@ -240,6 +241,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(membership_access_router)
     application.include_router(member_check_ins_router)
     application.include_router(member_reads_router)
+    application.include_router(rentals_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)
