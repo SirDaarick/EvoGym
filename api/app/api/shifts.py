@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError, TimeoutError
 
 from app.auth.admin import validate_admin_session
@@ -187,14 +188,19 @@ def list_registers_endpoint(
     if factory is None:
         raise HTTPException(500, "Database session factory not configured.")
 
-    if not principal.is_admin:
-        if branch_id is not None and branch_id != principal.branch_id:
-            raise HTTPException(403, "Access restricted to staff branch.")
-        effective_branch = principal.branch_id
-    else:
-        effective_branch = branch_id
-
     with factory() as session:
+        from app.db.models import RoleGrant
+        receptionist = not principal.is_admin and session.scalar(select(RoleGrant.id).where(
+            RoleGrant.staff_id == principal.staff_id, RoleGrant.role == "receptionist",
+            RoleGrant.scope_kind == "branch", RoleGrant.branch_id == principal.branch_id,
+            RoleGrant.is_active.is_(True),
+        )) is not None
+        if not principal.is_admin and not receptionist:
+            if branch_id is not None and branch_id != principal.branch_id:
+                raise HTTPException(403, "Access restricted to staff branch.")
+            effective_branch = principal.branch_id
+        else:
+            effective_branch = branch_id
         registers = list_cash_registers(session, branch_id=effective_branch)
         active_ids = get_active_register_ids(session)
         return [

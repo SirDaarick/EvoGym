@@ -1,0 +1,23 @@
+services:
+  postgres_dev:
+    image: postgres:16-alpine
+    container_name: evogym-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evogym
+      POSTGRES_PASSWORD: evogym_dev_password
+      POSTGRES_DB: evogym_dev
+    ports:
+      # Use port 5433 on host to avoid conflicts with other local PostgreSQL instances
+      - "${EVOGYM_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - evogym_postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evogym -d evogym_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  evogym_postgres_dev_data:
+    name: evogym_postgres_dev_data

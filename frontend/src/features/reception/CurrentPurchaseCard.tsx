@@ -51,6 +51,8 @@ export interface CurrentPurchaseCardProps {
   statusType?: 'error' | 'warning' | 'success';
   paymentMethod?: PaymentMethod;
   onPaymentMethodChange?: (method: PaymentMethod) => void;
+  cashOnly?: boolean;
+  useLiveCardIntent?: boolean;
 }
 
 const methodNames: Record<PaymentMethod, string> = {
@@ -105,6 +107,8 @@ export function CurrentPurchaseCard({
   backActionLabel,
   statusMessage,
   statusType = 'success',
+  cashOnly = false,
+  useLiveCardIntent = false,
   paymentMethod,
   onPaymentMethodChange,
 }: CurrentPurchaseCardProps) {
@@ -252,6 +256,10 @@ export function CurrentPurchaseCard({
   const handleConfirmCheckout = (forcePendingShortfall = false) => {
     setInternalError(null);
     if (selectedMethods.length === 0) return;
+    if (cashOnly && (selectedMethods.length !== 1 || selectedMethods[0] !== 'cash' || calculateShortfall() > 0)) {
+      setInternalError('Por ahora solo está disponible el pago completo en efectivo.');
+      return;
+    }
 
     if (selectedMethods.length === 2) {
       const m1 = selectedMethods[0];
@@ -418,13 +426,13 @@ export function CurrentPurchaseCard({
               </button>
             </div>
 
-            <div className="cart-overtime-toggle-slot" style={{ marginBottom: isOvertime ? '12px' : '0' }}>
+            {!cashOnly && <div className="cart-overtime-toggle-slot" style={{ marginBottom: isOvertime ? '12px' : '0' }}>
               <OvertimeSaleToggle
                 isOvertime={isOvertime}
                 shiftWindow={shiftWindow}
                 currentTime={currentTime}
               />
-            </div>
+            </div>}
 
             <label id="payment-methods-label" className="cart-payment-methods-heading">Método de cobro</label>
             <div className="cart-payment-methods-grid" role="radiogroup" aria-labelledby="payment-methods-label">
@@ -735,6 +743,10 @@ export function CurrentPurchaseCard({
           totalMinor={totalMinor}
           terminalName="Terminal Mostrador 01"
           onCancel={() => setIsPointModalOpen(false)}
+          onReject={(reason) => {
+            setIsPointModalOpen(false);
+            setInternalError(`Cobro en terminal rechazado: ${reason}. Intenta con otra tarjeta o cambia a efectivo.`);
+          }}
           onConfirm={(voucher) => {
             setIsPointModalOpen(false);
             onConfirmPayment?.(

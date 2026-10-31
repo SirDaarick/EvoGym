@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.db.models.orders import Order, OrderItem, Payment
+from app.db.models.orders import Order, OrderItem, Payment, ProductRefund
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.shifts import (
     CashRegister,
@@ -417,7 +417,18 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
         raise ValueError("Opening cash is outside supported minor-unit bounds.")
     if shift.opening_cash_minor > maximum - inflow:
         raise ValueError("Expected closing cash exceeds signed 64-bit minor units.")
-    return shift.opening_cash_minor + inflow
+    refund_outflow = 0
+    refund_amounts = session.scalars(
+        select(ProductRefund.amount_minor).where(
+            ProductRefund.financial_shift_id == shift.id,
+            ProductRefund.payout_method == "cash",
+        )
+    )
+    for amount in refund_amounts:
+        if type(amount) is not int or amount <= 0 or refund_outflow > maximum - amount:
+            raise ValueError("Cash refund outflow exceeds signed 64-bit minor units.")
+        refund_outflow += amount
+    return shift.opening_cash_minor + inflow - refund_outflow
 
 
 def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]:
@@ -451,6 +462,7 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
     cash_minor = 0
     pending_transfer_minor = 0
     methods: dict[str, dict[str, int | str]] = {}
+    families: dict[str, dict[str, int | str]] = {}
     for payment, order in payment_rows:
         description = order_descriptions.get(order.id) or "Membresía"
         payments.append({"id": payment.id, "description": description, "method": payment.method,
@@ -458,6 +470,10 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
                          "recorded_at": payment.received_at})
         if payment.status == "confirmed":
             confirmed_minor += payment.amount_minor
+            family = "product" if order.order_kind == "product" else "membership"
+            activity = families.setdefault(family, {"family": family, "count": 0, "amount_minor": 0})
+            activity["count"] = int(activity["count"]) + 1
+            activity["amount_minor"] = int(activity["amount_minor"]) + payment.amount_minor
             bucket = methods.setdefault(payment.method, {"method": payment.method, "count": 0, "amount_minor": 0})
             bucket["count"] = int(bucket["count"]) + 1
             bucket["amount_minor"] = int(bucket["amount_minor"]) + payment.amount_minor
@@ -472,13 +488,15 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
                          "recorded_at": debt.created_at})
         confirmed_minor += debt.amount_minor
         cash_minor += debt.amount_minor
+        activity = families.setdefault("membership", {"family": "membership", "count": 0, "amount_minor": 0})
+        activity["count"] = int(activity["count"]) + 1
+        activity["amount_minor"] = int(activity["amount_minor"]) + debt.amount_minor
         bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
         bucket["count"] = int(bucket["count"]) + 1
         bucket["amount_minor"] = int(bucket["amount_minor"]) + debt.amount_minor
 
     payments.sort(key=lambda row: (row["recorded_at"], str(row["id"])), reverse=True)
-    activities = ([{"family": "membership", "count": sum(int(method["count"]) for method in methods.values()),
-                    "amount_minor": confirmed_minor}] if confirmed_minor else [])
+    activities = list(families.values()) if confirmed_minor else []
     return {"shift_id": shift.id, "confirmed_minor": confirmed_minor, "confirmed_cash_minor": cash_minor,
             "pending_transfer_minor": pending_transfer_minor,
             "payment_methods": sorted(methods.values(), key=lambda item: str(item["method"])),

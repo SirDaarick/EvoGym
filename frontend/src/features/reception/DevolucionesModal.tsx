@@ -6,16 +6,25 @@ import {
   processReturn,
   type EligibleReturnItem,
   type ReturnOperationResult,
+  type ReturnTargetType,
 } from '../../demo/returnOperations';
 import { Badge, Button, Notice, type Tone } from '../../shared/ui';
+import type { AuthenticatedRequest } from '../../api/inventoryApi';
+import {
+  listEligibleProductReturns,
+  submitProductReturn,
+  type EligibleProductReturn,
+} from '../../api/productSalesApi';
 
 export interface DevolucionesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  state: DemoState;
+  state?: DemoState;
   initialMemberId?: string | null;
   onSuccess: (result: { message: string; refundedAmountMinor: number }) => void;
-  transact: <T>(update: (state: DemoState) => { state: DemoState; result: T }) => T;
+  transact?: <T>(update: (state: DemoState) => { state: DemoState; result: T }) => T;
+  apiRequest?: AuthenticatedRequest;
+  registerId?: string;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -34,6 +43,14 @@ const TYPE_TONES: Record<string, Tone> = {
   glove: 'warning',
 };
 
+interface DisplayItem {
+  id: string;
+  type: ReturnTargetType;
+  title: string;
+  amountMinor: number;
+  originalMethod: 'cash' | 'card';
+}
+
 export function DevolucionesModal({
   isOpen,
   onClose,
@@ -41,6 +58,8 @@ export function DevolucionesModal({
   initialMemberId,
   onSuccess,
   transact,
+  apiRequest,
+  registerId,
 }: DevolucionesModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [memberSearch, setMemberSearch] = useState('');
@@ -48,7 +67,14 @@ export function DevolucionesModal({
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [reason, setReason] = useState<string>('');
   const [refundMethod, setRefundMethod] = useState<'cash' | 'card'>('cash');
+  const [disposition, setDisposition] = useState<'restock' | 'waste'>('restock');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+
+  // Live state
+  const [liveMembers, setLiveMembers] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const [selectedLiveMember, setSelectedLiveMember] = useState<{ id: string; name: string; phone: string } | null>(null);
+  const [liveEligibleItems, setLiveEligibleItems] = useState<EligibleProductReturn[]>([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,6 +84,10 @@ export function DevolucionesModal({
       setReason('');
       setMemberSearch('');
       setErrorMessage('');
+      setDisposition('restock');
+      setSubmitting(false);
+      setSelectedLiveMember(null);
+      setLiveEligibleItems([]);
     }
   }, [isOpen, initialMemberId]);
 
@@ -72,30 +102,122 @@ export function DevolucionesModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  // Live member lookup when initialMemberId is provided
+  useEffect(() => {
+    if (!isOpen || !apiRequest || !initialMemberId) return;
+    let active = true;
+    apiRequest(`/api/v1/members?search=${encodeURIComponent(initialMemberId)}`)
+      .then(res => (res.ok ? res.json() : Promise.reject()))
+      .then((data: { items?: { id: string; full_name?: string; name?: string; phone: string }[] }) => {
+        if (!active) return;
+        const match = data.items?.find(m => m.id === initialMemberId);
+        if (match) {
+          setSelectedLiveMember({
+            id: match.id,
+            name: match.full_name || match.name || match.id,
+            phone: match.phone || '',
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isOpen, apiRequest, initialMemberId]);
+
+  // Live member search
+  useEffect(() => {
+    if (!isOpen || !apiRequest) return;
+    let active = true;
+    const q = memberSearch.trim();
+    if (q.length < 2) {
+      setLiveMembers([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiRequest(`/api/v1/members?page=1&limit=20&search=${encodeURIComponent(q)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { items?: { id: string; full_name?: string; name?: string; phone: string }[] };
+        if (active && data.items) {
+          setLiveMembers(
+            data.items.map(m => ({
+              id: m.id,
+              name: m.full_name || m.name || m.id,
+              phone: m.phone || '',
+            }))
+          );
+        }
+      } catch {
+        if (active) setLiveMembers([]);
+      }
+    }, 200);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, apiRequest, memberSearch]);
+
+  // Live eligible items fetch
+  useEffect(() => {
+    if (!isOpen || !apiRequest || !registerId || !selectedMemberId) {
+      setLiveEligibleItems([]);
+      return;
+    }
+    let active = true;
+    listEligibleProductReturns(apiRequest, registerId, selectedMemberId)
+      .then(items => {
+        if (active) setLiveEligibleItems(Array.isArray(items) ? items : []);
+      })
+      .catch(err => {
+        if (active) {
+          setLiveEligibleItems([]);
+          setErrorMessage(err instanceof Error ? err.message : 'Error al cargar compras elegibles.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, apiRequest, registerId, selectedMemberId]);
+
   if (!isOpen) return null;
 
-  const members = state.members ?? [];
-  const selectedMember = members.find(m => m.id === selectedMemberId);
+  // Selected member resolution
+  const demoMembers = state?.members ?? [];
+  const selectedMember = apiRequest
+    ? selectedLiveMember ?? (selectedMemberId ? { id: selectedMemberId, name: selectedMemberId, phone: '' } : null)
+    : demoMembers.find(m => m.id === selectedMemberId);
 
-  const filteredMembers = members.filter(m => {
-    if (!memberSearch.trim()) return true;
-    const q = memberSearch.toLowerCase();
-    return m.name.toLowerCase().includes(q) || m.phone.includes(q);
-  });
+  const displayedMembers = apiRequest
+    ? liveMembers
+    : demoMembers.filter(m => {
+        if (!memberSearch.trim()) return true;
+        const q = memberSearch.toLowerCase();
+        return m.name.toLowerCase().includes(q) || m.phone.includes(q);
+      });
 
-  const eligibleItems: EligibleReturnItem[] = selectedMemberId
-    ? getEligibleReturnsForMember(state, selectedMemberId)
-    : [];
+  const eligibleItems: DisplayItem[] = apiRequest
+    ? (Array.isArray(liveEligibleItems) ? liveEligibleItems : []).map(item => ({
+        id: item.order_item_id,
+        type: 'product',
+        title: `${item.product_name} (${item.quantity} ud${item.quantity > 1 ? 's' : ''})`,
+        amountMinor: item.line_total_minor,
+        originalMethod: item.original_payment_method === 'card' ? 'card' : 'cash',
+      }))
+    : selectedMemberId && state
+      ? (getEligibleReturnsForMember(state, selectedMemberId) as DisplayItem[])
+      : [];
 
   const selectedItem = eligibleItems.find(i => i.id === selectedTargetId);
 
-  function handleSelectMember(member: Member) {
+  function handleSelectMember(member: { id: string; name: string; phone: string }) {
     setSelectedMemberId(member.id);
+    setSelectedLiveMember(member);
     setSelectedTargetId('');
     setErrorMessage('');
   }
 
-  function handleSelectItem(item: EligibleReturnItem) {
+  function handleSelectItem(item: DisplayItem) {
     setSelectedTargetId(item.id);
     setRefundMethod(item.originalMethod === 'card' ? 'card' : 'cash');
     setErrorMessage('');
@@ -114,7 +236,7 @@ export function DevolucionesModal({
     setStep(2);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedMember || !selectedItem) {
       setErrorMessage('Selección incompleta.');
@@ -125,6 +247,35 @@ export function DevolucionesModal({
       return;
     }
 
+    if (apiRequest && registerId) {
+      setSubmitting(true);
+      try {
+        const key = crypto.randomUUID();
+        const res = await submitProductReturn(
+          apiRequest,
+          registerId,
+          {
+            order_item_id: selectedItem.id,
+            reason: reason.trim(),
+            disposition,
+            payout_method: refundMethod,
+          },
+          key
+        );
+        onSuccess({
+          message: `Devolución registrada por ${formatMoney(res.amount_minor)} MXN.`,
+          refundedAmountMinor: res.amount_minor,
+        });
+        onClose();
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'No se pudo registrar la devolución.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (!transact || !state) return;
     const opResult = transact<ReturnOperationResult>(current =>
       processReturn(current, {
         id: `ret-${crypto.randomUUID()}`,
@@ -284,12 +435,12 @@ export function DevolucionesModal({
                         background: 'var(--color-surface)',
                       }}
                     >
-                      {filteredMembers.length === 0 ? (
+                      {displayedMembers.length === 0 ? (
                         <p className="muted" style={{ padding: '8px', margin: 0, fontSize: '12px', textAlign: 'center' }}>
                           Sin clientes encontrados.
                         </p>
                       ) : (
-                        filteredMembers.map(m => (
+                        displayedMembers.map(m => (
                           <button
                             key={m.id}
                             type="button"
@@ -337,7 +488,9 @@ export function DevolucionesModal({
                       type="button"
                       onClick={() => {
                         setSelectedMemberId('');
+                        setSelectedLiveMember(null);
                         setSelectedTargetId('');
+                        setLiveEligibleItems([]);
                       }}
                       style={{
                         background: 'none',
@@ -375,7 +528,7 @@ export function DevolucionesModal({
                     }}
                   >
                     <p className="muted" style={{ fontSize: '13px', margin: 0 }}>
-                      Sin productos vendidos hoy ni membresías activas.
+                      Sin productos vendidos hoy ni compras disponibles para devolver.
                     </p>
                   </div>
                 ) : (
@@ -442,7 +595,7 @@ export function DevolucionesModal({
             </>
           )}
 
-          {/* STEP 2: Money Refund and Method */}
+          {/* STEP 2: Money Refund, Disposition and Method */}
           {step === 2 && selectedItem && (
             <>
               {/* Selected Item Summary Card */}
@@ -461,7 +614,7 @@ export function DevolucionesModal({
                   <div style={{ fontSize: '12px', color: 'var(--color-muted)' }}>Ítem a devolver:</div>
                   <strong style={{ fontSize: '14px' }}>{selectedItem.title}</strong>
                   <div className="muted" style={{ fontSize: '11px', marginTop: '2px' }}>
-                    {selectedItem.type === 'product' && 'Reintegra stock (+unidades).'}
+                    {selectedItem.type === 'product' && (disposition === 'restock' ? 'Reintegra stock (+unidades).' : 'No reintegra stock (marcado como merma).')}
                     {selectedItem.type === 'supplement' && 'Reintegra porciones a inventario.'}
                     {selectedItem.type === 'membership' && 'Cancela vigencia de membresía.'}
                     {selectedItem.type === 'locker' && 'Libera casillero inmediatamente.'}
@@ -475,6 +628,55 @@ export function DevolucionesModal({
                   </strong>
                 </div>
               </div>
+
+              {/* Disposition Toggle (only for products) */}
+              {selectedItem.type === 'product' && (
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                    Destino del producto *
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDisposition('restock')}
+                      style={{
+                        padding: '10px',
+                        borderRadius: '8px',
+                        border: disposition === 'restock' ? '2px solid var(--color-primary, #FC6C06)' : '1px solid var(--color-divider)',
+                        background: disposition === 'restock' ? 'var(--color-soft)' : 'var(--color-surface)',
+                        cursor: 'pointer',
+                        fontWeight: disposition === 'restock' ? 700 : 500,
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>🔄 Regresar a inventario</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDisposition('waste')}
+                      style={{
+                        padding: '10px',
+                        borderRadius: '8px',
+                        border: disposition === 'waste' ? '2px solid #dc2626' : '1px solid var(--color-divider)',
+                        background: disposition === 'waste' ? 'rgba(220, 38, 38, 0.08)' : 'var(--color-surface)',
+                        cursor: 'pointer',
+                        fontWeight: disposition === 'waste' ? 700 : 500,
+                        fontSize: '13px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>🗑️ Marcar como merma</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Refund Method Toggle */}
               <div>
@@ -558,13 +760,13 @@ export function DevolucionesModal({
                 <Button
                   variant="primary"
                   type="submit"
-                  disabled={!reason.trim()}
+                  disabled={!reason.trim() || submitting}
                   style={{
-                    background: reason.trim() ? '#dc2626' : undefined,
-                    borderColor: reason.trim() ? '#b91c1c' : undefined,
+                    background: reason.trim() && !submitting ? '#dc2626' : undefined,
+                    borderColor: reason.trim() && !submitting ? '#b91c1c' : undefined,
                   }}
                 >
-                  Confirmar devolución
+                  {submitting ? 'Confirmar devolución…' : 'Confirmar devolución'}
                 </Button>
               </div>
             </>

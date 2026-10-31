@@ -365,3 +365,48 @@ def test_phone_staff_login_assigns_purpose_server_side_and_rejects_client_purpos
         forged = client.post("/api/v1/auth/staff/sessions", json={**body, "purpose": "reception"})
         assert forged.status_code == 422
     engine.dispose()
+
+
+def test_admin_resolves_pending_sale_before_deactivation(tmp_path):
+    from app.db.models import CashRegister, ProductSaleIntent, ProductSaleResolution
+    url, engine, factory, ids = _setup(tmp_path)
+    client = None
+    try:
+        from app.sales.schemas import CashProductSaleRequest
+        from app.sales.queries import product_sale_fingerprint
+        payload = {'member_id': None, 'items': [{'product_id': str(UUID(int=1)), 'quantity': 1}], 'expected_total_minor': 0}
+        with factory.begin() as session:
+            register = CashRegister(branch_id=ids['branch_a'], code='pending', name='Pending')
+            session.add(register)
+            session.flush()
+            register_id = register.id
+            session.add(ProductSaleIntent(seller_id=ids['employee'], register_id=register.id,
+                idempotency_key='pending-test', request_fingerprint=product_sale_fingerprint(register.id, None, CashProductSaleRequest(**payload).items, 0),
+                payload=payload))
+        client, admin = _client(url)
+        base = f"/api/v1/admin/staff-accounts/{ids['employee']}/product-sale-intent"
+        assert client.get(base).status_code == 401
+        assert client.post(f"/api/v1/admin/staff-accounts/deactivate/{ids['employee']}", headers=admin).status_code == 409
+        pending = client.get(base, headers=admin)
+        assert pending.status_code == 200
+        assert pending.json()['key'] == 'pending-test'
+        assert client.post(base + '/resolve', headers=admin, json={'key': 'different'}).status_code == 409
+        assert client.get(base, headers=admin).json()['key'] == 'pending-test'
+        resolved = client.post(base + '/resolve', headers=admin, json={'key': 'pending-test'})
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()['status'] == 'cancelled'
+        with factory() as session:
+            record = session.scalar(select(ProductSaleResolution))
+            assert record.actor_id == ids['admin'] and record.seller_id == ids['employee']
+            assert record.idempotency_key == 'pending-test' and record.result == 'cancelled'
+        assert client.post(f"/api/v1/admin/staff-accounts/deactivate/{ids['employee']}", headers=admin).status_code == 204
+        assert client.get(base, headers=admin).json() is None
+        with factory.begin() as session:
+            session.add(ProductSaleIntent(seller_id=ids['employee'], register_id=register_id,
+                idempotency_key='legacy-pending', request_fingerprint=product_sale_fingerprint(register_id, None, CashProductSaleRequest(**payload).items, 0),
+                payload=payload))
+        assert client.get(base, headers=admin).json()['key'] == 'legacy-pending'
+        assert client.post(base + '/resolve', headers=admin, json={'key': 'legacy-pending'}).json()['status'] == 'cancelled'
+    finally:
+        if client is not None: client.close()
+        engine.dispose()

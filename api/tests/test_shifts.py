@@ -1127,13 +1127,12 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             res_r1_terms_b2 = client.get(f"/api/v1/terminals?branch_id={branch2_id}", headers=r1_headers)
             assert res_r1_terms_b2.status_code == 403
 
-            # Receptionist 1 lists registers (sees only Branch 1 register)
+            # Receptionist 1 can see registers in both branches.
             res_r1_regs = client.get("/api/v1/registers", headers=r1_headers)
             assert res_r1_regs.status_code == 200
             regs = res_r1_regs.json()
-            assert len(regs) == 1
-            assert regs[0]["id"] == reg1_id
-            assert regs[0]["has_open_shift"] is False
+            assert {reg["id"] for reg in regs} == {reg1_id, reg2_id}
+            assert all(reg["has_open_shift"] is False for reg in regs)
 
             # Receptionist 1 checks current shift when none open -> 404
             res_r1_curr_none = client.get(f"/api/v1/shifts/current?register_id={reg1_id}", headers=r1_headers)

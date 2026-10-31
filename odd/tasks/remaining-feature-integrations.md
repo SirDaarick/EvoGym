@@ -23,7 +23,7 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F07 | Review pending money and transfer payments | P1 / A | **Completed** | Finance permissions; decisions D-017/D-023 |
 | F08 | Manage staff schedule series and attendance corrections | P1 / A | **Completed** | Roster and schedule APIs; existing attendance occurrences |
 | F09 | Set up inventory and record stock movement | P1 / B | **Completed** | D-015; stock-movement semantics |
-| F10 | Sell products and process refunds/returns | P2 / C | F01, F09; sale/refund/accounting decisions |
+| F10 | Sell products and process refunds/returns | P2 / C | **Completed** | F01, F09; sale/refund/accounting decisions |
 | F11 | Manage rentals end to end | P2 / C | Rental lifecycle, inventory and payment rules |
 | F12 | Record and review expenses | P2 / C | Expense ownership, approval and accounting rules |
 | F13 | Run payroll | P2 / C | Payroll domain, legal/pay-period rules, permissions |
@@ -183,10 +183,10 @@ At feature start, verify each cited contract and route against current source. E
 **Source anchors:** existing register flow `frontend/src/features/reception/LiveMembershipCheckout.tsx`; sales API `api/app/api/sales.py`; inventory API `api/app/api/inventory.py`; product model `api/app/db/models/inventory.py:32-`. These are related primitives, not proof of product POS.
 
 **Tasks:**
-- [ ] Name product-sale and return/refund owner and resolve partial refund/stock restoration policy.
-- [ ] Map reusable register, payment, inventory and receipt contracts.
-- [ ] Define API and authenticated cashier flow only after the decisions are explicit.
-- [ ] Verify duplicate sale, insufficient stock, denied/refund, partial refund, reload, and persisted register/payment/stock ledgers.
+- [x] Name product-sale and return/refund owner and resolve partial refund/stock restoration policy.
+- [x] Map reusable register, payment, inventory and receipt contracts.
+- [x] Define API and authenticated cashier flow only after the decisions are explicit.
+- [x] Verify duplicate sale, insufficient stock, denied/refund, partial refund, reload, and persisted register/payment/stock ledgers.
 
 **Exit:** sale/refund is auditable across cash and stock; never rename membership checkout into POS.
 

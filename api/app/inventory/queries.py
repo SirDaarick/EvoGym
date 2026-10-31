@@ -160,7 +160,7 @@ def get_on_hand_stock(session: Session, *, branch_id: UUID, product_id: UUID) ->
             select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
                 StockMovement.branch_id == branch_id,
                 StockMovement.product_id == product_id,
-                StockMovement.kind == "restock",
+                StockMovement.kind.in_(("restock", "return")),
             )
         )
         or 0
@@ -170,7 +170,7 @@ def get_on_hand_stock(session: Session, *, branch_id: UUID, product_id: UUID) ->
             select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
                 StockMovement.branch_id == branch_id,
                 StockMovement.product_id == product_id,
-                StockMovement.kind == "waste",
+                StockMovement.kind.in_(("waste", "sale")),
             )
         )
         or 0
@@ -188,11 +188,12 @@ def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: 
         select(
             StockMovement.product_id,
             func.coalesce(
-                func.sum(case((StockMovement.kind == "restock", StockMovement.quantity), else_=0)), 0
+                func.sum(case((StockMovement.kind.in_(("restock", "return")), StockMovement.quantity), else_=0)), 0
             ).label("restocked"),
             func.coalesce(
                 func.sum(case((StockMovement.kind == "waste", StockMovement.quantity), else_=0)), 0
             ).label("waste"),
+            func.coalesce(func.sum(case((StockMovement.kind == "sale", StockMovement.quantity), else_=0)), 0).label("sold"),
         )
         .where(StockMovement.branch_id == branch_id)
         .group_by(StockMovement.product_id)
@@ -205,6 +206,7 @@ def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: 
             StockInitialization,
             func.coalesce(mov_sub.c.restocked, 0).label("restocked_quantity"),
             func.coalesce(mov_sub.c.waste, 0).label("waste_quantity"),
+            func.coalesce(mov_sub.c.sold, 0).label("sold_quantity"),
         )
         .outerjoin(
             StockInitialization,
@@ -265,7 +267,7 @@ def record_stock_movement(
         select(StockInitialization).where(
             StockInitialization.branch_id == branch_id,
             StockInitialization.product_id == product_id,
-        )
+        ).with_for_update()
     )
     if init_row is None:
         if kind == "restock":
@@ -335,7 +337,11 @@ def _read_current_inventory_rows(session: Session, branch_id: UUID):
             Product.name,
             Product.unit,
             StockInitialization.id,
-            StockInitialization.quantity,
+            (StockInitialization.quantity + select(func.coalesce(func.sum(case(
+                (StockMovement.kind.in_(("restock", "return")), StockMovement.quantity),
+                (StockMovement.kind.in_(("waste", "sale")), -StockMovement.quantity),
+                else_=0)), 0)).where(StockMovement.branch_id == branch_id,
+                                     StockMovement.product_id == Product.id).correlate(Product).scalar_subquery()).label("quantity"),
             StockInitialization.initialized_by,
             StockInitialization.initialized_at,
         )
@@ -425,7 +431,7 @@ def validate_opening_inventory_snapshot(
 ) -> tuple[RegisterInventorySnapshot, dict[UUID, RegisterInventorySnapshotItem]]:
     """Validate the exact immutable presentation against one current full-catalog read."""
     if session.bind is not None and session.bind.dialect.name == "postgresql":
-        session.execute(text("LOCK TABLE products, stock_initializations IN SHARE MODE"))
+        session.execute(text("LOCK TABLE products, stock_initializations, stock_movements IN SHARE MODE"))
 
     snapshot = get_register_inventory_snapshot(session, register_id=register_id, snapshot_id=snapshot_id)
     if snapshot is None or snapshot.branch_id != branch_id:

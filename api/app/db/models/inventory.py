@@ -75,7 +75,8 @@ class StockMovement(Base):
 
     __tablename__ = "stock_movements"
     __table_args__ = (
-        CheckConstraint("kind IN ('restock', 'waste')", name="ck_stock_movements_kind"),
+        CheckConstraint("kind IN ('restock', 'waste', 'sale', 'return')", name="ck_stock_movements_kind"),
+        CheckConstraint("(kind = 'sale' AND order_item_id IS NOT NULL) OR (kind IN ('restock', 'waste', 'return') AND order_item_id IS NULL)", name="ck_stock_movements_sale_link"),
         CheckConstraint("quantity > 0", name="ck_stock_movements_quantity_positive"),
         CheckConstraint(
             "kind != 'waste' OR (reason IS NOT NULL AND length(trim(reason)) > 0)",
@@ -85,6 +86,7 @@ class StockMovement(Base):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    order_item_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("order_items.id", ondelete="RESTRICT"), nullable=True, unique=True)
     branch_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False, index=True)
     product_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)

@@ -24,7 +24,9 @@ from app.db.models.inventory import (
     StockInitialization,
     StockMovement,
 )
-from app.db.models.orders import Order, OrderItem, Payment
+from app.db.models.orders import (
+    Order, OrderItem, Payment, ProductRefund, ProductSaleCancellation, ProductSaleIntent, ProductSaleResolution
+)
 from app.db.models.memberships import MembershipPeriod
 from app.db.models.payment_review_events import PaymentReviewEvent
 from app.db.models.membership_debts import MembershipDebt
@@ -70,6 +72,10 @@ __all__ = [
     "Order",
     "OrderItem",
     "Payment",
+    "ProductRefund",
+    "ProductSaleCancellation",
+    "ProductSaleIntent",
+    "ProductSaleResolution",
     "PaymentTerminal",
     "Product",
     "RegisterInventorySnapshot",

@@ -22,6 +22,10 @@ import {
   listAdminRosterProfiles,
   listAdminStaffAccounts,
   linkAdminStaffAccount,
+  deactivateStaffAccount,
+  getStaffPendingSale,
+  resolveStaffPendingSale,
+  type StaffPendingSale,
   type AdminRosterProfileChoice,
   type AdminBranchChoice,
   type AdminStaffAccountChoice,
@@ -777,6 +781,8 @@ export function ApiStaffManagement() {
   const [pinIssuingId, setPinIssuingId] = useState<string | null>(null);
   const [issuedPin, setIssuedPin] = useState<{ name: string; value: string } | null>(null);
   const [deviceProfile, setDeviceProfile] = useState<AdminRosterProfileChoice | null>(null);
+  const [deactivation, setDeactivation] = useState<{ profile: AdminRosterProfileChoice; pending: StaffPendingSale | null; active: boolean } | null>(null);
+  const [deactivationBusy, setDeactivationBusy] = useState(false);
   const [scheduleSeries, setScheduleSeries] = useState<StaffScheduleSeriesItem[]>([]);
   const [scheduleWeekdays, setScheduleWeekdays] = useState<number[]>([0, 1, 2, 3, 4]);
   const [scheduleStartTime, setScheduleStartTime] = useState('06:00');
@@ -1094,6 +1100,41 @@ export function ApiStaffManagement() {
     ? accounts.find(account => account.id === deviceProfile.staff_user_id && account.linked_profile_id === deviceProfile.id)
     : undefined;
 
+  async function openDeactivation(profile: AdminRosterProfileChoice, active: boolean) {
+    if (!profile.staff_user_id || !adminSession || adminSession.status !== 'authenticated') return;
+    setDeactivationBusy(true); setError('');
+    try {
+      const pending = await getStaffPendingSale(adminSession.request, profile.staff_user_id);
+      setDeactivation({ profile, pending, active });
+    } catch { setError('No se pudo consultar la venta pendiente. Intenta de nuevo.'); }
+    finally { setDeactivationBusy(false); }
+  }
+
+  async function resolveDeactivationSale() {
+    if (!deactivation?.pending || !deactivation.profile.staff_user_id || !adminSession || adminSession.status !== 'authenticated') return;
+    setDeactivationBusy(true); setError('');
+    try {
+      const status = await resolveStaffPendingSale(adminSession.request, deactivation.profile.staff_user_id, deactivation.pending.key);
+      const pending = await getStaffPendingSale(adminSession.request, deactivation.profile.staff_user_id);
+      setDeactivation({ ...deactivation, pending });
+      setNotice(status === 'completed' ? 'La venta ya estaba registrada.' : 'El intento pendiente fue cancelado; no se registró una venta.');
+    } catch { setError('No se pudo confirmar la resolución. Vuelve a consultar el estado.'); }
+    finally { setDeactivationBusy(false); }
+  }
+
+  async function confirmDeactivation() {
+    if (!deactivation || deactivation.pending || !deactivation.profile.staff_user_id || !adminSession || adminSession.status !== 'authenticated') return;
+    setDeactivationBusy(true); setError('');
+    try {
+      await deactivateStaffAccount(adminSession.request, deactivation.profile.staff_user_id);
+      setDeactivation(null); setNotice('La cuenta de acceso fue desactivada.');
+      await loadBranch(branchId);
+    } catch {
+      setError('No se pudo desactivar la cuenta. Puede existir una venta pendiente; consulta nuevamente.');
+      setDeactivation(null);
+    } finally { setDeactivationBusy(false); }
+  }
+
   return <div className="staff-mgmt-page">
     <header className="page-header">
       <div>
@@ -1150,6 +1191,10 @@ export function ApiStaffManagement() {
                 <Button variant="secondary" disabled={!account?.is_active || !profile.is_active}
                   onClick={() => setDeviceProfile(profile)} title="Gestionar dispositivos vinculados desde la API">Vincular Dispositivo</Button>
                 <Button variant="secondary" onClick={() => openEdit(profile)}>Editar</Button>
+                <Button variant="secondary" disabled={!account || deactivationBusy}
+                  onClick={() => void openDeactivation(profile, Boolean(account?.is_active))}>
+                  {account?.is_active ? 'Desactivar cuenta' : 'Consultar venta pendiente'}
+                </Button>
                 <Button variant="secondary" disabled title="La activación y desactivación aún no están disponibles en la API.">
                   {profile.is_active ? 'Desactivar' : 'Activar'}
                 </Button>
@@ -1161,6 +1206,22 @@ export function ApiStaffManagement() {
         </table>
       </div>
     </Panel>
+
+    {deactivation && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="deactivate-account-title">
+      <div className="staff-modal-card">
+        <h2 id="deactivate-account-title">Desactivar cuenta de {deactivation.profile.full_name}</h2>
+        {deactivation.pending ? <>
+          <p>Hay una venta pendiente por ${((deactivation.pending.payload.expected_total_minor) / 100).toFixed(2)}. Resuélvela antes de desactivar la cuenta.</p>
+          <p>Caja: {deactivation.pending.register_id}. Productos: {deactivation.pending.payload.items.reduce((sum, item) => sum + item.quantity, 0)}.</p>
+          <p>Al resolverla, se confirmará si ya se registró; si no, el intento se cancelará para impedir un cobro tardío.</p>
+          <Button disabled={deactivationBusy} onClick={() => void resolveDeactivationSale()}>Resolver venta pendiente</Button>
+        </> : deactivation.active ? <>
+          <p>Se revocarán las sesiones y dispositivos vinculados a esta cuenta.</p>
+          <Button disabled={deactivationBusy} onClick={() => void confirmDeactivation()}>Confirmar desactivación de cuenta</Button>
+        </> : <p>Esta cuenta está inactiva y no tiene ventas pendientes.</p>}
+        <Button variant="secondary" disabled={deactivationBusy} onClick={() => setDeactivation(null)}>Cerrar</Button>
+      </div>
+    </div>}
 
     {editingProfile && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-staff-form-title">
       <div className="staff-modal-card staff-mgmt-modal-card">

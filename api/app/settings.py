@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     admin_recovery_base_url: str | None = None
     cors_allowed_origins: str | None = Field(default=None)
     operational_security_log_directory: Path | None = Field(default=None)
+    mercado_pago_access_token: SecretStr | None = None
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":
@@ -64,6 +65,13 @@ class Settings(BaseSettings):
     @property
     def admin_recovery_configured(self) -> bool:
         return self.admin_auth_configured and self.admin_recovery_ttl_seconds is not None and self.admin_recovery_base_url is not None
+
+    @property
+    def mercado_pago_configured(self) -> bool:
+        return (
+            self.mercado_pago_access_token is not None
+            and len(self.mercado_pago_access_token.get_secret_value().strip()) > 0
+        )
 
     @model_validator(mode="after")
     def validate_recovery_url(self) -> "Settings":

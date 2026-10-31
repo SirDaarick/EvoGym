@@ -4,6 +4,7 @@ import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { useAdminSession } from '../features/auth/AdminSessionProvider';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from './ApiMembers';
 import { ApiStaffAttendance } from './ApiStaffAttendance';
+import { ApiReceptionHome } from './ApiReceptionHome';
 import { Shifts } from '../features/shifts/Shifts';
 import { Inventory } from '../features/inventory/Inventory';
 import { OwnerManagementPage } from '../features/auth/OwnerManagementPage';
@@ -105,7 +106,9 @@ export function ApiProductApp() {
   if (requestedRole !== role) return <Navigate to={homePath(role)} replace />;
 
   let content = <UnavailablePage title={pageTitles[pathname] ?? 'Función no disponible'} />;
-  if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
+  if (pathname === '/reception/home' && principal.kind === 'employee') {
+    content = <ApiReceptionHome request={apiRequest} actorId={principal.identity.id} />;
+  } else if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
     content = <PlanCatalog apiRequest={apiRequest} />;
   } else if (pathname === '/owner/expenses' && isAdmin && admin.status === 'authenticated') {
     content = <ExpenseReport apiRequest={apiRequest} />;

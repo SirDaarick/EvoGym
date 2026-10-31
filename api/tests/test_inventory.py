@@ -16,6 +16,82 @@ import pytest
 from app.inventory.queries import capture_register_inventory_snapshot, create_product, list_branch_stock, list_products
 
 
+def test_receptionist_can_read_other_branch_stock_and_registers(tmp_path):
+    from test_shifts import _seed_branch, _seed_receptionist, _setup_db
+    from app.shifts.queries import create_cash_register
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        home = _seed_branch(factory, 'home', 'Home')
+        other = _seed_branch(factory, 'other', 'Other')
+        _, token = _seed_receptionist(factory, home)
+        with factory.begin() as session:
+            register = create_cash_register(session, other, 'other-register', 'Other register')
+            register_id = str(register.id)
+        headers = {'Authorization': f'Bearer {token}'}
+        with TestClient(create_app(configured_settings(url))) as client:
+            stock = client.get(f'/api/v1/inventory/branches/{other}/stock', headers=headers)
+            assert stock.status_code == 200
+            registers = client.get('/api/v1/registers', headers=headers)
+            assert registers.status_code == 200
+            assert register_id in [item['id'] for item in registers.json()]
+    finally:
+        engine.dispose()
+
+
+def test_non_receptionist_reads_remain_branch_scoped(tmp_path):
+    from app.api.inventory import InventoryActorPrincipal, _actor
+    from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
+    from test_shifts import _seed_branch, _seed_receptionist, _setup_db
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        home = _seed_branch(factory, 'home', 'Home')
+        other = _seed_branch(factory, 'other', 'Other')
+        actor, _ = _seed_receptionist(factory, home)
+        with factory.begin() as session:
+            session.query(RoleGrant).filter_by(staff_id=actor).update({'is_active': False})
+        app = create_app(configured_settings(url))
+        app.dependency_overrides[_actor] = lambda: InventoryActorPrincipal(actor, False, home)
+        app.dependency_overrides[get_shift_actor_principal] = lambda: ShiftActorPrincipal(actor, False, home)
+        with TestClient(app) as client:
+            assert client.get(f'/api/v1/inventory/branches/{other}/stock').status_code == 403
+            assert client.get(f'/api/v1/registers?branch_id={other}').status_code == 403
+    finally:
+        engine.dispose()
+
+
+def test_direct_cross_branch_reads_authorize_only_active_receptionists(tmp_path):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.api.inventory import InventoryActorPrincipal, list_stock_endpoint
+    from app.api.shifts import ShiftActorPrincipal, list_registers_endpoint
+    from test_shifts import _seed_branch, _seed_receptionist, _setup_db
+    from app.shifts.queries import create_cash_register
+
+    _, engine, factory = _setup_db(tmp_path)
+    try:
+        home, other = _seed_branch(factory, 'home', 'Home'), _seed_branch(factory, 'other', 'Other')
+        actor, _ = _seed_receptionist(factory, home)
+        with factory.begin() as session:
+            register_id = create_cash_register(session, other, 'front', 'Front').id
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=factory)))
+        stock_actor = InventoryActorPrincipal(actor, False, home)
+        shift_actor = ShiftActorPrincipal(actor, False, home)
+        assert list_stock_endpoint(other, request, 0, 50, stock_actor).total == 0
+        assert str(register_id) in [row.id for row in list_registers_endpoint(request, None, shift_actor)]
+        with factory.begin() as session:
+            session.query(RoleGrant).filter_by(staff_id=actor).update({'is_active': False})
+        with pytest.raises(HTTPException) as stock_denied:
+            list_stock_endpoint(other, request, 0, 50, stock_actor)
+        assert stock_denied.value.status_code == 403
+        with pytest.raises(HTTPException) as register_denied:
+            list_registers_endpoint(request, other, shift_actor)
+        assert register_denied.value.status_code == 403
+    finally:
+        engine.dispose()
+
+
 def test_admin_can_create_piece_product_without_creating_stock(tmp_path):
     url = f"sqlite+pysqlite:///{(tmp_path / 'inventory.db').as_posix()}"
     engine = create_engine(url)
@@ -498,13 +574,13 @@ def test_stock_movements_ledger_invariants_and_branch_scope(tmp_path):
             admin_headers = approved_admin_headers(client, delivery)
             staff_headers = {"Authorization": f"Bearer {staff_token}"}
 
-            # 1. Reception staff can read stock for central branch, but receives 403 on north branch
+            # Reception staff can read stock in both branches.
             central_stock = client.get(f"/api/v1/inventory/branches/{central_id}/stock", headers=staff_headers)
             assert central_stock.status_code == 200
             assert central_stock.json()["items"][0]["quantity"] == 10
 
             north_stock = client.get(f"/api/v1/inventory/branches/{north_id}/stock", headers=staff_headers)
-            assert north_stock.status_code == 403
+            assert north_stock.status_code == 200
 
             # 2. Restock movement (+5)
             restock_res = client.post(

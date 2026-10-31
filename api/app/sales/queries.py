@@ -6,16 +6,479 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, select
+from sqlalchemy import func, null, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Branch, CashRegister, ClassSampleEntitlement, Member, MembershipPeriod, Order, OrderItem, Payment,
     MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
+    Product, StockInitialization, StockMovement, ProductRefund, ProductSaleCancellation, ProductSaleIntent, StaffUser,
 )
-from app.sales.schemas import RegisterMemberOpenDebtDTO
+from app.inventory.queries import get_on_hand_stock
+from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, RegisterMemberOpenDebtDTO
 
 MAX_MINOR = 2**63 - 1
+
+
+def product_sale_fingerprint(register_id, member_id, items, expected_total_minor):
+    lines = sorted((str(item.product_id), item.quantity) for item in items)
+    return sha256(repr((str(register_id), str(member_id), lines, expected_total_minor)).encode()).hexdigest()
+
+
+def get_product_sale_intent(session, *, actor_id):
+    return session.get(ProductSaleIntent, actor_id)
+
+
+def prepare_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+    seller = session.scalar(select(StaffUser).where(StaffUser.id == actor_id).with_for_update(key_share=True))
+    if seller is None or not seller.is_active:
+        raise CashSaleConflictError("Staff account is inactive.")
+    register = session.get(CashRegister, register_id)
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    existing = session.get(ProductSaleIntent, actor_id)
+    if existing:
+        if existing.register_id != register_id or existing.idempotency_key != idempotency_key or existing.request_fingerprint != fingerprint:
+            raise CashSaleConflictError("Another product sale intent is unresolved.")
+        return existing
+    if session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key)):
+        raise CashSaleConflictError("Product sale intent was cancelled.")
+    if session.scalar(select(Order.id).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
+                                             Order.idempotency_key == idempotency_key)):
+        raise CashSaleConflictError("Product sale intent was already completed.")
+    intent = ProductSaleIntent(seller_id=actor_id, register_id=register_id, idempotency_key=idempotency_key,
+        request_fingerprint=fingerprint, payload={"member_id": str(member_id) if member_id else None,
+        "items": [{"product_id": str(item.product_id), "quantity": item.quantity} for item in items],
+        "expected_total_minor": expected_total_minor})
+    session.add(intent)
+    session.flush()
+    return intent
+
+
+def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+    # Keep seller serialization compatible with shift-close foreign key checks.
+    session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
+    register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
+    if cancellation is not None:
+        raise CashSaleConflictError("Product sale intent was cancelled.")
+    existing = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
+                                                  Order.idempotency_key == idempotency_key).with_for_update())
+    if existing:
+        if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return existing, True
+    if register.status != "active":
+        raise CashSaleConflictError("Cash register is not active.")
+    branch = session.get(Branch, register.branch_id)
+    if branch is None or not branch.is_active:
+        raise CashSaleConflictError("Branch is not active.")
+    shift = session.scalar(select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update())
+    is_overtime = shift is None
+    if is_overtime:
+        shift = session.scalar(select(Shift).where(
+            Shift.cash_register_id == register_id, Shift.status == "closed", Shift.closed_at.is_not(None)
+        ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update())
+        if shift is None:
+            raise CashSaleConflictError("Open the first shift before making a sale.")
+    if member_id is not None and session.get(Member, member_id) is None:
+        raise CashSaleNotFoundError("Member not found.")
+    if len({item.product_id for item in items}) != len(items):
+        raise CashSaleConflictError("Each product may occur only once.")
+    rows = []
+    total = 0
+    for item in sorted(items, key=lambda line: str(line.product_id)):
+        product = session.scalar(select(Product).where(Product.id == item.product_id).with_for_update())
+        if product is None or not product.is_active:
+            raise CashSaleNotFoundError("Active product not found.")
+        initialization = session.scalar(select(StockInitialization).where(
+            StockInitialization.branch_id == register.branch_id, StockInitialization.product_id == product.id
+        ).with_for_update())
+        if initialization is None or get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id) < item.quantity:
+            raise CashSaleConflictError("Product stock is not initialized or insufficient.")
+        line_total = product.price_minor * item.quantity
+        total += line_total
+        if total > MAX_MINOR:
+            raise ValueError("Sale total exceeds supported minor units.")
+        rows.append((product, item.quantity, line_total))
+    if total != expected_total_minor:
+        raise CashSaleConflictError("Product prices changed; review the total.")
+    order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
+                  financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
+                  member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
+                  request_fingerprint=fingerprint, total_minor=total)
+    session.add(order)
+    session.flush()
+    for number, (product, quantity, line_total) in enumerate(rows, 1):
+        line = OrderItem(order_id=order.id, product_id=product.id, plan_version_id=None,
+                         item_kind="product", entitlement_mode=null(), line_number=number,
+                         description_snapshot=product.name, quantity=quantity,
+                         unit_amount_minor=product.price_minor, line_total_minor=line_total)
+        session.add(line)
+        session.flush()
+        session.add(StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
+                                  quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
+                                  idempotency_key=f"sale:{line.id}"))
+    session.add(Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total, received_by=actor_id))
+    session.flush()
+    session.refresh(order, ["items", "payment"])
+    return order, False
+
+
+def post_card_product_sale(
+    session: Session,
+    *,
+    register_id: UUID,
+    actor_id: UUID,
+    member_id: UUID | None,
+    items: list[ProductCartLineRequest],
+    expected_total_minor: int,
+    idempotency_key: str,
+    card_intent_id: str,
+    terminal_id: UUID | None = None,
+    card_brand: str | None = None,
+    card_last_four: str | None = None,
+    authorization_code: str | None = None,
+    mp_payment_id: str | None = None,
+) -> tuple[Order, bool]:
+    # Keep seller serialization compatible with shift-close foreign key checks.
+    session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
+    register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
+    if cancellation is not None:
+        raise CashSaleConflictError("Product sale intent was cancelled.")
+    existing = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
+                                                  Order.idempotency_key == idempotency_key).with_for_update())
+    if existing:
+        if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return existing, True
+    if register.status != "active":
+        raise CashSaleConflictError("Cash register is not active.")
+    branch = session.get(Branch, register.branch_id)
+    if branch is None or not branch.is_active:
+        raise CashSaleConflictError("Branch is not active.")
+    shift = session.scalar(select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update())
+    is_overtime = shift is None
+    if is_overtime:
+        shift = session.scalar(select(Shift).where(
+            Shift.cash_register_id == register_id, Shift.status == "closed", Shift.closed_at.is_not(None)
+        ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update())
+        if shift is None:
+            raise CashSaleConflictError("Open the first shift before making a sale.")
+    if member_id is not None and session.get(Member, member_id) is None:
+        raise CashSaleNotFoundError("Member not found.")
+    if len({item.product_id for item in items}) != len(items):
+        raise CashSaleConflictError("Each product may occur only once.")
+    rows = []
+    total = 0
+    for item in sorted(items, key=lambda line: str(line.product_id)):
+        product = session.scalar(select(Product).where(Product.id == item.product_id).with_for_update())
+        if product is None or not product.is_active:
+            raise CashSaleNotFoundError("Active product not found.")
+        initialization = session.scalar(select(StockInitialization).where(
+            StockInitialization.branch_id == register.branch_id, StockInitialization.product_id == product.id
+        ).with_for_update())
+        if initialization is None or get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id) < item.quantity:
+            raise CashSaleConflictError("Product stock is not initialized or insufficient.")
+        line_total = product.price_minor * item.quantity
+        total += line_total
+        if total > MAX_MINOR:
+            raise ValueError("Sale total exceeds supported minor units.")
+        rows.append((product, item.quantity, line_total))
+    if total != expected_total_minor:
+        raise CashSaleConflictError("Product prices changed; review the total.")
+    order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
+                  financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
+                  member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
+                  request_fingerprint=fingerprint, total_minor=total)
+    session.add(order)
+    session.flush()
+    for number, (product, quantity, line_total) in enumerate(rows, 1):
+        line = OrderItem(order_id=order.id, product_id=product.id, plan_version_id=None,
+                         item_kind="product", entitlement_mode=null(), line_number=number,
+                         description_snapshot=product.name, quantity=quantity,
+                         unit_amount_minor=product.price_minor, line_total_minor=line_total)
+        session.add(line)
+        session.flush()
+        session.add(StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
+                                  quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
+                                  idempotency_key=f"sale:{line.id}"))
+    payment = Payment(
+        order_id=order.id,
+        method="card",
+        status="confirmed",
+        amount_minor=total,
+        received_by=actor_id,
+        terminal_id=terminal_id,
+        mp_payment_intent_id=card_intent_id,
+        mp_payment_id=mp_payment_id,
+        card_brand=card_brand,
+        card_last_four=card_last_four,
+        authorization_code=authorization_code,
+    )
+    session.add(payment)
+    session.flush()
+    session.refresh(order, ["items", "payment"])
+    return order, False
+
+
+def resolve_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+    # Both operations lock the seller first so cancellation cannot race a delayed POST.
+    session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
+    register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
+    if register is None:
+        raise CashSaleNotFoundError("Cash register not found.")
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    order = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
+                                               Order.idempotency_key == idempotency_key))
+    if order is not None:
+        if order.order_kind != "product" or order.request_fingerprint != fingerprint:
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return order
+    cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
+    if cancellation is not None:
+        if cancellation.request_fingerprint != fingerprint:
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return None
+    session.add(ProductSaleCancellation(seller_id=actor_id, branch_id=register.branch_id,
+                                        idempotency_key=idempotency_key, request_fingerprint=fingerprint))
+    session.flush()
+    return None
+
+
+def product_return_fingerprint(register_id, order_item_id, reason, disposition, payout_method):
+    return sha256(repr((str(register_id), str(order_item_id), reason.strip(), disposition, payout_method)).encode()).hexdigest()
+
+
+class ProductReturnNotFoundError(LookupError):
+    """A requested member, register, order item, or shift is unavailable."""
+
+
+class ProductReturnConflictError(ValueError):
+    """A return request conflicts with eligibility, idempotency, or current state."""
+
+
+def list_eligible_product_returns(
+    session: Session,
+    *,
+    register_id: UUID,
+    member_id: UUID,
+) -> list[EligibleProductReturnDTO]:
+    register = session.get(CashRegister, register_id)
+    if register is None:
+        raise ProductReturnNotFoundError("Cash register not found.")
+    member = session.get(Member, member_id)
+    if member is None:
+        raise ProductReturnNotFoundError("Member not found.")
+    branch = session.get(Branch, register.branch_id)
+    if branch is None:
+        raise ProductReturnNotFoundError("Branch not found.")
+
+    try:
+        branch_zone = ZoneInfo(branch.timezone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise InvalidBranchTimezoneError("Branch timezone is invalid.") from exc
+
+    today = datetime.now(timezone.utc).astimezone(branch_zone).date()
+
+    orders = session.scalars(
+        select(Order)
+        .where(
+            Order.member_id == member_id,
+            Order.branch_id == register.branch_id,
+            Order.order_kind == "product",
+        )
+        .order_by(Order.created_at.desc(), Order.id.desc())
+    ).all()
+
+    eligible: list[EligibleProductReturnDTO] = []
+    for order in orders:
+        if not order.payment or order.payment.status != "confirmed":
+            continue
+        order_created = order.created_at if order.created_at.tzinfo is not None else order.created_at.replace(tzinfo=timezone.utc)
+        if order_created.astimezone(branch_zone).date() != today:
+            continue
+
+        for item in order.items:
+            if item.item_kind != "product" or item.product_id is None:
+                continue
+            is_refunded = session.scalar(
+                select(ProductRefund.id).where(ProductRefund.order_item_id == item.id)
+            ) is not None
+            if is_refunded:
+                continue
+            eligible.append(
+                EligibleProductReturnDTO(
+                    order_item_id=item.id,
+                    order_id=order.id,
+                    product_id=item.product_id,
+                    product_name=item.description_snapshot,
+                    quantity=item.quantity,
+                    unit_amount_minor=item.unit_amount_minor,
+                    line_total_minor=item.line_total_minor,
+                    original_payment_method=order.payment.method,
+                    created_at=order.created_at,
+                )
+            )
+    return eligible
+
+
+def post_product_return(
+    session: Session,
+    *,
+    register_id: UUID,
+    actor_id: UUID,
+    order_item_id: UUID,
+    reason: str,
+    disposition: str,
+    payout_method: str,
+    idempotency_key: str,
+) -> tuple[ProductRefund, bool]:
+    clean_reason = reason.strip() if isinstance(reason, str) else ""
+    if not clean_reason or len(clean_reason) > 240:
+        raise ValueError("Reason must be between 1 and 240 characters.")
+    if disposition not in ("restock", "waste"):
+        raise ValueError("Disposition must be 'restock' or 'waste'.")
+    if payout_method not in ("cash", "card"):
+        raise ValueError("Payout method must be 'cash' or 'card'.")
+
+    actor = session.scalar(select(StaffUser).where(StaffUser.id == actor_id).with_for_update(key_share=True))
+    if actor is None or not actor.is_active:
+        raise ProductReturnConflictError("Staff account is inactive.")
+
+    register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
+    if register is None:
+        raise ProductReturnNotFoundError("Cash register not found.")
+    if register.status != "active":
+        raise ProductReturnConflictError("Cash register is not active.")
+
+    branch = session.get(Branch, register.branch_id)
+    if branch is None or not branch.is_active:
+        raise ProductReturnConflictError("Branch is not active.")
+
+    fingerprint = product_return_fingerprint(register_id, order_item_id, clean_reason, disposition, payout_method)
+
+    existing = session.scalar(
+        select(ProductRefund).where(
+            ProductRefund.actor_id == actor_id,
+            ProductRefund.branch_id == register.branch_id,
+            ProductRefund.idempotency_key == idempotency_key,
+        ).with_for_update()
+    )
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise ProductReturnConflictError("Idempotency key was already used for a different request.")
+        return existing, True
+
+    shift = session.scalar(
+        select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update()
+    )
+    is_overtime = shift is None
+    if is_overtime:
+        shift = session.scalar(
+            select(Shift).where(
+                Shift.cash_register_id == register_id, Shift.status == "closed", Shift.closed_at.is_not(None)
+            ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update()
+        )
+        if shift is None:
+            raise ProductReturnConflictError("Open the first shift before recording a return.")
+
+    order_item = session.scalar(select(OrderItem).where(OrderItem.id == order_item_id).with_for_update())
+    if order_item is None:
+        raise ProductReturnNotFoundError("Order item not found.")
+    if order_item.item_kind != "product" or order_item.product_id is None:
+        raise ProductReturnConflictError("Only product order items can be returned.")
+
+    order = session.scalar(select(Order).where(Order.id == order_item.order_id).with_for_update())
+    if order is None:
+        raise ProductReturnNotFoundError("Order not found.")
+    if order.order_kind != "product":
+        raise ProductReturnConflictError("Only product orders can be returned.")
+    if order.member_id is None:
+        raise ProductReturnConflictError("Unassigned sales cannot be returned.")
+    if order.branch_id != register.branch_id:
+        raise ProductReturnConflictError("Cross-branch returns are not allowed.")
+    if order.payment is None or order.payment.status != "confirmed":
+        raise ProductReturnConflictError("Only orders with confirmed payment can be returned.")
+
+    try:
+        branch_zone = ZoneInfo(branch.timezone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+        raise InvalidBranchTimezoneError("Branch timezone is invalid.") from exc
+
+    effective_at = datetime.now(timezone.utc)
+    local_today = effective_at.astimezone(branch_zone).date()
+    order_created_at = order.created_at if order.created_at.tzinfo is not None else order.created_at.replace(tzinfo=timezone.utc)
+    if order_created_at.astimezone(branch_zone).date() != local_today:
+        raise ProductReturnConflictError("Returns are only allowed on the same calendar day of purchase.")
+
+    already_refunded = session.scalar(
+        select(ProductRefund.id).where(ProductRefund.order_item_id == order_item.id).with_for_update()
+    )
+    if already_refunded is not None:
+        raise ProductReturnConflictError("This product order item has already been returned.")
+
+    session.scalar(
+        select(StockInitialization).where(
+            StockInitialization.branch_id == register.branch_id,
+            StockInitialization.product_id == order_item.product_id,
+        ).with_for_update()
+    )
+
+    refund_id = uuid4()
+    refund = ProductRefund(
+        id=refund_id,
+        order_item_id=order_item.id,
+        branch_id=register.branch_id,
+        register_id=register_id,
+        shift_id=shift.id,
+        financial_shift_id=None if is_overtime else shift.id,
+        actor_id=actor_id,
+        reason=clean_reason,
+        disposition=disposition,
+        payout_method=payout_method,
+        amount_minor=order_item.line_total_minor,
+        quantity=order_item.quantity,
+        idempotency_key=idempotency_key,
+        request_fingerprint=fingerprint,
+    )
+    session.add(refund)
+
+    if disposition == "restock":
+        movement = StockMovement(
+            branch_id=register.branch_id,
+            product_id=order_item.product_id,
+            kind="return",
+            quantity=order_item.quantity,
+            reason=f"Return: {clean_reason}",
+            recorded_by=actor_id,
+            order_item_id=None,
+            idempotency_key=f"return:{refund_id}",
+        )
+        session.add(movement)
+    elif disposition == "waste":
+        movement = StockMovement(
+            branch_id=register.branch_id,
+            product_id=order_item.product_id,
+            kind="waste",
+            quantity=order_item.quantity,
+            reason=f"Return waste: {clean_reason}",
+            recorded_by=actor_id,
+            order_item_id=None,
+            idempotency_key=f"return:{refund_id}",
+        )
+        session.add(movement)
+
+    session.flush()
+    return refund, False
 
 
 class CashSaleNotFoundError(LookupError):

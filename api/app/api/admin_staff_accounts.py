@@ -29,7 +29,11 @@ from app.db.models import (
     StaffRosterProfile,
     StaffSession,
     StaffUser,
+    ProductSaleIntent,
+    ProductSaleResolution,
 )
+from app.sales.queries import resolve_product_sale
+from app.sales.schemas import CashProductSaleRequest
 from app.observability.security import SecurityEventType, make_security_event, queue_security_event
 
 router = APIRouter(prefix="/api/v1/admin/staff-accounts", tags=["admin staff accounts"])
@@ -45,6 +49,11 @@ class AdminPrincipal:
 class StaffAccountLinkRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     staff_user_id: UUID
+
+
+class ResolveProductSaleIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str
 
 
 class StaffAccountItem(BaseModel):
@@ -129,11 +138,11 @@ def _utc(value: datetime) -> datetime:
 
 def _require_live_admin(
     session, principal: AdminPrincipal, *, branch_id: UUID | None = None, target_id: UUID | None = None,
-    computer_only: bool = False,
+    computer_only: bool = False, allow_inactive_target: bool = False,
 ) -> tuple[StaffUser, StaffUser | None, Branch | None]:
     staff_ids = sorted({principal.staff_id, *([target_id] if target_id is not None else [])}, key=str)
     staff_rows = session.scalars(
-        select(StaffUser).where(StaffUser.id.in_(staff_ids)).order_by(StaffUser.id).with_for_update()
+        select(StaffUser).where(StaffUser.id.in_(staff_ids)).order_by(StaffUser.id).with_for_update(key_share=True)
     ).all()
     staff_by_id = {row.id: row for row in staff_rows}
     actor = staff_by_id.get(principal.staff_id)
@@ -179,7 +188,7 @@ def _require_live_admin(
         raise HTTPException(403, "Employee-management permission is required.")
     auth_session.last_seen_at = now
     device.last_used_at = now
-    if target_id is not None and (target is None or not target.is_active):
+    if target_id is not None and (target is None or (not target.is_active and not allow_inactive_target)):
         raise HTTPException(404, "Staff account not found.")
     if branch_id is not None and (branch is None or not branch.is_active):
         raise HTTPException(404, "Branch not found.")
@@ -202,6 +211,8 @@ def deactivate_staff_account(staff_id: UUID, request: Request, principal: AdminP
         ).with_for_update())
         if owner is not None or legacy_owner is not None:
             raise HTTPException(409, "The organization owner cannot be deactivated.")
+        if session.get(ProductSaleIntent, staff_id) is not None:
+            raise HTTPException(409, "Resolve this employee's pending product sale before deactivation.")
         target.is_active = False
         for row in session.scalars(select(StaffSession).where(
             StaffSession.staff_id == staff_id, StaffSession.revoked_at.is_(None),
@@ -223,6 +234,35 @@ def deactivate_staff_account(staff_id: UUID, request: Request, principal: AdminP
             occurred_at=now,
         ))
     return Response(status_code=204)
+
+
+@router.get("/{staff_id}/product-sale-intent")
+def get_staff_product_sale_intent(staff_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
+    with request.app.state.session_factory.begin() as session:
+        _require_live_admin(session, principal, target_id=staff_id, allow_inactive_target=True)
+        intent = session.get(ProductSaleIntent, staff_id)
+        if intent is None:
+            return None
+        return {"key": intent.idempotency_key, "register_id": str(intent.register_id), "payload": intent.payload}
+
+
+@router.post("/{staff_id}/product-sale-intent/resolve")
+def resolve_staff_product_sale_intent(staff_id: UUID, body: ResolveProductSaleIntentRequest, request: Request,
+                                      principal: AdminPrincipal = Depends(_principal)):
+    with request.app.state.session_factory.begin() as session:
+        _require_live_admin(session, principal, target_id=staff_id, allow_inactive_target=True)
+        intent = session.get(ProductSaleIntent, staff_id)
+        if intent is None or intent.idempotency_key != body.key:
+            raise HTTPException(409, "The pending sale changed. Refresh before resolving it.")
+        payload = CashProductSaleRequest.model_validate(intent.payload)
+        order = resolve_product_sale(session, register_id=intent.register_id, actor_id=staff_id,
+            member_id=payload.member_id, items=payload.items, expected_total_minor=payload.expected_total_minor,
+            idempotency_key=intent.idempotency_key)
+        result = "completed" if order is not None else "cancelled"
+        session.add(ProductSaleResolution(actor_id=principal.staff_id, seller_id=staff_id,
+            register_id=intent.register_id, idempotency_key=intent.idempotency_key, result=result))
+        session.delete(intent)
+        return {"status": result, "order_id": str(order.id) if order else None}
 
 
 @router.get("/reception-stations", response_model=ReceptionStationPage)

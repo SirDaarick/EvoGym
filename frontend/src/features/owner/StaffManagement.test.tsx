@@ -408,3 +408,32 @@ describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
     });
   });
 });
+
+it('requires an administrator to resolve a pending sale before disabling the account', async () => {
+  const user = userEvent.setup();
+  const branch = '00000000-0000-4000-8000-000000000001';
+  const profile = '11111111-1111-4111-8111-111111111111';
+  const staff = '22222222-2222-4222-8222-222222222222';
+  const register = '33333333-3333-4333-8333-333333333333';
+  let pending = true;
+  const request = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/branches')) return new Response(JSON.stringify({ branches: [{ id: branch, code: 'B', name: 'Branch' }] }));
+    if (path.includes('/roster-profiles')) return new Response(JSON.stringify({ profiles: [{ id: profile, full_name: 'Employee', position: 'Receptionist', is_active: true, staff_user_id: staff }] }));
+    if (path.includes('/admin/staff-accounts?')) return new Response(JSON.stringify({ accounts: [{ id: staff, login_identifier: 'employee', is_active: true, link_state: 'linked', linked_profile_id: profile }] }));
+    if (path.endsWith('/product-sale-intent/resolve')) { pending = false; return new Response(JSON.stringify({ status: 'cancelled' })); }
+    if (path.endsWith('/product-sale-intent')) return new Response(JSON.stringify(pending ? { key: 'sale', register_id: register, payload: { expected_total_minor: 500, items: [{ product_id: register, quantity: 1 }] } } : null));
+    if (path.includes('/deactivate/')) return new Response(null, { status: 204 });
+    if (path.includes('/staff-schedules/')) return new Response(JSON.stringify([]));
+    return new Response(null, { status: 404 });
+  });
+  mockAdminSession = { status: 'authenticated', request };
+  render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText(/Branch/)).toBeInTheDocument());
+  await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
+  await user.click(await screen.findByRole('button', { name: 'Desactivar cuenta' }));
+  expect(await screen.findByText(/Hay una venta pendiente/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Confirmar desactivación de cuenta' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Resolver venta pendiente' }));
+  await user.click(await screen.findByRole('button', { name: 'Confirmar desactivación de cuenta' }));
+  await waitFor(() => expect(request).toHaveBeenCalledWith(expect.stringContaining('/deactivate/'), expect.objectContaining({ method: 'POST' })));
+});

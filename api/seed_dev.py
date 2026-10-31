@@ -1,34 +1,40 @@
 import sys
 from pathlib import Path
 from uuid import UUID, uuid4
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 # Add api directory to sys.path
 api_dir = Path(__file__).resolve().parent
 if str(api_dir) not in sys.path:
     sys.path.insert(0, str(api_dir))
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models import Branch, StaffUser, StaffCredential, RoleGrant, StaffRosterProfile, CashRegister, Plan, PlanVersion, Member, AdminPasswordCredential
+from app.db.models import Branch, StaffUser, StaffCredential, RoleGrant, StaffRosterProfile, CashRegister, Plan, PlanVersion, Member, AdminPasswordCredential, Product, StockInitialization
 from app.auth.hashing import hash_pin
 from app.auth.passwords import hash_admin_password
 from app.auth.devices import issue_device_pairing_code
 from app.shifts.queries import create_cash_register, open_shift
 from app.inventory.queries import capture_register_inventory_snapshot
 from app.main import create_app
-from app.settings import Settings
+from app.settings import get_settings, Settings
 from fastapi.testclient import TestClient
 
-db_file = api_dir / "dev.db"
-if db_file.exists():
-    db_file.unlink()
-
-db_url = f"sqlite+pysqlite:///{db_file.as_posix()}"
+settings = get_settings()
+db_url = settings.require_database_url()
 engine = create_engine(db_url)
-Base.metadata.create_all(engine)
+
+if engine.dialect.name == "postgresql":
+    with engine.begin() as conn:
+        conn.execute(text("TRUNCATE TABLE branches, staff_users, members, plans, products CASCADE;"))
+else:
+    db_file = api_dir / "dev.db"
+    if db_file.exists():
+        db_file.unlink()
+    Base.metadata.create_all(engine)
+
 factory = sessionmaker(engine)
 
 # 1. Seed Branch
@@ -38,7 +44,7 @@ with factory.begin() as session:
     session.flush()
     branch_id = branch.id
 
-    # 2. Seed Receptionist
+    # 2. Seed Receptionist and Admin
     staff = StaffUser(login_identifier="recepcion")
     admin_user = StaffUser(login_identifier="admin@evogym.com")
     session.add_all([staff, admin_user])
@@ -51,7 +57,6 @@ with factory.begin() as session:
     profile = StaffRosterProfile(branch_id=branch_id, staff_user_id=staff_id, full_name="Recepcionista Centro", position="Recepción")
     
     admin_grant = RoleGrant(staff_id=admin_id, role="admin", scope_kind="organization")
-    from datetime import datetime, timezone
     admin_cred = AdminPasswordCredential(
         staff_id=admin_id, password_hash=hash_admin_password("Admin1234!"),
         recovery_email="admin@evogym.com", recovery_email_verified_at=datetime.now(timezone.utc),
@@ -102,20 +107,21 @@ with factory.begin() as session:
     m1_id = m1.id
     m2_id = m2.id
 
+    # 6. Seed Sample Products and Initial Stock
+    p1 = Product(code="agua-1l", name="Agua Natural 1L", category="Bebidas", price_minor=2000, cost_minor=1000, is_active=True, unit="piece", created_by=admin_id)
+    p2 = Product(code="isotonica", name="Bebida Isotónica", category="Bebidas", price_minor=3500, cost_minor=1800, is_active=True, unit="piece", created_by=admin_id)
+    session.add_all([p1, p2])
+    session.flush()
+
+    s1 = StockInitialization(branch_id=branch_id, product_id=p1.id, quantity=20, initialized_by=admin_id)
+    s2 = StockInitialization(branch_id=branch_id, product_id=p2.id, quantity=15, initialized_by=admin_id)
+    session.add_all([s1, s2])
+    session.flush()
+
 # 6. Issue reception session and buy membership for Member 1 using TestClient
-from datetime import datetime, timezone
 from app.auth.sessions import issue_session
 issued = issue_session(factory, login_identifier="recepcion", pin="123456", branch_id=branch_id, expires_at=datetime.now(timezone.utc) + timedelta(days=1))
 token = issued.token
-
-settings = Settings(
-    environment="test",
-    debug=False,
-    database_url=db_url,
-    admin_token_signing_secret="dev-secret-at-least-32-chars-long-here-1234",
-    cors_allowed_origins="http://localhost:5173",
-    _env_file=None
-)
 
 app = create_app(settings)
 with TestClient(app) as client:
@@ -131,7 +137,7 @@ with TestClient(app) as client:
 issued_pairing = issue_device_pairing_code(factory, admin_id, staff_id, ttl_seconds=86400)
 
 print("=" * 60)
-print("SEED COMPLETE")
+print("SEED COMPLETE ON POSTGRESQL")
 print(f"Branch ID: {branch_id}")
 print(f"Staff Token: {token}")
 print(f"Pairing Code: {issued_pairing.raw_code}")

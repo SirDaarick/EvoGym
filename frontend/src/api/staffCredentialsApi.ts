@@ -181,6 +181,34 @@ export async function deactivateStaffAccount(request: AdminRequest, staffId: str
   if (response.status !== 204) throw new StaffCredentialsApiError(response.status);
 }
 
+export interface StaffPendingSale {
+  key: string;
+  register_id: string;
+  payload: { expected_total_minor: number; items: { product_id: string; quantity: number }[] };
+}
+
+export async function getStaffPendingSale(request: AdminRequest, staffId: string): Promise<StaffPendingSale | null> {
+  if (!validUuid(staffId)) throw new StaffCredentialsApiError();
+  const body = await readJson(await request(`/api/v1/admin/staff-accounts/${staffId}/product-sale-intent`));
+  if (body === null) return null;
+  if (!isRecord(body) || typeof body.key !== 'string' || !validUuid(body.register_id) ||
+      !isRecord(body.payload) || !Number.isSafeInteger(body.payload.expected_total_minor) ||
+      !Array.isArray(body.payload.items) || !body.payload.items.every(item => isRecord(item) &&
+        validUuid(item.product_id) && Number.isSafeInteger(item.quantity) && Number(item.quantity) > 0)) {
+    throw new StaffCredentialsApiError();
+  }
+  return body as unknown as StaffPendingSale;
+}
+
+export async function resolveStaffPendingSale(request: AdminRequest, staffId: string, key: string): Promise<'completed' | 'cancelled'> {
+  if (!validUuid(staffId)) throw new StaffCredentialsApiError();
+  const body = await readJson(await request(`/api/v1/admin/staff-accounts/${staffId}/product-sale-intent/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }),
+  }));
+  if (!isRecord(body) || (body.status !== 'completed' && body.status !== 'cancelled')) throw new StaffCredentialsApiError();
+  return body.status;
+}
+
 function configuredOrigin(apiOrigin?: string): string {
   const configured = apiOrigin ?? import.meta.env?.VITE_API_BASE_URL;
   if (!configured) throw new StaffCredentialsConfigurationError();

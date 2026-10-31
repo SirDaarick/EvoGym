@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
 
 from app.auth.admin import validate_admin_session
@@ -210,17 +211,23 @@ def list_stock_endpoint(
     limit: int = Query(50, ge=1, le=100),
     principal: InventoryActorPrincipal = Depends(_actor),
 ):
-    if not principal.is_admin and principal.branch_id != branch_id:
-        raise HTTPException(403, "Access restricted to your assigned branch.")
-
     try:
         with _factory(request)() as session:
+            if not principal.is_admin and principal.branch_id != branch_id:
+                from app.db.models import RoleGrant
+                receptionist = session.scalar(select(RoleGrant.id).where(
+                    RoleGrant.staff_id == principal.staff_id, RoleGrant.role == "receptionist",
+                    RoleGrant.scope_kind == "branch", RoleGrant.branch_id == principal.branch_id,
+                    RoleGrant.is_active.is_(True),
+                )) is not None
+                if not receptionist:
+                    raise HTTPException(403, "Access restricted to your assigned branch.")
             rows, total = list_branch_stock(session, branch_id=branch_id, offset=offset, limit=limit)
             items = []
-            for product, initialization, restocked, waste in rows:
+            for product, initialization, restocked, waste, sold in rows:
                 initialized = initialization is not None
                 opening_qty = initialization.quantity if initialized else None
-                current_qty = (opening_qty + restocked - waste) if initialized else None
+                current_qty = (opening_qty + restocked - waste - sold) if initialized else None
                 items.append(
                     StockRowDTO(
                         product_id=product.id,

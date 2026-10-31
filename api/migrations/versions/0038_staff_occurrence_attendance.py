@@ -19,7 +19,7 @@ def _append_only(table: str, name: str) -> None:
         )
     elif connection.dialect.name == "postgresql":
         op.execute(
-            f"CREATE FUNCTION reject_{name}_mutation() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION '{table} are append-only'; END; $$ LANGUAGE plpgsql"
+            f"CREATE OR REPLACE FUNCTION reject_{name}_mutation() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION '{table} are append-only'; END; $$ LANGUAGE plpgsql"
         )
         op.execute(
             f"CREATE TRIGGER trg_{name}_no_update_delete BEFORE UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION reject_{name}_mutation()"
@@ -106,7 +106,7 @@ def downgrade() -> None:
         sa.text(
             "SELECT count(*) FROM staff_attendance_records "
             "WHERE series_id IS NOT NULL OR occurrence_date IS NOT NULL OR device_captured_at IS NOT NULL "
-            "OR idempotency_key IS NOT NULL OR clock_skew_seconds IS NOT NULL OR review_required = 1 OR schedule_conflict = 1"
+            "OR idempotency_key IS NOT NULL OR clock_skew_seconds IS NOT NULL OR review_required = true OR schedule_conflict = true"
         )
     ).scalar_one():
         raise RuntimeError("Cannot downgrade while staff attendance records contain occurrence-linked data.")
