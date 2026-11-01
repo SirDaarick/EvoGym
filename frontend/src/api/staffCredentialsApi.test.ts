@@ -20,6 +20,12 @@ function response(status: number, body?: unknown) {
 }
 
 describe('staff credentials API', () => {
+  it('retains the salary returned by the authorized roster endpoint', async () => {
+    const request = vi.fn().mockResolvedValue(response(200, { profiles: [{ id: staffId, full_name: 'Employee',
+      position: 'Coach', is_active: true, staff_user_id: null, monthly_salary_minor: 1400000 }] }));
+    await expect(listAdminRosterProfiles(request, branchId)).resolves.toEqual([{ id: staffId, full_name: 'Employee',
+      position: 'Coach', is_active: true, staff_user_id: null, monthly_salary_minor: 1400000 }]);
+  });
   it('validates the minimal admin choice contract and branch IDs', async () => {
     const request = vi.fn().mockResolvedValue(response(200, { branches: [{ id: branchId, code: 'north', name: 'North' }] }));
     await expect(listAdminBranches(request)).resolves.toEqual([{ id: branchId, code: 'north', name: 'North' }]);
@@ -53,6 +59,7 @@ describe('staff credentials API', () => {
   });
 
   it('requires a configured origin and sends the public change without credentials or bearer headers', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '');
     const fetchImpl = vi.fn().mockResolvedValue(response(204));
     await expect(submitFirstPinChange({ loginIdentifier: 'employee', branchId, currentPin: '123456', newPin: '654321' },
       { fetchImpl })).rejects.toBeInstanceOf(StaffCredentialsConfigurationError);
@@ -63,6 +70,7 @@ describe('staff credentials API', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('https://api.example.test/api/v1/staff/credentials/first-change');
     expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', credentials: 'omit', cache: 'no-store' });
     expect(fetchImpl.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Authorization');
+    vi.unstubAllEnvs();
   });
 
   it('maps public throttling and rejects unsafe origins', async () => {

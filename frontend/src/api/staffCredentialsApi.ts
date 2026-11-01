@@ -2,6 +2,7 @@ export interface AdminBranchChoice {
   id: string;
   code: string;
   name: string;
+  timezone?: string;
 }
 
 export interface AdminRosterProfileChoice {
@@ -10,6 +11,7 @@ export interface AdminRosterProfileChoice {
   position: string;
   is_active: boolean;
   staff_user_id: string | null;
+  monthly_salary_minor?: number;
 }
 
 export interface AdminStaffAccountChoice {
@@ -73,7 +75,8 @@ function parseBranches(value: unknown): AdminBranchChoice[] {
     if (!isRecord(row) || !validUuid(row.id) || typeof row.code !== 'string' || typeof row.name !== 'string') {
       throw new StaffCredentialsApiError();
     }
-    return { id: row.id, code: row.code, name: row.name };
+    if (row.timezone !== undefined && typeof row.timezone !== 'string') throw new StaffCredentialsApiError();
+    return { id: row.id, code: row.code, name: row.name, ...(row.timezone === undefined ? {} : { timezone: row.timezone }) };
   });
 }
 
@@ -81,10 +84,12 @@ function parseProfiles(value: unknown): AdminRosterProfileChoice[] {
   if (!isRecord(value) || !Array.isArray(value.profiles)) throw new StaffCredentialsApiError();
   return value.profiles.map(row => {
     if (!isRecord(row) || !validUuid(row.id) || typeof row.full_name !== 'string' || typeof row.position !== 'string' ||
-        typeof row.is_active !== 'boolean' || (row.staff_user_id !== null && !validUuid(row.staff_user_id))) {
+        typeof row.is_active !== 'boolean' || (row.staff_user_id !== null && !validUuid(row.staff_user_id)) ||
+        (row.monthly_salary_minor !== undefined && (!Number.isSafeInteger(row.monthly_salary_minor) || (row.monthly_salary_minor as number) < 0))) {
       throw new StaffCredentialsApiError();
     }
-    return { id: row.id, full_name: row.full_name, position: row.position, is_active: row.is_active, staff_user_id: row.staff_user_id };
+    return { id: row.id, full_name: row.full_name, position: row.position, is_active: row.is_active, staff_user_id: row.staff_user_id,
+      ...(row.monthly_salary_minor === undefined ? {} : { monthly_salary_minor: row.monthly_salary_minor as number }) };
   });
 }
 

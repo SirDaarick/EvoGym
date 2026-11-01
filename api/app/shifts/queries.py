@@ -391,6 +391,7 @@ def close_shift(
 
 def expected_cash_for_shift(session: Session, shift: Shift) -> int:
     """Calculate current expected cash from the same authoritative sources used by close."""
+    from app.db.models.expenses import Expense, ShiftCashContribution
     maximum = 2**63 - 1
     inflow = 0
     amounts = session.scalars(
@@ -425,6 +426,10 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
         if type(amount) is not int or amount < 0 or inflow > maximum - amount:
             raise ValueError("Rental cash inflow exceeds signed 64-bit minor units.")
         inflow += amount
+    for amount in session.scalars(select(ShiftCashContribution.amount_minor).where(ShiftCashContribution.shift_id == shift.id)):
+        if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
+            raise ValueError("Cash contribution inflow exceeds signed 64-bit minor units.")
+        inflow += amount
     if type(shift.opening_cash_minor) is not int or shift.opening_cash_minor < 0:
         raise ValueError("Opening cash is outside supported minor-unit bounds.")
     if shift.opening_cash_minor > maximum - inflow:
@@ -450,11 +455,16 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
         if type(amount) is not int or amount < 0 or refund_outflow > maximum - amount:
             raise ValueError("Rental cash refund outflow exceeds signed 64-bit minor units.")
         refund_outflow += amount
+    for amount in session.scalars(select(Expense.amount_minor).where(Expense.shift_id == shift.id, Expense.voided_at.is_(None))):
+        if type(amount) is not int or amount <= 0 or refund_outflow > maximum - amount:
+            raise ValueError("Cash expense outflow exceeds signed 64-bit minor units.")
+        refund_outflow += amount
     return shift.opening_cash_minor + inflow - refund_outflow
 
 
 def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]:
     """Return only canonical order and membership-debt payment activity for a shift."""
+    from app.db.models.expenses import Expense, ShiftCashContribution
     payment_rows = session.execute(
         select(Payment, Order)
         .join(Order, Order.id == Payment.order_id)
@@ -566,7 +576,10 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
 
     payments.sort(key=lambda row: (row["recorded_at"], str(row["id"])), reverse=True)
     activities = list(families.values()) if confirmed_minor else []
+    expense_amounts = list(session.scalars(select(Expense.amount_minor).where(Expense.shift_id == shift.id, Expense.voided_at.is_(None))))
+    extra_amounts = list(session.scalars(select(ShiftCashContribution.amount_minor).where(ShiftCashContribution.shift_id == shift.id)))
     return {"shift_id": shift.id, "confirmed_minor": confirmed_minor, "confirmed_cash_minor": cash_minor,
+            "expense_minor": sum(expense_amounts), "expense_count": len(expense_amounts), "extra_minor": sum(extra_amounts),
             "pending_transfer_minor": pending_transfer_minor,
             "payment_methods": sorted(methods.values(), key=lambda item: str(item["method"])),
             "activities": activities, "payments": payments,

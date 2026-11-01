@@ -7,7 +7,7 @@ describe('demo configuration', () => {
   it('allows demo only for the exact explicit true value', () => {
     for (const value of [undefined, '', 'false', 'TRUE', 'yes', '1']) {
       vi.unstubAllEnvs();
-      if (value !== undefined) vi.stubEnv('VITE_DEMO_MODE', value);
+      vi.stubEnv('VITE_DEMO_MODE', value);
       expect(isDemoModeEnabled()).toBe(false);
     }
     vi.stubEnv('VITE_DEMO_MODE', 'true');

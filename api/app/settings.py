@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     cors_allowed_origins: str | None = Field(default=None)
     operational_security_log_directory: Path | None = Field(default=None)
     mercado_pago_access_token: SecretStr | None = None
+    evidence_s3_endpoint: str | None = None
+    evidence_public_endpoint: str | None = None
+    evidence_s3_bucket: str | None = None
+    evidence_s3_access_key: SecretStr | None = None
+    evidence_s3_secret_key: SecretStr | None = None
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":

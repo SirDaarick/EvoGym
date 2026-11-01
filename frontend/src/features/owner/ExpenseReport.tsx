@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { PaginationState, SortingState, Updater } from '@tanstack/react-table';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import { listAdminExpenses, voidExpense, type ExpenseDTO } from '../../api/expensesApi';
 import {
   createTransferReviewIdempotencyKey,
   getPendingMoney,
   reviewTransferPayment,
   type PendingMoneyResponse,
 } from '../../api/pendingMoneyApi';
-import { createEmptyDemoState } from '../../demo/adapter';
+import { createEmptyDemoState, formatMoney } from '../../demo/adapter';
 import { useDemo } from '../../demo/DemoProvider';
-import { getExpenseReport } from '../../demo/expenseReportSelector';
+import { EXPENSE_CATEGORIES, formatExpenseDate, formatExpenseTime, getExpenseReport, localDateKey } from '../../demo/expenseReportSelector';
+import { GastoModal } from '../reception/GastoModal';
 import { useFixedCosts } from '../../demo/fixedCostsStore';
 import { getCurrentCalendarMonthRange, getFinanceProjection, getPreviousComparableRange, isValidFinanceRange } from '../../demo/financeReportSelector';
 import type { DemoState } from '../../domain/models';
@@ -60,7 +62,12 @@ function ExpenseReportContent({
   const [params, setParams] = useSearchParams();
   const fixedCosts = useFixedCosts();
   const staff = useStaff();
-  const defaultRange = getCurrentCalendarMonthRange(state.demoClock);
+  const defaultRange = apiRequest
+    ? (() => {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
+        return { from: `${today.slice(0, 7)}-01`, to: today };
+      })()
+    : getCurrentCalendarMonthRange(state.demoClock);
   const range = { from: params.get('from') ?? defaultRange.from, to: params.get('to') ?? defaultRange.to };
   const tabParam = params.get('tab');
   const active: FinanceTab = validTab(tabParam) ? tabParam : (apiRequest ? 'cobros' : 'balance');
@@ -79,6 +86,23 @@ function ExpenseReportContent({
   const [reviewingPaymentId, setReviewingPaymentId] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const reviewIdempotencyKeysRef = useRef<Map<string, string>>(new Map());
+  const [liveExpenses, setLiveExpenses] = useState<ExpenseDTO[]>([]);
+  const [expenseError, setExpenseError] = useState('');
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseRefresh, setExpenseRefresh] = useState(0);
+  const [expenseBranches, setExpenseBranches] = useState<{ id: string; name: string }[]>([]);
+  const [businessOpen, setBusinessOpen] = useState(false);
+
+  useEffect(() => {
+    if (!apiRequest || active !== 'gastos' || !isValidFinanceRange(range)) return;
+    let activeRequest = true;
+    setExpenseLoading(true); setExpenseError('');
+    listAdminExpenses(apiRequest, range.from, range.to, selectedBranchId === 'ALL' ? undefined : selectedBranchId)
+      .then(response => { if (activeRequest) { setLiveExpenses(response.items); setExpenseBranches(current => selectedBranchId === 'ALL' || current.length === 0 ? response.branches ?? [] : current); } })
+      .catch(error => { if (activeRequest) { setLiveExpenses([]); setExpenseError(error instanceof Error ? error.message : 'No se pudieron cargar los gastos.'); } })
+      .finally(() => { if (activeRequest) setExpenseLoading(false); });
+    return () => { activeRequest = false; };
+  }, [apiRequest, active, range.from, range.to, selectedBranchId, expenseRefresh]);
 
   const recordBranchOptions = useCallback((items: PendingMoneyResponse['items']) => {
     setBranchOptions(current => {
@@ -162,6 +186,15 @@ function ExpenseReportContent({
   const previousRange = useMemo(() => getPreviousComparableRange(range), [range.from, range.to]);
   const previousProjection = useMemo(() => getFinanceProjection(state, previousRange), [state, previousRange.from, previousRange.to]);
   const expenseReport = useMemo(() => getExpenseReport(state, range, `${range.to}T12:00:00-06:00`, { fixedCosts, staff }), [state, range.from, range.to, fixedCosts, staff]);
+  const expenseItems = apiRequest ? liveExpenses.map(item => ({
+    id: item.id, recordedAt: item.recorded_at, dateKey: localDateKey(item.recorded_at),
+    formattedDate: formatExpenseDate(item.recorded_at), formattedTime: formatExpenseTime(item.recorded_at),
+    shiftId: item.shift_id ?? '', shiftWindow: item.shift_id ?? 'Negocio', concept: item.concept,
+    category: EXPENSE_CATEGORIES[item.category].label, categoryKey: item.category, payeeName: item.payee_name,
+    amountMinor: item.amount_minor, amountFormatted: formatMoney(item.amount_minor), method: item.payment_method,
+    origin: item.shift_id ? 'shift' as const : 'business' as const, voucherReference: item.voucher_reference,
+    evidenceUrl: item.evidence_url, voided: Boolean(item.voided_at),
+  })) : expenseReport.items;
 
   useEffect(() => setFocusTab(active), [active]);
   useEffect(() => {
@@ -235,8 +268,13 @@ function ExpenseReportContent({
             },
           } : undefined} />
         : active === 'gastos'
-          ? <ExpensesView items={expenseReport.items} filters={expenseFilters} onFiltersChange={updateExpenseFilters} table={expenseTable}
+          ? <>{expenseError && <p role="alert">{expenseError}</p>}{expenseLoading && <p role="status">Cargando gastos…</p>}
+          <ExpensesView items={expenseItems} filters={expenseFilters} onFiltersChange={updateExpenseFilters} table={expenseTable}
+            onAdd={apiRequest ? () => setBusinessOpen(true) : undefined}
+            onVoid={apiRequest ? async (id, reason) => { await voidExpense(apiRequest, id, reason); setExpenseRefresh(value => value + 1); } : undefined}
+            branches={expenseBranches} selectedBranchId={selectedBranchId} onBranchChange={apiRequest ? setSelectedBranchId : undefined}
             setSorting={updater => updateSorting(setExpenseTable, updater)} setPagination={updater => updatePagination(setExpenseTable, updater)} />
+          {apiRequest && <GastoModal isOpen={businessOpen} onClose={() => setBusinessOpen(false)} apiRequest={apiRequest} mode="business" branches={expenseBranches} onSaved={() => { setBusinessOpen(false); setExpenseRefresh(value => value + 1); }} />}</>
           : <BudgetView costs={fixedCosts} staff={staff} />;
 
   return <main className="finance-page">

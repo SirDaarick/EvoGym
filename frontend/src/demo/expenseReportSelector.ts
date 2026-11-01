@@ -232,6 +232,11 @@ export interface ExpenseReportItem {
   payeeName: string;
   amountMinor: Money;
   amountFormatted: string;
+  method?: import('../api/expensesApi').ExpenseMethod;
+  origin?: 'shift' | 'business';
+  voucherReference?: string | null;
+  evidenceUrl?: string | null;
+  voided?: boolean;
 }
 
 export interface ExpenseCategorySummary {
@@ -516,7 +521,7 @@ export function getExpenseReport(
       continue;
     }
 
-    const categoryLabel = classifyExpenseConcept(exp.concept);
+    const categoryLabel = exp.category ? EXPENSE_CATEGORIES[exp.category].label : classifyExpenseConcept(exp.concept);
     const categoryConfig = Object.values(EXPENSE_CATEGORIES).find(
       c => c.label === categoryLabel
     ) ?? EXPENSE_CATEGORIES.general;

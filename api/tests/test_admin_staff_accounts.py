@@ -223,21 +223,21 @@ def test_admin_pin_choices_are_branch_scoped_minimal_and_require_admin(tmp_path)
         branches = client.get("/api/v1/admin/staff-accounts/branches", headers=admin)
         assert branches.status_code == 200, branches.text
         assert branches.json() == {"branches": [
-            {"id": str(ids["branch_a"]), "code": "account-a", "name": "Account A"},
-            {"id": str(ids["branch_b"]), "code": "account-b", "name": "Account B"},
+            {"id": str(ids["branch_a"]), "code": "account-a", "name": "Account A", "timezone": "America/Mexico_City"},
+            {"id": str(ids["branch_b"]), "code": "account-b", "name": "Account B", "timezone": "America/Mexico_City"},
         ]}
 
         profiles = client.get(f"/api/v1/admin/staff-accounts/roster-profiles?branch_id={ids['branch_a']}", headers=admin)
         assert profiles.status_code == 200, profiles.text
         assert profiles.json() == {"profiles": [
             {"id": str(ids["profile_a"]), "full_name": "Employee A", "position": "Coach",
-             "is_active": True, "staff_user_id": None},
+             "is_active": True, "staff_user_id": None, "monthly_salary_minor": 0},
             {"id": str(ids["profile_a_duplicate"]), "full_name": "Employee A2", "position": "Coach",
-             "is_active": True, "staff_user_id": None},
+             "is_active": True, "staff_user_id": None, "monthly_salary_minor": 0},
         ]}
         assert client.get(f"/api/v1/admin/staff-accounts/roster-profiles?branch_id={ids['branch_b']}", headers=admin).json() == {
             "profiles": [{"id": str(ids["profile_b"]), "full_name": "Employee B", "position": "Coach",
-                          "is_active": True, "staff_user_id": None}]
+                          "is_active": True, "staff_user_id": None, "monthly_salary_minor": 0}]
         }
         assert client.get(f"/api/v1/admin/staff-accounts/roster-profiles?branch_id={ids['inactive_branch']}", headers=admin).status_code == 404
         assert client.get("/api/v1/admin/staff-accounts/branches").status_code == 401

@@ -26,8 +26,8 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F10 | Sell products and process refunds/returns | P2 / C | **Completed** | F01, F09; sale/refund/accounting decisions |
 | F11 | Manage rentals end to end | P2 / C | **Completed** | Rental lifecycle, inventory and payment rules |
 | F12 | Record and review expenses | P2 / C | **Discovery completed** ([f12-expenses.md](f12-expenses.md)) | Expense ownership, approval and accounting rules |
-| F13 | Run payroll | P2 / C | Payroll domain, legal/pay-period rules, permissions |
-| F14 | Review a member account history | P2 / C | Member detail and individually confirmed history sources |
+| F13 | Run payroll | P2 / C | **Discovery completed** ([f13-payroll.md](f13-payroll.md)) | Payroll domain, weekly cadence and advances |
+| F14 | Review a member account history | P2 / C | **Discovery completed** ([f14-member-history.md](f14-member-history.md)) | Member detail and individually confirmed history sources |
 | F15 | Review one named owner daily operations summary | P2 / C | Named owner, metric definitions and source domains |
 
 Priority is order, not a deadline. Recommended next: F01, then F02. F03 can be separately owned only if it does not conflict on schema/router/migration work. No parallel shared-auth, router, or migration ownership.
@@ -220,27 +220,27 @@ At feature start, verify each cited contract and route against current source. E
 
 ### F13 — Run payroll (P2, C)
 
-**Discovery first:** resolve employee/pay-period definitions, compensation, overtime/attendance inputs, deductions, approval, payment/export, restricted access and jurisdictional rules with the product owner. No payroll router is confirmed by the supplied baseline; verify existing domain code first.
+**Discovery completed:** Detailed architecture and domain specification documented in [f13-payroll.md](f13-payroll.md).
 
 **Source anchors:** staff attendance contract `api/app/api/staff_attendance.py:215-272`; schedule contract `api/app/api/staff_schedules.py`; authenticated consumer boundary `frontend/src/app/ApiProductApp.tsx:103-117`.
 
 **Tasks:**
-- [ ] Produce reviewed payroll calculation/source contract and decision owner.
-- [ ] Define immutable pay-period snapshots, correction audit and permission model.
-- [ ] Implement API and restricted payroll adapter only after requirements are approved.
-- [ ] Verify missing inputs, permissions, correction policy, duplicate run and persisted period totals.
+- [x] Produce reviewed payroll calculation/source contract and decision owner (Weekly base salaries totaling $20,000 MXN, Model A fixed base, direct bank transfer advances).
+- [x] Define immutable pay-period snapshots, correction audit and permission model (Live weekly runs, per-employee pending/paid status, automatic expense integration to Finanzas).
+- [x] Implement API and restricted payroll adapter only after requirements are approved.
+- [x] Verify missing inputs, permissions, correction policy, duplicate run and persisted period totals.
 
 **Exit:** authorized payroll owner can review a defined period with traceable inputs; implementation invents no legal defaults.
 
 ### F14 — Review a member account history (P2, C)
 
-**Discovery first:** specify which member history is needed and for which authorized actor. Source confirms member detail/pending balance, eligibility, admin-only notes and member check-in write operations; do not imply every payment, visit, note or membership-history listing is already exposed as a UI/API list.
+**Discovery completed:** Detailed architecture and domain specification documented in [f14-member-history.md](f14-member-history.md).
 
 **Source anchors:** consumer `frontend/src/features/members/Members.tsx:300-302` (detail entry); member detail/notes/eligibility `api/app/api/members.py:221-240, 268-388`; access/check-in router `api/app/api/member_check_ins.py:21-76`; actual check-in route `:107-169`; payment sources `api/app/api/sales.py:87-232`; check-in persistence model `api/app/db/models/member_check_ins.py:11-52`; member model `api/app/db/models/members.py:11-`. Verify exact list/read endpoints and fields for each history domain before claiming availability.
 
 **Tasks:**
-- [ ] Name the user and history question; select only needed domains (membership, payment, access/visits, eligibility, notes).
-- [ ] For every chosen domain, verify a read contract, identity/scope and field semantics; list absent/uncertain sources separately.
+- [x] Name the user and history question; select only needed domains (membership, payment, access/visits, eligibility, notes) (Two-tab split: Zero-scroll Mostrador HUD + Deep Expediente tab).
+- [x] For every chosen domain, verify a read contract, identity/scope and field semantics; list absent/uncertain sources separately (Server-aggregated habits and rentals summary endpoint).
 - [ ] Decide sensitive note visibility and pagination/timezone ordering.
 - [ ] Implement a focused member account timeline/sections using real contracts; add API reads only for identified requirements.
 - [ ] Verify allowed/denied role, empty history, pagination, date boundary, reload and source-record links.

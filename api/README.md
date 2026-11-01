@@ -51,6 +51,33 @@ Browser clients are cross-origin only when `EVOGYM_CORS_ALLOWED_ORIGINS` is expl
 | `EVOGYM_DEBUG` | `false` | Validated development/test flag; framework exception-detail pages remain disabled |
 | `EVOGYM_DATABASE_URL` | unset | Optional `SecretStr`; an engine is created only during app lifespan when configured, and connects only for readiness or explicit database work |
 | `EVOGYM_STAFF_SESSION_TTL_SECONDS` | unset | Required for staff PIN sessions; server-owned expiry bounded to 60–86400 seconds |
+| `EVOGYM_EVIDENCE_S3_ENDPOINT` | unset | S3-compatible endpoint reachable by the API |
+| `EVOGYM_EVIDENCE_PUBLIC_ENDPOINT` | unset | S3-compatible endpoint reachable by the browser |
+| `EVOGYM_EVIDENCE_S3_BUCKET` | unset | Private bucket for expense evidence |
+| `EVOGYM_EVIDENCE_S3_ACCESS_KEY` / `EVOGYM_EVIDENCE_S3_SECRET_KEY` | unset | S3 credentials; provide through a protected environment or secret store |
+
+### Expense evidence and reception funds
+
+Expense evidence lives in an S3-compatible bucket. The API only speaks the S3 API, so the same code and settings serve the local emulator, MinIO and Cloudflare R2; only the `EVOGYM_EVIDENCE_*` values change.
+
+Start the local emulator and create the private `evogym-expenses` bucket:
+
+```powershell
+docker compose up -d s3_dev
+cd api
+$env:EVOGYM_EVIDENCE_S3_ENDPOINT='http://127.0.0.1:8333'
+$env:EVOGYM_EVIDENCE_PUBLIC_ENDPOINT='http://127.0.0.1:8333'
+$env:EVOGYM_EVIDENCE_S3_BUCKET='evogym-expenses'
+$env:EVOGYM_EVIDENCE_S3_ACCESS_KEY='evogym_dev'
+$env:EVOGYM_EVIDENCE_S3_SECRET_KEY='evogym_dev_password'
+.\.venv\Scripts\python.exe scripts\bootstrap_evidence_bucket.py
+```
+
+The browser and the API must reach the same public endpoint, so set `EVOGYM_EVIDENCE_PUBLIC_ENDPOINT` to the address the browser uses. The API signs uploads and downloads for five minutes and stores object keys rather than public URLs. When evidence settings are incomplete, expense registration remains available without a photo and the upload endpoint returns 501.
+
+For Cloudflare R2, create the bucket and an API token, allow the browser origin in the bucket CORS policy, and set the same variables to the R2 endpoint, bucket, access key and secret. The emulator image can differ; the API code does not.
+
+Money left by an administrator at reception for a later purchase is a shift cash contribution. Record the later purchase as a shift expense; do not also record the contribution as a business expense, which would count it twice.
 
 ### Staff PIN sessions
 

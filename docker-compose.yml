@@ -18,6 +18,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local S3-compatible storage for expense evidence. Any S3 server works:
+  # this image is the one this machine can pull; MinIO or Cloudflare R2 only
+  # change the EVOGYM_EVIDENCE_* settings.
+  s3_dev:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - evogym_s3_dev_data:/data
+
 volumes:
   evogym_postgres_dev_data:
     name: evogym_postgres_dev_data
+  evogym_s3_dev_data:
+    name: evogym_s3_dev_data

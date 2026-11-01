@@ -6,6 +6,8 @@ export interface ExpenseRequest {
   concept: string;
   payeeName: string;
   amountMinor: Money;
+  category?: ExpenseRecord['category'];
+  voucherReference?: string;
 }
 
 export type ExpenseResult =
@@ -46,6 +48,8 @@ export function registerExpense(
     amountMinor: request.amountMinor,
     shiftId: state.currentShiftId,
     recordedAt,
+    ...(request.category ? { category: request.category } : {}),
+    ...(request.voucherReference ? { voucherReference: request.voucherReference } : {}),
   };
 
   return {

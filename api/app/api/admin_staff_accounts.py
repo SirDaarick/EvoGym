@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.admin import ADMIN_IDLE_SECONDS, validate_admin_session
-from app.auth.authorization import AuthorizationDenied
+from app.auth.authorization import AuthorizationDenied, authorize
 from app.auth.authorization import Permission
 from app.auth.owner import has_organization_permission
 from app.db.models import (
@@ -72,6 +72,7 @@ class AdminBranchItem(BaseModel):
     id: UUID
     code: str
     name: str
+    timezone: str
 
 
 class AdminBranchPage(BaseModel):
@@ -84,6 +85,7 @@ class AdminRosterProfileItem(BaseModel):
     position: str
     is_active: bool
     staff_user_id: UUID | None
+    monthly_salary_minor: int | None = None
 
 
 class AdminRosterProfilePage(BaseModel):
@@ -372,10 +374,10 @@ def list_admin_branches(request: Request, principal: AdminPrincipal = Depends(_p
     with factory.begin() as session:
         _require_live_admin(session, principal)
         rows = session.scalars(select(Branch).where(Branch.is_active.is_(True)).order_by(Branch.code, Branch.id)).all()
-        return AdminBranchPage(branches=[AdminBranchItem(id=row.id, code=row.code, name=row.name) for row in rows])
+        return AdminBranchPage(branches=[AdminBranchItem(id=row.id, code=row.code, name=row.name, timezone=row.timezone) for row in rows])
 
 
-@router.get("/roster-profiles", response_model=AdminRosterProfilePage)
+@router.get("/roster-profiles", response_model=AdminRosterProfilePage, response_model_exclude_unset=True)
 def list_admin_roster_profiles(
     request: Request,
     branch_id: UUID = Query(),
@@ -384,6 +386,11 @@ def list_admin_roster_profiles(
     factory = request.app.state.session_factory
     with factory.begin() as session:
         _require_live_admin(session, principal, branch_id=branch_id)
+        try:
+            authorize(session, principal.staff_id, Permission.FINANCE_READ, branch_id)
+            can_read_salary = True
+        except AuthorizationDenied:
+            can_read_salary = False
         rows = session.scalars(select(StaffRosterProfile).where(
             StaffRosterProfile.branch_id == branch_id,
             StaffRosterProfile.is_active.is_(True),
@@ -395,6 +402,7 @@ def list_admin_roster_profiles(
                 position=row.position,
                 is_active=row.is_active,
                 staff_user_id=row.staff_user_id,
+                **({"monthly_salary_minor": row.monthly_salary_minor} if can_read_salary else {}),
             )
             for row in rows
         ])

@@ -1,19 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ExtraRecord } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { formatMoney, parseMoney } from '../../demo/adapter';
 import { registerExtra } from '../../demo/extraOperations';
 import { Button } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
+import { createCashContribution, listCashContributions, ExpenseApiError, type CashContributionDTO, type CashContributionInput } from '../../api/expensesApi';
+import type { ApiRequest } from '../../api/shiftsApi';
 
 export interface ExtraModalProps {
   isOpen: boolean;
   onClose: () => void;
+  apiRequest?: ApiRequest;
+  registerId?: string;
 }
 
-export function ExtraModal({ isOpen, onClose }: ExtraModalProps) {
-  const { state, transact } = useDemo();
-  const extras = state.extras ?? [];
+export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraModalProps) {
+  let demo: ReturnType<typeof useDemo> | null = null;
+  try { demo = useDemo(); } catch { /* Live mode does not mount DemoProvider. */ }
+  const [liveExtras, setLiveExtras] = useState<CashContributionDTO[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const pendingKey = useRef<string | null>(null);
+  const pendingBody = useRef<CashContributionInput | null>(null);
+  const pendingRegister = useRef<string | null>(null);
+  const inFlight = useRef(false);
 
   const [concept, setConcept] = useState('');
   const [staffName, setStaffName] = useState('');
@@ -38,7 +48,7 @@ export function ExtraModal({ isOpen, onClose }: ExtraModalProps) {
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !pendingKey.current) {
       setConcept('');
       setStaffName('');
       setAmountStr('');
@@ -46,12 +56,22 @@ export function ExtraModal({ isOpen, onClose }: ExtraModalProps) {
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !apiRequest || !registerId) return;
+    let active = true;
+    listCashContributions(apiRequest, registerId).then(page => { if (active) setLiveExtras(page.items); })
+      .catch(() => { if (active) setToast({ open: true, title: 'Error', description: 'No se pudo cargar el historial de extras.', type: 'error' }); });
+    return () => { active = false; };
+  }, [isOpen, apiRequest, registerId]);
+
   if (!isOpen) return null;
 
-  const currentShiftExtras = extras.filter(e => e.shiftId === state.currentShiftId);
+  const currentShiftExtras = apiRequest && registerId
+    ? liveExtras.map(item => ({ id: item.id, concept: item.concept, staffName: item.contributor_name, amountMinor: item.amount_minor, recordedAt: item.recorded_at }))
+    : (demo?.state.extras ?? []).filter(e => e.shiftId === demo?.state.currentShiftId);
   const totalShiftExtrasMinor = currentShiftExtras.reduce((acc, e) => acc + e.amountMinor, 0);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const amountMinor = parseMoney(amountStr);
 
@@ -85,8 +105,41 @@ export function ExtraModal({ isOpen, onClose }: ExtraModalProps) {
       return;
     }
 
+    if (apiRequest && registerId) {
+      if (inFlight.current) return;
+      const body = { concept: concept.trim(), contributor_name: staffName.trim(), amount_minor: amountMinor };
+      if (pendingBody.current && (pendingRegister.current !== registerId || JSON.stringify(body) !== JSON.stringify(pendingBody.current))) {
+        setToast({ open: true, title: 'Resultado pendiente', description: 'Reintenta el extra con los mismos datos para confirmar su resultado.', type: 'warning' });
+        return;
+      }
+      inFlight.current = true;
+      setSubmitting(true);
+      const key = pendingKey.current ?? crypto.randomUUID();
+      pendingKey.current = key;
+      pendingBody.current = body;
+      pendingRegister.current = registerId;
+      try {
+        await createCashContribution(apiRequest, registerId, body, key);
+        pendingKey.current = null;
+        pendingBody.current = null;
+        pendingRegister.current = null;
+        setConcept(''); setStaffName(''); setAmountStr('');
+        try {
+          const page = await listCashContributions(apiRequest, registerId);
+          setLiveExtras(page.items);
+          setToast({ open: true, title: 'Extra registrado', description: `Extra de ${formatMoney(amountMinor)} MXN registrado correctamente.`, type: 'success' });
+        } catch {
+          setToast({ open: true, title: 'Extra registrado', description: 'El extra se registró, pero no se pudo actualizar el historial.', type: 'warning' });
+        }
+      } catch (error) {
+        if (error instanceof ExpenseApiError && [401, 403, 422].includes(error.status)) { pendingKey.current = null; pendingBody.current = null; pendingRegister.current = null; }
+        setToast({ open: true, title: 'Error al registrar', description: error instanceof Error ? error.message : 'No se pudo registrar el extra.', type: 'error' });
+      } finally { inFlight.current = false; setSubmitting(false); }
+      return;
+    }
+    if (!demo) return;
     const extraId = `extra-${crypto.randomUUID()}`;
-    const result = transact(current =>
+    const result = demo.transact(current =>
       registerExtra(current, {
         id: extraId,
         concept: concept.trim(),
@@ -184,7 +237,7 @@ export function ExtraModal({ isOpen, onClose }: ExtraModalProps) {
             </div>
 
             <div className="op-flow-submit-wrap">
-              <Button variant="primary" type="submit">
+              <Button variant="primary" type="submit" disabled={submitting}>
                 Agregar
               </Button>
             </div>

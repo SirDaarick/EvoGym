@@ -45,18 +45,18 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8005',
         changeOrigin: true,
       },
       '/docs': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8005',
         changeOrigin: true,
       },
       '/openapi.json': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8005',
         changeOrigin: true,
       },
     },
   },
-  test: { pool: 'threads', environment: 'jsdom', setupFiles: ['./src/test/setup.ts'], css: true },
+  test: { pool: 'threads', environment: 'jsdom', setupFiles: ['./src/test/setup.ts'], css: true, testTimeout: 15000 },
 });

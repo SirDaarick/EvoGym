@@ -20,7 +20,7 @@ from app.inventory.queries import capture_register_inventory_snapshot
 from app.rentals.payments import RentalConflictError, active_rental_id
 from app.rentals.queries import (
     apply_card_attempt, begin_card_attempt, confirm_cancellation, create_rental,
-    preview_cancellation, record_receivable_payment, renew_rental, review_transfer,
+    preview_cancellation, record_receivable_payment, renew_rental, review_rental_transfer,
 )
 from app.rentals.schemas import TenderComponentInput
 from app.shifts.queries import open_shift
@@ -84,7 +84,7 @@ def postgres_rental_target(monkeypatch):
 
 
 def _rent(factory, ids, key, *, actor_index=1, kind="glove", asset_index=4, components=None,
-          expected_total_minor=2500, accepted_shortfall_minor=2500):
+          expected_total_minor=2500, accepted_shortfall_minor=1500):
     branch_id, staff_id, member_id, _glove_id, register_id, other_staff_id, _locker_id = ids
     asset_id = _locker_id if kind == "locker" else _glove_id
     actor_id = other_staff_id if actor_index == 2 else staff_id
@@ -162,7 +162,7 @@ def test_rental_migration_0048_preserves_assets_on_postgres(monkeypatch):
                 column["name"] for column in inspect(engine).get_columns("payments")}
             with engine.connect() as connection:
                 assert connection.execute(text("SELECT code FROM rental_assets")).scalar_one() == "legacy-glove"
-                assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0048_rental_lifecycle"
+                assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0050_payroll"
         finally:
             engine.dispose()
     finally:
@@ -182,12 +182,13 @@ def test_concurrent_different_actor_repayments_never_overpay(postgres_rental_tar
         barrier.wait()
         try:
             with factory.begin() as session:
-                _payment, remaining, _replayed = record_receivable_payment(
+                receipt, replayed = record_receivable_payment(
                     session, rental_id=rental_id, register_id=register_id, actor_id=actor_id,
                     authorized_branch_id=branch_id, method="cash", amount_minor=2000,
                     idempotency_key=key,
                 )
-                return remaining
+                assert replayed is False
+                return receipt.remaining_minor
         except RentalConflictError:
             return None
 
@@ -323,7 +324,7 @@ def test_concurrent_transfer_review_and_cancellation_do_not_resurrect_cancelled_
         barrier.wait()
         try:
             with factory.begin() as session:
-                review_transfer(session, payment_id=payment_id, actor_id=staff_id,
+                review_rental_transfer(session, payment_id=payment_id, actor_id=staff_id,
                                 status="confirmed", idempotency_key="review-race")
             return "reviewed"
         except (RentalConflictError, ValueError):

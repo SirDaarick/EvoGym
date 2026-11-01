@@ -43,6 +43,9 @@ export interface ShiftSummaryDTO {
   activities: { family: string; count: number; amount_minor: number }[];
   payments: { id: string; description: string; method: 'cash' | 'transfer'; status: 'confirmed' | 'pending' | 'under_review'; amount_minor: number; recorded_at: string }[];
   expected_cash_minor: number;
+  expense_minor: number;
+  expense_count: number;
+  extra_minor: number;
 }
 
 export class ShiftApiError extends Error {

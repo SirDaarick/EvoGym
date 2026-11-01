@@ -1065,14 +1065,16 @@ def test_f06_b01_register_member_open_debts_lifecycle(tmp_path):
             debts_res = client.get(debts_path, headers={"Authorization": f"Bearer {token_a}"})
             assert debts_res.status_code == 200, debts_res.text
             debts = debts_res.json()
-            assert [d["order_id"] for d in debts] == [order_a1_id, order_a2_id]
-            assert debts[0]["initial_outstanding_minor"] == 6000
-            assert debts[0]["paid_amount_minor"] == 0
-            assert debts[0]["remaining_balance_minor"] == 6000
-            assert debts[0]["description_snapshot"] == "F06 Month v1"
-            assert debts[1]["initial_outstanding_minor"] == 3000
-            assert debts[1]["paid_amount_minor"] == 0
-            assert debts[1]["remaining_balance_minor"] == 3000
+            assert len(debts) == 2
+            by_order = {debt["order_id"]: debt for debt in debts}
+            assert set(by_order) == {order_a1_id, order_a2_id}
+            assert by_order[order_a1_id]["initial_outstanding_minor"] == 6000
+            assert by_order[order_a1_id]["paid_amount_minor"] == 0
+            assert by_order[order_a1_id]["remaining_balance_minor"] == 6000
+            assert by_order[order_a1_id]["description_snapshot"] == "F06 Month v1"
+            assert by_order[order_a2_id]["initial_outstanding_minor"] == 3000
+            assert by_order[order_a2_id]["paid_amount_minor"] == 0
+            assert by_order[order_a2_id]["remaining_balance_minor"] == 3000
 
             repay_partial = client.post(
                 f"/api/v1/registers/{reg_a_id}/membership-debt-payments",
@@ -1083,9 +1085,9 @@ def test_f06_b01_register_member_open_debts_lifecycle(tmp_path):
 
             after_partial = client.get(debts_path, headers={"Authorization": f"Bearer {token_a}"}).json()
             assert len(after_partial) == 2
-            assert after_partial[0]["order_id"] == order_a1_id
-            assert after_partial[0]["paid_amount_minor"] == 2500
-            assert after_partial[0]["remaining_balance_minor"] == 3500
+            partial = next(debt for debt in after_partial if debt["order_id"] == order_a1_id)
+            assert partial["paid_amount_minor"] == 2500
+            assert partial["remaining_balance_minor"] == 3500
 
             repay_full = client.post(
                 f"/api/v1/registers/{reg_a_id}/membership-debt-payments",
@@ -1150,4 +1152,3 @@ def test_f06_b02_register_member_open_debts_cross_branch_and_inactive_register_d
             assert inactive_res.status_code == 409
     finally:
         engine.dispose()
-

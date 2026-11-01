@@ -1,7 +1,7 @@
 from datetime import datetime, time
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Time, UniqueConstraint, Uuid, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Time, UniqueConstraint, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db.base import Base
@@ -17,6 +17,7 @@ class StaffRosterProfile(Base):
         CheckConstraint("length(position) > 0 AND position = trim(position)", name="ck_staff_roster_position"),
         CheckConstraint("(expected_entry_time IS NULL) = (grace_tolerance_minutes IS NULL)", name="ck_staff_roster_schedule_complete"),
         CheckConstraint("grace_tolerance_minutes IS NULL OR grace_tolerance_minutes BETWEEN 0 AND 1440", name="ck_staff_roster_tolerance_range"),
+        CheckConstraint("monthly_salary_minor >= 0", name="ck_staff_roster_monthly_salary_nonnegative"),
         Index("uq_staff_roster_branch_name", "branch_id", text("lower(full_name)"), unique=True),
         Index("ix_staff_roster_branch_active_name", "branch_id", "is_active", "full_name"),
     )
@@ -32,6 +33,7 @@ class StaffRosterProfile(Base):
     position: Mapped[str] = mapped_column(String(80), nullable=False)
     expected_entry_time: Mapped[time | None] = mapped_column(Time(), nullable=True)
     grace_tolerance_minutes: Mapped[int | None] = mapped_column(nullable=True)
+    monthly_salary_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

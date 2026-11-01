@@ -41,6 +41,8 @@ from app.api.membership_access import router as membership_access_router
 from app.api.member_check_ins import router as member_check_ins_router
 from app.api.member_reads import router as member_reads_router
 from app.api.rentals import router as rentals_router
+from app.api.expenses import router as expenses_router
+from app.api.payroll import router as payroll_router
 
 
 class _AuthRateLimiter:
@@ -150,6 +152,33 @@ def _readiness_probe(engine: Engine | None) -> bool:
         return False
 
 
+class _DevelopmentRecoveryDelivery:
+    """Local development delivery that logs approval links and auto-approves new devices."""
+
+    def __init__(self, app: FastAPI):
+        self._app = app
+
+    def enqueue_recovery_link(self, email: str, link: str):
+        logging.getLogger("evogym.api").info("[DEV AUTH] Password recovery link for %s: %s", email, link)
+
+    def enqueue_admin_device_approval(self, email: str, link: str):
+        logger = logging.getLogger("evogym.api")
+        logger.info("[DEV AUTH] Admin device approval link for %s: %s", email, link)
+        try:
+            token = link.split("approval_token=", 1)[1].split("&", 1)[0]
+            factory = self._app.state.session_factory
+            if factory:
+                from app.auth.admin import approve_admin_login
+                import uuid
+                approve_admin_login(factory, token, uuid.uuid4())
+                logger.info("[DEV AUTH] Device automatically approved for development.")
+        except Exception as exc:
+            logger.warning("[DEV AUTH] Auto-approval encountered an issue: %s", exc)
+
+    def enqueue_admin_security_notice(self, email: str, category: str):
+        logging.getLogger("evogym.api").info("[DEV AUTH] Security notice for %s on %s", email, category)
+
+
 def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> FastAPI:
     configuration = settings or get_settings()
     docs_url = "/docs" if configuration.docs_enabled else None
@@ -214,6 +243,8 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.state.settings = configuration
     application.state.operational_security_log = None
     application.state.session_factory = None
+    if recovery_delivery is None and configuration.environment == "development":
+        recovery_delivery = _DevelopmentRecoveryDelivery(application)
     application.state.recovery_delivery = recovery_delivery
     application.state.auth_rate_limiter = _AuthRateLimiter()
     application.state.password_hash_capacity = BoundedSemaphore(configuration.auth_max_concurrent_hashes or 2)
@@ -242,6 +273,8 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(member_check_ins_router)
     application.include_router(member_reads_router)
     application.include_router(rentals_router)
+    application.include_router(expenses_router)
+    application.include_router(payroll_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)

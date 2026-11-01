@@ -8,6 +8,40 @@ describe('live reception cash checkout', () => {
     sessionStorage.clear();
   });
 
+  it('opens live cash contributions for the selected register', async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([{ id: 'register', branch_id: 'branch', code: 'front', name: 'Front', status: 'active', has_open_shift: true }]));
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', name: 'Central' }]));
+      if (path.startsWith('/api/v1/inventory/branches/')) return new Response(JSON.stringify({ items: [], total: 0 }));
+      if (path === '/api/v1/registers/register/cash-contributions') return new Response(JSON.stringify({ items: [], total_minor: 0 }));
+      throw new Error(path);
+    });
+    render(<ApiReceptionHome request={request} actorId="actor" />);
+    const button = await screen.findByRole('button', { name: 'Extra' });
+    await vi.waitFor(() => expect(button).toBeEnabled());
+    await userEvent.click(button);
+    expect(await screen.findByRole('dialog', { name: 'Registrar Extra' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('/api/v1/registers/register/cash-contributions', undefined));
+  });
+
+  it('opens live expenses for the selected register', async () => {
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([{ id: 'register', branch_id: 'branch', code: 'front', name: 'Front', status: 'active', has_open_shift: true }]));
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', name: 'Central' }]));
+      if (path.startsWith('/api/v1/inventory/branches/')) return new Response(JSON.stringify({ items: [], total: 0 }));
+      if (path === '/api/v1/registers/register/expenses') return new Response(JSON.stringify({ items: [], total_minor: 0 }));
+      throw new Error(path);
+    });
+    render(<ApiReceptionHome request={request} actorId="actor" />);
+    const button = await screen.findByRole('button', { name: 'Gasto' });
+    await vi.waitFor(() => expect(button).toBeEnabled());
+    await userEvent.click(button);
+    expect(await screen.findByRole('dialog', { name: 'Registrar Gasto' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('/api/v1/registers/register/expenses', undefined));
+  });
+
   it('allows cash sales without an open shift and asks for the first shift when required', async () => {
     const request = vi.fn(async (path: string) => {
       if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
