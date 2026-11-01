@@ -12,7 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.auth.sessions import validate_session
-from app.db.models import Branch, StaffRosterProfile
+from app.db.models import Branch, PayrollAdvance, PayrollPayment, StaffRosterProfile
+from app.api.payroll import weekly_base
 
 router = APIRouter(prefix="/api/v1/staff-roster", tags=["staff-roster"])
 _bearer = HTTPBearer(auto_error=False)
@@ -38,6 +39,7 @@ class StaffRosterUpdate(BaseModel):
     is_active: bool | None = None
     expected_entry_time: time | None = None
     grace_tolerance_minutes: int | None = Field(default=None, ge=0, le=1440)
+    monthly_salary_minor: int | None = Field(default=None, ge=0, le=9223372036854775807, strict=True)
 
 
 class StaffRosterItem(BaseModel):
@@ -57,6 +59,10 @@ class StaffRosterItem(BaseModel):
 class StaffRosterPage(BaseModel):
     items: list[StaffRosterItem]
     total: int
+
+
+class StaffRosterPatchResult(StaffRosterItem):
+    monthly_salary_minor: int | None = None
 
 
 def _principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> RosterPrincipal:
@@ -160,7 +166,7 @@ def create_staff_profile(
         raise HTTPException(409, "An employee with this name already exists in the branch.") from None
 
 
-@router.patch("/{profile_id}", response_model=StaffRosterItem)
+@router.patch("/{profile_id}", response_model=StaffRosterPatchResult, response_model_exclude_unset=True)
 def update_staff_profile(
     profile_id: UUID, payload: StaffRosterUpdate, request: Request,
     principal: RosterPrincipal = Depends(_principal),
@@ -173,6 +179,24 @@ def update_staff_profile(
                 raise HTTPException(404, "Staff profile not found.")
             _require_manage(session, principal, profile.branch_id)
             changes = payload.model_dump(exclude_unset=True)
+            if "monthly_salary_minor" in changes:
+                if not principal.is_admin:
+                    raise HTTPException(403, "Finance access denied.")
+                try:
+                    authorize(session, principal.staff_id, Permission.FINANCE_READ, profile.branch_id)
+                except AuthorizationDenied:
+                    raise HTTPException(403, "Finance access denied.") from None
+                profile = session.scalar(select(StaffRosterProfile).where(StaffRosterProfile.id == profile_id)
+                                         .execution_options(populate_existing=True).with_for_update())
+                new_salary = changes["monthly_salary_minor"]
+                if new_salary is not None:
+                    paid = select(PayrollPayment.id).where(PayrollPayment.staff_profile_id == profile_id,
+                        PayrollPayment.week_start == PayrollAdvance.week_start).exists()
+                    over_advanced = session.scalar(select(PayrollAdvance.week_start).where(
+                        PayrollAdvance.staff_profile_id == profile_id, ~paid).group_by(PayrollAdvance.week_start)
+                        .having(func.sum(PayrollAdvance.amount_minor) > weekly_base(new_salary)).limit(1))
+                    if over_advanced is not None:
+                        raise HTTPException(409, "Salary is lower than outstanding advances.")
             if "branch_id" in changes:
                 raise HTTPException(422, "A roster profile cannot be moved between branches.")
             for key, value in changes.items():
@@ -182,7 +206,10 @@ def update_staff_profile(
             if (profile.expected_entry_time is None) != (profile.grace_tolerance_minutes is None):
                 raise HTTPException(422, "Expected entry time and grace tolerance must be configured together.")
             session.flush()
-            return StaffRosterItem.model_validate(profile)
+            result = StaffRosterItem.model_validate(profile).model_dump()
+            if "monthly_salary_minor" in changes:
+                result["monthly_salary_minor"] = profile.monthly_salary_minor
+            return StaffRosterPatchResult(**result)
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from None
     except IntegrityError as exc:

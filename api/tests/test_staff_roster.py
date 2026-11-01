@@ -102,3 +102,27 @@ def test_staff_session_fallback_works_when_admin_signing_is_unconfigured(tmp_pat
         assert response.json()["items"] == []
     finally:
         engine.dispose()
+
+
+def test_salary_is_admin_only_and_persisted(tmp_path):
+    url, engine, _factory, branch_id, _other, desk_token, _branch_admin = _setup(tmp_path)
+    try:
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            token = complete_device_login(client, delivery, "owner@example.invalid", "synthetic-admin-password").json()["access_token"]
+            admin = {"Authorization": f"Bearer {token}"}
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            profile = client.post(f"/api/v1/staff-roster/branches/{branch_id}", headers=admin,
+                                  json={"full_name": "Salary Test", "position": "Staff"}).json()
+            path = f"/api/v1/staff-roster/{profile['id']}"
+            updated = client.patch(path, headers=admin, json={"monthly_salary_minor": 1400000})
+            assert updated.status_code == 200
+            assert updated.json()["monthly_salary_minor"] == 1400000
+            assert client.patch(path, headers=admin, json={"monthly_salary_minor": -1}).status_code == 422
+            assert client.patch(path, headers=desk, json={"monthly_salary_minor": 1}).status_code == 403
+            choices = client.get(f"/api/v1/admin/staff-accounts/roster-profiles?branch_id={branch_id}", headers=admin)
+            assert choices.json()["profiles"][0]["monthly_salary_minor"] == 1400000
+            roster = client.get(f"/api/v1/staff-roster?branch_id={branch_id}", headers=desk).json()
+            assert "monthly_salary_minor" not in roster["items"][0]
+    finally:
+        engine.dispose()
