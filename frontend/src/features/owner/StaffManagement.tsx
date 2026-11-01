@@ -1335,7 +1335,7 @@ export function ApiStaffManagement() {
                 <div className="staff-info"><strong>{profile.full_name}</strong><span className="muted">{profile.position} · ID: {profile.id}</span>
                   {account && <span className="muted">Cuenta: {account.login_identifier} · {account.is_active ? 'Activa' : 'Inactiva'}</span>}</div></div></td>
               <td>{formatScheduleSummary(getActiveSeriesForProfile(profile.id))}</td><td><span className="staff-salary-cell"><strong>{profile.monthly_salary_minor === undefined ? 'No disponible en API' : formatMoney(profile.monthly_salary_minor)}</strong>
-                {payrollItem && <span className="muted payroll-status">{payrollItem.paid ? 'Pagado esta semana' : `Pendiente ${formatMoney(payrollItem.net_minor)} netos`}</span>}</span></td><td>No disponible en API</td>
+                {payrollItem && <span className="muted payroll-status">{payrollItem.paid ? (payrollItem.advances_minor > 0 ? `Pagado ${formatMoney(payrollItem.net_minor)} + ${formatMoney(payrollItem.advances_minor)} (adelanto)` : `Pagado ${formatMoney(payrollItem.net_minor)}`) : `Pendiente ${formatMoney(payrollItem.net_minor)} netos`}</span>}</span></td><td>No disponible en API</td>
               <td><span className={`badge ${profile.is_active ? 'badge-success' : 'badge-neutral'}`}>{profile.is_active ? '● Activo' : '○ Inactivo'}</span></td>
               <td><div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end', width: '100%', flexWrap: 'wrap' }}>
                 {payrollItem && payrollDate && (

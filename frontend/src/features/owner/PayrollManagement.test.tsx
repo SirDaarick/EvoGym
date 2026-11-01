@@ -63,6 +63,6 @@ describe('payroll actions', () => {
     await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
     await user.click(await screen.findByRole('button', { name: 'Pagar $3,000.00' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
-    expect(await screen.findByText('Pagado esta semana')).toBeInTheDocument();
+    expect(await screen.findByText('Pagado $3,000.00 + $500.00 (adelanto)')).toBeInTheDocument();
   });
 });
