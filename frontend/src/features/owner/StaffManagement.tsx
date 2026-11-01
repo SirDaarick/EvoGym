@@ -61,6 +61,12 @@ function validUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
 }
 
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export function StaffManagement() {
   const staffList = useStaff();
   const [searchQuery, setSearchQuery] = useState('');
@@ -781,8 +787,9 @@ export function ApiStaffManagement() {
   const [salarySaving, setSalarySaving] = useState(false);
   const [payroll, setPayroll] = useState<PayrollWeek | null>(null);
   const [payrollDate, setPayrollDate] = useState<{ weekStart: string; weekday: number } | null>(null);
-  const [payrollDialog, setPayrollDialog] = useState<{ item: PayrollItem; mode: 'advance' | 'pay'; key: string } | null>(null);
+  const [payrollDialog, setPayrollDialog] = useState<{ item: PayrollItem; mode: 'advance' | 'pay'; targetWeek: string; key: string; nextWeekKey?: string } | null>(null);
   const [advanceText, setAdvanceText] = useState('');
+  const [nextWeekAdvanceText, setNextWeekAdvanceText] = useState('');
   const [payrollNotes, setPayrollNotes] = useState('');
   const [payrollMethod, setPayrollMethod] = useState<'cash' | 'transfer'>('transfer');
   const [payrollBusy, setPayrollBusy] = useState(false);
@@ -976,17 +983,24 @@ export function ApiStaffManagement() {
     }
   }
 
-  function openPayroll(item: PayrollItem) {
+  function openPayroll(item: PayrollItem, mode: 'advance' | 'pay', targetWeek?: string) {
     if (!payrollDate) return;
     const timezone = branches.find(branch => branch.id === branchId)?.timezone;
     if (!timezone) return;
     const currentDate = branchPayrollDate(timezone);
-    if (currentDate.weekStart !== payrollDate.weekStart || currentDate.weekday !== payrollDate.weekday) {
+    if (currentDate.weekStart !== payrollDate.weekStart) {
       void loadBranch(branchId);
       return;
     }
-    setPayrollDialog({ item, mode: payrollDate.weekday < 4 ? 'advance' : 'pay', key: crypto.randomUUID() });
+    setPayrollDialog({
+      item,
+      mode,
+      targetWeek: targetWeek ?? payrollDate.weekStart,
+      key: crypto.randomUUID(),
+      nextWeekKey: crypto.randomUUID(),
+    });
     setAdvanceText('');
+    setNextWeekAdvanceText('');
     setPayrollNotes('');
     setPayrollMethod('transfer');
     setPayrollError('');
@@ -994,26 +1008,63 @@ export function ApiStaffManagement() {
 
   async function submitPayroll() {
     if (!payrollDialog || !payrollDate || !adminSession || adminSession.status !== 'authenticated') return;
-    const timezone = branches.find(branch => branch.id === branchId)?.timezone;
-    const date = timezone ? branchPayrollDate(timezone) : null;
-    if (!date || date.weekStart !== payrollDate.weekStart || (date.weekday < 4) !== (payrollDialog.mode === 'advance')) {
-      setPayrollError('El período de nómina cambió. Cierra y vuelve a cargar la sucursal.');
-      return;
-    }
     const current = operation.current;
-    const body = { branch_id: branchId, staff_profile_id: payrollDialog.item.profile_id, week_start: payrollDate.weekStart };
+    const body = {
+      branch_id: branchId,
+      staff_profile_id: payrollDialog.item.profile_id,
+      week_start: payrollDialog.targetWeek,
+    };
     const amount = parseMoney(advanceText);
-    if (payrollDialog.mode === 'advance' && (amount === null || amount <= 0 || amount > payrollDialog.item.net_minor)) {
-      setPayrollError('Ingresa un adelanto válido que no supere el neto pendiente.');
-      return;
+    const nextAdvanceAmount = parseMoney(nextWeekAdvanceText);
+
+    if (payrollDialog.mode === 'advance') {
+      const maxAllowed = payrollDialog.targetWeek === payrollDate.weekStart
+        ? payrollDialog.item.net_minor
+        : payrollDialog.item.base_minor;
+      if (amount === null || amount <= 0 || amount > maxAllowed) {
+        setPayrollError('Ingresa un adelanto válido que no supere el límite permitido.');
+        return;
+      }
+    } else {
+      if (nextAdvanceAmount !== null && (nextAdvanceAmount <= 0 || nextAdvanceAmount > payrollDialog.item.base_minor)) {
+        setPayrollError('El adelanto de próxima semana no puede superar la base semanal.');
+        return;
+      }
     }
+
     setPayrollBusy(true);
     setPayrollError('');
     try {
       if (payrollDialog.mode === 'advance') {
-        await recordPayrollAdvance(adminSession.request, { ...body, amount_minor: amount!, ...(payrollNotes.trim() ? { notes: payrollNotes.trim() } : {}) }, payrollDialog.key);
+        await recordPayrollAdvance(
+          adminSession.request,
+          {
+            ...body,
+            amount_minor: amount!,
+            ...(payrollNotes.trim() ? { notes: payrollNotes.trim() } : {}),
+          },
+          payrollDialog.key
+        );
       } else {
-        await payPayrollWeek(adminSession.request, { ...body, payment_method: payrollMethod }, payrollDialog.key);
+        await payPayrollWeek(
+          adminSession.request,
+          { ...body, payment_method: payrollMethod },
+          payrollDialog.key
+        );
+        if (nextAdvanceAmount !== null && nextAdvanceAmount > 0) {
+          const nextWeek = addDays(payrollDialog.targetWeek, 7);
+          await recordPayrollAdvance(
+            adminSession.request,
+            {
+              branch_id: branchId,
+              staff_profile_id: payrollDialog.item.profile_id,
+              week_start: nextWeek,
+              amount_minor: nextAdvanceAmount,
+              notes: 'Adelanto registrado junto con liquidación semanal',
+            },
+            payrollDialog.nextWeekKey || crypto.randomUUID()
+          );
+        }
       }
       const next = await getPayrollWeek(adminSession.request, branchId, payrollDate.weekStart);
       if (operation.current !== current) return;
@@ -1287,7 +1338,24 @@ export function ApiStaffManagement() {
                 {payrollItem && <span className="muted payroll-status">{payrollItem.paid ? 'Pagado esta semana' : `Pendiente ${formatMoney(payrollItem.net_minor)} netos`}</span>}</span></td><td>No disponible en API</td>
               <td><span className={`badge ${profile.is_active ? 'badge-success' : 'badge-neutral'}`}>{profile.is_active ? '● Activo' : '○ Inactivo'}</span></td>
               <td><div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end', width: '100%', flexWrap: 'wrap' }}>
-                {payrollItem && !payrollItem.paid && payrollDate && <Button variant="secondary" onClick={() => openPayroll(payrollItem)}>{payrollDate.weekday < 4 ? 'Adelantar' : `Pagar ${formatMoney(payrollItem.net_minor)}`}</Button>}
+                {payrollItem && payrollDate && (
+                  !payrollItem.paid ? (
+                    <>
+                      {payrollItem.net_minor > 0 && (
+                        <Button variant="secondary" onClick={() => openPayroll(payrollItem, 'advance')}>
+                          Adelantar
+                        </Button>
+                      )}
+                      <Button variant="secondary" onClick={() => openPayroll(payrollItem, 'pay')}>
+                        Pagar {formatMoney(payrollItem.net_minor)}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="secondary" onClick={() => openPayroll(payrollItem, 'advance', addDays(payrollDate.weekStart, 7))}>
+                      Adelantar próx. semana
+                    </Button>
+                  )
+                )}
                 <Button variant="secondary" disabled={!profile.staff_user_id || pinIssuingId === profile.id}
                   onClick={() => void issuePin(profile)} title={profile.staff_user_id ? 'Emitir PIN inicial desde la API' : 'Vincula una cuenta antes de emitir el PIN'}>
                   {pinIssuingId === profile.id ? 'Emitiendo…' : 'Emitir PIN'}
@@ -1313,15 +1381,30 @@ export function ApiStaffManagement() {
 
     {payrollDialog && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="payroll-title">
       <div className="staff-modal-card">
-        <h2 id="payroll-title">{payrollDialog.mode === 'advance' ? 'Adelantar' : 'Pagar'} a {payrollDialog.item.full_name}</h2>
+        <h2 id="payroll-title">
+          {payrollDialog.mode === 'advance'
+            ? (payrollDialog.targetWeek !== payrollDate?.weekStart ? 'Adelanto próxima semana a ' : 'Adelantar a ')
+            : 'Pagar a '}
+          {payrollDialog.item.full_name}
+        </h2>
         <p className="muted">Referencia diaria: {formatMoney(payrollDialog.item.daily_minor)}</p>
         {payrollDialog.mode === 'advance' ? <>
+          {payrollDialog.targetWeek !== payrollDate?.weekStart && (
+            <p className="badge badge-neutral" style={{ marginBottom: '8px' }}>
+              Semana del {payrollDialog.targetWeek}
+            </p>
+          )}
           <div className="field"><label htmlFor="payroll-amount">Importe</label><input id="payroll-amount" value={advanceText} onChange={event => setAdvanceText(event.target.value)} disabled={payrollBusy} /></div>
           <Button variant="secondary" disabled={payrollBusy} onClick={() => setAdvanceText((payrollDialog.item.daily_minor / 100).toFixed(2))}>1 día ({formatMoney(payrollDialog.item.daily_minor)})</Button>
           <div className="field"><label htmlFor="payroll-notes">Notas opcionales</label><input id="payroll-notes" value={payrollNotes} maxLength={255} onChange={event => setPayrollNotes(event.target.value)} disabled={payrollBusy} /></div>
         </> : <>
-          <p>Base: {formatMoney(payrollDialog.item.base_minor)}</p><p>Adelantos: −{formatMoney(payrollDialog.item.advances_minor)}</p><p>Neto: {formatMoney(payrollDialog.item.net_minor)}</p>
+          <p>Base: {formatMoney(payrollDialog.item.base_minor)}</p><p>Adelantos: −{formatMoney(payrollDialog.item.advances_minor)}</p><p>Neto a liquidar: {formatMoney(payrollDialog.item.net_minor)}</p>
           <div className="field"><label htmlFor="payroll-method">Método de pago</label><select id="payroll-method" value={payrollMethod} onChange={event => setPayrollMethod(event.target.value as 'cash' | 'transfer')} disabled={payrollBusy}><option value="transfer">Transferencia</option><option value="cash">Efectivo</option></select></div>
+          <div className="field" style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+            <label htmlFor="payroll-next-advance">+ Adelanto próxima semana (opcional)</label>
+            <input id="payroll-next-advance" placeholder="0.00" value={nextWeekAdvanceText} onChange={event => setNextWeekAdvanceText(event.target.value)} disabled={payrollBusy} />
+            <span className="muted" style={{ fontSize: '0.82rem', display: 'block', marginTop: '4px' }}>Si el personal solicita un anticipo al cobrar su semana, se deducirá del siguiente periodo.</span>
+          </div>
         </>}
         {payrollError && <p role="alert">{payrollError}</p>}
         <Button disabled={payrollBusy} onClick={() => void submitPayroll()}>Confirmar</Button>
