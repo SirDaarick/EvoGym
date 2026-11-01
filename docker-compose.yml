@@ -26,8 +26,6 @@ services:
     command: server -s3
     ports:
       - "127.0.0.1:8333:8333"
-      - "127.0.0.1:8888:8888"
-      - "127.0.0.1:8080:8080"
     volumes:
       - evogym_s3_dev_data:/data
 
