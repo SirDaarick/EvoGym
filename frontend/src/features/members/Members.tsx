@@ -27,6 +27,7 @@ import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi
 import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import { listRentals, type RentalDTO } from '../../api/rentalsApi';
+import type { MemberSummary } from '../../api/memberReadsApi';
 
 export { getMemberStatusInfo };
 
@@ -314,6 +315,7 @@ export function MemberDetail({
   liveData?: {
     member: Member;
     reload: MemberReloadResponse;
+    summary?: MemberSummary | null;
     notes: string | null;
     status: string;
     isAdmin: boolean;
@@ -337,6 +339,7 @@ function LiveMemberDetail({
   role,
   member,
   reload,
+  summary,
   notes,
   status,
   isAdmin,
@@ -354,6 +357,7 @@ function LiveMemberDetail({
   role: Role;
   member: Member;
   reload: MemberReloadResponse;
+  summary?: MemberSummary | null;
   notes: string | null;
   status: string;
   isAdmin: boolean;
@@ -574,7 +578,7 @@ function LiveMemberDetail({
                 variant="secondary"
                 onClick={() => setCheckoutModal({ open: true, operation: 'sale' })}
               >
-                Vender membresía
+                {currentPeriod ? 'Renovar plan' : 'Vender membresía'}
               </Button>
               {hasPendingDebt && (
                 <Button
@@ -674,10 +678,10 @@ function LiveMemberDetail({
           sales={[]}
           role={isAdmin ? 'OWNER' : role}
           reloadState={reload}
-          onSwitchToRecord={() => setActiveTab('record')}
+          summary={summary}
           onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
-          liveNotesList={isAdmin ? liveNotesList : undefined}
-          onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
+          liveNotesList={liveNotesList}
+          onAddLiveNote={onAddLiveNote}
           noteSubmitting={noteSubmitting}
           noteError={noteError}
         />
@@ -699,11 +703,12 @@ function LiveMemberDetail({
           reloadState={reload}
           onPayDebt={(orderId?: string) => setCheckoutModal({ open: true, operation: 'debt_payment', orderId })}
           liveNotes={notes}
-          liveNotesList={isAdmin ? liveNotesList : undefined}
-          onAddLiveNote={isAdmin ? onAddLiveNote : undefined}
+          liveNotesList={liveNotesList}
+          onAddLiveNote={onAddLiveNote}
           noteSubmitting={noteSubmitting}
           noteError={noteError}
           liveApi
+          apiRequest={apiRequest}
         />
       </div>
     )}
@@ -823,7 +828,6 @@ function DemoMemberDetail({ role }: { role: Role }) {
             sales={state.sales ?? []}
             role={role}
             reloadState={reloadState ?? undefined}
-            onSwitchToRecord={() => setActiveTab('record')}
           />
         </div>
       ) : (

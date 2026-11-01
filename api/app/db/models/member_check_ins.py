@@ -31,6 +31,7 @@ class MemberCheckIn(Base):
         UniqueConstraint("branch_id", "recorded_by", "idempotency_key", name="uq_member_check_ins_actor_key"),
         Index("ix_member_check_ins_period_occurred", "period_id", "occurred_at"),
         Index("ix_member_check_ins_visit", "visit_id"),
+        Index("ix_member_check_ins_member_branch_occurred", "member_id", "branch_id", "occurred_at"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)

@@ -600,7 +600,7 @@ def test_member_notes_queries_and_voiding(tmp_path):
 
 
 def test_member_notes_api_endpoints_and_access_control(tmp_path):
-    """Verify note access control: Receptionist forbidden (403), Admin allowed."""
+    """Receptionists and admins share notes; only admins can void them."""
     url, engine, factory = _setup_db(tmp_path)
     try:
         branch_id = _seed_branch(factory)
@@ -615,16 +615,18 @@ def test_member_notes_api_endpoints_and_access_control(tmp_path):
 
         with TestClient(app) as client:
             admin_headers = approved_admin_headers(client, delivery, "owner@example.invalid", "super-secret-password")
-            # 1. Receptionist is forbidden from accessing note endpoints (403)
+            # Receptionists can read and create shared notes.
             res_r_get = client.get(f"/api/v1/members/{member.id}/notes", headers=recep_headers)
-            assert res_r_get.status_code == 403
+            assert res_r_get.status_code == 200
+            assert res_r_get.json() == []
 
             res_r_post = client.post(
                 f"/api/v1/members/{member.id}/notes",
                 headers=recep_headers,
                 json={"body": "Receptionist note attempt"},
             )
-            assert res_r_post.status_code == 403
+            assert res_r_post.status_code == 201
+            assert res_r_post.json()["author_id"] == str(_staff_id)
 
             # 2. Admin can create a note (201 Created)
             res_a_post = client.post(
@@ -638,6 +640,7 @@ def test_member_notes_api_endpoints_and_access_control(tmp_path):
             assert note_data["member_id"] == str(member.id)
             assert note_data["is_voided"] is False
             note_id = note_data["id"]
+            assert {n["id"] for n in client.get(f"/api/v1/members/{member.id}/notes", headers=recep_headers).json()} == {note_id, res_r_post.json()["id"]}
 
             # 3. Receptionist cannot void a note (403)
             res_r_void = client.post(
@@ -649,7 +652,7 @@ def test_member_notes_api_endpoints_and_access_control(tmp_path):
             # 4. Admin can list notes (200)
             res_a_get = client.get(f"/api/v1/members/{member.id}/notes", headers=admin_headers)
             assert res_a_get.status_code == 200
-            assert len(res_a_get.json()) == 1
+            assert len(res_a_get.json()) == 2
 
             # 5. Admin can void a note (200)
             res_a_void = client.post(
@@ -663,13 +666,13 @@ def test_member_notes_api_endpoints_and_access_control(tmp_path):
             # 6. Admin listing notes without include_voided returns empty list
             res_a_get2 = client.get(f"/api/v1/members/{member.id}/notes", headers=admin_headers)
             assert res_a_get2.status_code == 200
-            assert len(res_a_get2.json()) == 0
+            assert len(res_a_get2.json()) == 1
 
             # 7. Admin listing notes with include_voided=True returns the voided note
             res_a_get_all = client.get(f"/api/v1/members/{member.id}/notes?include_voided=true", headers=admin_headers)
             assert res_a_get_all.status_code == 200
-            assert len(res_a_get_all.json()) == 1
-            assert res_a_get_all.json()[0]["is_voided"] is True
+            assert len(res_a_get_all.json()) == 2
+            assert any(n["id"] == note_id and n["is_voided"] for n in res_a_get_all.json())
 
             # 8. Note operations on non-existent member -> 404
             fake_member_id = uuid4()

@@ -27,8 +27,8 @@ Classify cards: **A — core API contract exists; integrate/verify adapter**; **
 | F11 | Manage rentals end to end | P2 / C | **Completed** | Rental lifecycle, inventory and payment rules |
 | F12 | Record and review expenses | P2 / C | **Discovery completed** ([f12-expenses.md](f12-expenses.md)) | Expense ownership, approval and accounting rules |
 | F13 | Run payroll | P2 / C | **Discovery completed** ([f13-payroll.md](f13-payroll.md)) | Payroll domain, weekly cadence and advances |
-| F14 | Review a member account history | P2 / C | **Discovery completed** ([f14-member-history.md](f14-member-history.md)) | Member detail and individually confirmed history sources |
-| F15 | Review one named owner daily operations summary | P2 / C | Named owner, metric definitions and source domains |
+| F14 | Review a member account history | P2 / C | **Completed** | Member detail and individually confirmed history sources |
+| F15 | Review one named owner daily operations summary | P2 / C | **Discovery completed** ([f15-daily-operations-summary.md](f15-daily-operations-summary.md)) | Executive 360 command center, 4 pillars |
 
 Priority is order, not a deadline. Recommended next: F01, then F02. F03 can be separately owned only if it does not conflict on schema/router/migration work. No parallel shared-auth, router, or migration ownership.
 
@@ -241,21 +241,21 @@ At feature start, verify each cited contract and route against current source. E
 **Tasks:**
 - [x] Name the user and history question; select only needed domains (membership, payment, access/visits, eligibility, notes) (Two-tab split: Zero-scroll Mostrador HUD + Deep Expediente tab).
 - [x] For every chosen domain, verify a read contract, identity/scope and field semantics; list absent/uncertain sources separately (Server-aggregated habits and rentals summary endpoint).
-- [ ] Decide sensitive note visibility and pagination/timezone ordering.
-- [ ] Implement a focused member account timeline/sections using real contracts; add API reads only for identified requirements.
-- [ ] Verify allowed/denied role, empty history, pagination, date boundary, reload and source-record links.
+- [x] Decide sensitive note visibility and pagination/timezone ordering (Shared reception/admin notes, paginated purchases with date filters, Mexico City timezone).
+- [x] Implement a focused member account timeline/sections using real contracts; add API reads only for identified requirements (Mostrador Bento HUD, Expediente tab with TanStack Table and check-ins calendar).
+- [x] Verify allowed/denied role, empty history, pagination, date boundary, reload and source-record links (89 API tests, 49 frontend tests, typecheck and production build passing).
 
 **Exit:** each visible history item maps to an authorized persisted source record; unknown or unavailable domains are not represented as complete.
 
 ### F15 — Review one named owner daily operations summary (P2, C)
 
-**Discovery first:** name the owner decision and the first specific daily summary before selecting metrics. Define branch scope, business date/timezone, totals, exclusions, source records and zero-vs-missing. This is one named summary, not a generic reports dashboard or an all-domain history card.
+**Discovery completed:** Detailed architecture and domain specification documented in [f15-daily-operations-summary.md](f15-daily-operations-summary.md).
 
 **Source anchors:** authenticated owner route boundary `frontend/src/app/ApiProductApp.tsx:103-117`; possible source APIs must be mapped only after the owner question is known: `api/app/api/pending_money.py`, `api/app/api/sales.py`, `api/app/api/staff_attendance.py`, `api/app/api/shifts.py`.
 
 **Tasks:**
-- [ ] Record the owner, decision, date window/timezone, branch scope and each metric definition.
-- [ ] Trace each metric to an authoritative persisted source; identify needed missing aggregation API.
+- [x] Record the owner, decision, date window/timezone, branch scope and each metric definition (Default today in branch timezone, 4 Bento pillars with max 3 KPIs each).
+- [x] Trace each metric to an authoritative persisted source; identify needed missing aggregation API (Single aggregated backend endpoint across shifts, sales, attendance, payroll, alerts).
 - [ ] Agree API and authenticated owner adapter after definitions are approved.
 - [ ] Compare results to a fixed persisted fixture; verify branch denial, timezone edge, zero/missing and reload.
 

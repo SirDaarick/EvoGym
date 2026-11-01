@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, MembershipPayment, Member, PaymentMethod, Role, Sale, SupplementSale } from '../../domain/models';
-import type { MemberReloadResponse } from '../../api/memberReadsApi';
+import type { MemberPurchasePage, MemberReloadResponse, MemberSummary } from '../../api/memberReadsApi';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import type { MemberNoteDTO } from '../../api/membersApi';
 import { formatMoney } from '../../demo/adapter';
 import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
@@ -23,11 +24,51 @@ import { Badge, Button, EmptyState, Panel, TableRegion } from '../../shared/ui';
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';
 import './MemberDetail.css';
 
-type Purchase = { id: string; date: string; product: string; amount: number; method: PaymentMethod; status: string };
+type Purchase = { id: string; date: string; product: string; amount: number; method: PaymentMethod | null; status: string };
 type MembershipRow = { id: string; planName: string; date: string; current: boolean; period?: boolean };
 
 function ReadOnlyMemberNotes({ note }: { note: string | null }) {
   return <Panel><div className="member-notes-header"><div className="member-notes-title-wrap"><h2>Nota</h2></div></div>{note?.trim() ? <p className="member-note-body">{note}</p> : <EmptyState title="Sin notas registradas">Todavía no hay notas para este socio.</EmptyState>}</Panel>;
+}
+
+function LiveAttendanceCalendar({ memberId, now, request }: { memberId: string; now: string; request: AuthenticatedRequest }) {
+  const [month, setMonth] = useState(now.slice(0, 7));
+  const [visits, setVisits] = useState<{ id: string; occurred_at: string; access_reason: string }[]>([]);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState('');
+  useEffect(() => {
+    const [year, monthNumber] = month.split('-');
+    if (!year || !monthNumber) return;
+    let cancelled = false;
+    setError('');
+    void request(`/api/v1/members/${encodeURIComponent(memberId)}/check-ins?month=${Number(monthNumber)}&year=${Number(year)}`)
+      .then(response => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(data => { if (!cancelled && Array.isArray(data)) setVisits(data); })
+      .catch(() => { if (!cancelled) { setVisits([]); setError('No se pudo cargar la asistencia.'); } });
+    return () => { cancelled = true; };
+  }, [memberId, month, request]);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const days = Number.isFinite(year) && Number.isFinite(monthNumber) ? new Date(Date.UTC(year, monthNumber, 0)).getUTCDate() : 0;
+  const firstDay = days ? (new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() + 6) % 7 : 0;
+  const dates = visits.reduce<Record<string, number>>((counts, visit) => {
+    const key = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(visit.occurred_at));
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+  return <div>
+    <label>Mes de asistencia <input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>
+    {error ? <p role="alert">{error}</p> : <div role="grid" aria-label="Calendario de asistencias" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+      {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((day, index) => <span key={index}>{day}</span>)}
+      {Array.from({ length: firstDay }, (_, index) => <span key={`blank-${index}`} />)}
+      {Array.from({ length: days }, (_, index) => {
+        const key = `${month}-${String(index + 1).padStart(2, '0')}`;
+        return <button type="button" key={key} aria-label={`${key}: ${dates[key] ?? 0} asistencias`} aria-pressed={selected === key} onClick={() => setSelected(key)}>{index + 1}{dates[key] ? ' •' : ''}</button>;
+      })}
+    </div>}
+    {!error && (visits.length ? <ul>{visits.filter(visit => !selected || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(visit.occurred_at)) === selected).map(visit => <li key={visit.id}>
+      <time dateTime={visit.occurred_at}>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Mexico_City' }).format(new Date(visit.occurred_at))}</time> · {visit.access_reason}
+    </li>)}</ul> : <p>Sin asistencias en este mes.</p>)}
+  </div>;
 }
 
 function MemberNotes({ member, now }: { member: Member; now: string }) {
@@ -165,8 +206,8 @@ function LiveAdminNotes({
             <article key={note.id} className="member-note-card">
               <div className="member-note-header">
                 <div className="member-note-author">
-                  <span className="member-note-author-avatar" aria-hidden="true">AD</span>
-                  <strong>Administrador</strong>
+                  <span className="member-note-author-avatar" aria-hidden="true">{(note.author_name ?? 'Personal').slice(0, 2).toUpperCase()}</span>
+                  <strong>{note.author_name ?? 'Personal'}</strong>
                 </div>
                 <time dateTime={note.created_at}>
                   {new Intl.DateTimeFormat('es-MX', {
@@ -250,6 +291,7 @@ export function MemberDetailSections({
   noteSubmitting,
   noteError,
   liveApi = false,
+  apiRequest,
 }: {
   member: Member;
   now: string;
@@ -270,19 +312,33 @@ export function MemberDetailSections({
   noteSubmitting?: boolean;
   noteError?: string;
   liveApi?: boolean;
+  apiRequest?: AuthenticatedRequest;
 }) {
+  const [purchasePage, setPurchasePage] = useState<MemberPurchasePage | null>(null);
+  const [page, setPage] = useState(1);
+  const [purchaseError, setPurchaseError] = useState('');
+  useEffect(() => {
+    if (!liveApi || !apiRequest) return;
+    let cancelled = false;
+    setPurchaseError('');
+    void apiRequest(`/api/v1/members/${encodeURIComponent(member.id)}/purchases?page=${page}&page_size=20`)
+      .then(response => { if (!response.ok) throw new Error(); return response.json() as Promise<MemberPurchasePage>; })
+      .then(data => { if (!cancelled && Array.isArray(data.items)) setPurchasePage(data); })
+      .catch(() => { if (!cancelled) { setPurchasePage(null); setPurchaseError('No se pudo cargar el historial de compras.'); } });
+    return () => { cancelled = true; };
+  }, [apiRequest, liveApi, member.id, page]);
   const memberPayments = useMemo(() => membershipHistory(payments, member.id), [payments, member.id]);
   const streak = liveApi ? null : membershipRenewalStreak(payments, member.id);
   const today = now.slice(0, 10);
   const membershipIsCurrent = Boolean(member.membership && member.membership.startsOn <= today && member.membership.endsOn >= today);
   const glove = gloves.find(item => item.assignedMemberId === member.id);
   const locker = lockers.find(item => item.assignedMemberId === member.id);
-  const purchases = useMemo<Purchase[]>(() => [
+  const purchases = useMemo<Purchase[]>(() => liveApi && purchasePage ? purchasePage.items.map(item => ({ id: item.id, date: item.created_at, product: item.description, amount: item.amount_minor, method: item.method, status: item.status === 'paid' ? 'Pagado' : 'Pendiente' })) : [
     ...payments.map(p => ({ id: p.id, date: p.recordedAt, product: `Membresía · ${p.planName}`, amount: p.amountMinor, method: p.method, status: p.status === 'paid' ? 'Pagado' : 'Pendiente' })),
     ...gloveRentals.filter(r => r.memberId === member.id).map(r => ({ id: r.id, date: r.rentedAt, product: `Renta de guantes · ${gloves.find(g => g.id === r.gloveId)?.code ?? r.gloveId}`, amount: r.priceMinor, method: r.method, status: r.status === 'paid' ? 'Pagado' : 'Pendiente' })),
     ...lockerRentals.filter(r => r.memberId === member.id).map(r => ({ id: r.id, date: r.rentedAt, product: `Renta de casillero · ${lockers.find(l => l.id === r.lockerId)?.code ?? r.lockerId}`, amount: r.priceMinor, method: r.method, status: r.status === 'paid' ? 'Pagado' : 'Pendiente' })),
     ...supplementSales.filter(s => s.memberId === member.id).map(s => ({ id: s.id, date: s.recordedAt, product: s.name, amount: s.amountMinor, method: s.method, status: s.status === 'confirmed' ? 'Pagado' : 'Pendiente' })),
-  ].sort((a, b) => b.date.localeCompare(a.date)), [payments, gloveRentals, lockerRentals, supplementSales, gloves, lockers, member.id]);
+  ].sort((a, b) => b.date.localeCompare(a.date)), [liveApi, purchasePage, payments, gloveRentals, lockerRentals, supplementSales, gloves, lockers, member.id]);
   const columns = useMemo<ColumnDef<Purchase>[]>(() => [
     {
       accessorKey: 'date',
@@ -311,11 +367,11 @@ export function MemberDetailSections({
       accessorKey: 'method',
       header: 'Método',
       cell: info => {
-        const method = info.getValue() as PaymentMethod;
+        const method = info.getValue() as PaymentMethod | null;
         const labels: Record<PaymentMethod, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
         return (
           <span className={`member-method-badge method-${method}`}>
-            {labels[method] ?? method}
+              {method ? labels[method] ?? method : '—'}
           </span>
         );
       },
@@ -467,7 +523,7 @@ export function MemberDetailSections({
         <div className="member-detail-attendance">
           <Panel>
             <h2>Asistencia previa</h2>
-            {liveApi ? <EmptyState title="Frecuencia histórica no disponible">La integración muestra hasta 12 visitas recientes, no el total histórico de asistencia.</EmptyState> : <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />}
+            {liveApi ? (apiRequest ? <LiveAttendanceCalendar memberId={member.id} now={now} request={apiRequest} /> : <EmptyState title="Frecuencia histórica no disponible">No se pudo cargar la asistencia.</EmptyState>) : <AttendanceCalendar visits={visits} now={now} label="Asistencia previa" showIllustrativeDisclaimer={false} />}
             {reloadState?.recent_visits?.length ? (
               <div className="member-recent-visits" style={{ marginTop: '1rem' }}>
                 <h3>{liveApi ? 'Últimas visitas (máximo 12)' : 'Visitas recientes'}</h3>
@@ -492,14 +548,12 @@ export function MemberDetailSections({
         </div>
         <div className="member-detail-notes">
           {liveApi ? (
-            (role === 'OWNER' || role === 'ADMIN') ? (
               <LiveAdminNotes
                 notes={liveNotesList ?? []}
                 onAddNote={onAddLiveNote}
                 submitting={noteSubmitting}
                 error={noteError}
               />
-            ) : null
           ) : (
             <MemberNotes member={member} now={now} />
           )}
@@ -614,6 +668,7 @@ export function MemberDetailSections({
             </span>
           )}
         </div>
+        {purchaseError && <p role="alert">{purchaseError}</p>}
         {purchases.length ? (
           <TableRegion label="Historial de compras">
             <div className="member-purchase-table-scroll">
@@ -645,10 +700,15 @@ export function MemberDetailSections({
             </div>
           </TableRegion>
         ) : liveApi ? (
-          <EmptyState title="Historial de compras no disponible">No hay un historial de compras incluido en esta integración.</EmptyState>
+          <EmptyState title="Sin compras registradas">No hay operaciones atribuibles a este socio.</EmptyState>
         ) : (
           <EmptyState title="Sin compras registradas">No hay operaciones atribuibles a este socio.</EmptyState>
         )}
+        {liveApi && purchasePage && purchasePage.total > purchasePage.page_size && <div className="flow">
+          <Button variant="secondary" disabled={page <= 1} onClick={() => setPage(current => current - 1)}>Anterior</Button>
+          <span>Página {page}</span>
+          <Button variant="secondary" disabled={page * purchasePage.page_size >= purchasePage.total} onClick={() => setPage(current => current + 1)}>Siguiente</Button>
+        </div>}
       </Panel>
     </div>
   </section>;
@@ -667,7 +727,7 @@ export function MemberCounterView({
   sales = [],
   role = 'RECEPTION',
   reloadState,
-  onSwitchToRecord,
+  summary,
   onPayDebt,
   liveNotesList,
   onAddLiveNote,
@@ -686,7 +746,7 @@ export function MemberCounterView({
   sales?: Sale[];
   role?: Role | 'ADMIN';
   reloadState?: MemberReloadResponse;
-  onSwitchToRecord?: () => void;
+  summary?: MemberSummary | null;
   onPayDebt?: (orderId?: string) => void;
   liveNotesList?: MemberNoteDTO[];
   onAddLiveNote?: (body: string) => Promise<void>;
@@ -706,13 +766,20 @@ export function MemberCounterView({
       memberId: n.member_id,
       body: n.body,
       authorId: n.author_id,
-      authorName: 'Administrador',
+      authorName: n.author_name ?? (summary?.latest_note?.id === n.id ? summary.latest_note.author_name : 'Personal'),
       createdAt: n.created_at,
     }));
-  }, [liveNotesList]);
+  }, [liveNotesList, summary?.latest_note]);
 
   const allNotes = liveNoteItems ?? (demo?.state.memberNotes ?? []).filter(note => note.memberId === member.id);
-  const latestNote = allNotes[0] ?? null;
+  const latestNote = allNotes[0] ?? (summary?.latest_note?.body ? {
+    id: summary.latest_note.id,
+    memberId: member.id,
+    body: summary.latest_note.body,
+    authorId: '',
+    authorName: summary.latest_note.author_name,
+    createdAt: summary.latest_note.created_at ?? now,
+  } : null);
 
   const statusInfo = getMemberStatusInfo(member, now);
   const streak = useMemo(() => membershipRenewalStreak(payments, member.id), [payments, member.id]);
@@ -733,7 +800,7 @@ export function MemberCounterView({
 
   const activePeriod = reloadState?.active_periods?.[0];
   const isAdmin = role === 'OWNER' || role === 'ADMIN';
-  const effectiveHasPendingBalance = reloadState ? reloadState.financial.has_pending_balance : hasPendingBalance;
+  const effectiveHasPendingBalance = summary?.financial.has_pending_balance ?? (reloadState ? reloadState.financial.has_pending_balance : hasPendingBalance);
 
   const reloadLastVisit = reloadState?.recent_visits?.[0];
 
@@ -775,10 +842,19 @@ export function MemberCounterView({
     return 'Saludo cordial: Recibir por su nombre y desear excelente entrenamiento.';
   }, [visits.length, isToday, openVisit, lastVisit, lastVisitDate, today, habits.weeklyVisits]);
 
-  const glove = gloves.find(item => item.assignedMemberId === member.id);
   const locker = lockers.find(item => item.assignedMemberId === member.id);
-  const lockerState = locker ? rentalStatus(locker.expiresAt, now) : 'none';
-  const hasRentalWarning = lockerState === 'overdue' || lockerState === 'eviction-status';
+  const lockerCode = summary?.rentals?.active_locker?.code ?? locker?.code;
+  const lockerExpiresAt = summary?.rentals?.active_locker?.expires_at ?? locker?.expiresAt;
+  const effectiveLockerState = summary?.rentals?.active_locker
+    ? (summary.rentals.active_locker.status === 'expired' ? 'overdue' : 'active')
+    : (locker ? rentalStatus(locker.expiresAt, now) : 'none');
+  const hasRentalWarning = effectiveLockerState === 'overdue' || effectiveLockerState === 'eviction-status';
+
+  const glove = gloves.find(item => item.assignedMemberId === member.id);
+  const gloveCode = summary?.rentals?.active_gloves?.code ?? glove?.code;
+  const effectiveGloveActive = summary?.rentals?.active_gloves
+    ? !summary.rentals.active_gloves.returned
+    : Boolean(glove);
 
   const handleSaveNote = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -868,18 +944,18 @@ export function MemberCounterView({
                 <div className="counter-billing-alert is-warning" role="alert" data-testid="balance-warning-alert">
                   <span>
                     ⚠️ Saldo pendiente registrado
-                    {isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
+                    {summary ? <span className="counter-debt-amount">{' · '}Adeudo: {formatMoney(summary.financial.pending_balance_minor)} MXN</span> : isAdmin && reloadState?.financial.total_pending_balance_minor !== null && reloadState?.financial.total_pending_balance_minor !== undefined ? (
                       <span className="counter-debt-amount" data-testid="admin-debt-amount">
                         {' · '}Adeudo: {formatMoney(reloadState.financial.total_pending_balance_minor)} MXN
                       </span>
                     ) : null}
                   </span>
-                  {onPayDebt && (
+                  {onPayDebt && (!summary || summary.financial.unpaid_order_id) && (
                     <button
                       type="button"
                       className="counter-card-link-btn"
                       style={{ marginLeft: '8px' }}
-                      onClick={() => onPayDebt()}
+                      onClick={() => onPayDebt(summary?.financial.unpaid_order_id ?? undefined)}
                     >
                       Abonar en caja ›
                     </button>
@@ -894,13 +970,6 @@ export function MemberCounterView({
             </div>
           </div>
 
-          {onSwitchToRecord && (
-            <div className="counter-card-footer">
-              <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
-                Ver historial de membresías ›
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Card 2: Asistencia & Pauta Humana */}
@@ -926,7 +995,7 @@ export function MemberCounterView({
           <div className="counter-card-content">
             <div className="counter-human-callout">
               <span className="counter-human-callout-icon" aria-hidden="true">💬</span>
-              <p className="counter-human-text">{greetingInsight}</p>
+              <p className="counter-human-text">{summary?.habits.greeting_prompt ?? (reloadState ? 'Hábitos no disponibles.' : greetingInsight)}</p>
             </div>
 
             <div className="counter-attendance-metrics">
@@ -947,20 +1016,12 @@ export function MemberCounterView({
               <div className="counter-metric-row">
                 <span className="counter-metric-label muted">Frecuencia mensual:</span>
                 <span className="counter-metric-val">
-                  <strong>{habits.monthlyVisits}</strong> {habits.monthlyVisits === 1 ? 'visita' : 'visitas'} este mes
-                  <span className="muted"> ({habits.weeklyVisits} días / sem)</span>
+                  {summary ? <strong>{summary.habits.weekly_visits} visitas / sem</strong> : reloadState ? 'No disponible' : <><strong>{habits.monthlyVisits}</strong> {habits.monthlyVisits === 1 ? 'visita' : 'visitas'} este mes<span className="muted"> ({habits.weeklyVisits} días / sem)</span></>}
                 </span>
               </div>
             </div>
           </div>
 
-          {onSwitchToRecord && (
-            <div className="counter-card-footer">
-              <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
-                Ver mapa de asistencia ›
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Card 3: Rentas Activas */}
@@ -987,27 +1048,27 @@ export function MemberCounterView({
                   <div>
                     <strong>Casillero</strong>
                     <span className="counter-rental-meta muted">
-                      {locker ? `Identificador ${locker.code}` : 'Sin asignar'}
-                      {locker?.expiresAt && ` · Vence ${new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(locker.expiresAt))}`}
+                      {lockerCode ? `Identificador ${lockerCode}` : 'Sin asignar'}
+                      {lockerExpiresAt && ` · Vence ${new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeZone: 'America/Mexico_City' }).format(new Date(lockerExpiresAt))}`}
                     </span>
                   </div>
                 </div>
                 <Badge
                   tone={
-                    lockerState === 'active'
+                    effectiveLockerState === 'active'
                       ? 'success'
-                      : lockerState === 'overdue'
+                      : effectiveLockerState === 'overdue'
                         ? 'warning'
-                        : lockerState === 'eviction-status'
+                        : effectiveLockerState === 'eviction-status'
                           ? 'error'
                           : 'neutral'
                   }
                 >
-                  {lockerState === 'active'
+                  {effectiveLockerState === 'active'
                     ? 'Activo'
-                    : lockerState === 'overdue'
+                    : effectiveLockerState === 'overdue'
                       ? 'Vencido'
-                      : lockerState === 'eviction-status'
+                      : effectiveLockerState === 'eviction-status'
                         ? 'Desalojo'
                         : 'Sin renta'}
                 </Badge>
@@ -1019,39 +1080,31 @@ export function MemberCounterView({
                   <div>
                     <strong>Guantes</strong>
                     <span className="counter-rental-meta muted">
-                      {glove ? `Identificador ${glove.code}` : 'Sin asignar'}
+                      {gloveCode ? `Identificador ${gloveCode}` : 'Sin asignar'}
                     </span>
                   </div>
                 </div>
-                <Badge tone={glove ? 'success' : 'neutral'}>
-                  {glove ? 'Activo' : 'Sin renta'}
+                <Badge tone={effectiveGloveActive ? 'success' : 'neutral'}>
+                  {effectiveGloveActive ? 'Activo' : 'Sin renta'}
                 </Badge>
               </div>
             </div>
 
-            {lockerState === 'overdue' && (
+            {effectiveLockerState === 'overdue' && (
               <div className="counter-rental-alert is-warning" role="alert">
                 ⚠️ <strong>Casillero vencido:</strong> Gestión de renovación en curso.
               </div>
             )}
-            {lockerState === 'eviction-status' && (
+            {effectiveLockerState === 'eviction-status' && (
               <div className="counter-rental-alert is-danger" role="alert">
                 🚨 <strong>Estado de desalojo:</strong> Casillero superó 14 días vencido.
               </div>
             )}
           </div>
 
-          {onSwitchToRecord && (
-            <div className="counter-card-footer">
-              <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
-                Ver rentas en expediente ›
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Card 4: Atención al Socio - Hidden for reception in live mode */}
-        {(isAdmin || !reloadState) && (
+        {/* Card 4: Atención al Socio */}
           <div className="counter-card counter-card-service">
             <div className="counter-card-header">
               <div className="counter-card-title-group">
@@ -1130,28 +1183,20 @@ export function MemberCounterView({
                 <p className="counter-empty-note muted">Sin notas registradas.</p>
               )}
 
-              {habits.favoriteProducts.length > 0 && !isAddingNote && (
+              {(summary?.habits.favorite_product || (!reloadState && habits.favoriteProducts.length > 0)) && !isAddingNote && (
                 <div className="counter-upsell-box">
                   <span className="counter-upsell-icon" aria-hidden="true">🥤</span>
                   <div className="counter-upsell-content">
                     <span className="counter-upsell-title">Sugerencia de mostrador:</span>
                     <p className="counter-upsell-text">
-                      Ofrecer su habitual: <strong>{habits.favoriteProducts[0].name}</strong>
+                      Ofrecer su habitual: <strong>{summary?.habits.favorite_product ?? habits.favoriteProducts[0]?.name}</strong>
                     </p>
                   </div>
                 </div>
               )}
             </div>
 
-            {onSwitchToRecord && !isAddingNote && (
-              <div className="counter-card-footer">
-                <button type="button" className="counter-card-link-btn" onClick={onSwitchToRecord}>
-                  Ver todas las notas ({allNotes.length}) ›
-                </button>
-              </div>
-            )}
           </div>
-        )}
       </div>
     </section>
   );

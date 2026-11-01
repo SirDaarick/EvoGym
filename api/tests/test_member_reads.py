@@ -36,6 +36,7 @@ from app.db.models import (
     StaffUser,
 )
 from app.db.models.member_check_ins import MemberCheckInVisit
+from app.db.models.rentals import Rental, RentalAsset, RentalCharge
 from app.db.models.shifts import CashRegister, Shift
 from app.members.read_queries import (
     register_member_home_branch,
@@ -411,6 +412,139 @@ def test_t04_cross_branch_profile_read_permitted_and_cross_org_concealed(tmp_pat
             )
             assert res_org.status_code == 404
             assert res_org.json()["detail"] == "The requested resource was not found."
+
+            history = client.get(
+                f"/api/v1/members/{member.id}/check-ins?month=1&year=2026",
+                headers={"Authorization": f"Bearer {token_b}", "X-Organization-ID": str(foreign_org)},
+            )
+            assert history.status_code == 404
+            assert history.json()["detail"] == "The requested resource was not found."
+    finally:
+        engine.dispose()
+
+
+def test_f14_summary_and_paginated_purchases(tmp_path):
+    engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory, code="f14", name="F14")
+        staff, token = _seed_receptionist(factory, branch)
+        member = _seed_member(factory, member_number="SOC-F14")
+        _plan, order, _item, _shift = _seed_plan_and_order(factory, member.id, branch, staff, total_minor=10000)
+        with factory.begin() as session:
+            session.add(MembershipDebt(order_id=order, member_id=member.id, initial_outstanding_minor=10000))
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(_create_test_app(factory)) as client:
+            summary = client.get(f"/api/v1/members/{member.id}/summary", headers=headers)
+            assert summary.status_code == 200
+            assert summary.json()["member_id"] == str(member.id)
+            assert summary.json()["financial"]["pending_balance_minor"] == 10000
+            assert summary.json()["financial"]["unpaid_order_id"] == str(order)
+            assert summary.json()["habits"]["weekly_visits"] == 0
+            purchases = client.get(f"/api/v1/members/{member.id}/purchases?page=1&page_size=1", headers=headers)
+            assert purchases.status_code == 200
+            assert purchases.json()["total"] == 1
+            assert purchases.json()["items"][0]["id"] == str(order)
+            assert purchases.json()["items"][0]["status"] == "pending"
+            assert client.get(f"/api/v1/members/{member.id}/purchases?page=2&page_size=1", headers=headers).json()["items"] == []
+    finally:
+        engine.dispose()
+
+
+def test_f14_financial_history_is_branch_scoped_and_paginated(tmp_path):
+    engine, factory = _setup_db(tmp_path)
+    try:
+        branch_a = _seed_branch(factory, code="f14-a", name="F14 A")
+        branch_b = _seed_branch(factory, code="f14-b", name="F14 B")
+        staff_a, token_a = _seed_receptionist(factory, branch_a, login="f14-a@evogym.com")
+        staff_b, token_b = _seed_receptionist(factory, branch_b, login="f14-b@evogym.com")
+        member = _seed_member(factory, member_number="SOC-F14-BRANCH")
+        _, order_a, _, shift_a = _seed_plan_and_order(factory, member.id, branch_a, staff_a, total_minor=10000)
+        _, order_b, _, _ = _seed_plan_and_order(factory, member.id, branch_b, staff_b, total_minor=20000)
+        with factory.begin() as session:
+            debt = MembershipDebt(order_id=order_a, member_id=member.id, initial_outstanding_minor=6000)
+            session.add(debt)
+            session.flush()
+            register = session.get(Shift, shift_a).cash_register_id
+            session.add(MembershipDebtPayment(debt_id=debt.id, order_id=order_a, member_id=member.id,
+                branch_id=branch_a, register_id=register, shift_id=shift_a, amount_minor=2000,
+                remaining_after_minor=4000, received_by=staff_a, idempotency_key="f14-debt", request_fingerprint="a" * 64))
+            asset = RentalAsset(branch_id=branch_a, kind="locker", code="14", locker_number=14,
+                                price_minor=3000, status="available", created_by=staff_a)
+            session.add(asset)
+            session.flush()
+            rental = Rental(branch_id=branch_a, asset_id=asset.id, member_id=member.id, kind="locker", status="active",
+                            starts_on=date.today(), ends_on=date.today() + timedelta(days=30), actor_id=staff_a,
+                            idempotency_key="f14-rental", request_fingerprint="b" * 64)
+            session.add(rental)
+            session.flush()
+            charge = RentalCharge(rental_id=rental.id, branch_id=branch_a, charge_kind="initial", amount_minor=3000,
+                                  starts_on=date.today(), ends_on=date.today() + timedelta(days=30),
+                                  idempotency_key="f14-charge", request_fingerprint="c" * 64, created_by=staff_a)
+            session.add(charge)
+            session.flush()
+            charge_id = charge.id
+
+        app = _create_test_app(factory)
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token_a}"}
+            url = f"/api/v1/members/{member.id}"
+            assert client.get(f"{url}/summary").status_code == 401
+            assert client.get(f"{url}/purchases").status_code == 401
+            assert client.get(f"{url}/summary?branch_id={branch_b}", headers=headers).status_code == 403
+            assert client.get(f"{url}/purchases?branch_id={branch_b}", headers=headers).status_code == 403
+            summary = client.get(f"{url}/summary", headers=headers)
+            assert summary.status_code == 200, summary.text
+            assert summary.json()["financial"] == {"has_pending_balance": True, "pending_balance_minor": 7000,
+                                                    "unpaid_order_id": str(order_a)}
+            assert summary.json()["rentals"]["active_locker"]["code"] == "14"
+            first = client.get(f"{url}/purchases?page=1&page_size=1", headers=headers).json()
+            second = client.get(f"{url}/purchases?page=2&page_size=1", headers=headers).json()
+            third = client.get(f"{url}/purchases?page=3&page_size=1", headers=headers).json()
+            assert first["total"] == second["total"] == third["total"] == 3
+            rows = first["items"] + second["items"] + third["items"]
+            assert {item["kind"] for item in rows} == {"order", "rental", "debt_payment"}
+            assert {item["id"] for item in rows} >= {str(order_a), str(charge_id)}
+            assert str(order_b) not in {item["id"] for item in rows}
+            assert next(item for item in rows if item["kind"] == "rental")["status"] == "pending"
+            assert client.get(f"{url}/purchases?from_date=1900-01-01&to_date=1900-01-02", headers=headers).json()["total"] == 0
+            assert client.get(f"{url}/purchases?from_date=2026-02-01&to_date=2026-01-01", headers=headers).status_code == 422
+            branch_b_rows = client.get(f"{url}/purchases", headers={"Authorization": f"Bearer {token_b}"}).json()
+            assert branch_b_rows["total"] == 1
+            assert branch_b_rows["items"][0]["id"] == str(order_b)
+    finally:
+        engine.dispose()
+
+
+def test_f14_habits_count_distinct_recent_visits_in_callers_branch(tmp_path):
+    engine, factory = _setup_db(tmp_path)
+    try:
+        branch_a = _seed_branch(factory, code="habit-a", name="Habit A")
+        branch_b = _seed_branch(factory, code="habit-b", name="Habit B")
+        staff_a, token_a = _seed_receptionist(factory, branch_a, login="habit-a@evogym.com")
+        staff_b, _ = _seed_receptionist(factory, branch_b, login="habit-b@evogym.com")
+        member = _seed_member(factory, member_number="SOC-F14-HABITS")
+        plan, _, item, _ = _seed_plan_and_order(factory, member.id, branch_a, staff_a)
+        now = datetime.now(timezone.utc)
+        with factory.begin() as session:
+            period = MembershipPeriod(member_id=member.id, order_item_id=item, plan_version_id=plan,
+                                      starts_on=date.today() - timedelta(days=60), ends_on=date.today() + timedelta(days=30), activated_by=staff_a)
+            session.add(period)
+            session.flush()
+            for index in range(6):
+                timestamp = now - timedelta(days=2 if index < 4 else 40 if index == 4 else 1)
+                visit = MemberCheckInVisit(member_id=member.id, started_at=timestamp)
+                session.add(visit)
+                session.flush()
+                session.add(MemberCheckIn(visit_id=visit.id, member_id=member.id, period_id=period.id,
+                    branch_id=branch_b if index == 5 else branch_a, recorded_by=staff_b if index == 5 else staff_a,
+                    idempotency_key=f"f14-habit-{index}", request_fingerprint="d" * 64,
+                    access_reason="valid_membership", access_warnings=[], occurred_at=timestamp))
+        with TestClient(_create_test_app(factory)) as client:
+            result = client.get(f"/api/v1/members/{member.id}/summary", headers={"Authorization": f"Bearer {token_a}"})
+            assert result.status_code == 200, result.text
+            assert result.json()["habits"]["weekly_visits"] == 1
+            assert result.json()["habits"]["attendance_tier"] == "normal"
+            assert result.json()["habits"]["favorite_product"] is None
     finally:
         engine.dispose()
 
@@ -759,6 +893,21 @@ def test_t10_visit_history_bounding_and_branch_partitioning(tmp_path):
             assert len(visits_b) == 5
             for vb in visits_b:
                 assert vb["branch_id"] == str(branch_b)
+
+            month = base_time.month
+            year = base_time.year
+            history = client.get(
+                f"/api/v1/members/{member.id}/check-ins?month={month}&year={year}",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert history.status_code == 200
+            check_ins = history.json()
+            assert len(check_ins) == sum(
+                (base_time + timedelta(hours=i * 2)).month == month
+                for i in range(25)
+            )
+            assert all(item["access_reason"] == "valid_membership" for item in check_ins)
+            assert all(item["branch_id"] == str(branch_a) for item in check_ins)
     finally:
         engine.dispose()
 

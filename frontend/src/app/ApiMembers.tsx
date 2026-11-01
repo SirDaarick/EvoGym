@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { MemberReloadResponse } from '../api/memberReadsApi';
+import type { MemberReloadResponse, MemberSummary } from '../api/memberReadsApi';
 import type { Member, Role } from '../domain/models';
 import { Members, MemberDetail } from '../features/members/Members';
 import { rolePath } from './navigation';
@@ -208,6 +208,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
   const memberId = location.pathname.split('/').filter(Boolean).at(-1) ?? '';
   const [member, setMember] = useState<ApiMemberDetail | null>(null);
   const [reload, setReload] = useState<MemberReloadResponse | null>(null);
+  const [summary, setSummary] = useState<MemberSummary | null>(null);
   const [notesList, setNotesList] = useState<MemberNoteDTO[]>([]);
   const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [noteError, setNoteError] = useState('');
@@ -222,13 +223,15 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
     setLoading(true);
     setError('');
     try {
-      const [profile, state, notesData] = await Promise.all([
+      const [profile, state, notesData, summaryData] = await Promise.all([
         readResponse<ApiMemberDetail>(request, `/api/v1/members/${encodeURIComponent(memberId)}`),
         readResponse<MemberReloadResponse>(request, `/api/v1/members/${encodeURIComponent(memberId)}/reload?visit_limit=12`),
-        isAdmin ? listMemberNotes(request, memberId).catch(() => [] as MemberNoteDTO[]) : Promise.resolve(null),
+        listMemberNotes(request, memberId).catch(() => [] as MemberNoteDTO[]),
+        readResponse<MemberSummary>(request, `/api/v1/members/${encodeURIComponent(memberId)}/summary`).catch(() => null),
       ]);
       setMember(profile);
       setReload(state);
+      setSummary(summaryData?.financial && summaryData?.habits ? summaryData : null);
       if (Array.isArray(notesData)) {
         setNotesList(notesData);
       }
@@ -316,6 +319,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
       liveData={{
         member: detailMember,
         reload,
+        summary,
         notes: member.notes,
         status: member.status,
         isAdmin,
@@ -323,8 +327,8 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
         onCheckIn: recordCheckIn,
         legalFullName: member.full_name,
         email: member.email,
-        liveNotesList: isAdmin ? notesList : undefined,
-        onAddLiveNote: isAdmin ? handleAddNote : undefined,
+        liveNotesList: notesList,
+        onAddLiveNote: handleAddNote,
         noteSubmitting,
         noteError,
         onUpdateMember: handleUpdateMember,

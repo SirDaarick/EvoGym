@@ -689,7 +689,7 @@ describe('member workflow', () => {
       expect(editPhoneInput).toHaveValue('999');
     });
 
-    it('OWNER loads and posts durable notes via /notes with zero DemoProvider mounted; RECEPTION cannot see note controls; F05 check-in continues to work', async () => {
+    it('RECEPTION and OWNER access durable notes while F05 check-in continues to work', async () => {
       const notesList = [
         {
           id: 'note-f02-1',
@@ -731,6 +731,9 @@ describe('member workflow', () => {
         if (path === `/api/v1/members/${fixtureMember.id}/notes`) {
           return new Response(JSON.stringify(notesList));
         }
+        if (path.endsWith('/summary')) return new Response(JSON.stringify({ financial: { has_pending_balance: true, pending_balance_minor: 1500, unpaid_order_id: 'order-1' }, habits: { weekly_visits: 4, attendance_tier: 'high', greeting_prompt: 'Socio habitual', favorite_product: 'Agua fría' } }));
+        if (path.includes('/purchases?')) return new Response(JSON.stringify({ items: [{ id: 'purchase-1', created_at: '2026-10-27T11:00:00Z', description: 'Agua', amount_minor: 2500, method: 'cash', status: 'paid' }], total: 1, page: 1, page_size: 20 }));
+        if (path.includes('/check-ins?')) return new Response(JSON.stringify([]));
         if (path.startsWith('/api/v1/member-check-ins/branches/')) {
           return new Response(JSON.stringify({
             id: 'checkin-f02',
@@ -748,16 +751,23 @@ describe('member workflow', () => {
         return new Response('{}');
       });
 
-      // 1. RECEPTION: No /notes request, no note controls visible, F05 check-in works
+      // Reception loads the same notes and retains check-in access.
       const { unmount: unmountRecep } = render(
         <MemoryRouter initialEntries={[`/reception/members/${fixtureMember.id}`]}>
           <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
         </MemoryRouter>
       );
       expect(await screen.findByRole('button', { name: 'Registrar entrada' })).toBeVisible();
-      expect(requestedPaths.some(p => p.includes('/notes'))).toBe(false);
-      expect(screen.queryByRole('button', { name: '+ Agregar nota' })).not.toBeInTheDocument();
-      expect(screen.queryByText('Atención al socio')).not.toBeInTheDocument();
+      expect(requestedPaths.some(p => p.includes('/notes'))).toBe(true);
+      expect(screen.getByRole('button', { name: '+ Agregar nota' })).toBeVisible();
+      expect(screen.getByText('Nota existente de dirección')).toBeVisible();
+      expect(screen.getByText('Socio habitual')).toBeVisible();
+      expect(screen.getByText('Agua fría')).toBeVisible();
+      expect(screen.getByText(/Adeudo:.*15/)).toBeVisible();
+      await userEvent.click(screen.getByRole('tab', { name: 'Expediente' }));
+      expect(await screen.findByText('Agua')).toBeVisible();
+      expect(screen.getByRole('grid', { name: 'Calendario de asistencias' })).toBeVisible();
+      await userEvent.click(screen.getByRole('tab', { name: 'Mostrador' }));
 
       // Check-in still works (F05 preservation)
       await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
@@ -1026,7 +1036,7 @@ describe('member workflow', () => {
       );
 
       // Open checkout with closed registers
-      await userEvent.click(await screen.findByRole('button', { name: 'Vender membresía' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Renovar plan' }));
       expect(await screen.findByText('No hay cajas con turno abierto.')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Cobrar en efectivo' })).toBeDisabled();
 
@@ -1040,7 +1050,7 @@ describe('member workflow', () => {
         </MemoryRouter>
       );
 
-      await userEvent.click(await screen.findByRole('button', { name: 'Vender membresía' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Renovar plan' }));
       await userEvent.selectOptions(await screen.findByLabelText('Plan de membresía'), mockCatalogPlan.id);
       await userEvent.selectOptions(screen.getByLabelText('Caja abierta'), 'register-open-1');
 

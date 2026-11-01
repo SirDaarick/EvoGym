@@ -427,15 +427,12 @@
 
 .member-counter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-@media (max-width: 860px) {
-  .member-counter-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
+@media (max-width: 600px) {
+  .member-counter-grid { grid-template-columns: 1fr; }
 }
 
 .counter-card {
@@ -443,12 +440,11 @@
   border: 1px solid var(--color-divider, #E5E3E0);
   border-radius: var(--radius-panel, 20px);
   box-shadow: var(--shadow-clay, 0 10px 24px rgba(35, 29, 31, 0.10), 0 3px 7px rgba(35, 29, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9));
-  padding: 22px 24px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 220px;
+  gap: 10px;
   box-sizing: border-box;
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background-color 0.2s ease;
 }

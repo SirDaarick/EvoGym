@@ -104,6 +104,59 @@ export interface MemberReloadResponse {
   server_time: string; // ISO 8601 UTC
 }
 
+export interface MemberSummary {
+  member_id?: string;
+  member_number?: string;
+  full_name?: string;
+  phone?: string | null;
+  photo_url?: string | null;
+  membership?: {
+    plan_name: string;
+    starts_on: string;
+    ends_on: string;
+    status: string;
+    days_remaining: number;
+  } | null;
+  financial: {
+    has_pending_balance: boolean;
+    pending_balance_minor: number;
+    unpaid_order_id: string | null;
+  };
+  rentals?: {
+    active_locker: { code: string; expires_at: string | null; status: string } | null;
+    active_gloves: { code: string; returned: boolean } | null;
+  } | null;
+  habits: {
+    weekly_visits: number;
+    attendance_tier: string;
+    greeting_prompt: string;
+    favorite_product: string | null;
+  };
+  latest_note?: {
+    id: string;
+    body?: string;
+    author_name: string;
+    created_at?: string;
+  } | null;
+}
+
+export interface MemberPurchase {
+  id: string;
+  created_at: string;
+  kind: string;
+  description: string;
+  amount_minor: number;
+  method: 'cash' | 'card' | 'transfer' | null;
+  status: 'paid' | 'pending';
+}
+
+export interface MemberPurchasePage {
+  items: MemberPurchase[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 /**
  * Fetch durable reloadable member read state conforming to P2.2.
  * Resolves API URL via ReceptionConfig and dispatches authenticated GET.

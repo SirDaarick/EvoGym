@@ -18,6 +18,10 @@ Set-Location api
 
 The server binds to loopback only. In development, visit `http://127.0.0.1:8000/docs`; `/health/live` is independent of the database and `/health/ready` returns a generic 503 when no configured database is available. Stop it with `Ctrl+C`.
 
+### Member history
+
+Authenticated member-service staff and administrators can read `GET /api/v1/members/{id}/summary` for counter information, `GET /api/v1/members/{id}/purchases?page=1&page_size=20` for paginated transactions, and `GET /api/v1/members/{id}/check-ins?month=10&year=2026` for monthly attendance. Purchases also accept `from_date` and `to_date` as ISO dates. Transaction and attendance reads are scoped to the caller's branch; administrators can select a branch with `branch_id`. Staff and administrators share member notes; voiding notes remains administrator-only.
+
 ### Cash shift lifecycle
 
 - `POST /api/v1/shifts/open` opens a shift with mandatory denomination counts and the authorized inventory snapshot/review. Opening links any pending post-cut overtime membership cash sales to the new financial shift; those proceeds are already part of the physical opening count.

@@ -272,9 +272,7 @@ def list_member_notes_endpoint(
     include_voided: bool = Query(False),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
 ) -> list[MemberNoteDTO]:
-    """List restricted notes for a member. Admin only."""
-    if not principal.is_admin:
-        raise HTTPException(403, "Access restricted to admin.")
+    """List member notes for authenticated member-service staff and admins."""
 
     factory = request.app.state.session_factory
     if factory is None:
@@ -294,9 +292,7 @@ def create_member_note_endpoint(
     request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
 ) -> MemberNoteDTO:
-    """Create a new restricted note for a member. Admin only."""
-    if not principal.is_admin:
-        raise HTTPException(403, "Access restricted to admin.")
+    """Create a member note for authenticated member-service staff and admins."""
 
     factory = request.app.state.session_factory
     if factory is None:

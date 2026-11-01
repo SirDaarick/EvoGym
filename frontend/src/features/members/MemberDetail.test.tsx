@@ -267,6 +267,7 @@ describe('member detail presentation', () => {
     expect(screen.getByRole('heading', { name: 'Asistencia previa' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Rentas actuales' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Atención al socio' })).toBeVisible();
+    expect(document.querySelector('.member-counter-view .counter-card-footer')).not.toBeInTheDocument();
 
     await userEvent.click(expedienteTab);
     expect(expedienteTab).toHaveAttribute('aria-selected', 'true');
@@ -460,5 +461,44 @@ describe('member reload contract consumption (P2.4)', () => {
     expect(screen.queryByText('Estado sincronizado del socio')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Saldo pendiente registrado');
     expect(screen.getByText(/350\.00/)).toBeVisible();
+  });
+
+  it('renders active locker and habits from member summary in counter bento view', () => {
+    const summaryData = {
+      financial: { has_pending_balance: false, pending_balance_minor: 0, unpaid_order_id: null },
+      rentals: {
+        active_locker: { code: '14', expires_at: '2026-11-04T12:00:00Z', status: 'active' },
+        active_gloves: { code: 'G-08', returned: true },
+      },
+      habits: {
+        weekly_visits: 4,
+        attendance_tier: 'high',
+        greeting_prompt: 'Socio habitual: Saludo ágil y desear excelente entrenamiento.',
+        favorite_product: 'Agua Bonafont 1L',
+      },
+      latest_note: {
+        id: 'note-001',
+        body: 'Olvidó su toalla ayer, entregar en mostrador.',
+        author_name: 'Valeria M.',
+        created_at: '2026-10-30T14:30:00Z',
+      },
+    };
+
+    render(
+      <DemoProvider>
+        <MemberCounterView
+          member={dummyMember}
+          now="2026-10-23T12:00:00-06:00"
+          role="RECEPTION"
+          summary={summaryData}
+        />
+      </DemoProvider>
+    );
+
+    expect(screen.getByText(/Identificador 14/)).toBeVisible();
+    expect(screen.getByText(/Socio habitual/)).toBeVisible();
+    expect(screen.getByText(/4 visitas \/ sem/)).toBeVisible();
+    expect(screen.getByText('Agua Bonafont 1L')).toBeVisible();
+    expect(screen.getByText('Olvidó su toalla ayer, entregar en mostrador.')).toBeVisible();
   });
 });

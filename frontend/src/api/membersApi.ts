@@ -34,6 +34,7 @@ export interface MemberNoteDTO {
   id: string;
   member_id: string;
   author_id: string;
+  author_name?: string;
   body: string;
   created_at: string;
   voided_at: string | null;
