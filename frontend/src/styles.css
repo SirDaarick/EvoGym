@@ -925,6 +925,15 @@
   animation: modalCardPopIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+.payroll-edit-card {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.payroll-status {
+  display: block;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .staff-modal-overlay,
   .staff-modal-card {

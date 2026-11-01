@@ -16,6 +16,7 @@ import SwipeToast from '../catalog/react-bits/SwipeToast';
 import JellyRadio from '../catalog/react-bits/JellyRadio';
 import { DevicePairingModal } from '../staff/DevicePairingModal';
 import { useAdminSession } from '../auth/AdminSessionProvider';
+import { branchPayrollDate, getPayrollWeek, payPayrollWeek, recordPayrollAdvance, type PayrollItem, type PayrollWeek } from '../../api/payrollApi';
 import {
   issueInitialPin,
   listAdminBranches,
@@ -776,6 +777,16 @@ export function ApiStaffManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [editingProfile, setEditingProfile] = useState<AdminRosterProfileChoice | null>(null);
+  const [liveSalaryText, setLiveSalaryText] = useState('');
+  const [salarySaving, setSalarySaving] = useState(false);
+  const [payroll, setPayroll] = useState<PayrollWeek | null>(null);
+  const [payrollDate, setPayrollDate] = useState<{ weekStart: string; weekday: number } | null>(null);
+  const [payrollDialog, setPayrollDialog] = useState<{ item: PayrollItem; mode: 'advance' | 'pay'; key: string } | null>(null);
+  const [advanceText, setAdvanceText] = useState('');
+  const [payrollNotes, setPayrollNotes] = useState('');
+  const [payrollMethod, setPayrollMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [payrollBusy, setPayrollBusy] = useState(false);
+  const [payrollError, setPayrollError] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [linking, setLinking] = useState(false);
   const [pinIssuingId, setPinIssuingId] = useState<string | null>(null);
@@ -806,6 +817,9 @@ export function ApiStaffManagement() {
       setBranchId('');
       setProfiles([]);
       setAccounts([]);
+      setPayroll(null);
+      setPayrollDate(null);
+      setPayrollDialog(null);
       setEditingProfile(null);
       setSelectedAccountId('');
       setDeviceProfile(null);
@@ -831,6 +845,9 @@ export function ApiStaffManagement() {
     setBranchId(nextBranchId);
     setProfiles([]);
     setAccounts([]);
+    setPayroll(null);
+    setPayrollDate(null);
+    setPayrollDialog(null);
     setEditingProfile(null);
     setSelectedAccountId('');
     setLinking(false);
@@ -847,22 +864,28 @@ export function ApiStaffManagement() {
     if (!nextBranchId || !adminSession || adminSession.status !== 'authenticated') return;
     setLoading(true);
     try {
-      const [nextProfiles, nextAccounts, nextSeries] = await Promise.all([
+      const timezone = branches.find(branch => branch.id === nextBranchId)?.timezone;
+      const date = timezone ? branchPayrollDate(timezone) : null;
+      const [nextProfiles, nextAccounts, nextSeries, nextPayroll] = await Promise.all([
         listAdminRosterProfiles(adminSession.request, nextBranchId),
         listAdminStaffAccounts(adminSession.request, nextBranchId),
         listScheduleSeries(adminSession.request, nextBranchId).catch(() => []),
+        date ? getPayrollWeek(adminSession.request, nextBranchId, date.weekStart).catch(() => null) : Promise.resolve(null),
       ]);
       if (operation.current === current) {
         setProfiles(nextProfiles);
         setAccounts(nextAccounts);
         setScheduleSeries(nextSeries);
+        setPayroll(nextPayroll);
+        setPayrollDate(date);
+        if (date && !nextPayroll) setError('No se pudo cargar la nómina de la sucursal.');
       }
     } catch {
       if (operation.current === current) setError('No se pudo cargar el personal de la sucursal. No se usaron datos locales.');
     } finally {
       if (operation.current === current) setLoading(false);
     }
-  }, [adminSession]);
+  }, [adminSession, branches]);
 
   const filteredProfiles = profiles.filter(profile =>
     (statusFilter === 'all' || (statusFilter === 'active' ? profile.is_active : !profile.is_active)) &&
@@ -891,6 +914,7 @@ export function ApiStaffManagement() {
   function openEdit(profile: AdminRosterProfileChoice) {
     if (!profiles.some(row => row.id === profile.id)) return;
     setEditingProfile(profile);
+    setLiveSalaryText(profile.monthly_salary_minor === undefined ? '' : (profile.monthly_salary_minor / 100).toFixed(2));
     setSelectedAccountId(profile.staff_user_id ?? '');
     setError('');
     setNotice('');
@@ -923,6 +947,83 @@ export function ApiStaffManagement() {
     setSelectedAccountId('');
     setOverridingDate(null);
     setScheduleError('');
+  }
+
+  async function saveSalary() {
+    if (!editingProfile || editingProfile.monthly_salary_minor === undefined || !adminSession || adminSession.status !== 'authenticated') return;
+    const amount = parseMoney(liveSalaryText);
+    if (amount === null || amount < 0 || !Number.isSafeInteger(amount)) {
+      setError('Ingresa un sueldo mensual válido.');
+      return;
+    }
+    const current = operation.current;
+    setSalarySaving(true);
+    setError('');
+    try {
+      const response = await adminSession.request(`/api/v1/staff-roster/${editingProfile.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monthly_salary_minor: amount }),
+      });
+      if (!response.ok) throw new Error('Unable to save salary');
+      if (operation.current !== current) return;
+      setProfiles(rows => rows.map(row => row.id === editingProfile.id ? { ...row, monthly_salary_minor: amount } : row));
+      closeEdit();
+      setNotice('Sueldo actualizado correctamente.');
+      if (payrollDate) setPayroll(await getPayrollWeek(adminSession.request, branchId, payrollDate.weekStart));
+    } catch {
+      if (operation.current === current) setError('No se pudo guardar el sueldo. Verifica los adelantos pendientes e intenta de nuevo.');
+    } finally {
+      setSalarySaving(false);
+    }
+  }
+
+  function openPayroll(item: PayrollItem) {
+    if (!payrollDate) return;
+    const timezone = branches.find(branch => branch.id === branchId)?.timezone;
+    if (!timezone) return;
+    const currentDate = branchPayrollDate(timezone);
+    if (currentDate.weekStart !== payrollDate.weekStart || currentDate.weekday !== payrollDate.weekday) {
+      void loadBranch(branchId);
+      return;
+    }
+    setPayrollDialog({ item, mode: payrollDate.weekday < 4 ? 'advance' : 'pay', key: crypto.randomUUID() });
+    setAdvanceText('');
+    setPayrollNotes('');
+    setPayrollMethod('transfer');
+    setPayrollError('');
+  }
+
+  async function submitPayroll() {
+    if (!payrollDialog || !payrollDate || !adminSession || adminSession.status !== 'authenticated') return;
+    const timezone = branches.find(branch => branch.id === branchId)?.timezone;
+    const date = timezone ? branchPayrollDate(timezone) : null;
+    if (!date || date.weekStart !== payrollDate.weekStart || (date.weekday < 4) !== (payrollDialog.mode === 'advance')) {
+      setPayrollError('El período de nómina cambió. Cierra y vuelve a cargar la sucursal.');
+      return;
+    }
+    const current = operation.current;
+    const body = { branch_id: branchId, staff_profile_id: payrollDialog.item.profile_id, week_start: payrollDate.weekStart };
+    const amount = parseMoney(advanceText);
+    if (payrollDialog.mode === 'advance' && (amount === null || amount <= 0 || amount > payrollDialog.item.net_minor)) {
+      setPayrollError('Ingresa un adelanto válido que no supere el neto pendiente.');
+      return;
+    }
+    setPayrollBusy(true);
+    setPayrollError('');
+    try {
+      if (payrollDialog.mode === 'advance') {
+        await recordPayrollAdvance(adminSession.request, { ...body, amount_minor: amount!, ...(payrollNotes.trim() ? { notes: payrollNotes.trim() } : {}) }, payrollDialog.key);
+      } else {
+        await payPayrollWeek(adminSession.request, { ...body, payment_method: payrollMethod }, payrollDialog.key);
+      }
+      const next = await getPayrollWeek(adminSession.request, branchId, payrollDate.weekStart);
+      if (operation.current !== current) return;
+      setPayroll(next);
+      setPayrollDialog(null);
+    } catch (err) {
+      if (operation.current === current) setPayrollError(err instanceof Error ? err.message : 'No se pudo completar la operación de nómina.');
+    } finally {
+      setPayrollBusy(false);
+    }
   }
 
   async function handleSaveSchedule() {
@@ -1177,13 +1278,16 @@ export function ApiStaffManagement() {
           <thead><tr><th>Recepcionista</th><th>Turno</th><th>Sueldo mensual</th><th>Credencial</th><th>Estado</th><th style={{ textAlign: 'right' }}>Acciones</th></tr></thead>
           <tbody>{filteredProfiles.length ? filteredProfiles.map(profile => {
             const account = profile.staff_user_id ? accounts.find(row => row.id === profile.staff_user_id && row.linked_profile_id === profile.id) : undefined;
+            const payrollItem = payroll?.items.find(row => row.profile_id === profile.id);
             return <tr key={profile.id}>
               <td><div className="staff-cell"><div className="staff-avatar staff-avatar-recep" aria-hidden="true">{profile.full_name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? '').join('').toUpperCase() || '?'}</div>
                 <div className="staff-info"><strong>{profile.full_name}</strong><span className="muted">{profile.position} · ID: {profile.id}</span>
                   {account && <span className="muted">Cuenta: {account.login_identifier} · {account.is_active ? 'Activa' : 'Inactiva'}</span>}</div></div></td>
-              <td>{formatScheduleSummary(getActiveSeriesForProfile(profile.id))}</td><td>No disponible en API</td><td>No disponible en API</td>
+              <td>{formatScheduleSummary(getActiveSeriesForProfile(profile.id))}</td><td><span className="staff-salary-cell"><strong>{profile.monthly_salary_minor === undefined ? 'No disponible en API' : formatMoney(profile.monthly_salary_minor)}</strong>
+                {payrollItem && <span className="muted payroll-status">{payrollItem.paid ? 'Pagado esta semana' : `Pendiente ${formatMoney(payrollItem.net_minor)} netos`}</span>}</span></td><td>No disponible en API</td>
               <td><span className={`badge ${profile.is_active ? 'badge-success' : 'badge-neutral'}`}>{profile.is_active ? '● Activo' : '○ Inactivo'}</span></td>
               <td><div style={{ display: 'inline-flex', gap: '8px', justifyContent: 'flex-end', width: '100%', flexWrap: 'wrap' }}>
+                {payrollItem && !payrollItem.paid && payrollDate && <Button variant="secondary" onClick={() => openPayroll(payrollItem)}>{payrollDate.weekday < 4 ? 'Adelantar' : `Pagar ${formatMoney(payrollItem.net_minor)}`}</Button>}
                 <Button variant="secondary" disabled={!profile.staff_user_id || pinIssuingId === profile.id}
                   onClick={() => void issuePin(profile)} title={profile.staff_user_id ? 'Emitir PIN inicial desde la API' : 'Vincula una cuenta antes de emitir el PIN'}>
                   {pinIssuingId === profile.id ? 'Emitiendo…' : 'Emitir PIN'}
@@ -1207,6 +1311,24 @@ export function ApiStaffManagement() {
       </div>
     </Panel>
 
+    {payrollDialog && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="payroll-title">
+      <div className="staff-modal-card">
+        <h2 id="payroll-title">{payrollDialog.mode === 'advance' ? 'Adelantar' : 'Pagar'} a {payrollDialog.item.full_name}</h2>
+        <p className="muted">Referencia diaria: {formatMoney(payrollDialog.item.daily_minor)}</p>
+        {payrollDialog.mode === 'advance' ? <>
+          <div className="field"><label htmlFor="payroll-amount">Importe</label><input id="payroll-amount" value={advanceText} onChange={event => setAdvanceText(event.target.value)} disabled={payrollBusy} /></div>
+          <Button variant="secondary" disabled={payrollBusy} onClick={() => setAdvanceText((payrollDialog.item.daily_minor / 100).toFixed(2))}>1 día ({formatMoney(payrollDialog.item.daily_minor)})</Button>
+          <div className="field"><label htmlFor="payroll-notes">Notas opcionales</label><input id="payroll-notes" value={payrollNotes} maxLength={255} onChange={event => setPayrollNotes(event.target.value)} disabled={payrollBusy} /></div>
+        </> : <>
+          <p>Base: {formatMoney(payrollDialog.item.base_minor)}</p><p>Adelantos: −{formatMoney(payrollDialog.item.advances_minor)}</p><p>Neto: {formatMoney(payrollDialog.item.net_minor)}</p>
+          <div className="field"><label htmlFor="payroll-method">Método de pago</label><select id="payroll-method" value={payrollMethod} onChange={event => setPayrollMethod(event.target.value as 'cash' | 'transfer')} disabled={payrollBusy}><option value="transfer">Transferencia</option><option value="cash">Efectivo</option></select></div>
+        </>}
+        {payrollError && <p role="alert">{payrollError}</p>}
+        <Button disabled={payrollBusy} onClick={() => void submitPayroll()}>Confirmar</Button>
+        <Button variant="secondary" disabled={payrollBusy} onClick={() => setPayrollDialog(null)}>Cerrar</Button>
+      </div>
+    </div>}
+
     {deactivation && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="deactivate-account-title">
       <div className="staff-modal-card">
         <h2 id="deactivate-account-title">Desactivar cuenta de {deactivation.profile.full_name}</h2>
@@ -1224,16 +1346,16 @@ export function ApiStaffManagement() {
     </div>}
 
     {editingProfile && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-staff-form-title">
-      <div className="staff-modal-card staff-mgmt-modal-card">
+      <div className="staff-modal-card staff-mgmt-modal-card payroll-edit-card">
         <div className="staff-modal-header" style={{ width: '100%', textAlign: 'left', alignItems: 'flex-start' }}>
           <h2 id="modal-staff-form-title">Editar Recepcionista</h2>
           <p className="muted">Administra el horario semanal y la cuenta de acceso del colaborador.</p>
         </div>
-        <form className="staff-form" onSubmit={event => event.preventDefault()}>
+        <form className="staff-form" onSubmit={event => { event.preventDefault(); void saveSalary(); }}>
           <div className="field"><label htmlFor="staff-name-input">Nombre completo *</label><input id="staff-name-input" value={editingProfile.full_name} readOnly /></div>
           <div className="field-row">
 
-            <div className="field"><label htmlFor="staff-salary-input">Sueldo mensual (MXN) *</label><input id="staff-salary-input" type="text" disabled value="No disponible en API" /></div>
+            <div className="field"><label htmlFor="staff-salary-input">Sueldo mensual (MXN) *</label><input id="staff-salary-input" type="text" disabled={editingProfile.monthly_salary_minor === undefined || salarySaving} value={editingProfile.monthly_salary_minor === undefined ? 'No disponible en API' : liveSalaryText} onChange={event => setLiveSalaryText(event.target.value)} /></div>
           </div>
           {(() => {
             const activeScheduleSeries = getActiveSeriesForProfile(editingProfile.id);
@@ -1499,7 +1621,7 @@ export function ApiStaffManagement() {
           <div className="staff-modal-actions">
             <Button variant="secondary" disabled={linking} onClick={closeEdit}>Cancelar</Button>
             {!editingProfile.staff_user_id && <Button variant="primary" disabled={!selectedAccountId || linking} onClick={() => void linkAccount()}>{linking ? 'Vinculando…' : 'Vincular cuenta'}</Button>}
-            {editingProfile.staff_user_id && <Button variant="primary" type="submit" disabled title="La edición de datos personales aún no está disponible en la API.">Guardar cambios</Button>}
+            <Button variant="primary" type="submit" disabled={editingProfile.monthly_salary_minor === undefined || salarySaving}>{salarySaving ? 'Guardando…' : 'Guardar cambios'}</Button>
           </div>
         </form>
       </div>

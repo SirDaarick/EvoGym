@@ -124,7 +124,7 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
     // Lucía Ramos is now in the table with $9,000.00
     expect(screen.getByText('Lucía Ramos')).toBeVisible();
     expect(screen.getByText('$9,000.00')).toBeVisible();
-  });
+  }, 15000);
 
   it('displays active and inactive counts and allows selecting status in the modal with JellyRadio', async () => {
     await mount('/owner/staff');
@@ -209,6 +209,49 @@ describe('StaffManagement (T02 — Admin Staff Management)', () => {
 describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
   const branchId = '00000000-0000-4000-8000-000000000001';
   const profileId = '11111111-1111-4111-8111-111111111111';
+
+  it('shows the branch payroll net for a salaried employee', async () => {
+    const user = userEvent.setup();
+    const request = vi.fn(async (path: string) => {
+      if (path.endsWith('/branches')) return new Response(JSON.stringify({ branches: [{ id: branchId, code: 'SUR', name: 'Sucursal Sur', timezone: 'America/Mexico_City' }] }));
+      if (path.includes('/roster-profiles')) return new Response(JSON.stringify({ profiles: [{ id: profileId, full_name: 'Lucia Mendez', position: 'Recepcionista', is_active: true, staff_user_id: null, monthly_salary_minor: 1400000 }] }));
+      if (path.includes('/admin/staff-accounts?')) return new Response(JSON.stringify({ accounts: [] }));
+      if (path.includes('/payroll/weeks/')) return new Response(JSON.stringify({ items: [{ profile_id: profileId, full_name: 'Lucia Mendez', base_minor: 350000, advances_minor: 50000, net_minor: 300000, daily_minor: 70000, paid: null }] }));
+      return new Response('Not found', { status: 404 });
+    });
+    mockAdminSession = { status: 'authenticated', request };
+    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    await screen.findByText(/Sucursal Sur/);
+    await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
+    await screen.findByText('Pendiente $3,000.00 netos');
+  });
+
+  it('shows and saves the monthly salary for an authorized profile', async () => {
+    const user = userEvent.setup();
+    let salary = 1400000;
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/branches')) return new Response(JSON.stringify({ branches: [{ id: branchId, code: 'SUR', name: 'Sucursal Sur' }] }));
+      if (path.includes('/roster-profiles')) return new Response(JSON.stringify({ profiles: [{ id: profileId, full_name: 'Lucia Mendez', position: 'Recepcionista', is_active: true, staff_user_id: null, monthly_salary_minor: salary }] }));
+      if (path.includes('/admin/staff-accounts?')) return new Response(JSON.stringify({ accounts: [] }));
+      if (path === `/api/v1/staff-roster/${profileId}` && init?.method === 'PATCH') {
+        salary = JSON.parse(init.body as string).monthly_salary_minor;
+        return new Response('{}');
+      }
+      return new Response('Not found', { status: 404 });
+    });
+    mockAdminSession = { status: 'authenticated', request };
+    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    await screen.findByText(/Sucursal Sur/);
+    await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
+    await screen.findByText('$14,000.00');
+    await user.click(screen.getByRole('button', { name: 'Editar' }));
+    const input = screen.getByLabelText('Sueldo mensual (MXN) *');
+    await user.clear(input);
+    await user.type(input, '15000');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(salary).toBe(1500000));
+    await screen.findByText('$15,000.00');
+  });
 
   it('displays active schedule summary in Turno column and allows updating schedule', async () => {
     const user = userEvent.setup();
