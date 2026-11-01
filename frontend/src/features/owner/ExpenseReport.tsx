@@ -62,7 +62,12 @@ function ExpenseReportContent({
   const [params, setParams] = useSearchParams();
   const fixedCosts = useFixedCosts();
   const staff = useStaff();
-  const defaultRange = getCurrentCalendarMonthRange(state.demoClock);
+  const defaultRange = apiRequest
+    ? (() => {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
+        return { from: `${today.slice(0, 7)}-01`, to: today };
+      })()
+    : getCurrentCalendarMonthRange(state.demoClock);
   const range = { from: params.get('from') ?? defaultRange.from, to: params.get('to') ?? defaultRange.to };
   const tabParam = params.get('tab');
   const active: FinanceTab = validTab(tabParam) ? tabParam : (apiRequest ? 'cobros' : 'balance');
