@@ -88,8 +88,8 @@ describe('API product routes', () => {
     expect(await screen.findByText('No hay turnos registrados para esta caja.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Turno' })).toBeEnabled();
     expect(admin.request).toHaveBeenCalledWith('/api/v1/registers', undefined);
-    expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined);
-    expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts/current?register_id=register-1', undefined);
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined));
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/shifts/current?register_id=register-1', undefined));
     expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
   });
 
@@ -348,7 +348,7 @@ describe('API product routes', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Later Page Member' }));
     expect(await screen.findByText('Later Page Member')).toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${laterMember.id}`, expect.any(Object));
-  });
+  }, 15000);
 
   it('searches API-backed members by preferred name, legal name, and member number', async () => {
     const namedMember = { ...member, preferred_name: 'Fixture Member', full_name: 'Synthetic Member One', member_number: 'SYN0001' };

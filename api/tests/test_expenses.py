@@ -202,7 +202,10 @@ def test_unconfigured_evidence_upload_validates_request(tmp_path):
         branch_id = _seed_branch(factory)
         _, token = _seed_receptionist(factory, branch_id)
         headers = {"Authorization": f"Bearer {token}"}
-        with TestClient(create_app(configured_settings(url))) as client:
+        # Storage must stay unconfigured even when the ambient environment points at a live server.
+        settings = configured_settings(url, evidence_s3_endpoint=None, evidence_public_endpoint=None,
+                                       evidence_s3_bucket=None, evidence_s3_access_key=None, evidence_s3_secret_key=None)
+        with TestClient(create_app(settings)) as client:
             path = "/api/v1/expenses/evidence-uploads"
             body = {"branch_id": str(branch_id), "content_type": "image/webp", "file_size_bytes": 100}
             assert client.post(path, headers=headers, json=body).status_code == 501

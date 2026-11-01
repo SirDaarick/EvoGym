@@ -82,7 +82,7 @@ def database(tmp_path):
 
 
 def test_admin_login_fails_closed_when_server_auth_policy_is_unconfigured():
-    with TestClient(create_app(Settings(environment="test", debug=False))) as client:
+    with TestClient(create_app(Settings(environment="test", debug=False, _env_file=None))) as client:
         response = client.post(
             "/api/v1/auth/sessions",
             json={"login_identifier": "unknown@example.invalid", "password": "synthetic"},

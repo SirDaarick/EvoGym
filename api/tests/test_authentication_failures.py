@@ -167,7 +167,7 @@ ADMIN_CONSUMERS = [
     pytest.param(shifts, shifts.get_shift_actor_principal, id="shifts"),
     pytest.param(admin_enrollment, admin_enrollment._principal, id="admin-enrollment"),
     pytest.param(device_pairing, device_pairing._admin_principal, id="device-pairing"),
-    pytest.param(inventory, inventory._admin, id="inventory"),
+    pytest.param(inventory, inventory._actor, id="inventory"),
     pytest.param(membership_access, membership_access.record_access_decision, id="membership-access"),
     pytest.param(pending_money, pending_money._principal, id="pending-money"),
     pytest.param(staff_roster, staff_roster._principal, id="staff-roster"),
@@ -267,8 +267,13 @@ def test_missing_admin_signing_secret_fails_closed_for_admin_only_consumers(modu
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="synthetic-token")
     validator = Mock(side_effect=AssertionError("Admin validation must be skipped without a usable secret"))
     monkeypatch.setattr(module, "validate_admin_session", validator)
+    if module is inventory:
+        monkeypatch.setattr(module, "validate_session", Mock(side_effect=AuthorizationDenied("invalid")))
     with pytest.raises(HTTPException) as error:
-        consumer(request, credentials)
+        if module is inventory:
+            consumer(inventory._actor(request, credentials))
+        else:
+            consumer(request, credentials)
     assert error.value.status_code == 401
     assert error.value.detail == "Authentication failed."
     validator.assert_not_called()

@@ -47,33 +47,35 @@ def _setup(tmp_path):
 
 def test_weekly_schedule_expands_in_branch_wall_time_and_supports_skip_and_override(tmp_path):
     url, engine, _factory, branch_id, _other, profile_id, _other_profile, admin_token, _desk = _setup(tmp_path)
+    today = datetime.now(timezone.utc).date()
+    start = today + timedelta(days=(7 - today.weekday()) % 7 + 7)
+    skip, override, end = start + timedelta(days=2), start + timedelta(days=7), start + timedelta(days=15)
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             headers = {"Authorization": f"Bearer {admin_token}"}
             created = client.post(f"/api/v1/staff-schedules/branches/{branch_id}/profiles/{profile_id}", headers=headers, json={
-                "start_date": "2026-10-26", "weekdays": [0, 2], "start_time": "22:00", "end_time": "02:00",
-                "end_date": "2026-11-10",
+                "start_date": start.isoformat(), "weekdays": [0, 2], "start_time": "22:00", "end_time": "02:00",
+                "end_date": end.isoformat(),
             })
             assert created.status_code == 201, created.text
             series_id = created.json()["id"]
             occurrences = client.get(f"/api/v1/staff-schedules/{series_id}/occurrences", headers=headers,
-                                     params={"from_date": "2026-10-26", "to_date": "2026-11-10"})
+                                     params={"from_date": start.isoformat(), "to_date": end.isoformat()})
             assert occurrences.status_code == 200, occurrences.text
             assert [item["local_start"] for item in occurrences.json()] == [
-                "2026-10-26T22:00:00", "2026-10-28T22:00:00", "2026-11-02T22:00:00",
-                "2026-11-04T22:00:00", "2026-11-09T22:00:00",
+                f"{(start + timedelta(days=offset)).isoformat()}T22:00:00" for offset in (0, 2, 7, 9, 14)
             ]
-            skipped = client.put(f"/api/v1/staff-schedules/{series_id}/occurrences/2026-10-28", headers=headers,
+            skipped = client.put(f"/api/v1/staff-schedules/{series_id}/occurrences/{skip}", headers=headers,
                                  json={"action": "skip"})
             assert skipped.status_code == 200, skipped.text
-            overridden = client.put(f"/api/v1/staff-schedules/{series_id}/occurrences/2026-11-02", headers=headers,
+            overridden = client.put(f"/api/v1/staff-schedules/{series_id}/occurrences/{override}", headers=headers,
                                     json={"action": "override", "start_time": "21:30", "end_time": "23:30"})
             assert overridden.status_code == 200, overridden.text
             visible = client.get(f"/api/v1/staff-schedules/{series_id}/occurrences", headers=headers,
-                                 params={"from_date": "2026-10-26", "to_date": "2026-11-10"}).json()
+                                 params={"from_date": start.isoformat(), "to_date": end.isoformat()}).json()
             assert len(visible) == 4
-            assert all(item["local_start"] != "2026-10-28T22:00:00" for item in visible)
-            assert next(item for item in visible if item["local_start"].startswith("2026-11-02"))["local_start"] == "2026-11-02T21:30:00"
+            assert all(item["local_start"] != f"{skip}T22:00:00" for item in visible)
+            assert next(item for item in visible if item["local_start"].startswith(str(override)))["local_start"] == f"{override}T21:30:00"
     finally:
         engine.dispose()
 

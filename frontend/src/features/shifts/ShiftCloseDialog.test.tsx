@@ -147,6 +147,7 @@ describe('ShiftCloseDialog', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     await userEvent.type(screen.getByLabelText('Billete $500.00 · cantidad'), '1');
     expect(screen.getByRole('alert')).toHaveTextContent(/No se pudo guardar/);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Revisar cierre' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Confirmar cierre' })).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' })).toHaveAttribute('open');

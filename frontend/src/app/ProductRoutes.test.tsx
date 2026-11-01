@@ -43,6 +43,7 @@ describe('ProductRoutes mode boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.stubEnv('VITE_DEMO_MODE', 'false');
     window.sessionStorage.clear();
     access.principal = null;
     access.reload.mockClear();
@@ -70,7 +71,7 @@ describe('ProductRoutes mode boundary', () => {
   it('fails closed to API entry when mode is missing or invalid despite a stale override', async () => {
     for (const value of [undefined, 'yes']) {
       vi.unstubAllEnvs();
-      if (value !== undefined) vi.stubEnv('VITE_DEMO_MODE', value);
+      vi.stubEnv('VITE_DEMO_MODE', value);
       window.sessionStorage.setItem('evogym:demo-mode', 'true');
       const view = render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
       expect(await screen.findByText('Profile selection')).toBeInTheDocument();
@@ -391,7 +392,7 @@ describe('ProductRoutes mode boundary', () => {
     expect(await screen.findByText('No hay turnos registrados para esta caja.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Abrir Turno' })).toBeEnabled();
     expect(adminSession.request).toHaveBeenCalledWith('/api/v1/registers', undefined);
-    expect(adminSession.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined);
+    await waitFor(() => expect(adminSession.request).toHaveBeenCalledWith('/api/v1/shifts?register_id=register-1&offset=0&limit=100', undefined));
     expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
   });
 });

@@ -167,6 +167,8 @@ EXPECTED_DATABASE_TABLES = {
     "rental_card_attempts",
     "expenses",
     "shift_cash_contributions",
+    "payroll_advances",
+    "payroll_payments",
 }
 
 
@@ -314,7 +316,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0049_expenses"
+            assert head_version == "0050_payroll"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns

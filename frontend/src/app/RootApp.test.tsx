@@ -12,6 +12,7 @@ const adminId = '223e4567-e89b-42d3-a456-426614174000';
 describe('RootApp product access boundary', () => {
   beforeEach(() => {
     vi.unstubAllGlobals(); vi.unstubAllEnvs();
+    vi.stubEnv('VITE_DEMO_MODE', 'false');
     vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test');
     window.history.replaceState({}, '', '/');
   });
@@ -99,11 +100,13 @@ describe('RootApp product access boundary', () => {
     });
     vi.stubGlobal('fetch', fetchImpl);
     render(<MemoryRouter><RootApp /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole('button', { name: /Ana Perez/ }));
-    fireEvent.change(screen.getByLabelText('Ingresa el PIN de seis dígitos para Ana Perez'), { target: { value: '123456' } });
-    expect(await screen.findByRole('heading', { name: 'Función no disponible' })).toBeInTheDocument();
+    const employee = await screen.findByRole('button', { name: /Ana Perez/ });
+    await waitFor(() => expect(screen.queryByText('Verificando acceso…')).not.toBeInTheDocument());
+    fireEvent.click(employee);
+    fireEvent.change(await screen.findByLabelText('Ingresa el PIN de seis dígitos para Ana Perez'), { target: { value: '123456' } });
+    expect(await screen.findByTestId('application-shell')).toBeInTheDocument();
     expect(screen.getByText('Ana Perez')).toBeInTheDocument();
-    expect(screen.queryByText('Productos disponibles')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Productos disponibles' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Socios/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Socios · No disponible' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Permisos' })).not.toBeInTheDocument();
@@ -139,11 +142,12 @@ describe('RootApp product access boundary', () => {
     fireEvent.change(screen.getByLabelText('Código de vinculación de seis dígitos'), { target: { value: '123456' } });
     expect(await screen.findByRole('button', { name: /Ana Perez/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Mikel|Luis|Admin Evo/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Verificando acceso…')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Ana Perez/ }));
-    fireEvent.change(screen.getByLabelText('Ingresa el PIN de seis dígitos para Ana Perez'), { target: { value: '123456' } });
-    expect(await screen.findByRole('heading', { name: 'Función no disponible' })).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText('Ingresa el PIN de seis dígitos para Ana Perez'), { target: { value: '123456' } });
+    expect(await screen.findByTestId('application-shell')).toBeInTheDocument();
     expect(screen.getByText('Ana Perez')).toBeInTheDocument();
-    expect(screen.queryByText('Productos disponibles')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Productos disponibles' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cambiar perfil' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Elige tu perfil' })).toBeInTheDocument());
