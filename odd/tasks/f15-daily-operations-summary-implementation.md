@@ -53,15 +53,15 @@ No migration required (reads existing tables).
 
 ## Tasks (ODD, one delivery per phase)
 
-- [x] **T01 — Freeze contract & resolve Q1.** User approved option 1: staff card, period visits and new/renewed memberships, overdue lockers as an alert category, and unavailable Gimi metrics in live mode.
+- [x] **T01 — Freeze contract & resolve Q1 (commit `dbb3698`).** User approved option 1: staff card, period visits and new/renewed memberships, overdue lockers as an alert category, and unavailable Gimi metrics in live mode.
 - [x] **T02 — Backend aggregation endpoint (RED→GREEN; inline; commit `4b90f96`).** Create `api/app/api/owner_overview.py` and register in `api/app/main.py`. Write `api/tests/test_owner_overview.py` testing:
   - `200 OK` with persisted fixture across shifts, cash/card sales, pending transfers, member check-ins, memberships, inventory low stock, staff attendance/payroll, and overdue lockers.
   - Cash/card totals reconcile with shift financial summary.
   - Timezone boundary (`America/Mexico_City`) and date range filtering (`from > to` → `422`).
   - Zero/empty branch state returns clean zeros without errors.
   - Non-admin (`RECEPTION`) and wrong-branch callers receive `403 Forbidden`.
-- [x] **T03 — Frontend live adapter & route mount (inline; commit pending).** Create `frontend/src/api/ownerOverviewApi.ts`, split `Overview.tsx` into `LiveOverview` / `DemoOverview` sharing the Bento layout, and mount `/owner/overview` in `ApiProductApp.tsx`. Live behavior tests and existing demo tests pass; RED was not observed before the frontend implementation.
-- [x] **T04 — Verification & Browser Acceptance (inline and per-action worker; independent verification passed on retry; commit pending).** Targeted and affected backend `pytest` suites, `npm run test`, `npm run typecheck`, `npm run build`, and Playwright acceptance were run. Two suite failures reproduced on baseline and remain documented below.
+- [x] **T03 — Frontend live adapter & route mount (inline; commit `dbb3698`).** Create `frontend/src/api/ownerOverviewApi.ts`, split `Overview.tsx` into `LiveOverview` / `DemoOverview` sharing the Bento layout, and mount `/owner/overview` in `ApiProductApp.tsx`. Live behavior tests and existing demo tests pass; RED was not observed before the frontend implementation.
+- [x] **T04 — Verification & Browser Acceptance (inline and per-action worker; independent verification passed on retry; evidence in `dbb3698`).** Targeted and affected backend `pytest` suites, `npm run test`, `npm run typecheck`, `npm run build`, and Playwright acceptance were run. Two suite failures reproduced on baseline and remain documented below.
 
 Verification tier: **medium** (read-only aggregation, no schema migration or money mutation) → writer self-verification + parent spot check.
 
@@ -85,3 +85,4 @@ Verification tier: **medium** (read-only aggregation, no schema migration or mon
 - L10: User requested an independent-verification retry: “puedes intentarla de nuevo?”. In bounded isolated candidate and baseline copies, the verifier observed 11/11 owner endpoint tests, 13/13 live/demo Overview tests, the live route-mount test, and 10/10 baseline demo Overview tests passing. No candidate-caused blocker was reproduced. Scratch copies were removed and workspace dependencies preserved. Delivery strategy remains `ask-on-risk`; the >400-line forecast requires a chain-strategy decision before work-unit commits.
 - L11: User selected “Cadena de feature” for local delivery organization. No push or PR creation was authorized. Backend endpoint and regression tests form one cohesive slice exceeding the advisory review budget; retain all required coverage and recommend a size exception.
 - L12: Backend slice `feat/f15-daily-operations-summary-api` committed as `4b90f96` (559 insertions; endpoint and tests together). The prior boundary is tracker `feat/f15-daily-operations-summary` at `c2b9a69`; the frontend slice builds on this commit. No push or PR was created.
+- L13: Frontend slice `feat/f15-daily-operations-summary-ui` committed as `dbb3698` (307 insertions, 14 deletions, including this plan). It builds on `4b90f96`; the tracker remains at `c2b9a69`. Both slices are local and no push or PR was created. Rollback: revert `dbb3698` for the live UI, then `4b90f96` for the aggregation endpoint; this closing log records their identities.
