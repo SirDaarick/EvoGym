@@ -269,6 +269,8 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(inventory_router)
     application.include_router(sales_router)
     application.include_router(pending_money_router)
+    from app.api.owner_overview import router as owner_overview_router
+    application.include_router(owner_overview_router)
     application.include_router(membership_access_router)
     application.include_router(member_check_ins_router)
     application.include_router(member_reads_router)
