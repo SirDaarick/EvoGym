@@ -1308,3 +1308,92 @@ def test_create_member_note_rejects_whitespace_body(tmp_path):
                 assert session.scalar(select(func.count()).select_from(MemberNote)) == 0
     finally:
         engine.dispose()
+
+
+def test_list_members_derives_membership_status_from_latest_period(tmp_path):
+    from zoneinfo import ZoneInfo
+    from app.db.models.memberships import MembershipPeriod
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        members = _seed_sample_members(factory)
+        today = datetime.now(ZoneInfo("America/Mexico_City")).date()
+
+        with factory.begin() as session:
+            # members[0]: Carlos -> active period ending in 10 days
+            session.add(
+                MembershipPeriod(
+                    id=uuid4(),
+                    member_id=members[0].id,
+                    order_item_id=uuid4(),
+                    plan_version_id=uuid4(),
+                    starts_on=today - timedelta(days=20),
+                    ends_on=today + timedelta(days=10),
+                    activated_by=staff_id,
+                )
+            )
+            # members[1]: Ana -> expired period 10 days ago (<= 31 days -> expired) + older period 90 days ago
+            session.add_all([
+                MembershipPeriod(
+                    id=uuid4(),
+                    member_id=members[1].id,
+                    order_item_id=uuid4(),
+                    plan_version_id=uuid4(),
+                    starts_on=today - timedelta(days=120),
+                    ends_on=today - timedelta(days=90),
+                    activated_by=staff_id,
+                ),
+                MembershipPeriod(
+                    id=uuid4(),
+                    member_id=members[1].id,
+                    order_item_id=uuid4(),
+                    plan_version_id=uuid4(),
+                    starts_on=today - timedelta(days=40),
+                    ends_on=today - timedelta(days=10),
+                    activated_by=staff_id,
+                ),
+            ])
+            # Create a 6th member with status='active' whose period expired 45 days ago (> 31 days -> inactive)
+            stale_member_id = uuid4()
+            session.add(
+                Member(
+                    id=stale_member_id,
+                    member_number="SOC-0006",
+                    full_name="Fernando Ruiz",
+                    phone="555-1006",
+                    status="active",
+                    joined_on=today - timedelta(days=100),
+                )
+            )
+            session.flush()
+            session.add(
+                MembershipPeriod(
+                    id=uuid4(),
+                    member_id=stale_member_id,
+                    order_item_id=uuid4(),
+                    plan_version_id=uuid4(),
+                    starts_on=today - timedelta(days=75),
+                    ends_on=today - timedelta(days=45),
+                    activated_by=staff_id,
+                )
+            )
+
+        app = create_app(configured_settings(url), recovery_delivery=FakeRecoveryDelivery())
+        with TestClient(app) as client:
+            res = client.get("/api/v1/members?limit=50", headers={"Authorization": f"Bearer {token}"})
+            assert res.status_code == 200
+            by_number = {item["member_number"]: item for item in res.json()["items"]}
+
+            assert by_number["SOC-0001"]["membership_status"] == "active"
+            assert by_number["SOC-0001"]["membership_ends_on"] == (today + timedelta(days=10)).isoformat()
+
+            assert by_number["SOC-0002"]["membership_status"] == "expired"
+            assert by_number["SOC-0002"]["membership_ends_on"] == (today - timedelta(days=10)).isoformat()
+
+            assert by_number["SOC-0006"]["membership_status"] == "inactive"
+            assert by_number["SOC-0006"]["membership_ends_on"] == (today - timedelta(days=45)).isoformat()
+    finally:
+        engine.dispose()
+

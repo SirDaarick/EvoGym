@@ -2,6 +2,7 @@
 from datetime import date, datetime, timezone
 from typing import NamedTuple
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
 from app.db.models.membership_debts import MembershipDebt
 from app.db.models.membership_debt_payments import MembershipDebtPayment
+from app.db.models.memberships import MembershipPeriod
 from app.members.schemas import CreateMemberDTO, UpdateMemberDTO
 
 
@@ -18,6 +20,21 @@ ALLOWED_SORT_FIELDS = {
     "joined_on": Member.joined_on,
     "member_number": Member.member_number,
 }
+
+_BUSINESS_TZ = ZoneInfo("America/Mexico_City")
+
+
+def _derive_membership_status(member_status: str, ends_on: date | None, today: date) -> str:
+    """Derive operational membership status from latest period end date and profile status."""
+    if member_status in ("inactive", "suspended"):
+        return "inactive"
+    if member_status == "expired":
+        return "expired"
+    if ends_on is None:
+        return "active" if member_status == "active" else "inactive"
+    if ends_on >= today:
+        return "active"
+    return "expired" if (today - ends_on).days <= 31 else "inactive"
 
 
 class MemberListResult(NamedTuple):
@@ -85,7 +102,19 @@ def list_members(
     sort_col = ALLOWED_SORT_FIELDS[sort_by]
     order_clause = sort_col.asc() if sort_dir == "asc" else sort_col.desc()
 
-    stmt = select(Member)
+    latest_period_sq = (
+        select(
+            MembershipPeriod.member_id.label("member_id"),
+            func.max(MembershipPeriod.ends_on).label("max_ends_on"),
+        )
+        .group_by(MembershipPeriod.member_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(Member, latest_period_sq.c.max_ends_on)
+        .outerjoin(latest_period_sq, latest_period_sq.c.member_id == Member.id)
+    )
     if filters:
         stmt = stmt.where(*filters)
     stmt = (
@@ -93,7 +122,12 @@ def list_members(
         .offset((page - 1) * limit)
         .limit(limit)
     )
-    items = list(session.scalars(stmt).all())
+    today = datetime.now(_BUSINESS_TZ).date()
+    items: list[Member] = []
+    for member, max_ends_on in session.execute(stmt).all():
+        member.membership_ends_on = max_ends_on
+        member.membership_status = _derive_membership_status(member.status, max_ends_on, today)
+        items.append(member)
 
     return MemberListResult(items=items, total=total, pages=pages)
 

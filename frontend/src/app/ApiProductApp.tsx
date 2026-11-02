@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { useAdminSession } from '../features/auth/AdminSessionProvider';
+import { MemberSearch } from '../features/members/MemberSearch';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from './ApiMembers';
 import { ApiStaffAttendance } from './ApiStaffAttendance';
 import { ApiReceptionHome } from './ApiReceptionHome';
@@ -142,7 +143,13 @@ export function ApiProductApp() {
     items={shellItems}
     brandTo={homePath(role)}
     caption={principal.identity.display_name}
-    headerContent={<span className="muted">Sesión verificada por la API</span>}
+    headerContent={<>
+      <MemberSearch key={role} role={role} request={apiRequest} />
+      <Link to={rolePath(role, 'members/new')} className="button button-primary header-new-btn" aria-label="Agregar socio" title="Registrar socio">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+        <span>Nuevo</span>
+      </Link>
+    </>}
     headerActionsBeforeTheme={<Button variant="secondary" onClick={() => navigate(rolePath(role, 'shifts'))}>Turno</Button>}
     headerActionsAfterTheme={isPhoneEmployee ? <>
       <Button variant="secondary" disabled={access.loading} onClick={() => void unlinkDevice()}>Desvincular este dispositivo</Button>

@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Uuid, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -15,6 +15,7 @@ class MembershipPeriod(Base):
     __table_args__ = (
         CheckConstraint("ends_on > starts_on", name="ck_membership_periods_end_after_start"),
         UniqueConstraint("order_item_id", name="uq_membership_periods_order_item"),
+        Index("ix_membership_periods_member_ends_on", "member_id", "ends_on"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)

@@ -35,6 +35,7 @@ vi.mock('../features/auth/AdminSessionProvider', () => ({
 }));
 vi.mock('../demo/DemoProvider', () => ({
   DemoProvider: ({ children }: { children: React.ReactNode }) => { demoMounted(); return <div data-testid="demo-provider">{children}</div>; },
+  useDemo: () => ({ state: { members: [] } }),
 }));
 vi.mock('./App', () => ({ App: () => <div>Demo business app</div> }));
 vi.mock('../features/staff/StaffProfileSelection', () => ({ StaffProfileSelection: () => <div>Profile selection</div> }));

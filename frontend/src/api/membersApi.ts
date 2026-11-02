@@ -12,6 +12,8 @@ export interface MemberListItemDTO {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   photo_url: string | null;
+  membership_ends_on?: string | null;
+  membership_status?: string | null;
 }
 
 export interface MemberDetailDTO extends MemberListItemDTO {
@@ -286,3 +288,32 @@ export async function createMemberNote(
 
   return response.json() as Promise<MemberNoteDTO>;
 }
+
+export async function listMembers(
+  request: AuthenticatedRequest,
+  params: { page?: number; limit?: number; search?: string; status?: string } = {}
+): Promise<MemberListResponse> {
+  const query = new URLSearchParams({
+    page: String(params.page ?? 1),
+    limit: String(params.limit ?? 100),
+  });
+  if (params.search?.trim()) query.set('search', params.search.trim());
+  if (params.status?.trim()) query.set('status', params.status.trim());
+
+  let response: Response;
+  try {
+    response = await request(`/api/v1/members?${query}`, {
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    throw new MemberApiNetworkError();
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new MemberApiError(response.status, extractErrorMessage(body, response.status));
+  }
+
+  return response.json() as Promise<MemberListResponse>;
+}
+

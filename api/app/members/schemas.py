@@ -19,6 +19,8 @@ class MemberListItemDTO(BaseModel):
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
     photo_url: str | None = None
+    membership_ends_on: date | str | None = None
+    membership_status: str | None = None
 
     @field_validator("id", mode="before")
     @classmethod

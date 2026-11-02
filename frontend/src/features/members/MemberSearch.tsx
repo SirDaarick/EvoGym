@@ -1,23 +1,207 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
-import type { Member, Role } from '../../domain/models';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import type { Role } from '../../domain/models';
+import { listMembers, type AuthenticatedRequest, type MemberListItemDTO } from '../../api/membersApi';
 import { useDemo } from '../../demo/DemoProvider';
-import { memberSearchGroups, memberStatus, memberStatusLabels } from '../../demo/memberStatus';
+import { memberSearchGroups, memberStatus, memberStatusLabels, type MemberStatus } from '../../demo/memberStatus';
 import { rolePath } from '../../app/navigation';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import JellyRadio, { type JellyRadioItem } from '../catalog/react-bits/JellyRadio';
 
 type CategoryFilter = 'all' | 'active' | 'expired' | 'inactive';
 
-export function MemberSearch({ role }: { role: Role }) {
+interface SearchEntry {
+  id: string;
+  title: string;
+  description: string;
+}
+
+interface SearchGroup {
+  status: MemberStatus;
+  items: SearchEntry[];
+}
+
+export function MemberSearch({ role, request }: { role: Role; request?: AuthenticatedRequest }) {
+  if (request) return <LiveMemberSearch role={role} request={request} />;
+  return <DemoMemberSearch role={role} />;
+}
+
+function DemoMemberSearch({ role }: { role: Role }) {
   const { state } = useDemo();
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const groups: SearchGroup[] = useMemo(
+    () =>
+      memberSearchGroups(state.members, query, undefined, true).map(group => ({
+        status: group.status,
+        items: group.members.map(member => ({
+          id: member.id,
+          title: member.name,
+          description: memberStatus(member).label,
+        })),
+      })),
+    [state.members, query],
+  );
+
+  return (
+    <MemberSearchCombobox
+      role={role}
+      query={query}
+      onQueryChange={setQuery}
+      open={open}
+      onOpenChange={setOpen}
+      groups={groups}
+    />
+  );
+}
+
+function resolveLiveStatus(item: MemberListItemDTO): 'active' | 'expired' | 'inactive' {
+  const raw = item.membership_status ?? item.status;
+  if (raw === 'active') return 'active';
+  if (raw === 'expired') return 'expired';
+  return 'inactive';
+}
+
+function formatLiveDescription(item: MemberListItemDTO, status: 'active' | 'expired' | 'inactive'): string {
+  const statusLabel = status === 'active' ? 'Activa' : status === 'expired' ? 'Vencida' : 'Inactiva';
+  return item.member_number ? `${item.member_number} · ${statusLabel}` : statusLabel;
+}
+
+function LiveMemberSearch({ role, request }: { role: Role; request: AuthenticatedRequest }) {
+  const location = useLocation();
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [baseItems, setBaseItems] = useState<MemberListItemDTO[]>([]);
+  const [remoteItems, setRemoteItems] = useState<MemberListItemDTO[] | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const loadedBaseRef = useRef(false);
+  const generationRef = useRef(0);
+
+  // Invalidate cached directory when route changes (e.g. after registering or editing a member)
+  useEffect(() => {
+    loadedBaseRef.current = false;
+    setRemoteItems(null);
+  }, [location.pathname, request]);
+
+  // Lazy load first page when the user opens the search bar
+  useEffect(() => {
+    if (!open || loadedBaseRef.current) return;
+    const generation = ++generationRef.current;
+    setLoading(true);
+    void listMembers(request, { page: 1, limit: 100 })
+      .then(res => {
+        if (generation !== generationRef.current) return;
+        const items = Array.isArray(res.items) ? res.items : [];
+        loadedBaseRef.current = true;
+        setBaseItems(items);
+        setTotalCount(typeof res.total === 'number' ? res.total : items.length);
+      })
+      .catch(() => {
+        if (generation !== generationRef.current) return;
+        setBaseItems([]);
+      })
+      .finally(() => {
+        if (generation === generationRef.current) setLoading(false);
+      });
+  }, [open, request]);
+
+  // If the gym has more than 100 members, debounce server-side search for non-empty queries
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!open || !trimmed || totalCount <= baseItems.length) {
+      setRemoteItems(null);
+      return;
+    }
+    const generation = ++generationRef.current;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void listMembers(request, { page: 1, limit: 100, search: trimmed })
+        .then(res => {
+          if (generation !== generationRef.current) return;
+          setRemoteItems(Array.isArray(res.items) ? res.items : []);
+        })
+        .catch(() => {
+          if (generation !== generationRef.current) return;
+          setRemoteItems([]);
+        })
+        .finally(() => {
+          if (generation === generationRef.current) setLoading(false);
+        });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [open, query, totalCount, baseItems.length, request]);
+
+  const groups: SearchGroup[] = useMemo(() => {
+    const isWhitespace = query.length > 0 && query.trim() === '';
+    if (isWhitespace) {
+      return (['active', 'expired', 'inactive'] as const).map(status => ({ status, items: [] }));
+    }
+    const normalized = query.trim().toLocaleLowerCase('es-MX');
+    const source = remoteItems ?? baseItems;
+    const matched = normalized
+      ? source.filter(item =>
+          `${item.preferred_name ?? ''} ${item.full_name} ${item.phone} ${item.member_number}`
+            .toLocaleLowerCase('es-MX')
+            .includes(normalized),
+        )
+      : source;
+
+    const buckets: Record<'active' | 'expired' | 'inactive', SearchEntry[]> = {
+      active: [],
+      expired: [],
+      inactive: [],
+    };
+    for (const item of matched) {
+      const status = resolveLiveStatus(item);
+      buckets[status].push({
+        id: item.id,
+        title: item.preferred_name || item.full_name,
+        description: formatLiveDescription(item, status),
+      });
+    }
+    return (['active', 'expired', 'inactive'] as const).map(status => ({
+      status,
+      items: buckets[status],
+    }));
+  }, [baseItems, remoteItems, query]);
+
+  return (
+    <MemberSearchCombobox
+      role={role}
+      query={query}
+      onQueryChange={setQuery}
+      open={open}
+      onOpenChange={setOpen}
+      groups={groups}
+      loading={loading}
+    />
+  );
+}
+
+function MemberSearchCombobox({
+  role,
+  query,
+  onQueryChange,
+  open,
+  onOpenChange,
+  groups,
+  loading = false,
+}: {
+  role: Role;
+  query: string;
+  onQueryChange: (value: string | ((prev: string) => string)) => void;
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  groups: SearchGroup[];
+  loading?: boolean;
+}) {
   const navigate = useNavigate();
   const id = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [dark, setDark] = useState(() => {
@@ -29,25 +213,17 @@ export function MemberSearch({ role }: { role: Role }) {
   useEffect(() => {
     function syncTheme() {
       const currentTheme = document.documentElement.dataset.theme;
-      if (currentTheme) {
-        setDark(currentTheme === 'dark');
-      } else {
-        setDark(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
-      }
+      setDark(currentTheme ? currentTheme === 'dark' : (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false));
     }
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);
 
-  // Categorize members; include all on empty query
-  const allGroups = memberSearchGroups(state.members, query, undefined, true);
-
-  // Counts for filter pills
-  const countActive = allGroups.find(g => g.status === 'active')?.members.length ?? 0;
-  const countExpired = allGroups.find(g => g.status === 'expired')?.members.length ?? 0;
-  const countInactive = allGroups.find(g => g.status === 'inactive')?.members.length ?? 0;
-  const countUnknown = allGroups.find(g => g.status === 'unknown')?.members.length ?? 0;
+  const countActive = groups.find(g => g.status === 'active')?.items.length ?? 0;
+  const countExpired = groups.find(g => g.status === 'expired')?.items.length ?? 0;
+  const countInactive = groups.find(g => g.status === 'inactive')?.items.length ?? 0;
+  const countUnknown = groups.find(g => g.status === 'unknown')?.items.length ?? 0;
   const countTotal = countActive + countExpired + countInactive + countUnknown;
 
   const filterItems: JellyRadioItem[] = [
@@ -57,82 +233,72 @@ export function MemberSearch({ role }: { role: Role }) {
     { value: 'inactive', label: `Inactivos (${countInactive})` },
   ];
 
-  // Filter groups according to pill selection
-  const filteredGroups = allGroups.filter(group => {
-    if (categoryFilter === 'all') return true;
-    return group.status === categoryFilter;
-  });
-
-  const displayGroups = filteredGroups
-    .filter(group => group.members.length > 0)
+  const displayGroups = groups
+    .filter(group => (categoryFilter === 'all' ? true : group.status === categoryFilter))
+    .filter(group => group.items.length > 0)
     .map(group => ({
       label: memberStatusLabels[group.status],
-      items: group.members.map(member => ({
-        id: member.id,
-        title: member.name,
-        description: memberStatus(member).label,
-        member,
-      })),
+      items: group.items,
     }));
 
-  const flatResults = displayGroups.flatMap(group => group.items.map(item => item.member));
+  const flatResults = displayGroups.flatMap(group => group.items);
   const isWhitespace = query.length > 0 && query.trim() === '';
   const visible = open && !isWhitespace;
 
-  function select(member: Member) {
-    setOpen(false);
-    setQuery('');
+  function select(entry: SearchEntry) {
+    onOpenChange(false);
+    onQueryChange('');
     setSelectedIndex(-1);
-    navigate(rolePath(role, `members/${member.id}`));
+    navigate(rolePath(role, `members/${entry.id}`));
   }
 
   // Global Type-to-Search: listen for printable character keydown on window
   useEffect(() => {
     function handleGlobalKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setOpen(false);
+        onOpenChange(false);
         setSelectedIndex(-1);
         return;
       }
 
-      if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
+      if (event.key.length !== 1 || event.key === ' ' || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
 
       const active = document.activeElement;
-      if (active) {
-        const tagName = active.tagName.toLowerCase();
-        if (['input', 'textarea', 'select'].includes(tagName)) return;
+      if (active && active !== document.body && active !== document.documentElement) {
         if ((active as HTMLElement).isContentEditable) return;
-        if (active.closest('dialog, [role="dialog"]')) return;
+        if (
+          active.closest(
+            'input, textarea, select, button, a, summary, [role="button"], [role="tab"], [role="combobox"], [role="listbox"], [role="menuitem"], dialog, [role="dialog"]',
+          )
+        ) {
+          return;
+        }
       }
 
       event.preventDefault();
       inputRef.current?.focus();
-      setQuery(prev => prev + event.key);
-      setOpen(true);
+      onQueryChange(prev => prev + event.key);
+      onOpenChange(true);
       setSelectedIndex(-1);
     }
 
     window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleGlobalKeyDown);
-    };
-  }, []);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [onOpenChange, onQueryChange]);
 
   // Clicking outside closes the suggestions
   useEffect(() => {
     function handleClickOutside(event: MouseEvent | PointerEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        onOpenChange(false);
       }
     }
 
     document.addEventListener('pointerdown', handleClickOutside);
-    return () => {
-      document.removeEventListener('pointerdown', handleClickOutside);
-    };
-  }, []);
+    return () => document.removeEventListener('pointerdown', handleClickOutside);
+  }, [onOpenChange]);
 
   return (
     <div className="global-member-search" ref={containerRef}>
@@ -167,30 +333,30 @@ export function MemberSearch({ role }: { role: Role }) {
               : undefined
           }
           autoComplete="off"
-          placeholder="Barra de búsqueda de socios o inventario"
+          placeholder="Buscar socio por nombre, teléfono o número"
           value={query}
-          onFocus={() => setOpen(true)}
+          onFocus={() => onOpenChange(true)}
           onBlur={event => {
             if (!containerRef.current?.contains(event.relatedTarget as Node)) {
-              setOpen(false);
+              onOpenChange(false);
             }
           }}
           onChange={event => {
-            setQuery(event.target.value);
-            setOpen(true);
+            onQueryChange(event.target.value);
+            onOpenChange(true);
             setSelectedIndex(-1);
           }}
           onKeyDown={event => {
             if (event.key === 'Escape') {
               event.preventDefault();
-              setOpen(false);
+              onOpenChange(false);
               setSelectedIndex(-1);
               return;
             }
 
             if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && flatResults.length) {
               event.preventDefault();
-              setOpen(true);
+              onOpenChange(true);
               const next =
                 selectedIndex < 0
                   ? event.key === 'ArrowDown'
@@ -243,8 +409,8 @@ export function MemberSearch({ role }: { role: Role }) {
               selectedIndex={selectedIndex}
               onSelectedIndexChange={setSelectedIndex}
               onItemSelect={(_item, index) => {
-                const member = flatResults[index];
-                if (member) select(member);
+                const entry = flatResults[index];
+                if (entry) select(entry);
               }}
               theme={dark ? 'dark' : 'light'}
               accentColor="#FC6C06"
@@ -255,7 +421,7 @@ export function MemberSearch({ role }: { role: Role }) {
               maxHeight={320}
             />
           ) : (
-            <p role="status">Sin coincidencias de socios.</p>
+            <p role="status">{loading ? 'Buscando socios…' : 'Sin coincidencias de socios.'}</p>
           )}
 
           <p className="muted suggestion-note">La membresía debe estar vigente para autorizar el acceso.</p>
@@ -264,4 +430,3 @@ export function MemberSearch({ role }: { role: Role }) {
     </div>
   );
 }
-

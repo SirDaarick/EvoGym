@@ -183,6 +183,8 @@ def list_members_endpoint(
                     emergency_contact_name=item.emergency_contact_name,
                     emergency_contact_phone=item.emergency_contact_phone,
                     photo_url=item.photo_url,
+                    membership_ends_on=getattr(item, "membership_ends_on", None),
+                    membership_status=getattr(item, "membership_status", item.status),
                 )
                 for item in result.items
             ],

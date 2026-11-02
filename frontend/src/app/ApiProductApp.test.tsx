@@ -271,12 +271,12 @@ describe('API product routes', () => {
     expect(screen.getByText('$150.00 MXN')).toBeInTheDocument();
     expect(screen.getByText('$125.00 MXN')).toBeInTheDocument();
     expect(screen.queryByText(/0 meses/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Historial de compras no disponible')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Historial de compras' })).toBeInTheDocument();
     expect(screen.getAllByText('No disponible en esta integración')).toHaveLength(2);
     expect(screen.getByText(/Vencimiento: No disponible en esta integración/)).toBeInTheDocument();
     expect(screen.queryByText('Sin asignación')).not.toBeInTheDocument();
-    expect(screen.queryByText('Sin compras registradas')).not.toBeInTheDocument();
-    expect(screen.getByText('Frecuencia histórica no disponible')).toBeInTheDocument();
+    expect(screen.getByText('Sin compras registradas')).toBeInTheDocument();
+    expect(screen.getByRole('grid', { name: 'Calendario de asistencias' })).toBeInTheDocument();
     expect(screen.getByText('Últimas visitas (máximo 12)')).toBeInTheDocument();
     expect(screen.getByText('Períodos activos informados por la API; no representa el historial completo de pagos.')).toBeInTheDocument();
     expect(screen.queryByText(/visitas totales/i)).not.toBeInTheDocument();
@@ -485,5 +485,54 @@ describe('API product routes', () => {
     render(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>);
     expect(screen.queryByRole('heading', { name: 'Transferencias pendientes' })).not.toBeInTheDocument();
     expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/admin/pending-money'), expect.anything());
+  });
+
+  it('connects the global top search bar and Nuevo link in ApiProductApp to the live members API', async () => {
+    const expiredMember = {
+      ...member,
+      id: '333e4567-e89b-42d3-a456-426614174001',
+      member_number: 'M-200',
+      full_name: 'Grace Hopper',
+      membership_status: 'expired',
+      membership_ends_on: '2026-10-20',
+    };
+    admin.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/members?')) {
+        return new Response(JSON.stringify({ items: [member, expiredMember], total: 2, page: 1, limit: 100, pages: 1 }));
+      }
+      if (path.endsWith(`/members/${expiredMember.id}/reload?visit_limit=12`)) {
+        return new Response(JSON.stringify({
+          profile: {
+            id: expiredMember.id, organization_id: 'org-1', home_branch_id: 'branch-1',
+            member_number: expiredMember.member_number, full_name: expiredMember.full_name,
+            preferred_name: null, phone: expiredMember.phone, email: null, birth_date: null,
+            joined_on: expiredMember.joined_on, status: 'active', photo_url: null,
+            emergency_contact_name: null, emergency_contact_phone: null,
+          },
+          active_periods: [], class_samples: [],
+          financial: { has_pending_balance: false, credit_balance_minor: 0, total_pending_balance_minor: 0, currency: 'MXN', debts: [] },
+          recent_visits: [], server_time: '2026-11-01T12:00:00Z',
+        }));
+      }
+      if (path.endsWith(`/members/${expiredMember.id}`)) {
+        return new Response(JSON.stringify({ ...expiredMember, email: null, birth_date: null, notes: null, pending_balance_minor: 0, has_pending_balance: false }));
+      }
+      return new Response(JSON.stringify({}));
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/shifts']}><ProductRoutes /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'Agregar socio' })).toHaveAttribute('href', '/owner/members/new');
+
+    const combobox = screen.getByRole('combobox', { name: 'Búsqueda global de socios' });
+    await userEvent.click(combobox);
+
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).getAllByRole('group').map(g => g.getAttribute('aria-label'))).toEqual(['Activos', 'Vencidos']);
+
+    await userEvent.type(combobox, 'Grace');
+    expect(within(screen.getByRole('listbox')).getAllByRole('group').map(g => g.getAttribute('aria-label'))).toEqual(['Vencidos']);
+
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument();
   });
 });
