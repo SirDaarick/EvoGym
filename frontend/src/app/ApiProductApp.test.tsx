@@ -57,6 +57,14 @@ describe('API product routes', () => {
     });
   });
 
+  it('mounts the live owner overview with the authenticated request', async () => {
+    admin.request.mockResolvedValue(new Response('{}', { status: 503 }));
+    render(<MemoryRouter initialEntries={['/owner/overview']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el resumen');
+    expect(admin.request).toHaveBeenCalledWith('/api/v1/owner/overview');
+    expect(screen.queryByText('Función no disponible')).not.toBeInTheDocument();
+  });
+
   it('renders member DTOs through the authenticated product route without mounting demo state', async () => {
     render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();

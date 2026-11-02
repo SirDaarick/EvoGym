@@ -27,6 +27,9 @@ import type { GimiConversation } from '../../domain/gimi';
 import { Badge, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { NotebookNotice } from '../../shared/operationPresentation';
 import { PeriodFields } from './PeriodFields';
+import { LiveOverview } from './LiveOverview';
+import { OverviewGrid } from './OverviewGrid';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import './Overview.css';
 
 export function getAlertCenterAnalytics(state: DemoState, period: AlertPeriod = 'all') {
@@ -44,7 +47,11 @@ export function getGimiConversationsSummary(conversations: GimiConversation[] = 
   };
 }
 
-export function Overview() {
+export function Overview({ apiRequest }: { apiRequest?: AuthenticatedRequest } = {}) {
+  return apiRequest ? <LiveOverview apiRequest={apiRequest} /> : <DemoOverview />;
+}
+
+function DemoOverview() {
   const { state } = useDemo();
   const [period, setPeriod] = useState<ReportingPeriod>(() => defaultPeriod(state));
   const isValid = validPeriod(period);
@@ -92,6 +99,42 @@ export function Overview() {
       .reduce((sum, sale) => sum + sale.amountMinor, 0);
   }, [state.sales, isValid, period.from, period.to]);
 
+  return <OverviewView period={period} setPeriod={setPeriod} summary={summary && {
+    ...summary,
+    countDiscrepancies: summary.countDiscrepancies.map(count => ({
+      id: count.id, shiftId: count.shiftId, variance: count.variance,
+      productName: state.products.find(product => product.id === count.productId)?.name ?? '',
+    })),
+  }} attendance={attendance} memberAnalytics={memberAnalytics} inventory={inventory}
+    alertsResult={alertsResult} gimiSummary={gimiSummary} retailRevenueMinor={retailRevenueMinor} />;
+}
+
+interface OverviewViewProps {
+  period: ReportingPeriod;
+  setPeriod: (period: ReportingPeriod) => void;
+  summary: null | {
+    confirmedMinor: number; confirmedCount: number; cashMinor: number; cardMinor: number; transferPendingMinor: number;
+    shiftDiscrepancies: { id: string; window: string; cashDifferenceMinor?: number }[];
+    countDiscrepancies: { id: string; shiftId: string; variance: number; productName: string }[];
+  };
+  attendance: { liveOccupancyCount: number; gymCapacity: number; liveOccupancyPercent: number;
+    peakHour: { label: string }; valleyHour: { label: string }; averageDurationMinutes: number };
+  memberAnalytics: { activePercent: number; activeMembers: number; totalMembers: number;
+    tenure: { medianMonths: number }; expiringSoonCount: number; expiredCount: number };
+  inventory: { kpis: { lowStockCount: number; activeProductsCount: number; totalUnitsSold: number } };
+  alertsResult: { totalCount: number; categoryCounts: { category: string; label: string; color: string; count: number }[] };
+  gimiSummary: { resolutionRate: number; totalConversations: number } | null;
+  retailRevenueMinor: number;
+  live?: { timezone: string; totalCheckIns: number; sold: number; renewed: number; payday: string;
+    daysUntilPayday: number; payrollMinor: number; onDuty: number; absent: number };
+  loading?: boolean;
+  error?: string;
+}
+
+export function OverviewView({ period, setPeriod, summary, attendance, memberAnalytics, inventory,
+  alertsResult, gimiSummary, retailRevenueMinor, live, loading, error }: OverviewViewProps) {
+  const isValid = validPeriod(period);
+
   return (
     <div className="overview-page">
       <PageHeader
@@ -101,8 +144,10 @@ export function Overview() {
       />
 
       <Panel>
-        <PeriodFields period={period} onChange={setPeriod} />
+        <PeriodFields period={period} onChange={setPeriod} source={live ? 'registros del negocio' : undefined} timezone={live?.timezone} />
       </Panel>
+      {loading && <p role="status">Cargando resumen…</p>}
+      {error && <div role="alert"><Notice tone="error">{error}</Notice></div>}
 
       {!isValid ? (
         <div role="alert" className="overview-invalid-alert">
@@ -112,7 +157,7 @@ export function Overview() {
         </div>
       ) : (
         summary && (
-          <div className="bento-grid mt-6">
+          <OverviewGrid>
             {/* 1. Executive Pulse Strip (Full Width) */}
             <div className="executive-pulse-bar clay-card" role="region" aria-label="Pulso ejecutivo en tiempo real">
               <div className="pulse-header">
@@ -179,7 +224,7 @@ export function Overview() {
                     </Badge>
                   </div>
                   <span className="pulse-metric-subtext mt-1">
-                    Gimi AI: {gimiSummary.resolutionRate}% resuelto
+                    Gimi AI: {gimiSummary ? `${gimiSummary.resolutionRate}% resuelto` : 'No disponible'}
                   </span>
                 </div>
               </div>
@@ -213,7 +258,7 @@ export function Overview() {
               </TableRegion>
               {!summary.confirmedCount && (
                 <p className="muted mt-4">
-                  No hay cobros confirmados en este periodo; el cero corresponde a registros locales, no al negocio real.
+                  {live ? 'No hay cobros confirmados en este periodo.' : 'No hay cobros confirmados en este periodo; el cero corresponde a registros locales, no al negocio real.'}
                 </p>
               )}
               <div className="flow">
@@ -278,7 +323,7 @@ export function Overview() {
                       {summary.countDiscrepancies.map(count => (
                         <tr key={count.id}>
                           <td>
-                            {state.products.find(product => product.id === count.productId)?.name}
+                            {count.productName}
                             <p className="muted">{count.shiftId}</p>
                           </td>
                           <td>{count.variance}</td>
@@ -354,6 +399,7 @@ export function Overview() {
                     style={{ width: `${Math.min(100, attendance.liveOccupancyPercent)}%` }}
                   />
                 </div>
+                {live && <p className="muted">Nuevas / Renovaciones: {live.sold} / {live.renewed}</p>}
               </div>
               <div className="overview-stats-row">
                 <div className="overview-stat-box">
@@ -365,8 +411,8 @@ export function Overview() {
                   <span className="overview-stat-value">{attendance.valleyHour.label}</span>
                 </div>
                 <div className="overview-stat-box">
-                  <span className="overview-stat-label">Duración promedio</span>
-                  <span className="overview-stat-value">{attendance.averageDurationMinutes} min</span>
+                  <span className="overview-stat-label">{live ? 'Visitas en el periodo' : 'Duración promedio'}</span>
+                  <span className="overview-stat-value">{live ? live.totalCheckIns : `${attendance.averageDurationMinutes} min`}</span>
                 </div>
               </div>
               <div className="overview-card-actions">
@@ -407,6 +453,17 @@ export function Overview() {
               </div>
             </Panel>
 
+            {live && <Panel className="clay-card overview-pillar-card">
+              <div className="overview-card-header"><h2>Equipo y nómina</h2></div>
+              <div className="overview-kpi-highlight"><p className="text-3xl font-bold">{formatMoney(live.payrollMinor)} MXN</p><p className="muted">Nómina semanal estimada</p></div>
+              <div className="overview-stats-row">
+                <div className="overview-stat-box"><span className="overview-stat-label">Próximo pago</span><span className="overview-stat-value">{live.payday} ({live.daysUntilPayday} días)</span></div>
+                <div className="overview-stat-box"><span className="overview-stat-label">Staff en turno</span><span className="overview-stat-value">{live.onDuty}</span></div>
+                <div className="overview-stat-box"><span className="overview-stat-label">Ausencias</span><span className="overview-stat-value">{live.absent}</span></div>
+              </div>
+              <div className="overview-card-actions"><Link to="/owner/staff">Ver equipo y nómina →</Link></div>
+            </Panel>}
+
             {/* 6. Operations, Alerts & Gimi AI Pillar */}
             <Panel className="clay-card overview-pillar-card">
               <div className="overview-card-header">
@@ -436,11 +493,11 @@ export function Overview() {
               <div className="overview-stats-row">
                 <div className="overview-stat-box">
                   <span className="overview-stat-label">Conversaciones Gimi</span>
-                  <span className="overview-stat-value">{gimiSummary.totalConversations} chats</span>
+                  <span className="overview-stat-value">{gimiSummary ? `${gimiSummary.totalConversations} chats` : 'No disponible'}</span>
                 </div>
                 <div className="overview-stat-box">
                   <span className="overview-stat-label">Resolución autónoma</span>
-                  <span className="overview-stat-value">{gimiSummary.resolutionRate}%</span>
+                  <span className="overview-stat-value">{gimiSummary ? `${gimiSummary.resolutionRate}%` : 'No disponible'}</span>
                 </div>
               </div>
               <div className="overview-card-actions">
@@ -448,11 +505,11 @@ export function Overview() {
                 <Link to="/owner/gimi">Ver monitor de Gimi AI →</Link>
               </div>
             </Panel>
-          </div>
+          </OverviewGrid>
         )
       )}
 
-      <NotebookNotice />
+      {!live && <NotebookNotice />}
     </div>
   );
 }

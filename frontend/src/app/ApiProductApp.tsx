@@ -12,6 +12,7 @@ import { ApiStaffManagement } from '../features/owner/StaffManagement';
 import { PlanCatalog } from '../features/owner/PlanCatalog';
 import { ExpenseReport } from '../features/owner/ExpenseReport';
 import { AlertCenter } from '../features/owner/AlertCenter';
+import { Overview } from '../features/owner/Overview';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
@@ -109,6 +110,8 @@ export function ApiProductApp() {
   let content = <UnavailablePage title={pageTitles[pathname] ?? 'Función no disponible'} />;
   if (pathname === '/reception/home' && principal.kind === 'employee') {
     content = <ApiReceptionHome request={apiRequest} actorId={principal.identity.id} />;
+  } else if (pathname === '/owner/overview' && isAdmin && admin.status === 'authenticated') {
+    content = <Overview apiRequest={apiRequest} />;
   } else if (pathname === '/owner/alerts' && isAdmin && admin.status === 'authenticated') {
     content = <AlertCenter apiRequest={apiRequest} />;
   } else if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
