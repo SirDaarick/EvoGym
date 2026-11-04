@@ -55,6 +55,10 @@ class Settings(BaseSettings):
         return self.environment in {"development", "test"}
 
     @property
+    def point_mock_allowed(self) -> bool:
+        return self.environment in {"development", "test"}
+
+    @property
     def admin_auth_configured(self) -> bool:
         return self.database_url is not None and all(value is not None for value in (
             self.admin_session_ttl_seconds, self.admin_lockout_attempts,

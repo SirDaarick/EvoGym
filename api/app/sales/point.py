@@ -257,12 +257,22 @@ class MercadoPagoPointHttpClient:
 _global_mock_client: MockPointTerminalClient | None = None
 
 
+class PointTerminalUnavailable(RuntimeError):
+    """Raised when no real Point terminal is configured and the mock is not allowed."""
+
+
 def get_point_client(settings: Settings | None = None) -> PointTerminalClient:
-    """Factory resolving the active Point terminal client."""
+    """Factory resolving the active Point terminal client.
+
+    The in-memory mock is only returned in development/test environments; anywhere
+    else (or without settings) a missing Mercado Pago configuration is an error.
+    """
     global _global_mock_client
     if settings is not None and settings.mercado_pago_configured:
         token = settings.mercado_pago_access_token.get_secret_value()  # type: ignore[union-attr]
         return MercadoPagoPointHttpClient(access_token=token)
+    if settings is None or not settings.point_mock_allowed:
+        raise PointTerminalUnavailable("Point terminal is not configured.")
     if _global_mock_client is None:
         _global_mock_client = MockPointTerminalClient()
     return _global_mock_client

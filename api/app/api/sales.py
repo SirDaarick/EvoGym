@@ -12,7 +12,7 @@ from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
 from app.db.models import (
     Branch, CashRegister, Member, MembershipDebtPayment, MembershipPeriod, Order, OrderItem, Payment, PaymentTerminal, ProductRefund, RoleGrant, ProductSaleIntent, StaffUser,
 )
-from app.sales.point import get_point_client
+from app.sales.point import PointTerminalUnavailable, get_point_client
 from app.sales.queries import (
     CashSaleAccessDenied,
     CashSaleConflictError,
@@ -67,7 +67,14 @@ def _intent_response(intent):
         "registerId": str(intent.register_id), "payload": intent.payload}
 
 
-def _get_or_create_terminal_for_register(session, register: CashRegister) -> PaymentTerminal:
+def _point_client(request: Request):
+    try:
+        return get_point_client(getattr(request.app.state, "settings", None))
+    except PointTerminalUnavailable:
+        raise HTTPException(503, "Terminal no configurada") from None
+
+
+def _get_or_create_terminal_for_register(session, register: CashRegister, settings=None) -> PaymentTerminal:
     terminal = register.default_terminal
     if terminal is None:
         terminal = session.scalar(
@@ -77,6 +84,8 @@ def _get_or_create_terminal_for_register(session, register: CashRegister) -> Pay
             ).order_by(PaymentTerminal.code.asc())
         )
     if terminal is None:
+        if settings is None or not settings.point_mock_allowed:
+            raise HTTPException(503, "Terminal no configurada")
         terminal = PaymentTerminal(
             branch_id=register.branch_id,
             code="POINT-01",
@@ -229,9 +238,8 @@ def create_card_intent_endpoint(
             raise HTTPException(404, "Cash register not found.")
         if not principal.is_admin and register.branch_id != principal.branch_id:
             raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register)
-        settings = getattr(request.app.state, "settings", None)
-        client = get_point_client(settings)
+        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
+        client = _point_client(request)
         try:
             intent = client.create_payment_intent(
                 device_id=terminal.device_id,
@@ -270,9 +278,8 @@ def get_card_intent_status_endpoint(
             raise HTTPException(404, "Cash register not found.")
         if not principal.is_admin and register.branch_id != principal.branch_id:
             raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register)
-        settings = getattr(request.app.state, "settings", None)
-        client = get_point_client(settings)
+        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
+        client = _point_client(request)
         try:
             intent = client.get_payment_intent_status(
                 device_id=terminal.device_id,
@@ -311,9 +318,8 @@ def cancel_card_intent_endpoint(
             raise HTTPException(404, "Cash register not found.")
         if not principal.is_admin and register.branch_id != principal.branch_id:
             raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register)
-        settings = getattr(request.app.state, "settings", None)
-        client = get_point_client(settings)
+        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
+        client = _point_client(request)
         try:
             cancelled = client.cancel_payment_intent(
                 device_id=terminal.device_id,
@@ -375,9 +381,8 @@ def post_card_product_sale_endpoint(
                     payment=ProductSalePaymentDTO.model_validate(existing_order.payment),
                 )
 
-            terminal = _get_or_create_terminal_for_register(session, register)
-            settings = getattr(request.app.state, "settings", None)
-            client = get_point_client(settings)
+            terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
+            client = _point_client(request)
             try:
                 intent_dto = client.get_payment_intent_status(
                     terminal.device_id, payload.card_intent_id

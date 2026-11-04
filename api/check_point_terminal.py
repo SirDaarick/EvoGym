@@ -29,7 +29,7 @@ if str(api_dir) not in sys.path:
     sys.path.insert(0, str(api_dir))
 
 from app.settings import get_settings
-from app.sales.point import get_point_client, MercadoPagoPointHttpClient, MockPointTerminalClient
+from app.sales.point import PointTerminalUnavailable, get_point_client, MercadoPagoPointHttpClient, MockPointTerminalClient
 
 
 def print_banner() -> None:
@@ -43,7 +43,12 @@ def run_diagnostic(test_intent: bool = False, device_id: str | None = None, wait
 
     settings = get_settings()
     is_live = settings.mercado_pago_configured
-    client = get_point_client(settings)
+    try:
+        client = get_point_client(settings)
+    except PointTerminalUnavailable:
+        print("\n[ERROR] Terminal Point no configurada: define EVOGYM_MERCADO_PAGO_ACCESS_TOKEN "
+              "(el simulador solo está disponible en development/test).")
+        return 1
 
     if not is_live:
         print("\n[MODO ACTUAL: SIMULADOR / DEV]")
