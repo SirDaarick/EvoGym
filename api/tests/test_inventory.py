@@ -65,8 +65,9 @@ def test_direct_cross_branch_reads_authorize_only_active_receptionists(tmp_path)
     from types import SimpleNamespace
     from fastapi import HTTPException
     from app.errors import AppError
+    from app.shifts import service as shifts_service
     from app.api.inventory import InventoryActorPrincipal, list_stock_endpoint
-    from app.api.shifts import ShiftActorPrincipal, list_registers_endpoint
+    from app.api.shifts import ShiftActorPrincipal
     from test_shifts import _seed_branch, _seed_receptionist, _setup_db
     from app.shifts.queries import create_cash_register
 
@@ -80,15 +81,16 @@ def test_direct_cross_branch_reads_authorize_only_active_receptionists(tmp_path)
         stock_actor = InventoryActorPrincipal(actor, False, home)
         shift_actor = ShiftActorPrincipal(actor, False, home)
         assert list_stock_endpoint(other, request, 0, 50, stock_actor).total == 0
-        assert str(register_id) in [row.id for row in list_registers_endpoint(None, shift_actor, factory=factory)]
+        with factory() as session:
+            assert str(register_id) in [row.id for row in shifts_service.list_registers(session, shift_actor, None)]
         with factory.begin() as session:
             session.query(RoleGrant).filter_by(staff_id=actor).update({'is_active': False})
         with pytest.raises(AppError) as stock_denied:
             list_stock_endpoint(other, request, 0, 50, stock_actor)
         assert stock_denied.value.status == 403
-        with pytest.raises(HTTPException) as register_denied:
-            list_registers_endpoint(other, shift_actor, factory=factory)
-        assert register_denied.value.status_code == 403
+        with factory() as session, pytest.raises(AppError) as register_denied:
+            shifts_service.list_registers(session, shift_actor, other)
+        assert register_denied.value.status == 403
     finally:
         engine.dispose()
 

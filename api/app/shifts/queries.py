@@ -7,6 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.db.models import RoleGrant
 from app.db.models.orders import Order, OrderItem, Payment, ProductRefund
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.rentals import Rental, RentalCancellation, RentalCharge
@@ -118,6 +119,14 @@ def list_cash_registers(
         stmt = stmt.where(CashRegister.branch_id == branch_id)
     stmt = stmt.order_by(CashRegister.code.asc())
     return list(session.scalars(stmt).all())
+
+
+def has_receptionist_grant(session: Session, *, staff_id: UUID, branch_id: UUID | None) -> bool:
+    return session.scalar(select(RoleGrant.id).where(
+        RoleGrant.staff_id == staff_id, RoleGrant.role == "receptionist",
+        RoleGrant.scope_kind == "branch", RoleGrant.branch_id == branch_id,
+        RoleGrant.is_active.is_(True),
+    )) is not None
 
 
 def get_active_register_ids(session: Session) -> set[UUID]:

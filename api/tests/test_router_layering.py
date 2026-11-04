@@ -7,7 +7,7 @@ import pytest
 API = Path(__file__).resolve().parents[1]
 WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py", "app/api/staff_attendance.py",
                    "app/api/inventory.py", "app/api/catalog.py", "app/api/staff_schedules.py",
-                   "app/api/staff_roster.py", "app/api/staff_credentials.py"]  # later slices append their router here
+                   "app/api/staff_roster.py", "app/api/staff_credentials.py", "app/api/shifts.py"]  # later slices append their router here
 
 FORBIDDEN_CALLS = {"select", "execute", "scalar", "scalars", "add", "delete", "flush", "commit",
                    "rollback", "begin", "with_for_update", "authorize"}
