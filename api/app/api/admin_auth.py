@@ -134,11 +134,13 @@ def login(body: LoginBody, request: Request, response: Response, configured=Depe
 @router.post("/staff/sessions", status_code=201)
 def staff_login(body: StaffSessionBody, request: Request, response: Response, configured=Depends(_staff_rate_limit)):
     settings, factory = configured
+    if settings.staff_session_ttl_seconds is None:
+        raise HTTPException(503, "Authentication is temporarily unavailable.")
     semaphore: BoundedSemaphore = request.app.state.password_hash_capacity
     if not semaphore.acquire(blocking=False):
         raise HTTPException(503, "Authentication is temporarily unavailable.")
     try:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=90)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.staff_session_ttl_seconds)
         result = issue_session(
             factory, body.login_identifier.strip().casefold(), body.pin, body.branch_id, expires_at,
         )
