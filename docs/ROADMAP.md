@@ -1,6 +1,6 @@
 # EvoGym — Roadmap Maestro y Plan de Trabajo Accionable
 
-Este documento centraliza todas las tareas pendientes, correcciones de seguridad y mejoras arquitectónicas del proyecto **EvoGym**, organizadas por fases y prioridades para su ejecución secuencial y controlada.
+Este documento centraliza **todas las tareas pendientes, correcciones de seguridad, módulos funcionales y mejoras arquitectónicas** del proyecto **EvoGym**. Funciona como el libro mayor de trabajo para su ejecución secuencial y controlada.
 
 ---
 
@@ -8,169 +8,222 @@ Este documento centraliza todas las tareas pendientes, correcciones de seguridad
 
 | Fase | Enfoque | Impacto / Riesgo | Prioridad |
 |---|---|---|---|
-| **Fase 0** | Trabajo en Curso (Suplementos y Porciones) | Alto (migración DB y stock) | 🔴 Inmediato |
-| **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | 🔴 Alta |
-| **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | 🟡 Media-Alta |
-| **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | 🟡 Media-Alta |
-| **Fase 4** | Módulos Funcionales Pendientes | Medio (completitud operativa del gimnasio) | 🟢 Media |
-| **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 Media |
-| **Fase 6** | Pruebas Integrales y Preparación para Producción | Alto (certificación final de release) | 🔵 Final |
+| **Fase 0** | Trabajo en Curso (Suplementos y Porciones) | Alto (migración DB y stock) | ✅ **Completado** |
+| **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | 🔴 **Inmediata** |
+| **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | 🟡 **Alta** |
+| **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | 🟡 **Media-Alta** |
+| **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟢 **Media** |
+| **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 **Media** |
+| **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🔵 **Final** |
 
 ---
 
-## 🚀 Fase 0: Trabajo en Curso (Suplementos y Porciones)
-> **Objetivo:** Concluir y verificar la especificación activa en `odd/tasks/supplements-inventory-sales.md` para evitar estados a medias en la base de datos y la interfaz.
+## ✅ Fase 0: Trabajo en Curso (Suplementos y Porciones)
+> **Objetivo:** Concluir y verificar la especificación de porciones/botes en inventario y ventas POS (`odd/tasks/supplements-inventory-sales.md`).
 
 - [x] **T0.1 — Validar migración Alembic 0053 y modelo de datos**
   - **Archivos:** `api/app/db/models/inventory.py`, `api/migrations/versions/0053_scoop_products.py`.
-  - **Detalle:** Permitir `unit IN ('piece', 'scoop')` y almacenar `servings_per_container` (requerido positivo si es scoop). Verificar compatibilidad hacia atrás en SQLite y PostgreSQL.
-  - **Criterio de éxito:** Migración ejecuta limpia y reversible (`upgrade` / `downgrade`), suite `pytest api/tests/test_inventory.py` pasa al 100%.
+  - **Detalle:** Permitir `unit IN ('piece', 'scoop')` y almacenar `servings_per_container` (requerido positivo si es scoop).
+  - **Resultado:** Aprobado en commit `e3b2121`. 15/15 pruebas de `pytest api/tests/test_inventory.py` pasadas.
 
 - [x] **T0.2 — Apertura atómica de bote a porciones y ajuste de merma**
   - **Archivos:** `api/app/inventory/`, `frontend/src/features/inventory/Inventory.tsx`, `frontend/src/features/owner/InventoryAnalytics.tsx`.
-  - **Detalle:** La acción de "Abrir bote" debe restar 1 bote cerrado e incrementar $N$ porciones en una sola transacción atómica (sin registrarlo como merma ni venta). Proveer acción rápida de merma/ajuste para limpiar sobrantes.
-  - **Criterio de éxito:** Pruebas de integración de inventario cubren apertura con stock suficiente, rechazo por stock insuficiente y cálculo de equivalencias en UI.
+  - **Detalle:** Descontar 1 bote cerrado e incrementar $N$ porciones en una sola transacción atómica sin clasificarlo como merma ni venta. Acción rápida de vaciado de botes para mermas de sobrantes.
+  - **Resultado:** Aprobado en commit `e3b2121`.
 
 - [x] **T0.3 — POS de porciones en recepción y separación de catálogo**
   - **Archivos:** `frontend/src/features/reception/SuplementosModal.tsx`, `frontend/src/app/ApiReceptionHome.tsx`.
-  - **Detalle:** Conectar `SuplementosModal` a la API viva de ventas para cobros en efectivo y terminal Point. Filtrar el catálogo principal para que los botes completos no se confundan con porciones sueltas.
-  - **Criterio de éxito:** Venta en efectivo y tarjeta descuenta scoops del stock en vivo y genera orden con devolución habilitada en el mismo día.
+  - **Detalle:** Conectar `SuplementosModal` a la API viva de ventas para cobros en efectivo y terminal Point. Excluir productos de tipo scoop del grid principal de piezas.
+  - **Resultado:** Aprobado en commit `e3b2121`. 34/34 pruebas en Vitest pasadas.
 
 ---
 
 ## 🔒 Fase 1: Defectos Críticos de Seguridad y Estabilidad
-> **Objetivo:** Eliminar vulnerabilidades en cobros, prevenir errores 500 en turnos y corregir desfases de fecha operativa.
+> **Objetivo:** Eliminar vulnerabilidades en cobros, prevenir errores 500 en turnos y corregir desfases de fecha operativa (Must-Fix de Auditoría).
 
-- [ ] **T1.1 — Restringir terminal de tarjetas mock a entornos de prueba**
+- [ ] **T1.1 — Restringir terminal de tarjetas mock a entornos de prueba (P1)**
   - **Archivos:** `api/app/sales/point.py:259`.
-  - **Problema:** Si Mercado Pago no está configurado, la terminal mock auto-aprueba cualquier cobro en cualquier entorno.
-  - **Acción:** Permitir el fallback mock **únicamente** cuando `ENVIRONMENT in ('development', 'test', 'demo')`. En staging/producción debe fallar con error descriptivo (`503 / 400 Configuration Error`).
+  - **Problema:** Si Mercado Pago no está configurado, la terminal mock auto-aprueba cualquier cobro simulando una tarjeta "VISA 4242", incluso en producción.
+  - **Acción:** Permitir el fallback mock **únicamente** cuando `settings.environment in ('development', 'test', 'demo')`. En staging/producción debe responder error `503 Service Unavailable ("Terminal no configurada")`.
 
-- [ ] **T1.2 — Corregir captura de excepción en asistencia de personal**
+- [ ] **T1.2 — Corregir captura de excepción en asistencia de personal (P2)**
   - **Archivos:** `api/app/api/staff_attendance.py:641`.
-  - **Problema:** Un bloque `except IntegrityError` inalcanzable produce un error 500 no controlado ante registros duplicados.
-  - **Acción:** Manejar la violación de unicidad adecuadamente y devolver código `409 Conflict` con mensaje claro.
+  - **Problema:** Un bloque `except Exception: traceback.print_exc(); raise` previo a `except IntegrityError` causa que un doble check-in de empleado resulte en error 500 en vez de 409, saltándose la política de sanitización de logs.
+  - **Acción:** Eliminar el bloque inalcanzable de captura genérica y retornar un `409 Conflict` estructurado ante colisiones de registro único.
 
-- [ ] **T1.3 — Desacoplar bloqueos de base de datos de llamadas HTTP externas**
-  - **Archivos:** `api/app/sales/point.py`.
-  - **Problema:** Durante la llamada de cobro a la terminal Point (~15s), la conexión de base de datos mantiene bloqueos de fila abiertos, saturando el pool de conexiones.
-  - **Acción:** Confirmar la reserva del inventario o pedido, liberar la transacción mientras se espera la respuesta HTTP externa, y resolver el resultado atómicamente al recibir la respuesta o webhook.
+- [ ] **T1.3 — Desacoplar bloqueos de base de datos de llamadas HTTP externas (P4)**
+  - **Archivos:** `api/app/sales.py:225-243`, `api/app/sales/point.py:176`.
+  - **Problema:** Al cobrar con tarjeta Point, se retiene abierta la sesión de SQLAlchemy con `with_for_update` mientras `urllib` espera la respuesta de Mercado Pago (~15s). Con un pool de tamaño 5 (`pool_timeout=3`), 5 cobros simultáneos saturan el pool y botan toda la API.
+  - **Acción:** Validar acceso, cerrar o liberar la transacción de BD antes de la llamada HTTP externa, y abrir una nueva sesión atómica solo al recibir la respuesta de la terminal para asentar la orden.
 
-- [ ] **T1.4 — Normalizar fecha de negocio del gimnasio en Frontend**
-  - **Archivos:** 12 archivos en `frontend/src/` (búsqueda de `toISOString().split('T')[0]`).
-  - **Problema:** En el turno vespertino/nocturno, UTC cambia de día antes que la hora local de México (`America/Mexico_City`), mostrando asistencias y reportes con fecha de mañana.
-  - **Acción:** Implementar una utilidad central `getBusinessDate()` que respete la zona horaria oficial del gimnasio y reemplazar los 12 cálculos manuales.
+- [ ] **T1.4 — Normalizar fecha de negocio del gimnasio en Frontend (R1)**
+  - **Archivos:** 12 ocurrencias en `frontend/src/` (incluyendo `StaffAttendanceView.tsx`, `StaffManagement.tsx`, `AttendanceCalendar.tsx`).
+  - **Problema:** Se utiliza `new Date().toISOString().slice(0, 10)` (UTC). A partir de las 18:00 hrs en Ciudad de México (`America/Mexico_City`), el cliente pide asistencias y cortes con fecha del día siguiente, retornando listas vacías.
+  - **Acción:** Mover la función de fecha con zona horaria a `frontend/src/shared/formatters/date.ts` (`businessDate(now, timeZone)`) y reemplazar los 12 cálculos manuales.
 
 - [ ] **T1.5 — Respetar TTL de sesión de staff configurado**
   - **Archivos:** `api/app/api/admin_auth.py:141`.
-  - **Problema:** La expiración de la sesión de recepción está fijada en 90 días en duro, ignorando el parámetro de configuración.
+  - **Problema:** La expiración de la sesión de recepción está fijada en 90 días en código duro, ignorando la configuración.
   - **Acción:** Enlazar la expiración a la variable de entorno `STAFF_SESSION_TTL_HOURS`.
 
-- [ ] **T1.6 — Manejo robusto de errores en cargas secundarias del frontend**
-  - **Archivos:** `frontend/src/features/reception/` y `frontend/src/features/staff/`.
-  - **Problema:** Múltiples promesas tienen bloques `catch {}` vacíos que ocultan fallos de red al usuario y no cancelan peticiones pendientes al desmontar (`AbortController`).
-  - **Acción:** Manejar estados de error visibles y propagar abort signals.
+- [ ] **T1.6 — Manejo robusto de errores y cancelación en cargas secundarias (R2)**
+  - **Archivos:** `frontend/src/features/reception/StaffAttendanceView.tsx:139-211`.
+  - **Problema:** Promesas con bloques `catch {}` vacíos ocultan caídas de red, y la falta de `AbortController` permite que peticiones desfasadas sigan escribiendo estado al cambiar de sucursal.
+  - **Acción:** Mostrar errores en interfaz mediante `liveError`, implementar señales de aborto y consolidar llamadas en paralelo con `Promise.all`.
 
 ---
 
 ## 🏗️ Fase 2: Arquitectura y Resiliencia del Backend
-> **Objetivo:** Pasar de routers sobrecargados a una arquitectura limpia con separación de responsabilidades y reutilización de fontanería.
+> **Objetivo:** Introducir la Capa de Servicio, unificar dependencias de autenticación en FastAPI y estandarizar excepciones y modelos.
 
-- [ ] **T2.1 — Implementar Capa de Servicio de Dominio (`app/<dominio>/service.py`)**
-  - **Problema:** Los routers de FastAPI contienen cientos de líneas de transacciones, bloqueos de filas y cálculos contables.
+- [ ] **T2.1 — Implementar Capa de Servicio de Dominio (`app/<dominio>/service.py`) (A1)**
+  - **Problema:** Los routers de FastAPI contienen cientos de líneas de transacciones, bloqueos de filas y cálculos contables (ej. `api/sales.py` tiene 19 `select`, 10 `commit` y 88 `HTTPException`).
   - **Acción:**
     - `sales/service.py`: Centralizar cobros de membresías, POS de productos y devoluciones.
     - `shifts/service.py`: Lógica de apertura, conteo de denominaciones, cortes y arqueos.
     - `attendance/service.py`: Reglas de entrada de socios y personal.
-  - **Beneficio:** Controladores delgados, pruebas unitarias de negocio sin levantar FastAPI, y código reutilizable.
+  - **Beneficio:** Controladores HTTP delgados, reglas de negocio desacopladas del framework y pruebas unitarias puras sin levantar la API.
 
-- [ ] **T2.2 — Centralizar dependencias de sesión y autenticación (`deps.py`)**
+- [ ] **T2.2 — Centralizar dependencias de sesión y autenticación (`deps.py`) (P5, P6)**
   - **Archivos:** `api/app/api/deps.py`.
-  - **Problema:** Existen ~9 resolutores de credenciales duplicados y ~60 endpoints abriendo sesiones de base de datos manualmente.
-  - **Acción:** Crear dependencia canónica `SessionDep = Annotated[Session, Depends(get_db)]` y un resolutor unificado `CurrentUser` con verificación tipada de roles y permisos (`require_permission(...)`).
+  - **Problema:** Existen ~9 resolutores de credenciales dispersos y ~60 endpoints abriendo sesiones de base de datos manualmente.
+  - **Acción:** Implementar `SessionDep = Annotated[Session, Depends(get_db)]` y un resolutor unificado `CurrentUser` con validación RBAC por permisos (`require_permission(...)`), eliminando el código duplicado.
 
 - [ ] **T2.3 — Estandarizar catálogo de errores y sobre de respuesta**
   - **Archivos:** `api/app/core/errors.py`.
-  - **Acción:** Definir clase base `AppError(code, message, details)` con excepciones de dominio (`NotFoundError`, `InsufficientStockError`, `ShiftClosedError`) y un handler global que devuelva errores normalizados.
+  - **Acción:** Crear jerarquía `AppError(code, message, details)` con excepciones tipadas de negocio (`NotFoundError`, `InsufficientStockError`, `ShiftClosedError`) y un handler global de Starlette que devuelva un envelope JSON unificado.
 
-- [ ] **T2.4 — Desacoplar modelos por Bounded Contexts**
+- [ ] **T2.4 — Desacoplar modelos por Bounded Contexts (A5)**
   - **Archivos:** `api/app/db/models/`.
-  - **Acción:** Separar el paquete monolítico de modelos para que cada módulo mantenga sus entidades, evitando referencias circulares y facilitando futuras extracciones.
+  - **Acción:** Separar el paquete monolítico de 33 modelos para que cada contexto de dominio mantenga sus entidades, evitando dependencias circulares y facilitando la reutilización modular.
 
 ---
 
 ## 🎨 Fase 3: Arquitectura y Calidad del Frontend
-> **Objetivo:** Desacoplar la UI del código de demostración, estructurar componentes con Atomic Design y optimizar la reactividad.
+> **Objetivo:** Desacoplar la UI de demostración, estructurar componentes con Atomic Design y optimizar la reactividad.
 
-- [ ] **T3.1 — Romper acoplamiento con `frontend/src/demo/`**
-  - **Problema:** Utilidades críticas de negocio (`formatMoney`, tipos `Plan`, estado de membresía) se importan desde `demo/`.
-  - **Acción:** Trasladar tipos y funciones puras a `frontend/src/domain/` y `frontend/src/shared/formatters/`. Dejar `demo/` únicamente para fixtures y simulaciones aisladas.
+- [ ] **T3.1 — Romper acoplamiento con `frontend/src/demo/` (F1)**
+  - **Problema:** Utilidades críticas de negocio (`formatMoney`, tipos `Plan`, estado de membresía) se importan directamente desde `demo/` en más de 55 archivos.
+  - **Acción:** Trasladar tipos y funciones puras a `frontend/src/domain/` y `frontend/src/shared/formatters/`. Restringir `demo/` exclusivamente para datos simulados aislados.
 
-- [ ] **T3.2 — Cliente HTTP centralizado e interceptores**
+- [ ] **T3.2 — Cliente HTTP centralizado e interceptores (F3, R3)**
   - **Archivos:** `frontend/src/api/http.ts`.
-  - **Acción:** Crear una instancia única de cliente HTTP que gestione automáticamente tokens de sesión, cabeceras de sucursal, reintentos seguros y mapeo de errores tipados.
+  - **Acción:** Crear un cliente HTTP único con tipado consistente, inyección automática de tokens de sesión, cabeceras de sucursal, reintentos seguros y mapeo de errores estructurados.
 
-- [ ] **T3.3 — Descomposición de componentes gigantes (Container / Presentational)**
-  - **Archivos:** `Inventory.tsx`, `ApiReceptionHome.tsx`, `StaffManagement.tsx`.
-  - **Acción:** Separar la obtención de datos y mutaciones (Contenedor / Hooks) de la presentación visual pura (Presentational). Reducir archivos de +1,000 líneas a piezas testeables de <250 líneas.
+- [ ] **T3.3 — Descomposición de componentes gigantes (Container / Presentational) (F4)**
+  - **Archivos:** `Inventory.tsx`, `ApiReceptionHome.tsx`, `StaffManagement.tsx` (componentes de 800 a 1,500 líneas).
+  - **Acción:** Separar la lógica de datos y mutaciones (Contenedor / Custom Hooks) de la presentación visual pura (Presentational). Reducir archivos a unidades testeables de <250 líneas.
 
 - [ ] **T3.4 — Adoptar TanStack Query (React Query)**
-  - **Acción:** Reemplazar llamadas en `useEffect` y estados locales duplicados por consultas cacheadas (`useQuery`, `useMutation`), logrando invalidación automática de datos y estados de carga consistentes.
+  - **Acción:** Reemplazar peticiones manuales en `useEffect` y estados locales dispersos por consultas cacheadas (`useQuery`, `useMutation`), logrando invalidación automática y estados de carga transparentes.
 
-- [ ] **T3.5 — Primitivo accesible para Diálogos y Modales**
+- [ ] **T3.5 — Primitivo accesible para Diálogos y Modales (U1)**
   - **Archivos:** `frontend/src/shared/components/ui/Dialog.tsx`.
-  - **Problema:** Existen cerca de 30 implementaciones manuales de modales con problemas de gestión de foco y accesibilidad (WAI-ARIA).
-  - **Acción:** Implementar un modal base accesible (foco atrapado, cierre con tecla Escape, bloqueo de scroll de fondo) y migrar los modales de la aplicación a esta base.
+  - **Problema:** Cerca de 30 implementaciones manuales de modales carecen de trampa de foco (Tab trap), tecla Escape y atributos WAI-ARIA.
+  - **Acción:** Construir un componente primitivo sobre `<dialog>` nativo con `showModal()`, foco atrapado y retorno de foco al cerrar; migrar los modales gradualmente.
+
+- [ ] **T3.6 — Corrección de tokens y accesibilidad visual (U2, U3)**
+  - **Archivos:** `styles.css`, `Design.md`.
+  - **Problema:** El texto naranja `#FC6C06` sobre fondo claro tiene un contraste de 2.8:1 (falla WCAG AA).
+  - **Acción:** Crear token `--color-primary-ink` (`#A83D08` con contraste 5.98:1) para tipografía e iconos, reservando `#FC6C06` solo para rellenos interactivos.
 
 ---
 
-## 💼 Fase 4: Módulos Funcionales Pendientes
-> **Objetivo:** Completar los flujos de negocio del gimnasio que actualmente solo existen en interfaz simulada.
+## 💼 Fase 4: Módulos Funcionales y Conexión de Pantallas
+> **Objetivo:** Completar los flujos de negocio del gimnasio que actualmente muestran `UnavailablePage` o dependen de simulación.
 
-- [ ] **T4.1 — Rentas de Lockers y Guantes**
-  - **Alcance:** Modelos relacionales, endpoints de asignación, cobro, vencimiento y devolución de casilleros y equipo deportivo.
+- [ ] **T4.1 — Ciclo de vida completo de Rentas (Lockers y Guantes)**
+  - **Archivos:** `api/app/api/rentals.py`, `frontend/src/features/reception/GuantesModal.tsx`, `frontend/src/features/reception/CasillerosModal.tsx`.
+  - **Detalle:** Conectar los modales de recepción a los endpoints reales de `rentals.py`. Eliminar fallbacks a `demoRentGlove`/`useDemo`. Soporte para renta diaria de guantes vs renta mensual de casilleros, cobro, vencimiento y devolución de depósitos.
 
-- [ ] **T4.2 — Gastos de Operación y Caja Chica**
-  - **Alcance:** Registro de egresos desde recepción con comprobante, categoría y afectación directa al arqueo de efectivo del turno actual.
+- [ ] **T4.2 — Módulo de Gastos de Operación y Caja Chica (BK-045)**
+  - **Archivos:** `api/app/api/expenses.py` (crear), `api/app/db/models/expenses.py`, `frontend/src/features/reception/GastoModal.tsx`.
+  - **Detalle:** Crear tabla y migración Alembic para gastos (`expenses`), endpoints de registro con comprobante y categoría, vinculación contable al turno activo y descuento directo del arqueo físico de efectivo.
 
-- [ ] **T4.3 — Finanzas y Nómina de Personal**
-  - **Alcance:** Cálculo de horas laboradas basadas en `staff_attendance_logs`, registro de anticipos y liquidación quincenal.
+- [ ] **T4.3 — Finanzas, Compensaciones y Nómina de Personal (BK-043, BK-044)**
+  - **Archivos:** `api/app/api/staff_payroll.py`, `frontend/src/features/owner/StaffManagement.tsx`.
+  - **Detalle:** Motor de cálculo de horas ordinarias y extras a partir de `staff_attendance_logs`, registro de anticipos/deducciones y generación de liquidaciones quincenales para el dueño.
 
-- [ ] **T4.4 — Resumen Diario de Operaciones (`DailyOperationsSummary`)**
-  - **Alcance:** Endpoint y vista para que el dueño/administrador consulte ventas consolidadas por método de pago (efectivo, transferencias, terminales Point), cancelaciones y discrepancias de caja.
+- [ ] **T4.4 — Resumen Diario de Operaciones (`DailyOperationsSummary`) (BK-047, BK-049)**
+  - **Archivos:** `api/app/api/daily_summary.py`, `frontend/src/features/owner/Overview.tsx`.
+  - **Detalle:** Endpoint y vista para que el dueño consulte ventas consolidadas desglosadas por método (efectivo, transferencias, terminales Point), cancelaciones y discrepancias de caja.
+
+- [ ] **T4.5 — Conexión de Pantallas Desconectadas (`ApiProductApp.tsx`)**
+  - **Archivos:** `frontend/src/app/ApiProductApp.tsx:107-140`.
+  - **Detalle:** Conectar a la API las rutas que actualmente muestran `<UnavailablePage>`:
+    - `/owner/attendance`: Afluencia y capacidad del gimnasio basada en `member_check_ins`.
+    - `/owner/history`: Historial de movimientos y bitácora contable auditable.
+    - `/owner/gimi`: Monitor del asistente inteligente y métricas de soporte.
+
+- [ ] **T4.6 — Asistente Gimi, WhatsApp y Notificaciones (BK-053 a BK-057)**
+  - **Archivos:** `api/app/gimi/`, `api/app/notifications/`.
+  - **Detalle:**
+    - RAG en PostgreSQL con `pgvector` y búsqueda semántica HNSW sobre reglas y planes.
+    - Webhook de WhatsApp emparejando el teléfono con `members.phone` para consulta de adeudos y estatus.
+    - Outbox durable de notificaciones salientes con prevención de envíos duplicados de comprobantes.
 
 ---
 
 ## ⚡ Fase 5: Local-First y Modo Contingencia (Offline)
-> **Objetivo:** Garantizar que la recepción pueda registrar entradas y ventas en efectivo aun si se corta la conexión a internet.
+> **Objetivo:** Garantizar que la recepción pueda registrar entradas y ventas en efectivo aun si se corta la conexión a internet (BK-062 a BK-074).
 
-- [ ] **T5.1 — Base de datos local en navegador (IndexedDB / Dexie)**
-  - **Alcance:** Esquema local para almacenar temporalmente ventas en efectivo de mostrador, asistencias de socios y apertura/cierre de turnos.
+- [ ] **T5.1 — Shell de PWA y almacenamiento offline estático (BK-062)**
+  - **Detalle:** Service Worker que cachea los assets de la PWA para permitir arranque autónomo sin conexión tras la instalación.
 
-- [ ] **T5.2 — Cola de sincronización y conciliación en Backend**
-  - **Alcance:** Endpoint transaccional `POST /api/v1/sync/contingency-batch` con llaves de idempotencia (`idempotency_key`) para procesar las operaciones retenidas sin duplicar cargos ni accesos al volver la conexión.
+- [ ] **T5.2 — Base de datos local en navegador con IndexedDB / Dexie (BK-063)**
+  - **Detalle:** Tablas locales para socios activos, catálogo de precios, estado de cajas y tabla de cola inmutable `local_event_queue`.
+
+- [ ] **T5.3 — Cola de eventos inmutable con folios provisionales (BK-064)**
+  - **Detalle:** Dispatcher unificado que genera eventos inmutables con prefijo de dispositivo (ej. `REC-xxx`) para check-ins y ventas en efectivo cuando no hay red.
+
+- [ ] **T5.4 — Endpoint de Bootstrap para descarga de modelo de lectura (BK-065)**
+  - **Detalle:** `POST /api/v1/sync/bootstrap` para provisionar el token del dispositivo y descargar el padrón de socios activos, catálogo y cajas.
+
+- [ ] **T5.5 — Ingesta masiva de contingencia con recibos idempotentes (BK-066)**
+  - **Detalle:** `POST /api/v1/sync/contingency-events` que recibe lotes de eventos, deduplica por `(event_id, payload_hash)` y retorna recibos duraderos.
+
+- [ ] **T5.6 — Refresco incremental de lecturas delta (BK-067)**
+  - **Detalle:** `GET /api/v1/sync/roster-delta` para sincronizar cambios del padrón y catálogo mediante cursor de fecha sin multi-master.
+
+- [ ] **T5.7 — Autenticación offline de personal con PIN bcrypt (BK-068)**
+  - **Detalle:** Validación local de PIN con TTL acotado (24-48 hrs); el servidor revalida permisos al momento de la sincronización.
+
+- [ ] **T5.8 — Reconciliación de eventos y deduplicación de check-ins (BK-069)**
+  - **Detalle:** Fusión de flujos de eventos en backend, deduplicación de check-ins cercanos (<5 min) y aplicación de ventas al inventario con banderas de auditoría.
+
+- [ ] **T5.9 — Arqueo físico offline y conciliación de caja (BK-070)**
+  - **Detalle:** Declaración de arqueo de cierre offline cotejada contra las ventas en efectivo para alertar discrepancias de caja al administrador.
+
+- [ ] **T5.10 — Gestor de reconexión y detección de conectividad (BK-071)**
+  - **Detalle:** Detección automática de reconexión/hotspot móvil, vaciado de `local_event_queue` con backoff exponencial e indicador visual (Offline / Sincronizando / Sincronizado).
+
+- [ ] **T5.11 — Guardián de capacidades online-only (BK-072)**
+  - **Detalle:** Bloqueo explícito en UI de operaciones que requieren WAN obligatoria (cobros con Mercado Pago Point, links web de Checkout Pro y edición de catálogo).
 
 ---
 
-## 🧪 Fase 6: Pruebas Integrales y Preparación para Producción
-> **Objetivo:** Obtener garantías sólidas de estabilidad, concurrencia y seguridad previas a la puesta en marcha.
+## 🧪 Fase 6: Pruebas Integrales y Certificación de Producción
+> **Objetivo:** Obtener garantías sólidas de estabilidad, concurrencia y seguridad previas a la puesta en marcha oficial (BK-075, BK-076).
 
 - [ ] **T6.1 — Habilitar suite completa de PostgreSQL en CI**
-  - **Acción:** Configurar base de datos PostgreSQL temporal en GitHub Actions y ejecutar las 17 pruebas de concurrencia y bloqueos actualmente omitidas.
+  - **Acción:** Configurar un servicio de PostgreSQL real en GitHub Actions para ejecutar las 17 pruebas de concurrencia y bloqueos omitidas en local.
 
 - [ ] **T6.2 — Pruebas End-to-End (E2E) con Playwright**
-  - **Acción:** Automatizar los 3 flujos críticos:
-    1. Apertura de turno con arqueo -> cobro de membresía -> registro de visita.
-    2. Venta de productos y porciones con cobro en efectivo y tarjeta Point.
+  - **Acción:** Automatizar los 3 flujos críticos en navegador real:
+    1. Apertura de turno con arqueo $\rightarrow$ venta de membresía $\rightarrow$ check-in de socio.
+    2. Venta de productos/porciones con cobro en efectivo y tarjeta Point.
     3. Cierre de turno y generación de reporte de diferencias.
 
-- [ ] **T6.3 — Hardening de Seguridad y Despliegue**
-  - **Acción:** Rate limiting en login y emparejamiento móvil (`/pair`), rotación de secretos en producción, backups automáticos de PostgreSQL con PITR y auditoría final de dependencias (`pip audit`, `npm audit`).
+- [ ] **T6.3 — Procedimientos de respaldo PITR y recuperación ante desastres (BK-075)**
+  - **Acción:** Definir objetivos RPO/RTO, pruebas periódicas de restauración de base de datos PostgreSQL con PITR y mitigación de pérdida de dispositivos no sincronizados.
+
+- [ ] **T6.4 — Hardening de Seguridad, Rate Limiting y Despliegue (BK-076)**
+  - **Acción:** Rate limiting en login y emparejamiento móvil (`/pair`), rotación segura de secretos, configuración estricta de CORS/cookies y auditoría de vulnerabilidades (`pip audit`, `npm audit`).
 
 ---
 
 ## 📌 Guía de Uso del Roadmap
-Para avanzar con disciplina:
-1. **Seleccionar una tarea a la vez** respetando las dependencias de fase.
+Para avanzar con disciplina de ingeniería:
+1. **Seleccionar una tarea a la vez** respetando las dependencias entre fases.
 2. Seguir el ciclo **Rojo -> Verde -> Refactor** en cada cambio.
-3. Marcar la casilla `[x]` correspondiente una vez que los tests aprueben y no existan advertencias de linter.
+3. Marcar la casilla `[x]` correspondiente una vez que los tests aprueben y no existan advertencias de linter ni regresiones.
