@@ -1,4 +1,3 @@
-import { createHttpClient } from './http';
 export type ScheduleRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 export interface StaffScheduleSeriesItem {
@@ -172,20 +171,4 @@ export async function cancelScheduleSeries(
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(errorBody.detail || `Error al cancelar horario (${res.status})`);
   }
-}
-
-/**
- * Lists schedule series for a branch using an operational (PIN session) bearer token.
- * Returns [] when the response is not ok or has an unexpected shape.
- */
-export async function listBranchScheduleSeriesWithToken(
-  apiOrigin: string,
-  branchId: string,
-  token: string
-): Promise<StaffScheduleSeriesItem[]> {
-  const client = createHttpClient({ baseUrl: apiOrigin, getAuthorization: () => `Bearer ${token}` });
-  const res = await client(`/api/v1/staff-schedules/branches/${encodeURIComponent(branchId)}`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
 }
