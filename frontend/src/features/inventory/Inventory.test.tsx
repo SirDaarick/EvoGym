@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { renderWithQuery } from '../../test/renderWithQuery';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { DemoProvider, useDemo } from '../../demo/DemoProvider';
@@ -20,7 +21,7 @@ describe('Inventory catalog preview', () => {
       if (path.includes('/stock?')) return new Response(JSON.stringify({ items, total: 1 }));
       throw new Error(path);
     });
-    render(<Inventory role="RECEPTION" apiRequest={request} />);
+    renderWithQuery(<Inventory role="RECEPTION" apiRequest={request} />);
     expect(await screen.findByText('~5 scoops aprox.')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '+1 bote (+30 scoops)' }));
     expect(await screen.findByText('Bote abierto y porciones agregadas al inventario.')).toBeVisible();
@@ -174,7 +175,7 @@ describe('Inventory catalog preview', () => {
       return new Response('{}');
     });
 
-    render(<Inventory role="RECEPTION" apiRequest={mockRequest} />);
+    renderWithQuery(<Inventory role="RECEPTION" apiRequest={mockRequest} />);
 
     // Renders live product with stock 20
     expect(await screen.findByRole('button', { name: /Seleccionar Suero 500ml/ })).toBeInTheDocument();
