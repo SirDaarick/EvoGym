@@ -867,3 +867,172 @@ def test_integrity_error_at_commit_returns_409_not_500(tmp_path, capsys):
         event.remove(Session, "before_commit", fail_commit)
         engine.dispose()
     assert "Traceback" not in capsys.readouterr().err
+
+
+def _series(factory, branch_id, profile_id, start=time(9, 0), **kw):
+    with factory.begin() as session:
+        staff_id = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
+        row = StaffScheduleSeries(
+            profile_id=profile_id, branch_id=branch_id, start_date=kw.pop("start_date", date(2026, 10, 1)),
+            weekdays=kw.pop("weekdays", [4]), start_time=start, end_time=time(17, 0),
+            created_by=staff_id, timezone_rules_digest="test-digest", **kw,
+        )
+        session.add(row)
+        session.flush()
+        return row.id
+
+
+def _post(client, token, branch_id, profile_id, **body):
+    return client.post(
+        f"/api/v1/staff-attendance/branches/{branch_id}/profiles/{profile_id}",
+        headers={"Authorization": f"Bearer {token}"}, json=body,
+    )
+
+
+def test_non_occurrence_mark_is_stored_for_review(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc))
+    series_id = _series(factory, branch_a_id, profile_id, weekdays=[4], end_date=date(2026, 10, 30))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            ok = _post(client, desk_token, branch_a_id, profile_id, series_id=str(series_id), occurrence_date="2026-10-23")
+            assert ok.status_code == 201 and ok.json()["schedule_conflict"] is False
+            # Saturday (wrong weekday) and a Friday after end_date: stored, flagged, never rejected.
+            for day in ("2026-10-24", "2026-11-06"):
+                res = _post(client, desk_token, branch_a_id, profile_id, series_id=str(series_id), occurrence_date=day)
+                assert res.status_code == 201, res.text
+                assert res.json()["schedule_conflict"] is True and res.json()["review_required"] is True
+    finally:
+        engine.dispose()
+
+
+def test_idempotency_replay_compares_full_payload_and_adhoc_is_once_per_day(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    series_a = _series(factory, branch_a_id, profile_id)
+    series_b = _series(factory, branch_a_id, profile_id, start=time(13, 0))
+    base = {"series_id": str(series_a), "occurrence_date": "2026-10-23", "idempotency_key": "k1",
+            "device_captured_at": "2026-10-23T15:00:00Z"}
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert _post(client, desk_token, branch_a_id, profile_id, **base).status_code == 201
+            assert _post(client, desk_token, branch_a_id, profile_id, **base).status_code == 200
+            for change in ({"series_id": str(series_b)}, {"occurrence_date": "2026-10-30"},
+                           {"device_captured_at": "2026-10-23T15:01:00Z"}):
+                assert _post(client, desk_token, branch_a_id, profile_id, **{**base, **change}).status_code == 409
+            # Ad-hoc: a second mark that day with a NEW key returns the original, no second row.
+            first = _post(client, desk_token, branch_a_id, profile_id, idempotency_key="adhoc-1")
+            second = _post(client, desk_token, branch_a_id, profile_id, idempotency_key="adhoc-2")
+            assert first.status_code == 201 and second.status_code == 200 and second.json()["id"] == first.json()["id"]
+        with factory() as session:
+            assert len(session.scalars(select(StaffAttendanceRecord).where(StaffAttendanceRecord.series_id.is_(None))).all()) == 1
+            assert len(session.scalars(select(StaffAttendanceRecord)).all()) == 2
+    finally:
+        engine.dispose()
+
+
+def test_correction_original_server_side_allowlist_and_own_branch(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 30, tzinfo=timezone.utc))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            entry = _post(client, desk_token, branch_a_id, profile_id).json()
+            assert entry["status"] == "late"
+            url_ = f"/api/v1/staff-attendance/{entry['id']}/corrections"
+            body = {"field_name": "status", "corrected_value": "present", "reason": "Terminal was offline"}
+            # Receptionist corrects own-branch record; client-sent original_value is ignored.
+            res = client.post(url_, headers=desk, json={**body, "original_value": "forged"})
+            assert res.status_code == 201 and res.json()["original_value"] == "late"
+            forged = client.post(url_, headers=desk, json={**body, "field_name": "clock_in_at", "corrected_value": "2026-10-23T15:00:00Z", "original_value": "forged"})
+            assert forged.status_code == 201
+            with factory() as session:
+                stored = session.get(StaffAttendanceRecord, UUID(entry["id"])).occurred_at
+            assert forged.json()["original_value"] == str(stored)
+            out = client.post(url_, headers=desk, json={**body, "field_name": "clock_out_at", "corrected_value": "2026-10-23T23:00:00Z"})
+            assert out.status_code == 201 and out.json()["original_value"] == ""
+            assert client.post(url_, headers=desk, json={**body, "field_name": "notes", "corrected_value": "x"}).status_code == 201
+            for bad in ({"field_name": "status", "corrected_value": "absent"},
+                        {"field_name": "clock_in_at", "corrected_value": "not-a-date"},
+                        {"field_name": "clock_in_at", "corrected_value": "2026-10-23T15:00:00"}):
+                assert client.post(url_, headers=desk, json={**body, **bad}).status_code == 422
+            for field in ("branch_id", "recorded_by", "occurred_at", "id"):
+                assert client.post(url_, headers=desk, json={**body, "field_name": field}).status_code == 422
+    finally:
+        engine.dispose()
+
+
+def test_series_tolerance_boundary_and_dst_fall_back(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    p1, p2, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    with factory.begin() as session:
+        for pid in (p1, p2):
+            session.get(StaffRosterProfile, pid).grace_tolerance_minutes = 15
+    s1 = _series(factory, branch_a_id, p1)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            # Mexico City UTC-6: start 09:00 local = 15:00Z, cutoff 15:15Z.
+            ontime = _post(client, desk_token, branch_a_id, p1, series_id=str(s1), occurrence_date="2026-10-23",
+                           device_captured_at="2026-10-23T15:15:00Z")
+            assert ontime.status_code == 201 and ontime.json()["status"] == "present"
+            s2 = _series(factory, branch_a_id, p2)
+            late = _post(client, desk_token, branch_a_id, p2, series_id=str(s2), occurrence_date="2026-10-23",
+                         device_captured_at="2026-10-23T15:16:00Z")
+            assert late.status_code == 201 and late.json()["status"] == "late"
+
+            # New York fall-back 2026-11-01 (Sunday): 01:30 is ambiguous; first 01:30 is EDT = 05:30Z.
+            with factory.begin() as session:
+                from app.db.models import Branch
+                session.get(Branch, branch_a_id).timezone = "America/New_York"
+            s3 = _series(factory, branch_a_id, p1, start=time(1, 30), weekdays=[6])
+            # 06:40Z = 01:40 EST: naive local compare says present (<= 01:45), real elapsed is 70 min -> late.
+            dst = _post(client, desk_token, branch_a_id, p1, series_id=str(s3), occurrence_date="2026-11-01",
+                        device_captured_at="2026-11-01T06:40:00Z")
+            assert dst.status_code == 201 and dst.json()["status"] == "late"
+    finally:
+        engine.dispose()
+
+
+def test_checkout_replay_with_key_returns_record(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            entry = _post(client, desk_token, branch_a_id, profile_id).json()
+            path = f"/api/v1/staff-attendance/{entry['id']}/checkout"
+            first = client.post(path, headers=desk, json={"idempotency_key": "co-1"})
+            replay = client.post(path, headers=desk, json={"idempotency_key": "co-1"})
+            other = client.post(path, headers=desk, json={})
+            assert first.status_code == 201 and replay.status_code == 200 and other.status_code == 200
+            assert replay.json() == first.json() == other.json()
+    finally:
+        engine.dispose()
+
+
+def test_keyless_capture_replay_and_skipped_occurrence(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
+    clock = [datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc)]
+    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: clock[0])
+    series_id = _series(factory, branch_a_id, profile_id)
+    with factory.begin() as session:
+        staff_id = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
+        session.add(StaffScheduleException(
+            series_id=series_id, local_date=date(2026, 10, 30), action="skip",
+            original_start_time=time(9, 0), original_end_time=time(17, 0), recorded_by=staff_id,
+        ))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert _post(client, desk_token, branch_a_id, profile_id, idempotency_key="k").status_code == 201
+            clock[0] += timedelta(seconds=5)
+            assert _post(client, desk_token, branch_a_id, profile_id, idempotency_key="k").status_code == 200
+            skipped = _post(client, desk_token, branch_a_id, profile_id, series_id=str(series_id), occurrence_date="2026-10-30")
+            assert skipped.status_code == 201
+            assert skipped.json()["schedule_conflict"] is True and skipped.json()["review_required"] is True
+    finally:
+        engine.dispose()

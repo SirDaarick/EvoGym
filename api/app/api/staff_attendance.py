@@ -1,13 +1,13 @@
 """Branch-scoped, append-only affirmative staff-attendance records."""
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from app.api.staff_schedules import _occurrence_dates, _zone_for_branch
 from app.api.staff_roster import RosterPrincipal, _allowed_branches, _principal
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.db.models import (
@@ -21,6 +21,9 @@ from app.db.models import (
 from app.db.models.staff_attendance import StaffAttendanceCorrection
 
 router = APIRouter(prefix="/api/v1/staff-attendance", tags=["staff-attendance"])
+
+# Domain field names the UI sends; the original value is always derived server-side.
+CORRECTABLE_FIELDS = {"clock_in_at", "clock_out_at", "status", "notes"}
 
 
 def utc_now() -> datetime:
@@ -56,7 +59,6 @@ class StaffAttendanceItem(BaseModel):
     clock_validation_status: str = "trusted"
     review_required: bool = False
     schedule_conflict: bool = False
-    notes: str | None = None
 
 
 class StaffAttendanceCheckoutItem(BaseModel):
@@ -94,7 +96,6 @@ class StaffAttendanceCorrectionRequest(BaseModel):
     field_name: str = Field(min_length=1, max_length=32)
     corrected_value: str = Field(min_length=1, max_length=255)
     reason: str = Field(min_length=5, max_length=255)
-    original_value: str | None = None
 
 
 class StaffCheckoutRequest(BaseModel):
@@ -106,6 +107,12 @@ class StaffCheckoutRequest(BaseModel):
 class StaffAttendancePage(BaseModel):
     items: list[StaffAttendanceItem]
     total: int
+
+
+def _is_late(device_time: datetime, day: date, start: time, tolerance_minutes: int, zone) -> bool:
+    # Wall-clock start in the branch zone, converted to UTC before adding tolerance so DST shifts count.
+    cutoff = datetime.combine(day, start, tzinfo=zone).astimezone(timezone.utc) + timedelta(minutes=tolerance_minutes)
+    return device_time > cutoff
 
 
 def _utc(value: datetime) -> datetime:
@@ -398,6 +405,7 @@ def record_staff_attendance(
             eff_idempotency_key = payload.idempotency_key if (payload and payload.idempotency_key is not None) else idempotency_key
 
             server_received_at = _utc(utc_now())
+            zone = _zone_for_branch(branch)[0]
 
             if eff_device_captured_at is not None:
                 if eff_device_captured_at.tzinfo is None or eff_device_captured_at.utcoffset() is None:
@@ -422,7 +430,7 @@ def record_staff_attendance(
                 business_date = eff_occurrence_date
                 occ_date = eff_occurrence_date
             else:
-                business_date = device_time.astimezone(ZoneInfo(branch.timezone)).date()
+                business_date = device_time.astimezone(zone).date()
                 occ_date = business_date
 
             # 1. Idempotency key lookup
@@ -434,18 +442,17 @@ def record_staff_attendance(
                     )
                 )
                 if existing_by_key is not None:
+                    rec_dev = existing_by_key.device_captured_at
+                    if rec_dev is not None and rec_dev.tzinfo is None:
+                        rec_dev = rec_dev.replace(tzinfo=timezone.utc)
+                    # shortcut: notes/covered_profile_id are not persisted, so they cannot be compared; needs a column.
                     if (
                         existing_by_key.profile_id != profile.id
-                        or (eff_series_id is not None and existing_by_key.series_id != eff_series_id)
-                        or (eff_occurrence_date is not None and existing_by_key.occurrence_date != eff_occurrence_date)
+                        or existing_by_key.series_id != eff_series_id
+                        or existing_by_key.occurrence_date != occ_date
+                        or (eff_device_captured_at is not None and rec_dev is not None and abs((rec_dev - device_time).total_seconds()) > 0.001)
                     ):
                         raise HTTPException(409, "Idempotency key conflict: payload does not match existing record.")
-                    if eff_device_captured_at is not None and existing_by_key.device_captured_at is not None:
-                        rec_dev = existing_by_key.device_captured_at
-                        if rec_dev.tzinfo is None:
-                            rec_dev = rec_dev.replace(tzinfo=timezone.utc)
-                        if abs((rec_dev - device_time).total_seconds()) > 0.001:
-                            raise HTTPException(409, "Idempotency key conflict: capture time does not match.")
                     response.status_code = 200
                     checkout = session.scalar(
                         select(StaffAttendanceCheckout).where(
@@ -477,8 +484,8 @@ def record_staff_attendance(
                     rec_name = _resolve_single_recorder_name(session, existing_series_rec.recorded_by, branch.id)
                     return _item(existing_series_rec, profile, checkout, notes=_record_notes(session, existing_series_rec, profile, explicit_notes=payload.notes if payload else None), recorder_name=rec_name)
 
-            # 3. Existing ad-hoc / legacy lookup (when neither series_id nor idempotency_key is supplied)
-            if eff_series_id is None and eff_idempotency_key is None:
+            # 3. Existing ad-hoc / legacy lookup: one ad-hoc mark per day, whatever the key
+            if eff_series_id is None:
                 existing = _existing_record(session, branch.id, profile.id, business_date)
                 if existing is not None:
                     response.status_code = 200
@@ -515,8 +522,8 @@ def record_staff_attendance(
                     if covered_profile is None or covered_profile.branch_id != branch.id:
                         raise HTTPException(400, "Covered profile does not match branch.")
 
-                # If series was cancelled, retain and store mark with conflict flag
-                if series.cancelled_from is not None and occ_date >= series.cancelled_from:
+                # Cancelled series or a date that is not a real occurrence: retain for review (D-033).
+                if next(_occurrence_dates(series, occ_date, occ_date), None) is None:
                     schedule_conflict = True
                     review_required = True
 
@@ -545,10 +552,7 @@ def record_staff_attendance(
                     if profile.grace_tolerance_minutes is not None
                     else 15
                 )
-                local_time = device_time.astimezone(ZoneInfo(branch.timezone))
-                ref_date = occ_date
-                cutoff = datetime.combine(ref_date, scheduled_start_time) + timedelta(minutes=tolerance_minutes)
-                status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
+                status = "late" if _is_late(device_time, occ_date, scheduled_start_time, tolerance_minutes, zone) else "present"
             else:
                 # Ad-hoc / legacy flow
                 if profile.expected_entry_time is None:
@@ -561,11 +565,8 @@ def record_staff_attendance(
                         raise HTTPException(409, "A complete staff entry schedule is required before attendance can be recorded.")
                 else:
                     tolerance_minutes = profile.grace_tolerance_minutes if profile.grace_tolerance_minutes is not None else 15
-                    local_time = device_time.astimezone(ZoneInfo(branch.timezone))
-                    cutoff = datetime.combine(local_time.date(), profile.expected_entry_time) + timedelta(
-                        minutes=tolerance_minutes
-                    )
-                    status = "present" if local_time.replace(tzinfo=None) <= cutoff else "late"
+                    local_day = device_time.astimezone(zone).date()
+                    status = "late" if _is_late(device_time, local_day, profile.expected_entry_time, tolerance_minutes, zone) else "present"
                     scheduled_start_time = profile.expected_entry_time
                     scheduled_end_time = None
 
@@ -727,11 +728,29 @@ def record_staff_attendance_correction(
         if len(reason) < 5:
             raise HTTPException(422, "Reason must be at least 5 characters.")
 
-        if payload.original_value is not None:
-            orig_val = payload.original_value
+        if payload.field_name not in CORRECTABLE_FIELDS:
+            raise HTTPException(422, f"field_name must be one of: {', '.join(sorted(CORRECTABLE_FIELDS))}.")
+        if payload.field_name == "clock_in_at":
+            orig = record.occurred_at
+        elif payload.field_name == "clock_out_at":
+            orig = session.scalar(
+                select(StaffAttendanceCheckout.occurred_at).where(StaffAttendanceCheckout.attendance_id == record.id)
+            )
+        elif payload.field_name == "status":
+            orig = record.status
         else:
-            orig = getattr(record, payload.field_name, None)
-            orig_val = str(orig) if orig is not None else ""
+            profile = session.get(StaffRosterProfile, record.profile_id)
+            orig = _record_notes(session, record, profile)
+        orig_val = str(orig) if orig is not None else ""
+
+        value = payload.corrected_value
+        if payload.field_name == "status" and value not in ("present", "late"):
+            raise HTTPException(422, "status must be 'present' or 'late'.")
+        if payload.field_name in ("clock_in_at", "clock_out_at"):
+            try:
+                _utc(datetime.fromisoformat(value))
+            except ValueError:
+                raise HTTPException(422, "Corrected time must be an ISO-8601 timestamp.") from None
 
         correction = StaffAttendanceCorrection(
             attendance_id=record.id,
@@ -743,7 +762,6 @@ def record_staff_attendance_correction(
             corrected_at=_utc(utc_now()),
         )
         session.add(correction)
-        session.flush()
         session.flush()
         return _correction_item(correction)
 
