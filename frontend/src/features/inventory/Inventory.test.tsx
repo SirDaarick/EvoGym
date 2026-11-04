@@ -229,3 +229,29 @@ describe('Inventory catalog preview', () => {
     expect(screen.getByText('Stock: 25')).toBeInTheDocument();
   });
 });
+
+describe('LiveReceptionInventory stale data', () => {
+  it('keeps the stale grid and shows a notice when a refetch fails', async () => {
+    const { QueryClientProvider } = await import('@tanstack/react-query');
+    const { createTestQueryClient } = await import('../../test/renderWithQuery');
+    const { LiveReceptionInventory } = await import('./LiveReceptionInventory');
+    const { queryKeys } = await import('../../api/queryKeys');
+    let failStock = false;
+    const item = { product_id: 'p-1', code: 'suero', name: 'Suero 500ml', category: 'Bebidas', price_minor: 3500, cost_minor: 1800,
+      is_active: true, unit: 'piece', initialized: true, opening_quantity: 20, restocked_quantity: 0, waste_quantity: 0, quantity: 20, initialized_at: '2026-01-01T00:00:00Z' };
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch-1', code: 'central', name: 'Central' }]));
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        return failStock ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ items: [item], total: 1 }));
+      }
+      return new Response('{}');
+    });
+    const client = createTestQueryClient();
+    render(<QueryClientProvider client={client}><LiveReceptionInventory apiRequest={request} /></QueryClientProvider>);
+    expect(await screen.findByRole('button', { name: /Seleccionar Suero 500ml/ })).toBeInTheDocument();
+    failStock = true;
+    await client.refetchQueries({ queryKey: queryKeys.inventory.all }).catch(() => undefined);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/No se pudo actualizar el inventario/);
+    expect(screen.getByRole('button', { name: /Seleccionar Suero 500ml/ })).toBeInTheDocument();
+  });
+});

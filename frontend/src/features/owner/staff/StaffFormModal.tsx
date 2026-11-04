@@ -68,7 +68,7 @@ export function StaffFormModal({ staff, onSave, onClose }: Props) {
       title={staff ? 'Editar Recepcionista' : 'Nuevo Recepcionista'}
       description="Registra los datos de acceso, turno y remuneración del empleado"
     >
-      <form onSubmit={handleSubmit} className="staff-form">
+      <form onSubmit={handleSubmit} className="staff-form" noValidate>
         <Field id="staff-name-input" label="Nombre completo *" type="text" required value={name} error={errors.name}
           onChange={e => setName(e.target.value)} placeholder="Ej. Valeria Morales" autoFocus />
         <div className="field-row">

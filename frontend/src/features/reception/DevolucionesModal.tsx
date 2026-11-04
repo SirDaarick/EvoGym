@@ -500,7 +500,7 @@ export function DevolucionesModal({
                       style={{
                         background: 'none',
                         border: 'none',
-                        color: 'var(--color-primary)',
+                        color: 'var(--color-primary-ink)',
                         cursor: 'pointer',
                         fontWeight: 600,
                         fontSize: '12px',

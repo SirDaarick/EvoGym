@@ -467,7 +467,7 @@ export function AlertCenter({ apiRequest: explicitRequest, branchId: explicitBra
               padding: 0,
               textAlign: 'left',
               font: 'inherit',
-              color: 'var(--color-primary)',
+              color: 'var(--color-primary-ink)',
               cursor: 'pointer',
             }}
             onClick={() => setSelectedCategory('security')}
@@ -499,7 +499,7 @@ export function AlertCenter({ apiRequest: explicitRequest, branchId: explicitBra
               padding: 0,
               textAlign: 'left',
               font: 'inherit',
-              color: 'var(--color-primary)',
+              color: 'var(--color-primary-ink)',
               cursor: 'pointer',
             }}
             onClick={() => setSelectedCategory('rentals')}

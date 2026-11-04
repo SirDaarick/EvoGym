@@ -42,6 +42,13 @@ describe('parseErrorEnvelope', () => {
 });
 
 describe('requestJson', () => {
+  it('wraps a 2xx with invalid JSON into a typed HttpError', async () => {
+    const req = vi.fn().mockResolvedValue(new Response('<html>oops</html>', { status: 200 }));
+    const err = await requestJson<any>(req, '/x').catch((e: any) => e);
+    expect(isHttpError(err)).toBe(true);
+    expect(err).toMatchObject({ status: 200, code: 'invalid_response', message: 'Respuesta inválida del servidor.' });
+  });
+
   it('maps fetch rejection to NetworkError', async () => {
     const req = vi.fn().mockRejectedValue(new TypeError('fail'));
     const err = await requestJson<any>(req, '/x', { method: 'POST', body: {} }).catch((e: any) => e);

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { AdminAuthClient } from '../../api/adminAuthApi';
 import type { ProfileIdentityChoice } from '../../api/profileAccessApi';
 import { ProductAccessProvider, useProductAccess } from './ProductAccessProvider';
@@ -261,6 +262,74 @@ describe('live product profile access', () => {
     queryClient.setQueryData(['stale-before-exit'], 2);
     fireEvent.click(screen.getByRole('button', { name: 'Exit one' }));
     await waitFor(() => expect(queryClient.getQueryData(['stale-before-exit'])).toBeUndefined());
+  });
+
+  it('recovers a child query that mounts in the same commit as the principal change', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/v1/auth/refresh') return response(401);
+      if (path === '/api/v1/auth/sessions') return response(201, { access_token: 'x'.repeat(43), token_type: 'bearer', expires_at: new Date(Date.now() + 3600000).toISOString() });
+      if (path === '/api/v1/admin/profile-access/choices') return response(200, { current_identity_id: adminId, identities: [adminIdentity] });
+      if (path === '/api/v1/auth/profile-access/context') return response(200, { identities: [] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const queryClient = createTestQueryClient();
+    function Child() {
+      const query = useQuery({ queryKey: ['same-commit'], queryFn: async () => 'loaded' });
+      return <output aria-label="Child query">{query.status}:{String(query.data ?? '')}</output>;
+    }
+    function Parent() {
+      const access = useProductAccess();
+      return <>
+        <button type="button" onClick={() => access.enterAdmin(adminIdentity)}>Enter Admin</button>
+        {access.principal && <Child />}
+      </>;
+    }
+    function SignIn() {
+      const admin = useAdminSession();
+      return <button type="button" onClick={() => { void admin.signIn('admin@example.test', 'synthetic-only', 'computer'); }}>Sign in Admin</button>;
+    }
+    const client = new AdminAuthClient({ apiOrigin: 'https://api.example.test', fetchImpl });
+    render(<QueryClientProvider client={queryClient}><MemoryRouter><ProductAccessProvider client={client} queryClient={queryClient} apiOrigin="https://api.example.test" fetchImpl={fetchImpl as typeof fetch}><SignIn /><Parent /></ProductAccessProvider></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in Admin' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Enter Admin' })).toBeInTheDocument());
+    await waitFor(() => expect(fetchImpl.mock.calls.some(call => String(call[0]).endsWith('/admin/profile-access/choices'))).toBe(true));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Admin' }));
+    await waitFor(() => expect(screen.getByLabelText('Child query')).toHaveTextContent('success:loaded'));
+  });
+
+  it('does not clear the query cache when the employee token rotates for the same principal', async () => {
+    let n = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/auth/refresh') return response(401);
+      if (url.pathname.endsWith('/profile-access/context')) return response(200, { identities });
+      if (url.pathname.endsWith('/profile-access/sessions')) return response(201, {
+        access_token: String.fromCharCode(96 + ++n).repeat(43), token_type: 'bearer', expires_at: new Date(Date.now() + 3600000).toISOString(),
+        purpose: 'phone', identity: { id: employeeId }, profile: { id: profileId, branch_id: branchId },
+      });
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+    const queryClient = createTestQueryClient();
+    let enter!: ReturnType<typeof useProductAccess>['enter'];
+    function Probe() {
+      const access = useProductAccess();
+      const admin = useAdminSession();
+      enter = access.enter;
+      return <><output aria-label="Admin status">{admin.status}</output><output aria-label="Token">{access.principal?.kind === 'employee' ? access.principal.session.accessToken.slice(0, 1) : ''}</output><output aria-label="Loading">{access.loading ? 'loading' : 'idle'}</output></>;
+    }
+    const client = new AdminAuthClient({ apiOrigin: 'https://api.example.test', fetchImpl });
+    render(<MemoryRouter><ProductAccessProvider client={client} queryClient={queryClient} apiOrigin="https://api.example.test" fetchImpl={fetchImpl as typeof fetch}><Probe /></ProductAccessProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByLabelText('Admin status')).toHaveTextContent('unauthenticated'));
+    await waitFor(() => expect(screen.getByLabelText('Loading')).toHaveTextContent('idle'));
+    const identity = identities[0]! as ProfileIdentityChoice;
+    await act(async () => { await enter(identity, identity.branch_profiles[0]!, '123456'); });
+    await waitFor(() => expect(screen.getByLabelText('Token')).toHaveTextContent('a'));
+    queryClient.setQueryData(['kept'], 'value');
+    await act(async () => { await enter(identity, identity.branch_profiles[0]!, '123456'); });
+    await waitFor(() => expect(screen.getByLabelText('Token')).toHaveTextContent('b'));
+    expect(queryClient.getQueryData(['kept'])).toBe('value');
   });
 
   it('reports Admin logout failure without invoking paired-device unlink', async () => {

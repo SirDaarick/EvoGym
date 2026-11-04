@@ -208,7 +208,7 @@ export function UnscheduledClockInModal({
                 padding: '2px 8px',
                 borderRadius: '6px',
                 background: 'var(--color-soft)',
-                color: 'var(--color-primary)',
+                color: 'var(--color-primary-ink)',
                 fontWeight: 600,
               }}
             >
@@ -263,7 +263,7 @@ export function UnscheduledClockInModal({
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: 'var(--color-primary)',
+                      color: 'var(--color-primary-ink)',
                       cursor: 'pointer',
                       fontSize: '11px',
                       fontWeight: 600,

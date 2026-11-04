@@ -75,11 +75,7 @@ export function LiveReceptionInventory({ apiRequest }: { apiRequest: Authenticat
     }
   }
 
-  const catalog = inv.isLoading ? (
-    <p className="muted" role="status">Cargando inventario...</p>
-  ) : inv.loadError ? (
-    <p className="field-error" role="alert">{inv.loadError}</p>
-  ) : inv.matchingProducts.length ? (
+  const grid = inv.matchingProducts.length ? (
     <div className="product-grid">
       {inv.matchingProducts.map(product => (
         <ProductCard
@@ -93,6 +89,22 @@ export function LiveReceptionInventory({ apiRequest }: { apiRequest: Authenticat
     </div>
   ) : (
     <p className="muted" role="status">No se encontraron productos.</p>
+  );
+
+  // A failed refetch must not discard data already on screen: keep the stale grid and show a non-blocking notice.
+  const catalog = inv.isLoading ? (
+    <p className="muted" role="status">Cargando inventario...</p>
+  ) : inv.loadError && !inv.hasData ? (
+    <p className="field-error" role="alert">{inv.loadError}</p>
+  ) : (
+    <>
+      {inv.loadError && (
+        <p className="field-error" role="alert">
+          No se pudo actualizar el inventario; se muestran los últimos datos cargados. {inv.loadError}
+        </p>
+      )}
+      {grid}
+    </>
   );
 
   return (

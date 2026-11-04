@@ -51,7 +51,7 @@ export function StaffEditModal({ profile, branchId, accounts, series, error, sal
       title="Editar Recepcionista"
       description="Administra el horario semanal y la cuenta de acceso del colaborador."
     >
-      <form className="staff-form" onSubmit={submit}>
+      <form className="staff-form" onSubmit={submit} noValidate>
         <SalarySection profile={profile} value={salaryText} error={salaryError} saving={salarySaving} onChange={setSalaryText} />
         <ScheduleSection profileId={profile.id} branchId={branchId} series={series} onNotice={onNotice} />
         {!profile.staff_user_id && (

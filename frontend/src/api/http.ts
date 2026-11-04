@@ -174,7 +174,12 @@ export async function requestJson<T>(request: ApiRequest, path: string, opts: Re
       throw error instanceof NetworkError ? error : new NetworkError(opts.networkMessage);
     }
     if (response.ok) {
-      return (response.status === 204 ? undefined : await response.json()) as T;
+      if (response.status === 204) return undefined as T;
+      try {
+        return (await response.json()) as T;
+      } catch {
+        throw new HttpError(response.status, 'Respuesta inválida del servidor.', 'invalid_response');
+      }
     }
     if (attempt < maxRetries && RETRYABLE_STATUS.has(response.status)) {
       await sleep(baseDelay * 2 ** attempt, opts.signal);

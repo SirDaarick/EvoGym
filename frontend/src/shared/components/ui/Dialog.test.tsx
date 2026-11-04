@@ -66,6 +66,18 @@ describe('Dialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('does not close when a press starts in the panel and is released on the backdrop', () => {
+    const onClose = vi.fn();
+    render(<Dialog open onClose={onClose} title="T"><p>contenido</p></Dialog>);
+    const dialog = screen.getByRole('dialog');
+    fireEvent.mouseDown(screen.getByText('contenido'));
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.mouseDown(dialog);
+    fireEvent.click(dialog);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('wraps focus with Tab and Shift+Tab', () => {
     render(<Dialog open onClose={() => {}} title="T" footer={<button>Fin</button>}><input aria-label="Uno" /></Dialog>);
     const close = screen.getByRole('button', { name: 'Cerrar' });

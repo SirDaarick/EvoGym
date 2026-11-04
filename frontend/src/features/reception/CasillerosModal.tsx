@@ -1340,7 +1340,7 @@ export function CasillerosModal({
                   {cancellationPreview.cancelled_debt_minor > 0 && (
                     <div className="guantes-spec-row">
                       <span className="muted">Deuda a cancelar:</span>
-                      <strong style={{ color: 'var(--color-primary)' }}>
+                      <strong style={{ color: 'var(--color-primary-ink)' }}>
                         {formatMoney(cancellationPreview.cancelled_debt_minor)} MXN
                       </strong>
                     </div>

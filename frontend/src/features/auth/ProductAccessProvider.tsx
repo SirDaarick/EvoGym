@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { queryClient as defaultQueryClient } from '../../app/queryClient';
 import { AdminAuthClient } from '../../api/adminAuthApi';
@@ -70,13 +70,18 @@ function ProductAccessState({ children, apiOrigin, fetchImpl, queryClient }: { c
   }, [apiOrigin, fetchImpl]);
 
   // Cache isolation: any change of the active principal (sign-in, profile switch,
-  // leaveProfile, sign-out, session expiry) drops every cached query.
-  const principalKey = principal ? `${principal.kind}:${principal.identity.id}:${principal.kind === 'employee' ? `${principal.branch.profile_id}:${principal.session.accessToken}` : ''}` : '';
+  // leaveProfile, sign-out, session expiry) drops cached data. The employee access
+  // token is deliberately NOT part of the key: rotating the token of the same
+  // principal must not wipe the cache. Runs in a layout effect so it precedes the
+  // passive effects (fetch starts) of children mounting in the same commit; inactive
+  // queries are removed and active ones are reset and refetched so no observer stays pending.
+  const principalKey = principal ? `${principal.kind}:${principal.identity.id}:${principal.kind === 'employee' ? principal.branch.profile_id : ''}` : '';
   const previousPrincipalKey = useRef(principalKey);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousPrincipalKey.current === principalKey) return;
     previousPrincipalKey.current = principalKey;
-    queryClient.clear();
+    queryClient.removeQueries({ type: 'inactive' });
+    void queryClient.resetQueries({ type: 'active' });
   }, [principalKey, queryClient]);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; }; }, []);

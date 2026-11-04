@@ -67,30 +67,42 @@ export function useStaffAccountActions(branchId: string, { onError, onNotice }: 
     },
   });
 
+  // Deactivation results are ignored when the selected branch changed while they were in flight.
   const openCheck = useMutation({
-    mutationFn: async ({ profile, active }: { profile: AdminRosterProfileChoice; active: boolean }) =>
+    mutationFn: async ({ profile, active }: { profile: AdminRosterProfileChoice; active: boolean; branch: string }) =>
       ({ profile, active, pending: await getStaffPendingSale(need(), profile.staff_user_id!) }),
-    onSuccess: setDeactivation,
-    onError: () => onError('No se pudo consultar la venta pendiente. Intenta de nuevo.'),
+    onSuccess: (state, vars) => {
+      if (branchRef.current === vars.branch) setDeactivation(state);
+    },
+    onError: (_e, vars) => {
+      if (branchRef.current === vars.branch) onError('No se pudo consultar la venta pendiente. Intenta de nuevo.');
+    },
   });
 
   const resolveSale = useMutation({
-    mutationFn: async (state: DeactivationState) => {
+    mutationFn: async ({ state }: { state: DeactivationState; branch: string }) => {
       const staffId = state.profile.staff_user_id!;
       const status = await resolveStaffPendingSale(need(), staffId, state.pending!.key);
       return { status, pending: await getStaffPendingSale(need(), staffId) };
     },
-    onSuccess: ({ status, pending }, state) => {
+    onSuccess: ({ status, pending }, { state, branch }) => {
+      if (branchRef.current !== branch) return;
       setDeactivation({ ...state, pending });
       onNotice(status === 'completed' ? 'La venta ya estaba registrada.' : 'El intento pendiente fue cancelado; no se registró una venta.');
     },
-    onError: () => onError('No se pudo confirmar la resolución. Vuelve a consultar el estado.'),
+    onError: (_e, { branch }) => {
+      if (branchRef.current === branch) onError('No se pudo confirmar la resolución. Vuelve a consultar el estado.');
+    },
   });
 
   const confirm = useMutation({
-    mutationFn: (state: DeactivationState) => deactivateStaffAccount(need(), state.profile.staff_user_id!),
-    onSuccess: () => { setDeactivation(null); onNotice('La cuenta de acceso fue desactivada.'); return refresh(); },
-    onError: () => {
+    mutationFn: ({ state }: { state: DeactivationState; branch: string }) => deactivateStaffAccount(need(), state.profile.staff_user_id!),
+    onSuccess: (_data, { branch }) => {
+      if (branchRef.current === branch) { setDeactivation(null); onNotice('La cuenta de acceso fue desactivada.'); }
+      return refresh();
+    },
+    onError: (_e, { branch }) => {
+      if (branchRef.current !== branch) return;
       onError('No se pudo desactivar la cuenta. Puede existir una venta pendiente; consulta nuevamente.');
       setDeactivation(null);
     },
@@ -105,9 +117,9 @@ export function useStaffAccountActions(branchId: string, { onError, onNotice }: 
     clearIssuedPin: () => setIssuedPin(null),
     deactivation,
     closeDeactivation: () => setDeactivation(null),
-    openDeactivation: openCheck.mutate,
-    resolveSale: resolveSale.mutate,
-    confirmDeactivation: confirm.mutate,
+    openDeactivation: (vars: { profile: AdminRosterProfileChoice; active: boolean }) => openCheck.mutate({ ...vars, branch: branchRef.current }),
+    resolveSale: (state: DeactivationState) => resolveSale.mutate({ state, branch: branchRef.current }),
+    confirmDeactivation: (state: DeactivationState) => confirm.mutate({ state, branch: branchRef.current }),
     deactivationBusy: openCheck.isPending || resolveSale.isPending || confirm.isPending,
     reset: () => { setIssuedPin(null); setDeactivation(null); },
   };

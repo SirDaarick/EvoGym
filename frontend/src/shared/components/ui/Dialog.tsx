@@ -102,8 +102,18 @@ export function Dialog({
     }
   }
 
+  // A press that started inside the panel (e.g. a drag-select) and is released on the
+  // backdrop must not close the dialog: both mousedown and click must hit the dialog element.
+  const pressStartedInPanel = useRef(false);
+
+  function handleMouseDown(event: ReactMouseEvent<HTMLDialogElement>) {
+    pressStartedInPanel.current = event.target !== event.currentTarget;
+  }
+
   function handleClick(event: ReactMouseEvent<HTMLDialogElement>) {
-    if (event.target === event.currentTarget && dismissible) onClose();
+    const startedInPanel = pressStartedInPanel.current;
+    pressStartedInPanel.current = false;
+    if (event.target === event.currentTarget && !startedInPanel && dismissible) onClose();
   }
 
   const style = maxWidth ? ({ '--ui-dialog-max-width': maxWidth } as CSSProperties) : undefined;
@@ -120,6 +130,7 @@ export function Dialog({
         if (dismissible) onClose();
       }}
       onKeyDown={handleKeyDown}
+      onMouseDown={handleMouseDown}
       onClick={handleClick}
     >
       {open && (

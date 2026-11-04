@@ -751,7 +751,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
 
                 <div className="shift-open-summary-card">
                   <h4>Fondo Inicial de Caja</h4>
-                  <div className="shift-open-summary-val" style={{ color: 'var(--color-primary)' }}>
+                  <div className="shift-open-summary-val" style={{ color: 'var(--color-primary-ink)' }}>
                     {formatMoney(calculatedOpeningCashMinor ?? 0)} MXN
                   </div>
                   <p className="shift-open-summary-detail">
@@ -775,7 +775,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
 
                 {adjustmentsList.length > 0 && (
                   <div className="shift-open-adjustments-card">
-                    <h4 style={{ color: 'var(--color-primary)' }}>Detalle de Ajustes / Mermas al Abrir</h4>
+                    <h4 style={{ color: 'var(--color-primary-ink)' }}>Detalle de Ajustes / Mermas al Abrir</h4>
                     <ul className="shift-open-adjustments-list">
                       {adjustmentsList.map(item => (
                         <li key={item.product.id}>

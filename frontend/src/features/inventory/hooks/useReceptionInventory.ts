@@ -79,6 +79,8 @@ export function useReceptionInventory(apiRequest: AuthenticatedRequest) {
     setSelectedBranchId,
     branches: branchesQuery.data ?? [],
     isLoading: branchesQuery.isPending || (Boolean(branchId) && stockQuery.isPending),
+    /** True once stock has loaded at least once; a later failed refetch keeps this data. */
+    hasData: stockQuery.data !== undefined,
     loadError: errorMessage(branchesQuery.error) ?? errorMessage(stockQuery.error),
     search,
     setSearch,

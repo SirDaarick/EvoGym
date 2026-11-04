@@ -85,7 +85,7 @@ export function PendingBalanceModal({
               <strong style={{ textAlign: 'right', color: '#175D3B' }}>{formatMoney(coveredMinor)} MXN</strong>
 
               <span className="muted">Saldo pendiente por asignar:</span>
-              <strong style={{ textAlign: 'right', color: 'var(--color-primary)' }}>
+              <strong style={{ textAlign: 'right', color: 'var(--color-primary-ink)' }}>
                 {formatMoney(shortfallMinor)} MXN
               </strong>
 

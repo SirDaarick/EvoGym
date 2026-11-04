@@ -22,7 +22,7 @@ export function IssuedPinDialog({ pin, description, employeeName, onClose }: Pro
     >
       <div style={{ padding: '16px', background: 'var(--color-canvas)', borderRadius: '12px', textAlign: 'center' }}>
         {employeeName && <span className="muted" style={{ fontSize: '13px' }}>Empleado: {employeeName}</span>}
-        <p style={{ fontSize: '36px', fontWeight: 700, letterSpacing: '8px', margin: '12px 0', color: 'var(--color-primary)' }}>{pin}</p>
+        <p style={{ fontSize: '36px', fontWeight: 700, letterSpacing: '8px', margin: '12px 0', color: 'var(--color-primary-ink)' }}>{pin}</p>
       </div>
     </Dialog>
   );

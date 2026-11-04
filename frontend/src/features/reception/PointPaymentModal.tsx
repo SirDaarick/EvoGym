@@ -304,7 +304,7 @@ export function PointPaymentModal({
             <div className="point-voucher-ticket">
               <div className="point-voucher-row">
                 <span className="point-voucher-label">Total cobrado:</span>
-                <strong className="point-voucher-value" style={{ color: 'var(--color-primary)', fontSize: '16px' }}>
+                <strong className="point-voucher-value" style={{ color: 'var(--color-primary-ink)', fontSize: '16px' }}>
                   {formatMoney(totalMinor)} MXN
                 </strong>
               </div>
