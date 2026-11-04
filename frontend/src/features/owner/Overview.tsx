@@ -111,7 +111,12 @@ interface OverviewViewProps {
   setPeriod: (period: ReportingPeriod) => void;
   summary: null | {
     confirmedMinor: number; confirmedCount: number; cashMinor: number; cardMinor: number; transferPendingMinor: number;
-    shiftDiscrepancies: { id: string; window: string; cashDifferenceMinor?: number }[];
+    shiftDiscrepancies: { id: string; window: string; cashDifferenceMinor?: number; registerName?: string }[];
+    byMethod?: { method: string; label: string; count: number; grossMinor: number; refundsMinor: number; amountMinor: number;
+      terminals?: { id: string; name: string; count: number; amountMinor: number }[] }[];
+    cancellations?: { totalCount: number; productSales: number; productRefunds: { count: number; amountMinor: number };
+      rental: { count: number; refundMinor: number; cancelledDebtMinor: number; unreviewedCount: number } };
+    deposits?: { heldMinor: number; refundedMinor: number; retainedMinor: number };
     countDiscrepancies: { id: string; shiftId: string; variance: number; productName: string }[];
   };
   attendance: { liveOccupancyCount: number; gymCapacity: number; liveOccupancyPercent: number;
@@ -242,14 +247,27 @@ export function OverviewView({ period, setPeriod, summary, attendance, memberAna
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td>Efectivo</td>
-                      <td>{formatMoney(summary.cashMinor)}</td>
-                    </tr>
-                    <tr>
-                      <td>Tarjeta</td>
-                      <td>{formatMoney(summary.cardMinor)}</td>
-                    </tr>
+                    {summary.byMethod ? summary.byMethod.flatMap(row => [
+                      <tr key={row.method}>
+                        <td>{row.label}{row.refundsMinor > 0 && <p className="muted">Bruto {formatMoney(row.grossMinor)} − reembolsos {formatMoney(row.refundsMinor)}</p>}</td>
+                        <td>{formatMoney(row.amountMinor)}</td>
+                      </tr>,
+                      ...(row.terminals ?? []).map(terminal => (
+                        <tr key={`${row.method}-${terminal.id}`}>
+                          <td className="muted">Point · {terminal.name} ({terminal.count})</td>
+                          <td>{formatMoney(terminal.amountMinor)}</td>
+                        </tr>
+                      )),
+                    ]) : (<>
+                      <tr>
+                        <td>Efectivo</td>
+                        <td>{formatMoney(summary.cashMinor)}</td>
+                      </tr>
+                      <tr>
+                        <td>Tarjeta</td>
+                        <td>{formatMoney(summary.cardMinor)}</td>
+                      </tr>
+                    </>)}
                   </tbody>
                 </table>
               </TableRegion>
@@ -258,6 +276,9 @@ export function OverviewView({ period, setPeriod, summary, attendance, memberAna
                   {live ? 'No hay cobros confirmados en este periodo.' : 'No hay cobros confirmados en este periodo; el cero corresponde a registros locales, no al negocio real.'}
                 </p>
               )}
+              {summary.deposits && <p className="muted" data-testid="deposits-line">
+                Depósitos de renta en custodia (no son ingreso): recibidos {formatMoney(summary.deposits.heldMinor)} · devueltos {formatMoney(summary.deposits.refundedMinor)} · retenidos {formatMoney(summary.deposits.retainedMinor)} MXN
+              </p>}
               <div className="flow">
                 <Link to="/owner/history">Consultar movimientos</Link>
               </div>
@@ -270,6 +291,17 @@ export function OverviewView({ period, setPeriod, summary, attendance, memberAna
                 No incluidas en los cobros confirmados. No validan pago, inventario ni acceso. La recepción y validación de transferencias siguen sin definir.
               </Notice>
             </Panel>
+
+            {summary.cancellations && <Panel className="clay-card">
+              <h2>Cancelaciones y reembolsos</h2>
+              <p className="text-3xl font-bold">{summary.cancellations.totalCount}</p>
+              <ul>
+                <li>Ventas de producto canceladas: {summary.cancellations.productSales}</li>
+                <li>Reembolsos de producto: {summary.cancellations.productRefunds.count} · {formatMoney(summary.cancellations.productRefunds.amountMinor)} MXN</li>
+                <li>Rentas canceladas: {summary.cancellations.rental.count} · reembolsado {formatMoney(summary.cancellations.rental.refundMinor)} MXN · deuda cancelada {formatMoney(summary.cancellations.rental.cancelledDebtMinor)} MXN</li>
+                <li>Cancelaciones de renta sin revisar: {summary.cancellations.rental.unreviewedCount}</li>
+              </ul>
+            </Panel>}
 
             <Panel className="clay-card">
               <h2>Diferencias de efectivo</h2>
@@ -287,7 +319,7 @@ export function OverviewView({ period, setPeriod, summary, attendance, memberAna
                       {summary.shiftDiscrepancies.map(shift => (
                         <tr key={shift.id}>
                           <td>
-                            {shift.id}
+                            {shift.registerName ?? shift.id}
                             <p className="muted">{shift.window}</p>
                           </td>
                           <td>{formatMoney(shift.cashDifferenceMinor!)}</td>

@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from app.db.models import (
     Branch, CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MembershipDebt, MembershipDebtPayment,
     MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, PayrollAdvance, PayrollPayment, Product,
-    PaymentTerminal, ProductRefund, ProductSaleCancellation, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, Shift,
+    PaymentTerminal, ProductRefund, ProductSaleCancellation, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, RentalDepositMovement, Shift,
     ShiftInventoryObservation, ShiftInventoryReview, StaffAttendanceCheckout, StaffAttendanceRecord,
     StaffRosterProfile, StaffScheduleSeries, StockInitialization, StockMovement,
 )
@@ -152,6 +152,11 @@ def product_sale_cancellations(session, branch_id, start, end):
 def rental_cancellations(session, branch_id, start, end):
     return session.scalars(select(RentalCancellation).where(RentalCancellation.branch_id == branch_id,
         RentalCancellation.created_at >= start, RentalCancellation.created_at < end)).all()
+
+
+def deposit_movements(session, branch_id, start, end):
+    return session.scalars(select(RentalDepositMovement).where(RentalDepositMovement.branch_id == branch_id,
+        RentalDepositMovement.created_at >= start, RentalDepositMovement.created_at < end)).all()
 
 
 def register_names(session, branch_id):

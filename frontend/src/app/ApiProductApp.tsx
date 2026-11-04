@@ -14,6 +14,8 @@ import { PlanCatalog } from '../features/owner/PlanCatalog';
 import { ExpenseReport } from '../features/owner/ExpenseReport';
 import { AlertCenter } from '../features/owner/AlertCenter';
 import { Overview } from '../features/owner/Overview';
+import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
+import { History } from '../features/owner/History';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
@@ -113,6 +115,10 @@ export function ApiProductApp() {
     content = <ApiReceptionHome request={apiRequest} actorId={principal.identity.id} />;
   } else if (pathname === '/owner/overview' && isAdmin && admin.status === 'authenticated') {
     content = <Overview apiRequest={apiRequest} />;
+  } else if (pathname === '/owner/history' && isAdmin && admin.status === 'authenticated') {
+    content = <History apiRequest={apiRequest} />;
+  } else if (pathname === '/owner/attendance' && isAdmin && admin.status === 'authenticated') {
+    content = <AttendanceAnalytics apiRequest={apiRequest} />;
   } else if (pathname === '/owner/alerts' && isAdmin && admin.status === 'authenticated') {
     content = <AlertCenter apiRequest={apiRequest} />;
   } else if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {

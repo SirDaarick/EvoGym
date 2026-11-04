@@ -83,6 +83,14 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
         payments = []
         for shift in shifts:
             payments.extend(row for row in shift_financial_summary(session, shift)["payments"] if in_window(row["recorded_at"]))
+        # Rental deposits are custody liabilities: shift_financial_summary counts them for the cash count,
+        # but they are not revenue, so they are removed here and reported separately.
+        deposit_rows = q.deposit_movements(session, branch.id, start, end)
+        deposit_ids = {row.id for row in deposit_rows}
+        payments = [row for row in payments if row["id"] not in deposit_ids]
+        deposits = {"held_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "hold"),
+                    "refunded_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "refund"),
+                    "retained_minor": sum(r.retained_minor for r in deposit_rows if r.kind == "refund")}
         overtime = q.overtime_payments(session, branch.id, start, end)
         payments.extend({"id": row.id, "method": row.method, "status": row.status,
                          "amount_minor": row.amount_minor, "recorded_at": row.received_at} for row in overtime)
@@ -159,7 +167,7 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
             "finances": {"cash_minor": cash, "card_minor": card,
                 "confirmed_count": sum(1 for row in payments if row["status"] == "confirmed" and row["amount_minor"] >= 0),
                 "pending_transfer_minor": sum(row["amount_minor"] for row in pending), "pending_transfer_count": len(pending),
-                "shift_discrepancies": discrepancies, "count_discrepancies": counts, "by_method": by_method},
+                "deposits": deposits, "shift_discrepancies": discrepancies, "count_discrepancies": counts, "by_method": by_method},
             "cancellations": cancellation_summary,
             "members": {"total_members": len(members), "active_members": len(active),
                 "active_percent": round(100 * len(active) / len(members), 1) if members else 0,

@@ -166,6 +166,14 @@ describe('Overview Executive 360 Command Center', () => {
     expect(toInput).toHaveFocus();
   });
 
+  it('demo mode keeps the two-row method table and omits live-only cancellations and deposits', () => {
+    mountOverview();
+    expect(screen.getByRole('cell', { name: 'Efectivo' })).toBeVisible();
+    expect(screen.queryByRole('cell', { name: /Transferencia/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Cancelaciones y reembolsos' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('deposits-line')).not.toBeInTheDocument();
+  });
+
   it('getGimiConversationsSummary calculates totals and autonomous resolution rate', () => {
     const mockConversations: GimiConversation[] = [
       {

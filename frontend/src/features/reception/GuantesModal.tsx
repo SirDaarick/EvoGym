@@ -1,9 +1,6 @@
 import { formatMoney } from '@/shared/formatters/money';
-import { memberStatus } from '@/domain/membership';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { GloveItem, PaymentMethod } from '../../domain/models';
-import { useDemo } from '../../demo/DemoProvider';
-import { rentGlove as demoRentGlove, returnGlove as demoReturnGlove } from '../../demo/gloveOperations';
+import type { GloveItem } from '../../domain/models';
 import { Button, FormField, Notice, useFieldErrors } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
@@ -18,24 +15,25 @@ import {
   updateRentalAsset,
   type RentalAssetDTO,
   type RentalDTO,
-  type TenderComponentInput,
 } from '../../api/rentalsApi';
+import {
+  DepositEndSection,
+  buildEndBody,
+  buildRentalTender,
+  cardPendingMessage,
+  collectRentalCard,
+  depositNotice,
+  type DepositEndErrors,
+} from './rentalPayments';
 
+/** Live-only: rentals are server-backed (no demo fallback). */
 export interface GuantesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  apiRequest?: AuthenticatedRequest;
+  apiRequest: AuthenticatedRequest;
+  branchId: string;
   registerId?: string;
-  branchId?: string;
   isAdmin?: boolean;
-}
-
-function useOptionalDemo() {
-  try {
-    return useDemo();
-  } catch {
-    return null;
-  }
 }
 
 interface MemberSearchResult {
@@ -52,8 +50,6 @@ export function GuantesModal({
   branchId,
   isAdmin = false,
 }: GuantesModalProps) {
-  const isLive = Boolean(apiRequest && branchId);
-  const demo = useOptionalDemo();
 
   // Live state
   const [liveAssets, setLiveAssets] = useState<RentalAssetDTO[]>([]);
@@ -70,6 +66,12 @@ export function GuantesModal({
   const [newPricePesos, setNewPricePesos] = useState('25');
   const [editingPricePesos, setEditingPricePesos] = useState('');
   const [adminSaving, setAdminSaving] = useState(false);
+  const [newDepositPesos, setNewDepositPesos] = useState('0');
+  const [editingDepositPesos, setEditingDepositPesos] = useState('');
+  // Deposit refund inputs; null refund means "full held amount".
+  const [depositRefundPesos, setDepositRefundPesos] = useState<string | null>(null);
+  const [depositReason, setDepositReason] = useState('');
+  const [depositErrors, setDepositErrors] = useState<DepositEndErrors>({});
 
   const [selectedGloveId, setSelectedGloveId] = useState<string>('glove-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
@@ -95,7 +97,6 @@ export function GuantesModal({
   });
 
   const refreshLive = useCallback(async () => {
-    if (!apiRequest || !branchId) return;
     try {
       const [assetsPage, rentalsPage] = await Promise.all([
         listRentalAssets(apiRequest, branchId, 'glove', 0, 100),
@@ -115,14 +116,14 @@ export function GuantesModal({
   }, [apiRequest, branchId]);
 
   useEffect(() => {
-    if (isOpen && isLive) {
+    if (isOpen) {
       void refreshLive();
     }
-  }, [isOpen, isLive, refreshLive]);
+  }, [isOpen, refreshLive]);
 
   // Live member search
   useEffect(() => {
-    if (!isOpen || !isLive || !apiRequest) return;
+    if (!isOpen) return;
     const q = memberQuery.trim();
     if (q.length < 2) {
       setLiveMembers([]);
@@ -146,7 +147,7 @@ export function GuantesModal({
       active = false;
       clearTimeout(timer);
     };
-  }, [isOpen, isLive, apiRequest, memberQuery]);
+  }, [isOpen, apiRequest, memberQuery]);
 
   useEffect(() => {
     function syncTheme() {
@@ -199,127 +200,59 @@ export function GuantesModal({
 
   if (!isOpen) return null;
 
-  // Build unified gloves array
-  const gloves: GloveItem[] = isLive
-    ? liveAssets.map(asset => {
-        const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
-        return {
-          id: asset.id,
-          code: asset.code,
-          color: asset.color || 'Negro',
-          ounces: asset.ounces || 12,
-          priceMinor: asset.price_minor,
-          status: activeRental ? 'rented' : 'available',
-          assignedMemberId: activeRental?.member_id ?? null,
-          assignedMemberName: activeRental?.member_name ?? null,
-          assignedAt: activeRental?.created_at ?? null,
-          rentalId: activeRental?.id ?? null,
-          paymentStatus: activeRental && activeRental.outstanding_minor > 0 ? 'pending' : 'paid',
-          paymentMethod: 'cash',
-        };
-      })
-    : (demo?.state.gloves ?? []);
+  // Build unified gloves array from the server catalog
+  const gloves: GloveItem[] = liveAssets.map(asset => {
+    const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
+    return {
+      id: asset.id,
+      code: asset.code,
+      color: asset.color || 'Negro',
+      ounces: asset.ounces || 12,
+      priceMinor: asset.price_minor,
+      status: activeRental ? 'rented' : 'available',
+      assignedMemberId: activeRental?.member_id ?? null,
+      assignedMemberName: activeRental?.member_name ?? null,
+      assignedAt: activeRental?.created_at ?? null,
+      rentalId: activeRental?.id ?? null,
+      paymentStatus: activeRental && activeRental.outstanding_minor > 0 ? 'pending' : 'paid',
+      paymentMethod: 'cash',
+    };
+  });
 
   const selectedGlove: GloveItem | undefined =
     gloves.find(g => g.id === selectedGloveId) ??
     gloves.find(g => g.status === 'available') ??
     gloves[0];
 
-  const assignedMember = isLive
-    ? selectedLiveMember
-    : assignedMemberId && demo
-    ? demo.state.members.find(m => m.id === assignedMemberId) ?? null
-    : null;
+  const selectedAsset = liveAssets.find(a => a.id === selectedGlove?.id);
+  const selectedRental = liveRentals.find(r => r.id === selectedGlove?.rentalId);
+  const depositMinor = selectedAsset?.deposit_minor ?? 0;
+  const heldDeposit = selectedRental?.deposit_held_minor ?? 0;
+  const refundPesosValue = depositRefundPesos ?? (heldDeposit / 100).toFixed(2);
 
-  const rentedMember = !isLive && selectedGlove?.assignedMemberId && demo
-    ? demo.state.members.find(m => m.id === selectedGlove.assignedMemberId) ?? null
-    : null;
+  const assignedMember = selectedLiveMember;
 
-  // Demo active members filter
-  const demoActiveMembers = (!isLive && demo)
-    ? demo.state.members.filter(m => memberStatus(m, demo.state.demoClock).status === 'active')
-    : [];
+  const flatActiveMembers = liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }));
 
-  const hasOpenAttendance = (memberId: string) =>
-    demo?.state.attendance.some(a => a.memberId === memberId && !a.observedCheckOut && !a.autoClosedAt) ?? false;
-
-  const hasAnyAttendance = (memberId: string) =>
-    demo?.state.attendance.some(a => a.memberId === memberId) ?? false;
-
-  const q = memberQuery.trim().toLowerCase();
-  const matchingMembers = demoActiveMembers.filter(m => {
-    if (!q) return true;
-    return m.name.toLowerCase().includes(q) || (m.phone && m.phone.toLowerCase().includes(q));
-  });
-
-  const withAttendance = matchingMembers
-    .filter(m => hasOpenAttendance(m.id) || hasAnyAttendance(m.id))
-    .sort((a, b) => {
-      const aOpen = hasOpenAttendance(a.id) ? 1 : 0;
-      const bOpen = hasOpenAttendance(b.id) ? 1 : 0;
-      if (aOpen !== bOpen) return bOpen - aOpen;
-      return a.name.localeCompare(b.name);
-    });
-
-  const withoutAttendance = matchingMembers
-    .filter(m => !hasOpenAttendance(m.id) && !hasAnyAttendance(m.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const flatActiveMembers = isLive
-    ? liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }))
-    : [...withAttendance, ...withoutAttendance];
-
-  const memberGroups = isLive
-    ? (liveMembers.length > 0
-        ? [
-            {
-              label: 'Socios encontrados',
-              items: liveMembers.map(m => ({
-                id: m.id,
-                title: m.full_name,
-                description: 'Socio del gimnasio',
-                meta: m.phone || undefined,
-                member: { id: m.id, name: m.full_name, phone: m.phone },
-              })),
-            },
-          ]
-        : [])
-    : [
-        ...(withAttendance.length > 0
-          ? [
-              {
-                label: 'Con asistencia',
-                items: withAttendance.map(m => ({
-                  id: m.id,
-                  title: m.name,
-                  description: hasOpenAttendance(m.id)
-                    ? '🟢 En el gimnasio · Activo'
-                    : '⏱ Con asistencia · Activo',
-                  meta: m.phone || undefined,
-                  member: m,
-                })),
-              },
-            ]
-          : []),
-        ...(withoutAttendance.length > 0
-          ? [
-              {
-                label: 'Otros socios activos',
-                items: withoutAttendance.map(m => ({
-                  id: m.id,
-                  title: m.name,
-                  description: 'Socio activo',
-                  meta: m.phone || undefined,
-                  member: m,
-                })),
-              },
-            ]
-          : []),
-      ];
+  const memberGroups =
+    liveMembers.length > 0
+      ? [
+          {
+            label: 'Socios encontrados',
+            items: liveMembers.map(m => ({
+              id: m.id,
+              title: m.full_name,
+              description: 'Socio del gimnasio',
+              meta: m.phone || undefined,
+              member: { id: m.id, name: m.full_name, phone: m.phone },
+            })),
+          },
+        ]
+      : [];
 
   function handleAssignMember(memberId: string, memberObj?: { id: string; name: string; phone?: string }) {
     setAssignedMemberId(memberId);
-    if (isLive && memberObj) {
+    if (memberObj) {
       setSelectedLiveMember(memberObj);
     }
     setIsSearchOpen(false);
@@ -327,166 +260,104 @@ export function GuantesModal({
     setSelectedMemberIndex(-1);
   }
 
-  async function handleConfirmRental(breakdown?: CheckoutPaymentBreakdown, forcePending?: boolean) {
+  function selectGlove(id: string) {
+    setSelectedGloveId(id);
+    setDepositRefundPesos(null);
+    setDepositReason('');
+    setDepositErrors({});
+  }
+
+  async function handleConfirmRental(breakdown?: CheckoutPaymentBreakdown) {
     if (!selectedGlove || !assignedMemberId) return;
 
-    if (isLive) {
-      if (!apiRequest || !branchId || !registerId) {
-        setToast({
-          open: true,
-          title: 'Caja no seleccionada',
-          description: 'Se requiere una caja con turno abierto para registrar la renta.',
-          type: 'error',
-        });
-        return;
-      }
-      const components: TenderComponentInput[] = [];
-      if (breakdown) {
-        if (breakdown.mode === 'single') {
-          const amount = selectedGlove.priceMinor - (breakdown.shortfallMinor ?? 0);
-          if (amount > 0) {
-            components.push({ method: breakdown.method as any, amount_minor: amount });
-          }
-        } else {
-          if ((breakdown.mixedAmount1Minor ?? 0) > 0 && breakdown.mixedMethod1) {
-            components.push({ method: breakdown.mixedMethod1 as any, amount_minor: breakdown.mixedAmount1Minor! });
-          }
-          if ((breakdown.mixedAmount2Minor ?? 0) > 0 && breakdown.mixedMethod2) {
-            components.push({ method: breakdown.mixedMethod2 as any, amount_minor: breakdown.mixedAmount2Minor! });
-          }
-        }
-      } else {
-        components.push({ method: 'cash', amount_minor: selectedGlove.priceMinor });
-      }
-
-      const shortfall = breakdown?.shortfallMinor ?? 0;
-      try {
-        await apiRentGlove(
-          apiRequest,
-          {
-            branch_id: branchId,
-            asset_id: selectedGlove.id,
-            member_id: assignedMemberId,
-            register_id: registerId,
-            components,
-            expected_total_minor: selectedGlove.priceMinor,
-            accepted_shortfall_minor: shortfall,
-          },
-          crypto.randomUUID()
-        );
-        await refreshLive();
-        const memberName = assignedMember?.name ?? 'socio';
-        setAssignedMemberId(null);
-        setSelectedLiveMember(null);
-        setToast({
-          open: true,
-          title: 'Renta confirmada',
-          description: `Guantes ${selectedGlove.code} rentados exitosamente a ${memberName}.`,
-          type: 'success',
-        });
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error de renta',
-          description: err.message || 'No se pudo registrar la renta.',
-          type: 'error',
-        });
-      }
-      return;
-    }
-
-    // Demo transaction
-    if (!demo) return;
-    const paymentMethodToUse: PaymentMethod = breakdown
-      ? (breakdown.mode === 'mixed' ? (breakdown.mixedMethod1 ?? 'cash') : breakdown.method)
-      : 'cash';
-    const shortfall = breakdown?.shortfallMinor ?? 0;
-
-    const rentalId = `rental-${crypto.randomUUID()}`;
-    const result = demo.transact(current => {
-      const rentalTx = demoRentGlove(current, {
-        id: rentalId,
-        gloveId: selectedGlove.id,
-        memberId: assignedMemberId,
-        method: paymentMethodToUse,
-      });
-      if (rentalTx.result.status === 'error') return rentalTx;
-      if (shortfall > 0 && forcePending) {
-        return {
-          ...rentalTx,
-          state: {
-            ...rentalTx.state,
-            members: rentalTx.state.members.map(m =>
-              m.id === assignedMemberId ? { ...m, creditMinor: m.creditMinor - shortfall } : m
-            ),
-          },
-        };
-      }
-      return rentalTx;
-    });
-
-    if (result.status === 'paid' || result.status === 'pending') {
-      const memberName = assignedMember?.name ?? 'socio';
-      const success = `Guantes ${selectedGlove.code} rentados exitosamente a ${memberName}.`;
-      setAssignedMemberId(null);
+    if (!registerId) {
       setToast({
         open: true,
-        title: 'Renta confirmada',
-        description: success,
-        type: 'success',
+        title: 'Caja no seleccionada',
+        description: 'Se requiere una caja con turno abierto para registrar la renta.',
+        type: 'error',
       });
-    } else if (result.status === 'error') {
+      return;
+    }
+    const tender = buildRentalTender(selectedGlove.priceMinor, breakdown);
+    try {
+      const rental = await apiRentGlove(
+        apiRequest,
+        {
+          branch_id: branchId,
+          asset_id: selectedGlove.id,
+          member_id: assignedMemberId,
+          register_id: registerId,
+          components: tender.components,
+          expected_total_minor: selectedGlove.priceMinor,
+          accepted_shortfall_minor: tender.shortfallMinor,
+          expected_deposit_minor: depositMinor,
+        },
+        crypto.randomUUID()
+      );
+      let cardWarning: string | null = null;
+      if (tender.cardMinor > 0) {
+        try {
+          const result = await collectRentalCard(apiRequest, rental, registerId, tender.cardMinor);
+          if (!result.confirmed) cardWarning = cardPendingMessage(result.attempt, tender.cardMinor);
+        } catch (err: any) {
+          cardWarning = `${err.message || 'No se pudo iniciar el cobro con tarjeta.'} La renta quedó con saldo pendiente.`;
+        }
+      }
+      await refreshLive();
+      const memberName = assignedMember?.name ?? 'socio';
+      setAssignedMemberId(null);
+      setSelectedLiveMember(null);
+      setToast(
+        cardWarning
+          ? { open: true, title: 'Renta registrada con saldo pendiente', description: cardWarning, type: 'warning' }
+          : {
+              open: true,
+              title: 'Renta confirmada',
+              description: `Guantes ${selectedGlove.code} rentados exitosamente a ${memberName}.`,
+              type: 'success',
+            }
+      );
+    } catch (err: any) {
       setToast({
         open: true,
         title: 'Error de renta',
-        description: result.message,
+        description: err.message || 'No se pudo registrar la renta.',
         type: 'error',
       });
     }
   }
 
   async function handleReturnGlove() {
-    if (!selectedGlove) return;
+    if (!selectedGlove || !selectedGlove.rentalId) return;
     const gloveCode = selectedGlove.code;
-
-    if (isLive) {
-      if (!apiRequest || !selectedGlove.rentalId) return;
-      try {
-        await apiReturnGlove(apiRequest, selectedGlove.rentalId, crypto.randomUUID());
-        await refreshLive();
-        setToast({
-          open: true,
-          title: 'Guantes devueltos',
-          description: `Guantes ${gloveCode} devueltos y ahora disponibles para renta.`,
-          type: 'success',
-        });
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error al devolver',
-          description: err.message || 'No se pudo procesar la devolución.',
-          type: 'error',
-        });
-      }
+    const built = buildEndBody({
+      heldMinor: heldDeposit,
+      registerId,
+      refundPesos: refundPesosValue,
+      reason: depositReason,
+    });
+    if (built.errors) {
+      setDepositErrors(built.errors);
       return;
     }
-
-    if (!demo) return;
-    const result = demo.transact(current => demoReturnGlove(current, selectedGlove.id));
-
-    if (result.status === 'returned') {
-      const success = `Guantes ${gloveCode} devueltos y ahora disponibles para renta.`;
+    setDepositErrors({});
+    try {
+      await apiReturnGlove(apiRequest, selectedGlove.rentalId, crypto.randomUUID(), built.body);
+      await refreshLive();
+      setDepositRefundPesos(null);
+      setDepositReason('');
       setToast({
         open: true,
         title: 'Guantes devueltos',
-        description: success,
+        description: `Guantes ${gloveCode} devueltos y ahora disponibles para renta.`,
         type: 'success',
       });
-    } else if (result.status === 'error') {
+    } catch (err: any) {
       setToast({
         open: true,
         title: 'Error al devolver',
-        description: result.message,
+        description: err.message || 'No se pudo procesar la devolución.',
         type: 'error',
       });
     }
@@ -495,7 +366,6 @@ export function GuantesModal({
   // Admin asset management handlers
   async function handleCreateAsset(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiRequest || !branchId) return;
     if (!newCode.trim()) {
       setAdminErrors({ code: 'Escribe el código del guante.' });
       document.getElementById('new-glove-code')?.focus();
@@ -511,6 +381,7 @@ export function GuantesModal({
         color: newColor.trim() || 'Negro',
         ounces: Number(newOunces) || 12,
         price_minor: priceMinor,
+        deposit_minor: Math.max(0, Math.round(parseFloat(newDepositPesos || '0') * 100) || 0),
       });
       await refreshLive();
       setNewCode('');
@@ -533,7 +404,7 @@ export function GuantesModal({
   }
 
   async function handleUpdatePrice() {
-    if (!apiRequest || !selectedGlove) return;
+    if (!selectedGlove) return;
     const priceMinor = Math.round(parseFloat(editingPricePesos || '0') * 100);
     if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
       setAdminErrors({ price: 'Ingresa una tarifa válida mayor a $0.00.' });
@@ -564,6 +435,38 @@ export function GuantesModal({
     }
   }
 
+  async function handleUpdateDeposit() {
+    if (!selectedGlove) return;
+    const value = Math.round(parseFloat(editingDepositPesos || '') * 100);
+    if (!Number.isFinite(value) || value < 0) {
+      setAdminErrors({ deposit: 'Ingresa un depósito válido (0 o mayor).' });
+      document.getElementById('edit-glove-deposit')?.focus();
+      return;
+    }
+    clearAdminError('deposit');
+    setAdminSaving(true);
+    try {
+      await updateRentalAsset(apiRequest, selectedGlove.id, { deposit_minor: value });
+      await refreshLive();
+      setEditingDepositPesos('');
+      setToast({
+        open: true,
+        title: 'Depósito actualizado',
+        description: `El depósito de ${selectedGlove.code} ahora es ${formatMoney(value)} MXN.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      setToast({
+        open: true,
+        title: 'Error al actualizar depósito',
+        description: err.message || 'No se pudo actualizar el depósito.',
+        type: 'error',
+      });
+    } finally {
+      setAdminSaving(false);
+    }
+  }
+
   return (
     <div
       className="staff-modal-overlay"
@@ -582,7 +485,7 @@ export function GuantesModal({
             <p className="muted">Control de préstamo y renta de guantes de entrenamiento</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {isAdmin && isLive && (
+            {isAdmin && (
               <Button
                 variant="secondary"
                 className="button-sm"
@@ -616,9 +519,7 @@ export function GuantesModal({
                   type="button"
                   className={`guante-card ${isSelected ? 'selected' : ''}`}
                   aria-pressed={isSelected}
-                  onClick={() => {
-                    setSelectedGloveId(glove.id);
-                  }}
+                  onClick={() => selectGlove(glove.id)}
                 >
                   <div className="guante-card-header">
                     <span
@@ -644,7 +545,7 @@ export function GuantesModal({
           {/* Right Sidebar */}
           {selectedGlove && (
             <div className="guantes-sidebar-column">
-              {isAdminMode && isLive ? (
+              {isAdminMode ? (
                 /* Admin Panel */
                 <div className="guantes-bento-card">
                   <h3>Administración de activo</h3>
@@ -656,6 +557,10 @@ export function GuantesModal({
                     <div className="guantes-spec-row">
                       <span className="muted">Tarifa actual:</span>
                       <strong>{formatMoney(selectedGlove.priceMinor)} MXN</strong>
+                    </div>
+                    <div className="guantes-spec-row">
+                      <span className="muted">Depósito actual:</span>
+                      <strong>{formatMoney(depositMinor)} MXN</strong>
                     </div>
                   </div>
 
@@ -682,6 +587,37 @@ export function GuantesModal({
                       </Button>
                     </div>
                     {adminErrors.price && <p id="edit-glove-price-error" className="field-error">{adminErrors.price}</p>}
+                  </div>
+
+                  <div className="field" style={{ marginBottom: '12px' }}>
+                    <label htmlFor="edit-glove-deposit">Nuevo depósito reembolsable (MXN)</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        id="edit-glove-deposit"
+                        aria-invalid={adminErrors.deposit ? true : undefined}
+                        aria-describedby="edit-glove-deposit-help"
+                        type="number"
+                        step="0.50"
+                        min="0"
+                        placeholder="0.00"
+                        disabled={selectedGlove.status !== 'available'}
+                        value={editingDepositPesos}
+                        onChange={e => { setEditingDepositPesos(e.target.value); clearAdminError('deposit'); }}
+                      />
+                      <Button
+                        variant="secondary"
+                        disabled={adminSaving || selectedGlove.status !== 'available'}
+                        onClick={handleUpdateDeposit}
+                      >
+                        Actualizar depósito
+                      </Button>
+                    </div>
+                    <span id="edit-glove-deposit-help" className="muted" style={{ fontSize: '0.8rem' }}>
+                      {selectedGlove.status === 'available'
+                        ? 'Se cobra en efectivo al rentar y se devuelve al regresar los guantes.'
+                        : 'Solo se edita con el activo libre (sin renta activa).'}
+                    </span>
+                    {adminErrors.deposit && <p className="field-error">{adminErrors.deposit}</p>}
                   </div>
 
                   <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--color-border)' }} />
@@ -729,6 +665,17 @@ export function GuantesModal({
                         onChange={e => setNewPricePesos(e.target.value)}
                       />
                     </div>
+                    <div className="field">
+                      <label htmlFor="new-glove-deposit">Depósito reembolsable (MXN)</label>
+                      <input
+                        id="new-glove-deposit"
+                        type="number"
+                        step="0.50"
+                        min="0"
+                        value={newDepositPesos}
+                        onChange={e => setNewDepositPesos(e.target.value)}
+                      />
+                    </div>
                     <Button type="submit" disabled={adminSaving}>
                       Guardar nuevo activo
                     </Button>
@@ -744,6 +691,9 @@ export function GuantesModal({
                   confirmActionLabel="Confirmar cobro y entregar"
                   step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedGlove.priceMinor)} MXN →`}
                   step1ActionDisabled={!assignedMemberId}
+                  useLiveCardIntent
+                  statusMessage={depositNotice(depositMinor)}
+                  statusType="warning"
                   assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
                   onAssignMemberClick={() => setIsSearchOpen(true)}
                   onConfirmPayment={handleConfirmRental}
@@ -890,6 +840,12 @@ export function GuantesModal({
                         <span className="muted">Tarifa:</span>
                         <strong>{formatMoney(selectedGlove.priceMinor)} MXN</strong>
                       </div>
+                      {depositMinor > 0 && (
+                        <div className="guantes-spec-row">
+                          <span className="muted">Depósito (efectivo):</span>
+                          <strong>{formatMoney(depositMinor)} MXN</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CurrentPurchaseCard>
@@ -902,15 +858,9 @@ export function GuantesModal({
                       <div className="guantes-spec-row">
                         <span className="muted">Asignado a:</span>
                         <strong>
-                          {selectedGlove.assignedMemberName || rentedMember?.name || 'Socio'}
+                          {selectedGlove.assignedMemberName || 'Socio'}
                         </strong>
                       </div>
-                      {rentedMember?.phone && (
-                        <div className="guantes-spec-row">
-                          <span className="muted">Teléfono:</span>
-                          <span>{rentedMember.phone}</span>
-                        </div>
-                      )}
                       {selectedGlove.assignedAt && (
                         <div className="guantes-spec-row">
                           <span className="muted">Prestado el:</span>
@@ -954,6 +904,18 @@ export function GuantesModal({
                       </div>
                     </div>
                   </div>
+
+                  {selectedRental && heldDeposit > 0 && (
+                    <DepositEndSection
+                      idPrefix="glove"
+                      rental={selectedRental}
+                      refundPesos={refundPesosValue}
+                      reason={depositReason}
+                      errors={depositErrors}
+                      onRefundChange={value => { setDepositRefundPesos(value); setDepositErrors({}); }}
+                      onReasonChange={value => { setDepositReason(value); setDepositErrors({}); }}
+                    />
+                  )}
 
                   <div className="guantes-bento-card">
                     <h3>Devolución</h3>

@@ -1,12 +1,7 @@
 import { formatMoney } from '@/shared/formatters/money';
-import { memberStatus } from '@/domain/membership';
 import { calculateNextMonthExpiry } from '@/domain/lockers';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { LockerItem, LockerStatus, PaymentMethod } from '../../domain/models';
-import type { GimiAlert } from '../../domain/gimi';
-import { useDemo } from '../../demo/DemoProvider';
-import { assignLocker as demoAssignLocker, releaseLocker as demoReleaseLocker, renewLocker as demoRenewLocker } from '../../demo/lockerOperations';
-import { getStoredAlerts, saveStoredAlerts } from '../gimi/gimiStore';
+import type { LockerItem, LockerStatus } from '../../domain/models';
 import { Button, FormField, Notice, useFieldErrors } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
@@ -25,15 +20,24 @@ import {
   type RentalAssetDTO,
   type RentalDTO,
   type CancellationPreviewDTO,
-  type TenderComponentInput,
 } from '../../api/rentalsApi';
+import {
+  DepositEndSection,
+  buildEndBody,
+  buildRentalTender,
+  cardPendingMessage,
+  collectRentalCard,
+  depositNotice,
+  type DepositEndErrors,
+} from './rentalPayments';
 
+/** Live-only: rentals are server-backed (no demo fallback). */
 export interface CasillerosModalProps {
   isOpen: boolean;
   onClose: () => void;
-  apiRequest?: AuthenticatedRequest;
+  apiRequest: AuthenticatedRequest;
   registerId?: string;
-  branchId?: string;
+  branchId: string;
   isAdmin?: boolean;
 }
 
@@ -79,14 +83,6 @@ export function getLockerEffectiveStatus(locker: LockerItem, nowIso: string) {
   };
 }
 
-function useOptionalDemo() {
-  try {
-    return useDemo();
-  } catch {
-    return null;
-  }
-}
-
 interface MemberSearchResult {
   id: string;
   full_name: string;
@@ -101,8 +97,6 @@ export function CasillerosModal({
   branchId,
   isAdmin = false,
 }: CasillerosModalProps) {
-  const isLive = Boolean(apiRequest && branchId);
-  const demo = useOptionalDemo();
 
   // Live state
   const [liveAssets, setLiveAssets] = useState<RentalAssetDTO[]>([]);
@@ -125,6 +119,12 @@ export function CasillerosModal({
   const [newPricePesos, setNewPricePesos] = useState('180');
   const [editingPricePesos, setEditingPricePesos] = useState('');
   const [adminSaving, setAdminSaving] = useState(false);
+  const [newDepositPesos, setNewDepositPesos] = useState('0');
+  const [editingDepositPesos, setEditingDepositPesos] = useState('');
+  // Deposit refund inputs; null refund means "full held amount".
+  const [depositRefundPesos, setDepositRefundPesos] = useState<string | null>(null);
+  const [depositReason, setDepositReason] = useState('');
+  const [depositErrors, setDepositErrors] = useState<DepositEndErrors>({});
   const { errors: fieldErrors, setErrors: setFieldErrors, clear: clearFieldError } = useFieldErrors();
 
   const [selectedLockerId, setSelectedLockerId] = useState<string>('locker-01');
@@ -150,7 +150,6 @@ export function CasillerosModal({
   });
 
   const refreshLive = useCallback(async () => {
-    if (!apiRequest || !branchId) return;
     try {
       const [assetsPage, rentalsPage] = await Promise.all([
         listRentalAssets(apiRequest, branchId, 'locker', 0, 100),
@@ -170,14 +169,14 @@ export function CasillerosModal({
   }, [apiRequest, branchId]);
 
   useEffect(() => {
-    if (isOpen && isLive) {
+    if (isOpen) {
       void refreshLive();
     }
-  }, [isOpen, isLive, refreshLive]);
+  }, [isOpen, refreshLive]);
 
   // Live member search
   useEffect(() => {
-    if (!isOpen || !isLive || !apiRequest) return;
+    if (!isOpen) return;
     const q = memberQuery.trim();
     if (q.length < 2) {
       setLiveMembers([]);
@@ -201,7 +200,7 @@ export function CasillerosModal({
       active = false;
       clearTimeout(timer);
     };
-  }, [isOpen, isLive, apiRequest, memberQuery]);
+  }, [isOpen, apiRequest, memberQuery]);
 
   useEffect(() => {
     function syncTheme() {
@@ -257,133 +256,66 @@ export function CasillerosModal({
 
   if (!isOpen) return null;
 
-  // Build unified lockers array
-  const lockers: LockerItem[] = isLive
-    ? liveAssets.map((asset, index) => {
-        const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
-        const lockerStatus: LockerStatus = activeRental
-          ? 'assigned'
-          : asset.status === 'employee'
-          ? 'employee'
-          : asset.status === 'out_of_service'
-          ? 'out_of_service'
-          : 'available';
-        return {
-          id: asset.id,
-          number: asset.locker_number ?? (index + 1),
-          code: asset.code,
-          status: lockerStatus,
-          monthlyPriceMinor: asset.price_minor,
-          assignedMemberId: activeRental?.member_id ?? null,
-          assignedMemberName: activeRental?.member_name ?? null,
-          assignedAt: activeRental?.created_at ?? null,
-          expiresAt: activeRental?.ends_on ? `${activeRental.ends_on}T23:59:59.000Z` : null,
-          rentalId: activeRental?.id ?? null,
-          paymentStatus: activeRental && activeRental.outstanding_minor > 0 ? 'pending' : 'paid',
-          paymentMethod: 'cash',
-        };
-      })
-    : (demo?.state.lockers ?? []);
+  // Build unified lockers array from the server catalog
+  const lockers: LockerItem[] = liveAssets.map((asset, index) => {
+    const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
+    const lockerStatus: LockerStatus = activeRental
+      ? 'assigned'
+      : asset.status === 'employee'
+      ? 'employee'
+      : asset.status === 'out_of_service'
+      ? 'out_of_service'
+      : 'available';
+    return {
+      id: asset.id,
+      number: asset.locker_number ?? (index + 1),
+      code: asset.code,
+      status: lockerStatus,
+      monthlyPriceMinor: asset.price_minor,
+      assignedMemberId: activeRental?.member_id ?? null,
+      assignedMemberName: activeRental?.member_name ?? null,
+      assignedAt: activeRental?.created_at ?? null,
+      expiresAt: activeRental?.ends_on ? `${activeRental.ends_on}T23:59:59.000Z` : null,
+      rentalId: activeRental?.id ?? null,
+      paymentStatus: activeRental && activeRental.outstanding_minor > 0 ? 'pending' : 'paid',
+      paymentMethod: 'cash',
+    };
+  });
 
   const selectedLocker: LockerItem | undefined =
     lockers.find(l => l.id === selectedLockerId) ??
     lockers.find(l => l.status === 'available') ??
     lockers[0];
 
-  const assignedMember = isLive
-    ? selectedLiveMember
-    : assignedMemberId && demo
-    ? demo.state.members.find(m => m.id === assignedMemberId) ?? null
-    : null;
+  const selectedAsset = liveAssets.find(a => a.id === selectedLocker?.id);
+  const selectedRental = liveRentals.find(r => r.id === selectedLocker?.rentalId);
+  const depositMinor = selectedAsset?.deposit_minor ?? 0;
+  const heldDeposit = selectedRental?.deposit_held_minor ?? 0;
+  const refundPesosValue = depositRefundPesos ?? (heldDeposit / 100).toFixed(2);
 
-  const rentedMember = !isLive && selectedLocker?.assignedMemberId && demo
-    ? demo.state.members.find(m => m.id === selectedLocker.assignedMemberId) ?? null
-    : null;
+  const assignedMember = selectedLiveMember;
 
-  const demoActiveMembers = (!isLive && demo)
-    ? demo.state.members.filter(m => memberStatus(m, demo.state.demoClock).status === 'active')
-    : [];
+  const flatActiveMembers = liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }));
 
-  const hasOpenAttendance = (memberId: string) =>
-    demo?.state.attendance.some(a => a.memberId === memberId && !a.observedCheckOut && !a.autoClosedAt) ?? false;
-
-  const hasAnyAttendance = (memberId: string) =>
-    demo?.state.attendance.some(a => a.memberId === memberId) ?? false;
-
-  const q = memberQuery.trim().toLowerCase();
-  const matchingMembers = demoActiveMembers.filter(m => {
-    if (!q) return true;
-    return m.name.toLowerCase().includes(q) || (m.phone && m.phone.toLowerCase().includes(q));
-  });
-
-  const withAttendance = matchingMembers
-    .filter(m => hasOpenAttendance(m.id) || hasAnyAttendance(m.id))
-    .sort((a, b) => {
-      const aOpen = hasOpenAttendance(a.id) ? 1 : 0;
-      const bOpen = hasOpenAttendance(b.id) ? 1 : 0;
-      if (aOpen !== bOpen) return bOpen - aOpen;
-      return a.name.localeCompare(b.name);
-    });
-
-  const withoutAttendance = matchingMembers
-    .filter(m => !hasOpenAttendance(m.id) && !hasAnyAttendance(m.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const flatActiveMembers = isLive
-    ? liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }))
-    : [...withAttendance, ...withoutAttendance];
-
-  const memberGroups = isLive
-    ? (liveMembers.length > 0
-        ? [
-            {
-              label: 'Socios encontrados',
-              items: liveMembers.map(m => ({
-                id: m.id,
-                title: m.full_name,
-                description: 'Socio del gimnasio',
-                meta: m.phone || undefined,
-                member: { id: m.id, name: m.full_name, phone: m.phone },
-              })),
-            },
-          ]
-        : [])
-    : [
-        ...(withAttendance.length > 0
-          ? [
-              {
-                label: 'Con asistencia',
-                items: withAttendance.map(m => ({
-                  id: m.id,
-                  title: m.name,
-                  description: hasOpenAttendance(m.id)
-                    ? '🟢 En el gimnasio · Activo'
-                    : '⏱ Con asistencia · Activo',
-                  meta: m.phone || undefined,
-                  member: m,
-                })),
-              },
-            ]
-          : []),
-        ...(withoutAttendance.length > 0
-          ? [
-              {
-                label: 'Otros socios activos',
-                items: withoutAttendance.map(m => ({
-                  id: m.id,
-                  title: m.name,
-                  description: 'Socio activo',
-                  meta: m.phone || undefined,
-                  member: m,
-                })),
-              },
-            ]
-          : []),
-      ];
+  const memberGroups =
+    liveMembers.length > 0
+      ? [
+          {
+            label: 'Socios encontrados',
+            items: liveMembers.map(m => ({
+              id: m.id,
+              title: m.full_name,
+              description: 'Socio del gimnasio',
+              meta: m.phone || undefined,
+              member: { id: m.id, name: m.full_name, phone: m.phone },
+            })),
+          },
+        ]
+      : [];
 
   function handleAssignMember(memberId: string, memberObj?: { id: string; name: string; phone?: string }) {
     setAssignedMemberId(memberId);
-    if (isLive && memberObj) {
+    if (memberObj) {
       setSelectedLiveMember(memberObj);
     }
     setIsSearchOpen(false);
@@ -391,228 +323,123 @@ export function CasillerosModal({
     setSelectedMemberIndex(-1);
   }
 
-  async function handleConfirmAssignment(breakdown?: CheckoutPaymentBreakdown, forcePending?: boolean) {
+  function selectLocker(id: string) {
+    setSelectedLockerId(id);
+    setDepositRefundPesos(null);
+    setDepositReason('');
+    setDepositErrors({});
+  }
+
+  async function handleConfirmAssignment(breakdown?: CheckoutPaymentBreakdown) {
     if (!selectedLocker || !assignedMemberId) return;
 
-    if (isLive) {
-      if (!apiRequest || !branchId || !registerId) {
-        setToast({
-          open: true,
-          title: 'Caja no seleccionada',
-          description: 'Se requiere una caja con turno abierto para asignar el casillero.',
-          type: 'error',
-        });
-        return;
-      }
-      const components: TenderComponentInput[] = [];
-      if (breakdown) {
-        if (breakdown.mode === 'single') {
-          const amount = selectedLocker.monthlyPriceMinor - (breakdown.shortfallMinor ?? 0);
-          if (amount > 0) {
-            components.push({ method: breakdown.method as any, amount_minor: amount });
-          }
-        } else {
-          if ((breakdown.mixedAmount1Minor ?? 0) > 0 && breakdown.mixedMethod1) {
-            components.push({ method: breakdown.mixedMethod1 as any, amount_minor: breakdown.mixedAmount1Minor! });
-          }
-          if ((breakdown.mixedAmount2Minor ?? 0) > 0 && breakdown.mixedMethod2) {
-            components.push({ method: breakdown.mixedMethod2 as any, amount_minor: breakdown.mixedAmount2Minor! });
-          }
-        }
-      } else {
-        components.push({ method: 'cash', amount_minor: selectedLocker.monthlyPriceMinor });
-      }
-
-      const shortfall = breakdown?.shortfallMinor ?? 0;
-      try {
-        await apiAssignLocker(
-          apiRequest,
-          {
-            branch_id: branchId,
-            asset_id: selectedLocker.id,
-            member_id: assignedMemberId,
-            register_id: registerId,
-            components,
-            expected_total_minor: selectedLocker.monthlyPriceMinor,
-            accepted_shortfall_minor: shortfall,
-          },
-          crypto.randomUUID()
-        );
-        await refreshLive();
-        const memberName = assignedMember?.name ?? 'socio';
-        setAssignedMemberId(null);
-        setSelectedLiveMember(null);
-        setToast({
-          open: true,
-          title: 'Casillero asignado',
-          description: `Casillero ${selectedLocker.code} asignado a ${memberName}.`,
-          type: 'success',
-        });
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error de asignación',
-          description: err.message || 'No se pudo asignar el casillero.',
-          type: 'error',
-        });
-      }
-      return;
-    }
-
-    // Demo transaction
-    if (!demo) return;
-    const paymentMethodToUse: PaymentMethod = breakdown
-      ? (breakdown.mode === 'mixed' ? (breakdown.mixedMethod1 ?? 'cash') : breakdown.method)
-      : 'cash';
-    const shortfall = breakdown?.shortfallMinor ?? 0;
-
-    const rentalId = `locker-rental-${crypto.randomUUID()}`;
-    const result = demo.transact(current => {
-      const assignTx = demoAssignLocker(current, {
-        id: rentalId,
-        lockerId: selectedLocker.id,
-        memberId: assignedMemberId,
-        method: paymentMethodToUse,
-      });
-      if (assignTx.result.status === 'error') return assignTx;
-      if (shortfall > 0 && forcePending) {
-        return {
-          ...assignTx,
-          state: {
-            ...assignTx.state,
-            members: assignTx.state.members.map(m =>
-              m.id === assignedMemberId ? { ...m, creditMinor: m.creditMinor - shortfall } : m
-            ),
-          },
-        };
-      }
-      return assignTx;
-    });
-
-    if (result.status === 'paid' || result.status === 'pending') {
-      const memberName = assignedMember?.name ?? 'socio';
-      const msg = `Casillero ${selectedLocker.code} asignado a ${memberName}.`;
-      setAssignedMemberId(null);
+    if (!registerId) {
       setToast({
         open: true,
-        title: 'Casillero asignado',
-        description: msg,
-        type: 'success',
+        title: 'Caja no seleccionada',
+        description: 'Se requiere una caja con turno abierto para asignar el casillero.',
+        type: 'error',
       });
-    } else if (result.status === 'error') {
+      return;
+    }
+    const tender = buildRentalTender(selectedLocker.monthlyPriceMinor, breakdown);
+    try {
+      const rental = await apiAssignLocker(
+        apiRequest,
+        {
+          branch_id: branchId,
+          asset_id: selectedLocker.id,
+          member_id: assignedMemberId,
+          register_id: registerId,
+          components: tender.components,
+          expected_total_minor: selectedLocker.monthlyPriceMinor,
+          accepted_shortfall_minor: tender.shortfallMinor,
+          expected_deposit_minor: depositMinor,
+        },
+        crypto.randomUUID()
+      );
+      let cardWarning: string | null = null;
+      if (tender.cardMinor > 0) {
+        try {
+          const result = await collectRentalCard(apiRequest, rental, registerId, tender.cardMinor);
+          if (!result.confirmed) cardWarning = cardPendingMessage(result.attempt, tender.cardMinor);
+        } catch (err: any) {
+          cardWarning = `${err.message || 'No se pudo iniciar el cobro con tarjeta.'} El casillero quedó con saldo pendiente.`;
+        }
+      }
+      await refreshLive();
+      const memberName = assignedMember?.name ?? 'socio';
+      setAssignedMemberId(null);
+      setSelectedLiveMember(null);
+      setToast(
+        cardWarning
+          ? { open: true, title: 'Casillero asignado con saldo pendiente', description: cardWarning, type: 'warning' }
+          : {
+              open: true,
+              title: 'Casillero asignado',
+              description: `Casillero ${selectedLocker.code} asignado a ${memberName}.`,
+              type: 'success',
+            }
+      );
+    } catch (err: any) {
       setToast({
         open: true,
         title: 'Error de asignación',
-        description: result.message,
+        description: err.message || 'No se pudo asignar el casillero.',
         type: 'error',
       });
     }
   }
 
-  async function handleReleaseLocker() {
-    if (!selectedLocker) return;
+  async function handleReleaseLocker(title = 'Casillero liberado') {
+    if (!selectedLocker || !selectedLocker.rentalId) return;
     const code = selectedLocker.code;
-
-    if (isLive) {
-      if (!apiRequest || !selectedLocker.rentalId) return;
-      try {
-        await apiReleaseLocker(apiRequest, selectedLocker.rentalId, crypto.randomUUID());
-        await refreshLive();
-        setToast({
-          open: true,
-          title: 'Casillero liberado',
-          description: `Casillero ${code} disponible para asignación.`,
-          type: 'success',
-        });
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error al liberar',
-          description: err.message || 'No se pudo liberar el casillero.',
-          type: 'error',
-        });
-      }
+    const built = buildEndBody({
+      heldMinor: heldDeposit,
+      registerId,
+      refundPesos: refundPesosValue,
+      reason: depositReason,
+    });
+    if (built.errors) {
+      setDepositErrors(built.errors);
       return;
     }
-
-    if (!demo) return;
-    const result = demo.transact(current => demoReleaseLocker(current, selectedLocker.id));
-
-    if (result.status === 'released') {
+    setDepositErrors({});
+    try {
+      await apiReleaseLocker(apiRequest, selectedLocker.rentalId, crypto.randomUUID(), built.body);
+      await refreshLive();
+      setDepositRefundPesos(null);
+      setDepositReason('');
       setToast({
         open: true,
-        title: 'Casillero liberado',
+        title,
         description: `Casillero ${code} disponible para asignación.`,
         type: 'success',
       });
-    } else if (result.status === 'error') {
+    } catch (err: any) {
       setToast({
         open: true,
         title: 'Error al liberar',
-        description: result.message,
+        description: err.message || 'No se pudo liberar el casillero.',
         type: 'error',
       });
     }
   }
 
   async function handleOpenCancellation() {
-    if (!selectedLocker) return;
-    if (isLive) {
-      if (!apiRequest || !selectedLocker.rentalId) return;
-      try {
-        const preview = await previewLockerCancellation(apiRequest, selectedLocker.rentalId);
-        setCancellationPreview(preview);
-        setCancellationRefundPesos((preview.suggested_refund_minor / 100).toFixed(2));
-        setCancellationMethod('cash');
-        setCancellationReason('');
-        setIsCancellationOpen(true);
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error al consultar cancelación',
-          description: err.message || 'No se pudo obtener el cálculo de cancelación.',
-          type: 'error',
-        });
-      }
-      return;
-    }
-
-    // Demo cancellation
-    handleDemoCancelLocker();
-  }
-
-  function handleDemoCancelLocker() {
-    if (!selectedLocker || !demo) return;
-    const code = selectedLocker.code;
-    const memberName = selectedLocker.assignedMemberName || rentedMember?.name || 'Socio';
-
-    const result = demo.transact(current => demoReleaseLocker(current, selectedLocker.id));
-
-    if (result.status === 'released') {
-      const adminAlert: GimiAlert = {
-        id: `alert-cancel-locker-${Date.now()}`,
-        conversationId: 'casilleros',
-        clientName: memberName,
-        channel: 'web',
-        type: 'churn_risk',
-        severity: 'medium',
-        message: `Cancelación anticipada: Casillero ${code} liberado de ${memberName}. Casillero reactivado como disponible.`,
-        timestamp: demo.state.demoClock || new Date().toISOString(),
-        status: 'pending',
-      };
-      saveStoredAlerts([adminAlert, ...getStoredAlerts()]);
-
+    if (!selectedLocker || !selectedLocker.rentalId) return;
+    try {
+      const preview = await previewLockerCancellation(apiRequest, selectedLocker.rentalId);
+      setCancellationPreview(preview);
+      setCancellationRefundPesos((preview.suggested_refund_minor / 100).toFixed(2));
+      setCancellationMethod('cash');
+      setCancellationReason('');
+      setIsCancellationOpen(true);
+    } catch (err: any) {
       setToast({
         open: true,
-        title: 'Casillero cancelado y liberado',
-        description: `Casillero ${code} ahora está disponible. Se notificó la cancelación a administración.`,
-        type: 'warning',
-      });
-    } else if (result.status === 'error') {
-      setToast({
-        open: true,
-        title: 'Error al cancelar',
-        description: result.message,
+        title: 'Error al consultar cancelación',
+        description: err.message || 'No se pudo obtener el cálculo de cancelación.',
         type: 'error',
       });
     }
@@ -620,7 +447,7 @@ export function CasillerosModal({
 
   async function handleConfirmCancellationSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiRequest || !registerId || !selectedLocker?.rentalId || !cancellationPreview) return;
+    if (!registerId || !selectedLocker?.rentalId || !cancellationPreview) return;
     const refundMinor = Math.round(parseFloat(cancellationRefundPesos || '0') * 100);
     const found: Record<string, string> = {};
     if (refundMinor > cancellationPreview.max_refundable_minor) {
@@ -670,101 +497,44 @@ export function CasillerosModal({
   }
 
   async function handleRenewLocker() {
-    if (!selectedLocker) return;
+    if (!selectedLocker || !registerId || !selectedLocker.rentalId) return;
     const code = selectedLocker.code;
-
-    if (isLive) {
-      if (!apiRequest || !registerId || !selectedLocker.rentalId) return;
-      try {
-        await apiRenewLocker(
-          apiRequest,
-          selectedLocker.rentalId,
-          {
-            register_id: registerId,
-            components: [{ method: 'cash', amount_minor: selectedLocker.monthlyPriceMinor }],
-            expected_total_minor: selectedLocker.monthlyPriceMinor,
-            accepted_shortfall_minor: 0,
-          },
-          crypto.randomUUID()
-        );
-        await refreshLive();
-        setToast({
-          open: true,
-          title: 'Mensualidad renovada',
-          description: `Casillero ${code} extendido por 1 mes.`,
-          type: 'success',
-        });
-      } catch (err: any) {
-        setToast({
-          open: true,
-          title: 'Error al renovar',
-          description: err.message || 'No se pudo renovar la mensualidad.',
-          type: 'error',
-        });
-      }
-      return;
-    }
-
-    if (!demo) return;
-    const result = demo.transact(current => demoRenewLocker(current, selectedLocker.id));
-
-    if (result.status === 'updated') {
-      const newExpiry = result.locker.expiresAt
-        ? new Date(result.locker.expiresAt).toLocaleDateString('es-MX', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          })
-        : '1 mes';
+    try {
+      await apiRenewLocker(
+        apiRequest,
+        selectedLocker.rentalId,
+        {
+          register_id: registerId,
+          components: [{ method: 'cash', amount_minor: selectedLocker.monthlyPriceMinor }],
+          expected_total_minor: selectedLocker.monthlyPriceMinor,
+          accepted_shortfall_minor: 0,
+        },
+        crypto.randomUUID()
+      );
+      await refreshLive();
       setToast({
         open: true,
         title: 'Mensualidad renovada',
-        description: `Casillero ${code} extendido por 1 mes (vigente hasta: ${newExpiry}).`,
+        description: `Casillero ${code} extendido por 1 mes.`,
         type: 'success',
       });
-    } else if (result.status === 'error') {
+    } catch (err: any) {
       setToast({
         open: true,
         title: 'Error al renovar',
-        description: result.message,
+        description: err.message || 'No se pudo renovar la mensualidad.',
         type: 'error',
       });
     }
   }
 
   async function handleEvictAndReleaseLocker() {
-    if (!selectedLocker) return;
-    const code = selectedLocker.code;
-
-    if (isLive) {
-      await handleReleaseLocker();
-      return;
-    }
-
-    if (!demo) return;
-    const result = demo.transact(current => demoReleaseLocker(current, selectedLocker.id));
-
-    if (result.status === 'released') {
-      setToast({
-        open: true,
-        title: 'Casillero desalojado',
-        description: `Casillero ${code} desalojado con éxito y puesto como disponible.`,
-        type: 'success',
-      });
-    } else if (result.status === 'error') {
-      setToast({
-        open: true,
-        title: 'Error al desalojar',
-        description: result.message,
-        type: 'error',
-      });
-    }
+    await handleReleaseLocker('Casillero desalojado');
   }
 
   // Admin handlers
   async function handleCreateLockerAsset(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiRequest || !branchId) return;
     if (!newCode.trim()) {
       setFieldErrors({ code: 'Escribe el código del casillero.' });
       document.getElementById('new-locker-code')?.focus();
@@ -779,6 +549,7 @@ export function CasillerosModal({
         code: newCode.trim(),
         locker_number: Number(newNumber) || 1,
         price_minor: priceMinor,
+        deposit_minor: Math.max(0, Math.round(parseFloat(newDepositPesos || '0') * 100) || 0),
       });
       await refreshLive();
       setNewCode('');
@@ -801,7 +572,7 @@ export function CasillerosModal({
   }
 
   async function handleUpdateLockerPrice() {
-    if (!apiRequest || !selectedLocker) return;
+    if (!selectedLocker) return;
     const priceMinor = Math.round(parseFloat(editingPricePesos || '0') * 100);
     if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
       setFieldErrors({ price: 'Ingresa una tarifa válida mayor a $0.00.' });
@@ -832,8 +603,40 @@ export function CasillerosModal({
     }
   }
 
+  async function handleUpdateLockerDeposit() {
+    if (!selectedLocker) return;
+    const value = Math.round(parseFloat(editingDepositPesos || '') * 100);
+    if (!Number.isFinite(value) || value < 0) {
+      setFieldErrors({ deposit: 'Ingresa un depósito válido (0 o mayor).' });
+      document.getElementById('edit-locker-deposit')?.focus();
+      return;
+    }
+    clearFieldError('deposit');
+    setAdminSaving(true);
+    try {
+      await updateRentalAsset(apiRequest, selectedLocker.id, { deposit_minor: value });
+      await refreshLive();
+      setEditingDepositPesos('');
+      setToast({
+        open: true,
+        title: 'Depósito actualizado',
+        description: `El depósito de ${selectedLocker.code} ahora es ${formatMoney(value)} MXN.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      setToast({
+        open: true,
+        title: 'Error al actualizar depósito',
+        description: err.message || 'No se pudo actualizar el depósito.',
+        type: 'error',
+      });
+    } finally {
+      setAdminSaving(false);
+    }
+  }
+
   const projectedExpiry = calculateNextMonthExpiry(new Date());
-  const nowIso = demo?.state.demoClock || new Date().toISOString();
+  const nowIso = new Date().toISOString();
 
   return (
     <div
@@ -853,7 +656,7 @@ export function CasillerosModal({
             <p className="muted">Control y asignación de los 42 casilleros mensuales del gimnasio</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {isAdmin && isLive && (
+            {isAdmin && (
               <Button
                 variant="secondary"
                 className="button-sm"
@@ -887,9 +690,7 @@ export function CasillerosModal({
                   type="button"
                   className={`casillero-card ${isSelected ? 'selected' : ''}`}
                   aria-pressed={isSelected}
-                  onClick={() => {
-                    setSelectedLockerId(locker.id);
-                  }}
+                  onClick={() => selectLocker(locker.id)}
                 >
                   <div className="casillero-card-top">
                     <span className={`casillero-badge ${eff.badgeClass}`}>
@@ -926,7 +727,7 @@ export function CasillerosModal({
 
             return (
               <div className="guantes-sidebar-column">
-                {isAdminMode && isLive ? (
+                {isAdminMode ? (
                   /* Admin Locker Panel */
                   <div className="guantes-bento-card">
                     <h3>Administración de casillero</h3>
@@ -938,6 +739,10 @@ export function CasillerosModal({
                       <div className="guantes-spec-row">
                         <span className="muted">Tarifa actual:</span>
                         <strong>{formatMoney(selectedLocker.monthlyPriceMinor)}/mes</strong>
+                      </div>
+                      <div className="guantes-spec-row">
+                        <span className="muted">Depósito actual:</span>
+                        <strong>{formatMoney(depositMinor)} MXN</strong>
                       </div>
                     </div>
 
@@ -964,6 +769,37 @@ export function CasillerosModal({
                         </Button>
                       </div>
                       {fieldErrors.price && <p id="edit-locker-price-error" className="field-error">{fieldErrors.price}</p>}
+                    </div>
+
+                    <div className="field" style={{ marginBottom: '12px' }}>
+                      <label htmlFor="edit-locker-deposit">Nuevo depósito reembolsable (MXN)</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          id="edit-locker-deposit"
+                          aria-invalid={fieldErrors.deposit ? true : undefined}
+                          aria-describedby="edit-locker-deposit-help"
+                          type="number"
+                          step="1.00"
+                          min="0"
+                          placeholder="0.00"
+                          disabled={selectedLocker.status !== 'available'}
+                          value={editingDepositPesos}
+                          onChange={e => { setEditingDepositPesos(e.target.value); clearFieldError('deposit'); }}
+                        />
+                        <Button
+                          variant="secondary"
+                          disabled={adminSaving || selectedLocker.status !== 'available'}
+                          onClick={handleUpdateLockerDeposit}
+                        >
+                          Actualizar depósito
+                        </Button>
+                      </div>
+                      <span id="edit-locker-deposit-help" className="muted" style={{ fontSize: '0.8rem' }}>
+                        {selectedLocker.status === 'available'
+                          ? 'Se cobra en efectivo al asignar y se devuelve al liberar el casillero.'
+                          : 'Solo se edita con el activo libre (sin renta activa).'}
+                      </span>
+                      {fieldErrors.deposit && <p className="field-error">{fieldErrors.deposit}</p>}
                     </div>
 
                     <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--color-border)' }} />
@@ -1000,6 +836,17 @@ export function CasillerosModal({
                           onChange={e => setNewPricePesos(e.target.value)}
                         />
                       </div>
+                      <div className="field">
+                        <label htmlFor="new-locker-deposit">Depósito reembolsable (MXN)</label>
+                        <input
+                          id="new-locker-deposit"
+                          type="number"
+                          step="1.00"
+                          min="0"
+                          value={newDepositPesos}
+                          onChange={e => setNewDepositPesos(e.target.value)}
+                        />
+                      </div>
                       <Button type="submit" disabled={adminSaving}>
                         Guardar nuevo casillero
                       </Button>
@@ -1015,6 +862,9 @@ export function CasillerosModal({
                     confirmActionLabel="Confirmar cobro y asignar"
                     step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedLocker.monthlyPriceMinor)} MXN →`}
                     step1ActionDisabled={!assignedMemberId}
+                    useLiveCardIntent
+                    statusMessage={depositNotice(depositMinor)}
+                    statusType="warning"
                     assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
                     onAssignMemberClick={() => setIsSearchOpen(true)}
                     onConfirmPayment={handleConfirmAssignment}
@@ -1148,6 +998,12 @@ export function CasillerosModal({
                           <span className="muted">Tarifa mensual:</span>
                           <strong>{formatMoney(selectedLocker.monthlyPriceMinor)} MXN</strong>
                         </div>
+                        {depositMinor > 0 && (
+                          <div className="guantes-spec-row">
+                            <span className="muted">Depósito (efectivo):</span>
+                            <strong>{formatMoney(depositMinor)} MXN</strong>
+                          </div>
+                        )}
                         <div className="guantes-spec-row">
                           <span className="muted">Periodo:</span>
                           <span>1 mes calendario</span>
@@ -1184,14 +1040,8 @@ export function CasillerosModal({
                         </div>
                         <div className="guantes-spec-row">
                           <span className="muted">{effSelected.status === 'evict' ? 'Último socio:' : 'Asignado a:'}</span>
-                          <strong>{selectedLocker.assignedMemberName || rentedMember?.name || 'Staff EvoGym'}</strong>
+                          <strong>{selectedLocker.assignedMemberName || 'Staff EvoGym'}</strong>
                         </div>
-                        {rentedMember?.phone && (
-                          <div className="guantes-spec-row">
-                            <span className="muted">Teléfono:</span>
-                            <span>{rentedMember.phone}</span>
-                          </div>
-                        )}
                         {selectedLocker.assignedAt && (
                           <div className="guantes-spec-row">
                             <span className="muted">Asignado el:</span>
@@ -1226,6 +1076,21 @@ export function CasillerosModal({
                         </div>
                       </div>
                     </div>
+
+                    {selectedRental && heldDeposit > 0 && (
+                      <DepositEndSection
+                        idPrefix="locker"
+                        rental={selectedRental}
+                        refundPesos={refundPesosValue}
+                        reason={depositReason}
+                        errors={depositErrors}
+                        note={effSelected.status === 'assigned'
+                          ? 'Si cancelas la asignación, el depósito se devuelve completo en efectivo.'
+                          : undefined}
+                        onRefundChange={value => { setDepositRefundPesos(value); setDepositErrors({}); }}
+                        onReasonChange={value => { setDepositReason(value); setDepositErrors({}); }}
+                      />
+                    )}
 
                     <div className="guantes-bento-card">
                       <h3>Acciones de casillero</h3>

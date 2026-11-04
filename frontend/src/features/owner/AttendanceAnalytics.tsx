@@ -29,7 +29,9 @@ import {
 
 import { useDemo } from '../../demo/DemoProvider';
 import { isDemoDataDisabled } from '../../demo/adapter';
-import { getAttendanceAnalytics, type DayOfWeekTrafficBin, type HourlyTrafficBin, type LiveOccupant } from '../../demo/attendanceAnalyticsSelector';
+import { getAttendanceAnalytics, type AttendanceAnalyticsSummary, type DayOfWeekTrafficBin, type HourlyTrafficBin, type LiveOccupant } from '../../demo/attendanceAnalyticsSelector';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import { LiveAttendance } from './LiveAttendance';
 import { Badge, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './AttendanceAnalytics.css';
 
@@ -39,15 +41,13 @@ const PERIOD_OPTIONS: { id: AttendancePeriod; label: string; ariaLabel: string }
   { id: 'month', label: 'Últimos 30 días', ariaLabel: 'Filtrar últimos 30 días' },
 ];
 
-export function AttendanceAnalytics() {
+export function AttendanceAnalytics({ apiRequest }: { apiRequest?: AuthenticatedRequest } = {}) {
+  return apiRequest ? <LiveAttendance apiRequest={apiRequest} /> : <DemoAttendanceAnalytics />;
+}
+
+function DemoAttendanceAnalytics() {
   const { state } = useDemo();
   const [period, setPeriod] = useState<AttendancePeriod>('week');
-  const [searchOccupant, setSearchOccupant] = useState('');
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: 'elapsedMinutes', desc: true },
-  ]);
-
-  // Compute analytics using pure selector
   const analytics = useMemo(() => {
     return getAttendanceAnalytics(
       state.attendance,
@@ -57,6 +57,20 @@ export function AttendanceAnalytics() {
       { includeBaseline: !isDemoDataDisabled() }
     );
   }, [state.attendance, state.members, state.demoClock, period]);
+  return <AttendanceAnalyticsView analytics={analytics} period={period} setPeriod={setPeriod} />;
+}
+
+export function AttendanceAnalyticsView({ analytics, period, setPeriod, live = false }: {
+  analytics: AttendanceAnalyticsSummary;
+  period: AttendancePeriod;
+  setPeriod: (period: AttendancePeriod) => void;
+  /** Live mode hides sections the API cannot supply (slots, occupants, duration, recommendations). */
+  live?: boolean;
+}) {
+  const [searchOccupant, setSearchOccupant] = useState('');
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: 'elapsedMinutes', desc: true },
+  ]);
 
   // Chart 1: Hourly Traffic (06:00 - 22:00, 16 operating hours)
   // Highlights peak hour in brand orange (#FC6C06) and valley in sky blue (#0284C7)
@@ -313,7 +327,7 @@ export function AttendanceAnalytics() {
             <p className="att-kpi-value text-accent">{analytics.peakHour.label}</p>
             <p className="att-kpi-subtext">
               {analytics.peakHour.visits > 0
-                ? `${analytics.peakHour.visits} visitas registradas (${analytics.peakHour.occupancyPercent}% aforo)`
+                ? `${analytics.peakHour.visits} visitas registradas${live ? '' : ` (${analytics.peakHour.occupancyPercent}% aforo)`}`
                 : 'Sin visitas registradas'}
             </p>
           </div>
@@ -336,7 +350,7 @@ export function AttendanceAnalytics() {
             <p className="att-kpi-value text-sky">{analytics.valleyHour.label}</p>
             <p className="att-kpi-subtext">
               {analytics.valleyHour.visits > 0
-                ? `${analytics.valleyHour.visits} visitas (${analytics.valleyHour.occupancyPercent}% aforo)`
+                ? `${analytics.valleyHour.visits} visitas${live ? '' : ` (${analytics.valleyHour.occupancyPercent}% aforo)`}`
                 : 'Sin visitas registradas'}
             </p>
           </div>
@@ -367,6 +381,7 @@ export function AttendanceAnalytics() {
         </article>
 
         {/* Card 5: Average Workout Duration */}
+        {!live && (
         <article className="att-kpi-card clay-card">
           <div className="att-kpi-header">
             <span className="att-kpi-title">Duración promedio</span>
@@ -381,6 +396,7 @@ export function AttendanceAnalytics() {
             <span>Estándar fitness 60–75 min</span>
           </div>
         </article>
+        )}
 
         {/* Card 6: Total Visits */}
         <article className="att-kpi-card clay-card">
@@ -393,7 +409,7 @@ export function AttendanceAnalytics() {
           <div className="att-kpi-body">
             <p className="att-kpi-value">{analytics.totalVisits}</p>
             <p className="att-kpi-subtext">
-              {analytics.rawVisitsCount > 0 ? `${analytics.rawVisitsCount} registradas` : 'Distribución proyectada'}
+              {analytics.rawVisitsCount > 0 ? `${analytics.rawVisitsCount} registradas` : live ? 'Sin visitas registradas' : 'Distribución proyectada'}
             </p>
           </div>
           <div className="att-kpi-footer">
@@ -475,7 +491,8 @@ export function AttendanceAnalytics() {
         </Panel>
       </div>
 
-      {/* Operational Time Slots (Matutino, Vespertino, Nocturno) */}
+      {/* Operational Time Slots + live occupants */}
+      {!live && (<>
       <section className="att-slots-section" aria-label="Franjas horarias operativas">
         <h2 className="att-section-title">Franjas operativas y balance de carga</h2>
         <div className="att-slots-grid">
@@ -578,7 +595,10 @@ export function AttendanceAnalytics() {
         )}
       </Panel>
 
+      </>)}
+
       {/* Strategic Operational Insights Panel */}
+      {!live && (
       <section className="att-insights-section" aria-label="Recomendaciones operativas">
         <div className="att-insights-head">
           <div className="att-insights-title-row">
@@ -624,6 +644,7 @@ export function AttendanceAnalytics() {
           ))}
         </div>
       </section>
+      )}
     </div>
   );
 }

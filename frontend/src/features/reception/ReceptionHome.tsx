@@ -12,8 +12,6 @@ import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPur
 import { AssignedMemberSummary } from './AssignedMemberSummary';
 import { MermaModal, type WasteItem } from './MermaModal';
 import { DevolucionesModal } from './DevolucionesModal';
-import { GuantesModal } from './GuantesModal';
-import { CasillerosModal } from './CasillerosModal';
 import { SuplementosModal } from './SuplementosModal';
 import { GastoModal } from './GastoModal';
 import { ExtraModal } from './ExtraModal';
@@ -129,8 +127,6 @@ export function ReceptionHome() {
   const [isMermaOpen, setIsMermaOpen] = useState(false);
   const [isDevolucionesOpen, setIsDevolucionesOpen] = useState(false);
   const [selectedCatalogProductId, setSelectedCatalogProductId] = useState<string | null>(null);
-  const [isGuantesOpen, setIsGuantesOpen] = useState(false);
-  const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
   const [isSuplementosOpen, setIsSuplementosOpen] = useState(false);
   const [isGastoOpen, setIsGastoOpen] = useState(false);
   const [isExtraOpen, setIsExtraOpen] = useState(false);
@@ -144,6 +140,16 @@ export function ReceptionHome() {
     description: string;
     type: 'success' | 'error' | 'warning';
   } | null>(null);
+
+  // Rentals (guantes/casilleros) are server-backed only; this demo prototype cannot run them.
+  function notifyRentalsUnavailable(label: string) {
+    setToast({
+      open: true,
+      type: 'warning',
+      title: `${label} no disponible en modo demo`,
+      description: 'Las rentas requieren el servidor y un turno abierto. Úsalas desde la recepción conectada.',
+    });
+  }
 
   // Theme observer for JellyRadio & AnimatedList light/dark mode adaptation
   const [dark, setDark] = useState(() => {
@@ -852,7 +858,7 @@ export function ReceptionHome() {
               <Button
                 variant="secondary"
                 className="shortcut-clay-btn"
-                onClick={() => setIsGuantesOpen(true)}
+                onClick={() => notifyRentalsUnavailable('Guantes')}
               >
                 {shortcutIcons.guantes}
                 <span>Guantes</span>
@@ -868,7 +874,7 @@ export function ReceptionHome() {
               <Button
                 variant="secondary"
                 className="shortcut-clay-btn"
-                onClick={() => setIsCasillerosOpen(true)}
+                onClick={() => notifyRentalsUnavailable('Casilleros')}
               >
                 {shortcutIcons.casilleros}
                 <span>Casilleros</span>
@@ -1188,18 +1194,6 @@ export function ReceptionHome() {
             description: message,
           });
         }}
-      />
-
-      {/* Guantes Modal Dialog */}
-      <GuantesModal
-        isOpen={isGuantesOpen}
-        onClose={() => setIsGuantesOpen(false)}
-      />
-
-      {/* Casilleros Modal Dialog */}
-      <CasillerosModal
-        isOpen={isCasillerosOpen}
-        onClose={() => setIsCasillerosOpen(false)}
       />
 
       {/* Suplementos Modal Dialog */}

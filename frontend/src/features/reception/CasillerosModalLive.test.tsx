@@ -319,3 +319,100 @@ describe('CasillerosModal live API integration', () => {
     );
   });
 });
+
+describe('CasillerosModal deposits and card (live)', () => {
+  const branchId = 'branch-001';
+  const registerId = 'reg-001';
+  const asset = (over: Record<string, unknown> = {}) => ({
+    id: 'asset-lock-1', branch_id: branchId, kind: 'locker', code: '#01', locker_number: 1,
+    price_minor: 18000, deposit_minor: 5000, status: 'available', is_active: true, active_rental_id: null, ...over,
+  });
+  const lockerRental = (over: Record<string, unknown> = {}) => ({
+    id: 'rental-lock-1', asset_id: 'asset-lock-1', asset_code: '#01', member_id: 'member-1', member_name: 'Ana Karen',
+    status: 'active', kind: 'locker', paid_minor: 18000, outstanding_minor: 0, ends_on: '2026-01-01',
+    deposit_minor: 5000, deposit_status: 'held', deposit_held_minor: 5000, deposit_refunded_minor: 0,
+    deposit_retained_minor: 0, deposit_reason: null, charges: [], ...over,
+  });
+  function makeRequest(assets: unknown[], rentals: unknown[], extra?: (url: string, init?: RequestInit) => Response | undefined) {
+    return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const custom = extra?.(url, init);
+      if (custom) return Promise.resolve(custom);
+      if (url.includes('/api/v1/rentals/assets')) return Promise.resolve(new Response(JSON.stringify({ items: assets, total: assets.length }), { status: 200 }));
+      if (url.includes('/api/v1/rentals?')) return Promise.resolve(new Response(JSON.stringify({ items: rentals, total: rentals.length }), { status: 200 }));
+      if (url.includes('/api/v1/members?')) return Promise.resolve(new Response(JSON.stringify({ items: [{ id: 'member-9', full_name: 'Mariana López', phone: '555' }] }), { status: 200 }));
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+  }
+  const body = (request: ReturnType<typeof makeRequest>, part: string) => {
+    const call = request.mock.calls.find(([url, init]) => String(url).includes(part) && (init as RequestInit | undefined)?.method === 'POST');
+    return call ? JSON.parse((call[1] as RequestInit).body as string) : undefined;
+  };
+  const open = (request: ReturnType<typeof makeRequest>, props: Record<string, unknown> = {}) =>
+    render(<CasillerosModal isOpen onClose={vi.fn()} apiRequest={request} branchId={branchId} registerId={registerId} {...props} />);
+
+  it('assigns with expected_deposit_minor and shows the cash deposit', async () => {
+    const request = makeRequest([asset()], [], (url, init) =>
+      url === '/api/v1/rentals/lockers' && init?.method === 'POST'
+        ? new Response(JSON.stringify(lockerRental({ id: 'new' })), { status: 201 })
+        : undefined);
+    open(request);
+    await screen.findAllByText('#01');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Buscar socio activo' }), 'Mariana');
+    await userEvent.click(await screen.findByText('Mariana López'));
+    await userEvent.click(screen.getByRole('button', { name: /revisar cobro|proceder al cobro/i }));
+    expect(screen.getByText(/cobra en efectivo el depósito reembolsable: \$50\.00 MXN/)).toBeVisible();
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro y asignar' }));
+    await screen.findByText('Casillero asignado');
+    expect(body(request, '/api/v1/rentals/lockers')).toMatchObject({ expected_deposit_minor: 5000, expected_total_minor: 18000 });
+  });
+
+  it('evicts an overdue locker returning the deposit with a retention reason', async () => {
+    const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })], [lockerRental()], (url, init) =>
+      url.endsWith('/rental-lock-1/release') && init?.method === 'POST'
+        ? new Response(JSON.stringify(lockerRental({ status: 'released' })), { status: 200 })
+        : undefined);
+    open(request);
+    const refund = await screen.findByLabelText(/Monto a devolver en efectivo/);
+    await userEvent.clear(refund);
+    await userEvent.type(refund, '20');
+    await userEvent.click(screen.getByRole('button', { name: 'Desalojar casillero' }));
+    expect(await screen.findByText(/Escribe el motivo de la retención/)).toBeInTheDocument();
+    expect(body(request, '/release')).toBeUndefined();
+
+    await userEvent.type(screen.getByLabelText(/Motivo de la retención/), 'Candado perdido');
+    await userEvent.click(screen.getByRole('button', { name: 'Desalojar casillero' }));
+    await screen.findByText('Casillero desalojado');
+    expect(body(request, '/release')).toEqual({ register_id: registerId, deposit_refund_minor: 2000, reason: 'Candado perdido' });
+  });
+
+  it('explains that cancelling an active locker returns the full deposit', async () => {
+    const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })], [lockerRental({ ends_on: '2099-12-31' })]);
+    open(request);
+    expect(await screen.findByText(/el depósito se devuelve completo en efectivo/)).toBeVisible();
+    expect(screen.queryByLabelText(/Monto a devolver en efectivo/)).not.toBeInTheDocument();
+  });
+
+  it('collects the card portion through a terminal attempt', async () => {
+    const charge = { id: 'charge-9', charge_kind: 'initial', amount_minor: 18000, outstanding_minor: 18000, starts_on: '2026-11-04', ends_on: '2026-11-30' };
+    const request = makeRequest([asset({ deposit_minor: 0 })], [], (url, init) => {
+      if (url === '/api/v1/rentals/lockers' && init?.method === 'POST') {
+        return new Response(JSON.stringify(lockerRental({ id: 'new', outstanding_minor: 18000, charges: [charge] })), { status: 201 });
+      }
+      if (url.endsWith('/charges/charge-9/card-attempts') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ id: 'att', status: 'confirmed' }), { status: 200 });
+      }
+      return undefined;
+    });
+    open(request);
+    await screen.findAllByText('#01');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Buscar socio activo' }), 'Mariana');
+    await userEvent.click(await screen.findByText('Mariana López'));
+    await userEvent.click(screen.getByRole('button', { name: /revisar cobro|proceder al cobro/i }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Tarjeta' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro y asignar' }));
+    await screen.findByText('Casillero asignado');
+    expect(body(request, '/api/v1/rentals/lockers')).toMatchObject({ components: [], accepted_shortfall_minor: 18000 });
+    expect(body(request, '/card-attempts')).toEqual({ register_id: registerId, amount_minor: 18000 });
+  });
+});

@@ -13,6 +13,8 @@ import {
   confirmLockerCancellation,
   listRentalAlerts,
   reviewRentalAlert,
+  beginRentalCardAttempt,
+  getRentalCardAttempt,
 } from './rentalsApi';
 
 describe('rentalsApi client', () => {
@@ -159,9 +161,75 @@ describe('rentalsApi client', () => {
   });
 
   it('throws RentalApiError on HTTP error status with extracted message', async () => {
-    const errorResponse = new Response(JSON.stringify({ detail: 'Casillero no disponible' }), { status: 409 });
+    const errorResponse = new Response(JSON.stringify({ detail: 'Rental asset is not available for assignment.' }), { status: 409 });
     const request = vi.fn().mockResolvedValue(errorResponse);
 
     await expect(returnGlove(request, 'rent-err', 'key')).rejects.toThrow(RentalApiError);
+  });
+
+  it('rentGlove forwards expected_deposit_minor', async () => {
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'r', deposit_status: 'held' }), { status: 201 }));
+    await rentGlove(request, {
+      branch_id: branchId, asset_id: 'a', member_id: 'm', register_id: 'reg',
+      components: [], expected_total_minor: 5000, accepted_shortfall_minor: 0, expected_deposit_minor: 20000,
+    }, 'k');
+    const body = JSON.parse((request.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.expected_deposit_minor).toBe(20000);
+  });
+
+  it('returnGlove and releaseLocker send the deposit body only when given', async () => {
+    const request = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"id":"r"}', { status: 200 })));
+    await returnGlove(request, 'r1', 'k1', { register_id: 'reg', deposit_refund_minor: 10000, reason: 'Desgaste' });
+    const init = request.mock.calls[0][1] as RequestInit;
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'Idempotency-Key': 'k1' });
+    expect(JSON.parse(init.body as string)).toEqual({ register_id: 'reg', deposit_refund_minor: 10000, reason: 'Desgaste' });
+
+    await releaseLocker(request, 'r2', 'k2', { register_id: 'reg' });
+    expect(JSON.parse((request.mock.calls[1][1] as RequestInit).body as string)).toEqual({ register_id: 'reg' });
+
+    await releaseLocker(request, 'r3', 'k3');
+    expect((request.mock.calls[2][1] as RequestInit).body).toBeUndefined();
+  });
+
+  it('updateRentalAsset patches deposit_minor', async () => {
+    const request = vi.fn().mockResolvedValue(new Response('{"id":"a","deposit_minor":15000}', { status: 200 }));
+    const result = await updateRentalAsset(request, 'a', { deposit_minor: 15000 });
+    expect(JSON.parse((request.mock.calls[0][1] as RequestInit).body as string)).toEqual({ deposit_minor: 15000 });
+    expect(result.deposit_minor).toBe(15000);
+  });
+
+  it('maps 409 and 422 deposit errors to Spanish messages', async () => {
+    const mk = (status: number, detail: string) =>
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status }));
+    await expect(returnGlove(mk(409, 'Deposit refund exceeds held amount.'), 'r', 'k')).rejects.toThrow(
+      'El reembolso no puede exceder el depósito retenido.'
+    );
+    await expect(returnGlove(mk(409, 'Expected deposit does not match the asset deposit.'), 'r', 'k')).rejects.toThrow(
+      /depósito cambió/
+    );
+    await expect(returnGlove(mk(422, 'A reason is required when retaining part of the deposit.'), 'r', 'k')).rejects.toThrow(
+      /motivo/
+    );
+    await expect(returnGlove(mk(422, 'register_id is required'), 'r', 'k')).rejects.toThrow(/caja/);
+  });
+
+  it('beginRentalCardAttempt posts to the charge and getRentalCardAttempt reads it', async () => {
+    const attempt = { id: 'att-1', status: 'pending', rental_id: 'r', charge_id: 'c', amount_minor: 5000 };
+    const request = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(attempt), { status: 200 })));
+    const created = await beginRentalCardAttempt(request, 'r', 'c', { register_id: 'reg', amount_minor: 5000 }, 'k-att');
+    expect(request).toHaveBeenCalledWith('/api/v1/rentals/r/charges/c/card-attempts', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'k-att' },
+    }));
+    expect(created.status).toBe('pending');
+    await getRentalCardAttempt(request, 'att-1');
+    expect(request).toHaveBeenLastCalledWith('/api/v1/rentals/card-attempts/att-1');
+  });
+
+  it('reports an unconfigured card terminal (503) in Spanish', async () => {
+    const request = vi.fn().mockResolvedValue(new Response('{"detail":"x"}', { status: 503 }));
+    await expect(beginRentalCardAttempt(request, 'r', 'c', { register_id: 'reg', amount_minor: 1 }, 'k')).rejects.toThrow(
+      /terminal de tarjeta/
+    );
   });
 });

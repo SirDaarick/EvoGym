@@ -1229,20 +1229,24 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
         </div>
       )}
 
-      <GuantesModal
-        isOpen={isGuantesOpen}
-        onClose={() => setIsGuantesOpen(false)}
-        apiRequest={apiRequest}
-        branchId={selectedBranchId || branches[0]?.id}
-        isAdmin={true}
-      />
-      <CasillerosModal
-        isOpen={isCasillerosOpen}
-        onClose={() => setIsCasillerosOpen(false)}
-        apiRequest={apiRequest}
-        branchId={selectedBranchId || branches[0]?.id}
-        isAdmin={true}
-      />
+      {apiRequest && (selectedBranchId || branches[0]?.id) && (
+        <>
+          <GuantesModal
+            isOpen={isGuantesOpen}
+            onClose={() => setIsGuantesOpen(false)}
+            apiRequest={apiRequest}
+            branchId={selectedBranchId || branches[0]!.id}
+            isAdmin={true}
+          />
+          <CasillerosModal
+            isOpen={isCasillerosOpen}
+            onClose={() => setIsCasillerosOpen(false)}
+            apiRequest={apiRequest}
+            branchId={selectedBranchId || branches[0]!.id}
+            isAdmin={true}
+          />
+        </>
+      )}
     </div>
   );
 }

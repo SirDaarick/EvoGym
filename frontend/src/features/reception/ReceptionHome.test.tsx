@@ -205,20 +205,19 @@ describe('Reception Home overview', () => {
     expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
   });
 
-  it('opens and closes Guantes modal from shortcut button', async () => {
+  it('explains that Guantes and Casilleros rentals are unavailable in the demo prototype', async () => {
     render(<MemoryRouter><DemoProvider><ReceptionHome /></DemoProvider></MemoryRouter>);
-    const guantesBtn = screen.getByRole('button', { name: 'Guantes' });
-    expect(guantesBtn).toBeVisible();
 
-    await userEvent.click(guantesBtn);
-    expect(screen.getByRole('dialog')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Guantes' })).toBeVisible();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Cerrar modal de guantes' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Guantes' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Guantes no disponible en modo demo')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Casilleros' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Casilleros no disponible en modo demo')).toBeInTheDocument();
   });
 
-  it('opens and closes Gasto, Extra, Suplementos, and Casilleros modals from shortcut buttons', async () => {
+  it('opens and closes Gasto, Extra, and Suplementos modals from shortcut buttons', async () => {
     render(<MemoryRouter><DemoProvider><ReceptionHome /></DemoProvider></MemoryRouter>);
 
     // Gasto
@@ -238,12 +237,6 @@ describe('Reception Home overview', () => {
     expect(screen.getByRole('heading', { name: 'Suplementos' })).toBeVisible();
       expect(screen.queryByText(/de demostración/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar modal de suplementos' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-
-    // Casilleros
-    await userEvent.click(screen.getByRole('button', { name: 'Casilleros' }));
-    expect(screen.getByRole('heading', { name: 'Casilleros' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Cerrar modal de casilleros' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 

@@ -468,3 +468,55 @@ def test_owner_overview_rental_cancellation_summary_and_shift_discrepancy_contex
             assert row["opened_at"] and row["closed_at"] and row["register_id"]
     finally:
         engine.dispose()
+
+
+def test_owner_overview_excludes_rental_deposits_and_reports_them_separately(tmp_path):
+    from app.db.models import RentalDepositMovement
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory)
+        actor, _ = _seed_receptionist(factory, branch)
+        seed_admin(factory)
+        with factory.begin() as session:
+            member = Member(member_number="DEP-OVERVIEW", full_name="Member", phone="5550100")
+            asset = RentalAsset(branch_id=branch, kind="locker", code="locker-dep", locker_number=1,
+                                price_minor=500, created_by=actor)
+            product = create_product(session, name="Water", created_by=actor, price_minor=500,
+                                     initial_quantity=20, initial_branch_id=branch)
+            register = create_cash_register(session, branch, "dep-overview", "Caja Depositos")
+            asset2 = RentalAsset(branch_id=branch, kind="locker", code="locker-dep2", locker_number=2,
+                                 price_minor=500, created_by=actor)
+            session.add_all([member, asset, asset2])
+            session.flush()
+            shift = open_shift(session, register_id=register.id, opened_by=actor,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            post_cash_product_sale(session, register_id=register.id, actor_id=actor, member_id=member.id,
+                items=[ProductCartLineRequest(product_id=product.id, quantity=1)], expected_total_minor=500,
+                idempotency_key="dep-cash")
+            rentals = []
+            for index in range(2):
+                rental = Rental(branch_id=branch, asset_id=(asset, asset2)[index].id, member_id=member.id, kind="locker",
+                    status="active", starts_on=date(2026, 1, 1), ends_on=date(2026, 2, 1), actor_id=actor,
+                    idempotency_key=f"dep-rental-{index}", request_fingerprint=str(index) * 64)
+                session.add(rental)
+                rentals.append(rental)
+            session.flush()
+            def movement(rental, kind, amount, retained, key):
+                return RentalDepositMovement(rental_id=rental.id, branch_id=branch, register_id=register.id,
+                    shift_id=shift.id, kind=kind, amount_minor=amount, retained_minor=retained,
+                    reason="Dano" if retained else None, idempotency_key=key,
+                    request_fingerprint=key[-1] * 64, actor_id=actor)
+            session.add_all([movement(rentals[0], "hold", 300, 0, "dep-h0"), movement(rentals[1], "hold", 200, 0, "dep-h1"),
+                             movement(rentals[0], "refund", 250, 50, "dep-r0")])
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            response = client.get(f"/api/v1/owner/overview?branch_id={branch}", headers=approved_admin_headers(client, delivery))
+            assert response.status_code == 200, response.text
+            fin = response.json()["finances"]
+            assert fin["cash_minor"] == 500 and fin["confirmed_count"] == 1
+            cash = next(m for m in fin["by_method"] if m["method"] == "cash")
+            assert (cash["amount_minor"], cash["count"], cash["gross_minor"], cash["refunds_minor"]) == (500, 1, 500, 0)
+            assert fin["deposits"] == {"held_minor": 500, "refunded_minor": 250, "retained_minor": 50}
+            assert response.json()["pulse"]["confirmed_minor"] == 500
+    finally:
+        engine.dispose()

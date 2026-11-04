@@ -1,7 +1,7 @@
 import { validPeriod, type ReportingPeriod } from '@/domain/reporting';
 import { useEffect, useState } from 'react';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
-import { getOwnerOverview, type OwnerOverviewResponse } from '../../api/ownerOverviewApi';
+import { formatShiftWindow, getOwnerOverview, type OwnerOverviewResponse } from '../../api/ownerOverviewApi';
 import { Notice, PageHeader } from '../../shared/ui';
 import { OverviewView } from './Overview';
 
@@ -35,7 +35,18 @@ export function LiveOverview({ apiRequest }: { apiRequest: AuthenticatedRequest 
   return <OverviewView period={period} setPeriod={setPeriod} loading={loading} error={error} summary={validPeriod(period) && !loading && !error ? {
     confirmedMinor: data.pulse.confirmed_minor, confirmedCount: finances.confirmed_count,
     cashMinor: finances.cash_minor, cardMinor: finances.card_minor, transferPendingMinor: finances.pending_transfer_minor,
-    shiftDiscrepancies: finances.shift_discrepancies.map(row => ({ id: row.shift_id, window: '', cashDifferenceMinor: row.difference_minor })),
+    shiftDiscrepancies: finances.shift_discrepancies.map(row => ({ id: row.shift_id, registerName: row.register_name ?? undefined,
+      window: formatShiftWindow(row.opened_at, row.closed_at, data.period.timezone), cashDifferenceMinor: row.difference_minor })),
+    byMethod: finances.by_method?.map(row => ({ method: row.method, label: row.label, count: row.count, grossMinor: row.gross_minor,
+      refundsMinor: row.refunds_minor, amountMinor: row.amount_minor, terminals: row.terminals?.map(t => ({
+        id: t.terminal_id ?? 'sin-terminal', name: t.terminal_name ?? 'Sin terminal asignada', count: t.count, amountMinor: t.amount_minor })) })),
+    cancellations: data.cancellations && { totalCount: data.cancellations.total_count, productSales: data.cancellations.product_sales.count,
+      productRefunds: { count: data.cancellations.product_refunds.count, amountMinor: data.cancellations.product_refunds.amount_minor },
+      rental: { count: data.cancellations.rental_cancellations.count, refundMinor: data.cancellations.rental_cancellations.refund_amount_minor,
+        cancelledDebtMinor: data.cancellations.rental_cancellations.cancelled_debt_minor,
+        unreviewedCount: data.cancellations.rental_cancellations.unreviewed_count } },
+    deposits: finances.deposits && { heldMinor: finances.deposits.held_minor, refundedMinor: finances.deposits.refunded_minor,
+      retainedMinor: finances.deposits.retained_minor },
     countDiscrepancies: finances.count_discrepancies.map((row, index) => ({ id: `${row.shift_id}-${index}`,
       shiftId: row.shift_id, productName: row.product, variance: row.physical_quantity - row.expected_quantity })),
   } : null} attendance={{ liveOccupancyCount: attendance.live_occupancy_count, gymCapacity: attendance.gym_capacity,

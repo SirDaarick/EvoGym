@@ -35,6 +35,7 @@ Discrepancias de IDs: BK-043/044 y BK-053..056 del roadmap no corresponden a lo 
 4. **T4.6**: adaptadores falsos (outbox, webhook firmado, RAG simulado).
 5. **T4.4**: extender `owner_overview.py` (default recomendado, no contestado explícitamente).
 6. `/owner/gimi` permanece `UnavailablePage` hasta que T4.6 tenga datos reales.
+7. **T4.1 frontend (H)**: `GuantesModal`/`CasillerosModal` son live-only (`apiRequest` y `branchId` obligatorios, sin `useDemo`). `ReceptionHome.tsx` (prototipo demo) ya no monta los modales: los atajos Guantes/Casilleros muestran un aviso "no disponible en modo demo". `demo/gloveOperations.ts` y `demo/lockerOperations.ts` se conservan (solo los usan sus propios tests). Tarjeta en rentas: el backend rechaza `card` en `components`; el modal crea la renta con el monto de tarjeta como saldo pendiente y luego abre `card-attempts` (`rentalsApi.beginRentalCardAttempt`/`getRentalCardAttempt`), avisando si no se confirma.
 
 ## 3. Oleadas de ejecución
 
