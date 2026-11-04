@@ -10,7 +10,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 |---|---|---|---|
 | **Fase 0** | Trabajo en Curso (Suplementos y Porciones) | Alto (migración DB y stock) | ✅ **Completado** |
 | **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | ✅ **Completado** |
-| **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | 🟡 **Alta** |
+| **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | ✅ **Completado** |
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | 🟡 **Media-Alta** |
 | **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟢 **Media** |
 | **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 **Media** |
@@ -76,26 +76,26 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 ## 🏗️ Fase 2: Arquitectura y Resiliencia del Backend
 > **Objetivo:** Introducir la Capa de Servicio, unificar dependencias de autenticación en FastAPI y estandarizar excepciones y modelos.
 
-- [ ] **T2.1 — Implementar Capa de Servicio de Dominio (`app/<dominio>/service.py`) (A1)**
+- [x] **T2.1 — Implementar Capa de Servicio de Dominio (`app/<dominio>/service.py`) (A1)**
   - **Problema:** Los routers de FastAPI contienen cientos de líneas de transacciones, bloqueos de filas y cálculos contables (ej. `api/sales.py` tiene 19 `select`, 10 `commit` y 88 `HTTPException`).
-  - **Acción:**
-    - `sales/service.py`: Centralizar cobros de membresías, POS de productos y devoluciones.
-    - `shifts/service.py`: Lógica de apertura, conteo de denominaciones, cortes y arqueos.
-    - `attendance/service.py`: Reglas de entrada de socios y personal.
+  - **Acción:** `app/<dominio>/queries.py` contiene solo SQL y proyecciones atómicas; `app/<dominio>/service.py` (o `app/staff/*.py`, `app/auth/*.py`) orquesta permisos/`authorize`, queries, commit, idempotencia y bloqueos, y lanza solo `AppError`/`HttpStatusError`. Los routers de `app/api/` son solo transporte HTTP. Dominios: sales, rentals, staff (asistencia, horarios, roster, credenciales), inventory/catalog, shifts, members/memberships, finance/expenses, admin (cuentas, roles, login, sesiones, alertas, enrolamiento) y perfil (acceso, emparejamiento, recepción).
   - **Beneficio:** Controladores HTTP delgados, reglas de negocio desacopladas del framework y pruebas unitarias puras sin levantar la API.
+  - **Resultado:** Un commit por dominio en `feat/backend-phase2`: `b4e1a73` sales, `718ff8a` rentals (+ `app/errors.http_errors`), `99c5629` asistencia de staff (nuevo `app/staff/`), `1e8f993` inventory+catalog, `bedbe6c` horarios/roster/credenciales, `8a11c8d` shifts, `b2aabd4` members+memberships, `578cb2a` finance (`app/expenses` + nuevo `app/finance`), `43da3df` cuentas/roles admin, `385eb42` acceso de perfil/emparejamiento/recepción, `03cf6ed` login/sesiones/alertas/enrolamiento admin; commit de limpieza final pendiente. Routers: 8452 → 2647 líneas. El test AST `tests/test_router_layering.py` cubre los 26 routers con endpoints y prohíbe `select`/`execute`/`scalar(s)`/`add`/`delete`/`flush`/`commit`/`rollback`/`begin`/`with_for_update`/`authorize` y los imports de `sqlalchemy` (salvo `sqlalchemy.exc`), `app.db`, `app.auth.authorization` (salvo `AuthorizationDenied`/`Permission`) y cualquier `*.queries`. Salida de red (status/code/message) sin cambios. Suite API por slice: ~650–674 passed, 43 skipped (PostgreSQL), con los mismos 3 fallos preexistentes (`test_contract_smoke` ×2: propiedades OpenAPI de `MemberListItemDTO` y head de migración; `test_rentals` migración 0048 ×1). Test intermitente conocido: restore en `test_membership_access` (timestamps de 1 s en SQLite). No probado: concurrencia/locks en PostgreSQL (sin destino PG desechable); el orden de locks se comparó solo leyendo el código.
 
-- [ ] **T2.2 — Centralizar dependencias de sesión y autenticación (`deps.py`) (P5, P6)**
+- [x] **T2.2 — Centralizar dependencias de sesión y autenticación (`deps.py`) (P5, P6)**
   - **Archivos:** `api/app/api/deps.py`.
   - **Problema:** Existen ~9 resolutores de credenciales dispersos y ~60 endpoints abriendo sesiones de base de datos manualmente.
-  - **Acción:** Implementar `SessionDep = Annotated[Session, Depends(get_db)]` y un resolutor unificado `CurrentUser` con validación RBAC por permisos (`require_permission(...)`), eliminando el código duplicado.
+  - **Acción:** Implementar `SessionFactoryDep`, `SessionDep`, `AdminDep` y `get_roster_principal`, eliminando el código duplicado.
+  - **Resultado:** Commit `7a48277`.
 
-- [ ] **T2.3 — Estandarizar catálogo de errores y sobre de respuesta**
-  - **Archivos:** `api/app/core/errors.py`.
-  - **Acción:** Crear jerarquía `AppError(code, message, details)` con excepciones tipadas de negocio (`NotFoundError`, `InsufficientStockError`, `ShiftClosedError`) y un handler global de Starlette que devuelva un envelope JSON unificado.
+- [x] **T2.3 — Estandarizar catálogo de errores y sobre de respuesta**
+  - **Archivos:** `api/app/errors.py` (no existe `app/core/errors.py`).
+  - **Acción:** `AppError(code, status, message, metadata)`, `HttpStatusError(status)` (se renderiza igual que `HTTPException`), `http_errors(*mapping)` como mapeador compartido excepción de dominio→status, `PublicDomainError` (subclase 409) y un único handler global. Nunca se devuelve texto interno.
+  - **Resultado:** Commit `b850f94`; `http_errors` se añadió en `718ff8a`.
 
-- [ ] **T2.4 — Desacoplar modelos por Bounded Contexts (A5)**
+- [x] **T2.4 — Desacoplar modelos por Bounded Contexts (A5)**
   - **Archivos:** `api/app/db/models/`.
-  - **Acción:** Separar el paquete monolítico de 33 modelos para que cada contexto de dominio mantenga sus entidades, evitando dependencias circulares y facilitando la reutilización modular.
+  - **Resultado:** Cerrado **sin cambios** por decisión del usuario. `app/db/models/` ya es un archivo por dominio (32 módulos), no hay imports circulares (solo `orders.py` usa `TYPE_CHECKING`; las relaciones usan referencias string) y hay ~190 sitios de import, incluidos tests con rutas de submódulo, por lo que el cambio no se justifica.
 
 ---
 

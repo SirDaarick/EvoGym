@@ -30,6 +30,8 @@ The current master ledger contains **76 main BK tasks: 18 Done, 18 Partial, 40 N
 
 ## 2. Finish schedules and occurrence-aware attendance
 
+> **2026-11-04 note:** STAFF-2 occurrence-linked attendance and FE09 live binding are implemented (S1 `5ff3fb7`, S2 `6040d7e`, S3 `f7549ef`: occurrence validation, strict replay, correction allowlist, tz-aware classification, 13-day lookahead removed, FE09 typed clients, multi-shift, retry key reuse). Remaining: PostgreSQL proof and STAFF-3 offline (waits on phase 3).
+
 **Dependencies:** approved recurrence/timezone/scope semantics and B02–B04/E02.
 
 1. Preserve and review the **evolved** STAFF-1 cancellation/future-lookup/shared-validation corrections and tests already present; do not replay old B02–B04 failures as current proof or overwrite other work. Reconfirm first-occurrence/long-future/replay/exception/rollback acceptance. Overlap scope is the same branch roster profile; profiles in different branches are independent under the user's confirmed policy and are not globally linked or cross-checked.
