@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { resetStaff, setSelectedStaff } from '../staff/staffStore';
 import { StaffAttendanceView } from './StaffAttendanceView';
+import { businessDate } from '../../shared/formatters/date';
 
 const testBranchId = '00000000-0000-4000-8000-000000000001';
 
@@ -56,7 +57,9 @@ describe('StaffAttendanceView', () => {
     const mikelCard = screen.getByTestId('staff-card-staff-mikel');
     expect(mikelCard).toHaveTextContent('En turno');
     expect(mikelCard).toHaveTextContent('Hora de entrada:');
-    expect(mikelCard).toHaveTextContent('07:00 hrs');
+    // The seed is 07:00-06:00; the card renders it in the viewer's zone, so derive the hour instead of assuming Mexico.
+    const seededHour = new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date('2026-10-08T07:00:00-06:00'));
+    expect(mikelCard).toHaveTextContent(`${seededHour} hrs`);
     expect(mikelCard).toHaveTextContent('Registrado por:');
 
     // Charly is outside the gym
@@ -179,8 +182,21 @@ describe('StaffAttendanceView', () => {
   });
 
   describe('Live Operational Mode', () => {
+    // Live mode comes only from props; tests route liveRequest through the mocked fetch.
+    const liveRequest = (path: string, init: RequestInit = {}) => fetch(path, init);
+    const liveStaff = [
+      { id: 'staff-mikel', name: 'Mikel', shift: '07:00 - 15:00', active: true, avatarInitials: 'M', department: 'Entrenador' },
+      { id: 'staff-charly', name: 'Charly', shift: '08:00 - 16:00', active: true, avatarInitials: 'C', department: 'Staff' },
+    ];
+    function renderLive() {
+      return render(
+        <DemoProvider>
+          <StaffAttendanceView liveRequest={liveRequest} liveStaff={liveStaff} branchId={testBranchId} />
+        </DemoProvider>
+      );
+    }
+
     it('successfully loads server-accepted attendance items and review required badge', async () => {
-      sessionStorage.setItem('evogym:operational-session', 'valid-bearer-token');
 
       const mockItems = [
         {
@@ -239,7 +255,7 @@ describe('StaffAttendanceView', () => {
         return new Response('Not Found', { status: 404 });
       });
 
-      renderView();
+      renderLive();
 
       // Mikel should show present mark and in-turn status
       await waitFor(() => {
@@ -257,7 +273,6 @@ describe('StaffAttendanceView', () => {
 
     it('performs live clock-in and clock-out with server responses', async () => {
       const user = userEvent.setup();
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
 
       let currentAttendance: any[] = [];
 
@@ -313,7 +328,7 @@ describe('StaffAttendanceView', () => {
         return new Response('Not Found', { status: 404 });
       });
 
-      renderView();
+      renderLive();
 
       const charlyCard = screen.getByTestId('staff-card-staff-charly');
       expect(charlyCard).toHaveTextContent('Fuera del gym');
@@ -344,7 +359,6 @@ describe('StaffAttendanceView', () => {
 
     it('handles live API errors for 409 conflict and 403 forbidden', async () => {
       const user = userEvent.setup();
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
 
       let responseStatus = 409;
       let responseBody = {
@@ -369,7 +383,7 @@ describe('StaffAttendanceView', () => {
         return new Response('Not Found', { status: 404 });
       });
 
-      renderView();
+      renderLive();
 
       const clockInBtn = screen.getByRole('button', { name: 'Marcar entrada para Charly' });
       await user.click(clockInBtn);
@@ -403,7 +417,6 @@ describe('StaffAttendanceView', () => {
 
     it('renders corrections column in live mode, shows append-only history, and allows submitting a correction', async () => {
       const user = userEvent.setup();
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
 
       const mockAttendance = [
         {
@@ -480,7 +493,7 @@ describe('StaffAttendanceView', () => {
         return new Response('Not Found', { status: 404 });
       });
 
-      renderView();
+      renderLive();
 
       // Verify the Correcciones header exists in the audit table
       await waitFor(() => {
@@ -543,7 +556,6 @@ describe('StaffAttendanceView', () => {
 
     it('prompts confirmation when unscheduled employee clocks in to cover colleague or perform support shift', async () => {
       const user = userEvent.setup();
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
 
       const liveStaffList = [
         { id: 'staff-alex', name: 'Alex', active: true, avatarInitials: 'A', department: 'Staff' },
@@ -619,7 +631,7 @@ describe('StaffAttendanceView', () => {
 
       render(
         <DemoProvider>
-          <StaffAttendanceView liveStaff={liveStaffList} branchId={testBranchId} />
+          <StaffAttendanceView liveRequest={liveRequest} liveStaff={liveStaffList} branchId={testBranchId} />
         </DemoProvider>
       );
 
@@ -674,7 +686,6 @@ describe('StaffAttendanceView', () => {
       try {
         // 19:00 in Mexico City on 2026-11-03 is already 2026-11-04 in UTC.
         vi.setSystemTime(new Date('2026-11-04T01:00:00Z'));
-        sessionStorage.setItem('evogym:operational-session', 'live-token');
         const urls: string[] = [];
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
           urls.push(String(input));
@@ -686,7 +697,7 @@ describe('StaffAttendanceView', () => {
 
         render(
           <DemoProvider>
-            <StaffAttendanceView liveStaff={[]} branchId={testBranchId} />
+            <StaffAttendanceView liveRequest={liveRequest} liveStaff={[]} branchId={testBranchId} />
           </DemoProvider>
         );
 
@@ -703,7 +714,6 @@ describe('StaffAttendanceView', () => {
     });
 
     it('shows a secondary warning when corrections or schedules fail to load but keeps attendance', async () => {
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
         const url = String(input);
         if (url.includes('/corrections')) return new Response('boom', { status: 500 });
@@ -713,7 +723,7 @@ describe('StaffAttendanceView', () => {
 
       render(
         <DemoProvider>
-          <StaffAttendanceView liveStaff={[]} branchId={testBranchId} />
+          <StaffAttendanceView liveRequest={liveRequest} liveStaff={[]} branchId={testBranchId} />
         </DemoProvider>
       );
 
@@ -723,7 +733,6 @@ describe('StaffAttendanceView', () => {
     });
 
     it('does not render stale data from a previous branch after switching branches', async () => {
-      sessionStorage.setItem('evogym:operational-session', 'live-token');
       const branchA = '00000000-0000-4000-8000-0000000000aa';
       const branchB = '00000000-0000-4000-8000-0000000000bb';
       const staff = [{ id: 'staff-x', name: 'Xavier', active: true, avatarInitials: 'X', department: 'Staff' }];
@@ -752,7 +761,7 @@ describe('StaffAttendanceView', () => {
 
       const view = (id: string) => (
         <DemoProvider>
-          <StaffAttendanceView liveStaff={staff} branchId={id} />
+          <StaffAttendanceView liveRequest={liveRequest} liveStaff={staff} branchId={id} />
         </DemoProvider>
       );
       const { rerender } = render(view(branchA));
@@ -764,6 +773,87 @@ describe('StaffAttendanceView', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(screen.getByTestId('staff-card-staff-x')).toHaveTextContent('Fuera del gym');
+    });
+
+    const shiftSeries = (id: string, start: string, end: string) => ({
+      id, profile_id: 'staff-bob', branch_id: testBranchId, start_date: '2026-01-01', weekdays: [0, 1, 2, 3, 4, 5, 6],
+      start_time: start, end_time: end, end_date: null, occurrence_count: null, cancelled_from: null,
+    });
+
+    function mockBobApi(options: { attendance?: unknown[]; failFirstClockIn?: 'network' | 409 } = {}) {
+      const bodies: Array<Record<string, string>> = [];
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        if (url.includes('/staff-schedules/branches/')) {
+          return new Response(JSON.stringify([shiftSeries('series-am', '06:00:00', '10:00:00'), shiftSeries('series-pm', '16:00:00', '20:00:00')]), { status: 200 });
+        }
+        if (url.includes('/corrections')) return new Response('[]', { status: 200 });
+        if (method === 'GET') return new Response(JSON.stringify({ items: options.attendance ?? [], total: 0 }), { status: 200 });
+        bodies.push(JSON.parse(String(init?.body)));
+        if (options.failFirstClockIn === 'network' && bodies.length === 1) throw new TypeError('offline');
+        if (options.failFirstClockIn === 409 && bodies.length === 1) return new Response('{}', { status: 409 });
+        return new Response(JSON.stringify({ ...bodies.at(-1), id: 'att-new', profile_id: 'staff-bob', full_name: 'Bob', recorded_by: 'Op', occurred_at: '2026-10-23T16:00:00Z' }), { status: 201 });
+      });
+      render(
+        <DemoProvider>
+          <StaffAttendanceView
+            liveRequest={liveRequest}
+            liveStaff={[{ id: 'staff-bob', name: 'Bob', active: true, avatarInitials: 'B', department: 'Entrenador' }]}
+            branchId={testBranchId}
+          />
+        </DemoProvider>
+      );
+      return bodies;
+    }
+
+    it('clocks in the next scheduled shift when the first shift of the day already has a closed record', async () => {
+      const user = userEvent.setup();
+      const today = businessDate();
+      const bodies = mockBobApi({
+        attendance: [{
+          id: 'att-am', profile_id: 'staff-bob', full_name: 'Bob', position: 'Entrenador', recorded_by: 'Op', occurred_at: `${today}T12:00:00Z`,
+          status: 'present', checkout_at: `${today}T16:00:00Z`, series_id: 'series-am', occurrence_date: today,
+          device_captured_at: null, clock_validation_status: 'accepted', review_required: false,
+        }],
+      });
+      await waitFor(() => expect(screen.getByTestId('staff-card-staff-bob')).toHaveTextContent('Fuera del gym'));
+      await user.click(screen.getByRole('button', { name: 'Marcar entrada para Bob' }));
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0].series_id).toBe('series-pm');
+      expect(bodies[0].occurrence_date).toBe(today);
+    });
+
+    it('keeps key and capture time after a network error, and drops them after a 409', async () => {
+      const user = userEvent.setup();
+      for (const failure of ['network', 409] as const) {
+        const bodies = mockBobApi({ failFirstClockIn: failure });
+        const button = await screen.findByRole('button', { name: 'Marcar entrada para Bob' });
+        await user.click(button);
+        await screen.findByText('Error al marcar entrada');
+        await new Promise(resolve => setTimeout(resolve, 5));
+        await user.click(screen.getByRole('button', { name: 'Marcar entrada para Bob' }));
+        await waitFor(() => expect(bodies).toHaveLength(2));
+        const same = bodies[1].idempotency_key === bodies[0].idempotency_key;
+        expect(same).toBe(failure === 'network');
+        expect(bodies[1].device_captured_at === bodies[0].device_captured_at).toBe(failure === 'network');
+        cleanup();
+      }
+    });
+
+    it('does not resend a scheduled series once every shift of the day has a record', async () => {
+      const user = userEvent.setup();
+      const today = businessDate();
+      const done = (id: string, series: string) => ({
+        id, profile_id: 'staff-bob', full_name: 'Bob', position: 'Entrenador', recorded_by: 'Op', occurred_at: `${today}T12:00:00Z`,
+        status: 'present', checkout_at: `${today}T13:00:00Z`, series_id: series, occurrence_date: today,
+        device_captured_at: null, clock_validation_status: 'accepted', review_required: false,
+      });
+      const bodies = mockBobApi({ attendance: [done('att-am', 'series-am'), done('att-pm', 'series-pm')] });
+      await waitFor(() => expect(screen.getByTestId('staff-card-staff-bob')).toHaveTextContent('Fuera del gym'));
+      await user.click(screen.getByRole('button', { name: 'Marcar entrada para Bob' }));
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(bodies).toHaveLength(0);
     });
   });
 });

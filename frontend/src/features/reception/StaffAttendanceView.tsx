@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDemo } from '../../demo/DemoProvider';
 import { activeShift } from '../../demo/inventoryOperations';
 import {
@@ -11,15 +11,13 @@ import {
   recordStaffAttendance,
   recordStaffCheckout,
   OperationalApiHttpError,
-  OperationalApiNetworkError,
   type StaffAttendanceItem,
   correctStaffAttendance,
   getStaffAttendanceCorrections,
   listBranchAttendanceCorrections,
   type StaffAttendanceCorrectionItem,
 } from '../../api/staffAttendanceApi';
-import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi';
-import type { StaffScheduleSeriesItem } from '../../api/staffSchedulesApi';
+import { listScheduleSeries, type StaffScheduleSeriesItem } from '../../api/staffSchedulesApi';
 import type { RecordAttendancePayload } from '../../api/staffAttendanceApi';
 import { createEmptyDemoState } from '../../demo/adapter';
 import { businessDate } from '../../shared/formatters/date';
@@ -87,6 +85,29 @@ interface ActiveStaffRecord {
 
 type LiveRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
+function seriesRunsOn(series: StaffScheduleSeriesItem, date: string): boolean {
+  const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return (
+    series.start_date <= date &&
+    (!series.end_date || series.end_date >= date) &&
+    (!series.cancelled_from || series.cancelled_from > date) &&
+    series.weekdays.includes(weekday)
+  );
+}
+
+function hasRosterShift(staff: StaffAttendancePerson): boolean {
+  const shift = staff.shift?.toLowerCase();
+  return Boolean(shift && !shift.startsWith('sin turno') && !shift.startsWith('descanso'));
+}
+
+function needsReview(rec: StaffAttendanceItem): boolean {
+  return rec.review_required || rec.clock_validation_status === 'review_required';
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
 export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { liveRequest?: LiveRequest; liveStaff?: StaffAttendancePerson[]; branchId?: string } = {}) {
   let demo: ReturnType<typeof useDemo> | null = null;
   try { demo = useDemo(); } catch { /* API routes do not mount demo state. */ }
@@ -97,8 +118,19 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   const currentActiveShift = demo ? activeShift(state) : undefined;
   const loggedStaff = getSelectedStaff();
 
-  const operationalToken = liveRequest ? null : readOperationalToken();
-  const isLive = Boolean(liveRequest || operationalToken);
+  const isLive = Boolean(liveRequest);
+  // One idempotency key per pending attempt: a retry after a failure reuses it, success clears it.
+  // The capture time is kept with the key: the backend rejects a replay whose capture time differs.
+  const pendingAttempts = useRef<Record<string, { key: string; capturedAt: string }>>({});
+  const attempt = (scope: string) =>
+    (pendingAttempts.current[scope] ??= {
+      key: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `key-${Date.now()}`,
+      capturedAt: new Date().toISOString(),
+    });
+  // Only network errors keep the attempt for a retry; any server answer ends it.
+  const endAttempt = (scope: string, err?: unknown) => {
+    if (!err || err instanceof OperationalApiHttpError) delete pendingAttempts.current[scope];
+  };
 
   const [liveRecords, setLiveRecords] = useState<StaffAttendanceItem[]>([]);
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -140,60 +172,18 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   const [liveWarnings, setLiveWarnings] = useState<string[]>([]);
 
   const fetchLiveAttendance = useCallback(async (signal: AbortSignal) => {
-    if (!operationalToken && !liveRequest) return;
+    if (!liveRequest) return;
     const today = businessDate();
-    const encodedBranch = encodeURIComponent(branchId ?? '');
-    const init: RequestInit = { signal };
-
-    const loadAttendance = async (): Promise<StaffAttendanceItem[]> => {
-      if (liveRequest) {
-        const response = await liveRequest(`/api/v1/staff-attendance?branch_id=${encodedBranch}&business_date=${today}`, init);
-        if (!response.ok) throw new Error('No se pudo sincronizar la asistencia desde la API.');
-        return (await response.json() as { items: StaffAttendanceItem[] }).items;
-      }
-      return (await listStaffAttendance(today, operationalToken!, branchId, init)).items;
-    };
-
-    const loadCorrections = async (): Promise<StaffAttendanceCorrectionItem[]> => {
-      if (liveRequest) {
-        const res = await liveRequest(`/api/v1/staff-attendance/branches/${encodedBranch}/corrections?business_date=${today}`, init);
-        if (!res.ok) throw new Error('corrections');
-        return (await res.json()) as StaffAttendanceCorrectionItem[];
-      }
-      return listBranchAttendanceCorrections(branchId, today, operationalToken!, init);
-    };
-
-    const loadSchedules = async (): Promise<StaffScheduleSeriesItem[]> => {
-      let res: Response;
-      if (liveRequest) {
-        res = await liveRequest(`/api/v1/staff-schedules/branches/${encodedBranch}`, init);
-      } else {
-        const config = getReceptionConfig();
-        const targetBranchId = branchId ?? config.branchId;
-        res = await fetch(`${config.apiOrigin}/api/v1/staff-schedules/branches/${encodeURIComponent(targetBranchId)}`, {
-          headers: { Authorization: `Bearer ${operationalToken}` },
-          signal,
-        });
-      }
-      if (!res.ok) throw new Error('schedules');
-      const data = await res.json();
-      return Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
-    };
-
+    const request: LiveRequest = (path, init) => liveRequest(path, { ...init, signal });
     const [attendance, corrections, schedules] = await Promise.allSettled([
-      loadAttendance(),
-      loadCorrections(),
-      loadSchedules(),
+      listStaffAttendance(today, undefined, branchId, request),
+      listBranchAttendanceCorrections(branchId, today, undefined, request),
+      listScheduleSeries(request, branchId ?? ''),
     ]);
     if (signal.aborted) return;
 
     if (attendance.status === 'rejected') {
-      const err = attendance.reason;
-      if (err instanceof OperationalApiHttpError || err instanceof OperationalApiNetworkError || (err instanceof Error && err.message)) {
-        setLiveError(err.message);
-      } else {
-        setLiveError('Error al sincronizar asistencia.');
-      }
+      setLiveError(errorMessage(attendance.reason, 'Error al sincronizar asistencia.'));
       return;
     }
 
@@ -210,11 +200,11 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     if (schedules.status === 'rejected') warnings.push('No se pudieron cargar los horarios.');
 
     setBranchSchedules(schedules.status === 'fulfilled' ? schedules.value : []);
-    setLiveRecords(attendance.value);
+    setLiveRecords(attendance.value.items);
     setCorrectionsByAttendanceId(corrMap);
     setLiveWarnings(warnings);
     setLiveError(null);
-  }, [branchId, liveRequest, operationalToken]);
+  }, [branchId, liveRequest]);
 
   function handleStartCorrection(recId: string) {
     if (correctingRecordId === recId) {
@@ -239,39 +229,13 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
     }
     setCorrectionSubmitting(true);
     try {
-      const rec = liveRecords.find(r => r.id === recordId);
-      const originalValue = rec
-        ? correctionField === 'clock_in_at'
-          ? (rec.device_captured_at ?? rec.occurred_at)
-          : correctionField === 'clock_out_at'
-          ? (rec.checkout_at ?? '')
-          : correctionField === 'status'
-          ? rec.status
-          : ''
-        : '';
-
-      const payload = {
-        field_name: correctionField,
-        original_value: originalValue || null,
-        corrected_value: correctionValue.trim(),
-        reason: correctionReason.trim(),
-      };
-
-      let result: StaffAttendanceCorrectionItem;
-      if (liveRequest) {
-        const response = await liveRequest(`/api/v1/staff-attendance/${encodeURIComponent(recordId)}/corrections`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.detail || 'Error al enviar corrección.');
-        }
-        result = (await response.json()) as StaffAttendanceCorrectionItem;
-      } else {
-        result = await correctStaffAttendance(recordId, payload, operationalToken ?? undefined);
-      }
+      // original_value is derived server-side.
+      const result = await correctStaffAttendance(
+        recordId,
+        { field_name: correctionField, corrected_value: correctionValue.trim(), reason: correctionReason.trim() },
+        undefined,
+        liveRequest
+      );
 
       setCorrectionsByAttendanceId(prev => ({
         ...prev,
@@ -291,7 +255,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         open: true,
         type: 'error',
         title: 'Error al corregir asistencia',
-        description: err instanceof Error ? err.message : 'Error al guardar la corrección.',
+        description: errorMessage(err, 'Error al guardar la corrección.'),
       });
     } finally {
       setCorrectionSubmitting(false);
@@ -325,9 +289,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         }
       >();
       activeStaff.forEach(staff => {
-        const recordsForStaff = liveRecords.filter(
-          r => r.profile_id === staff.id || r.full_name.toLowerCase() === staff.name.toLowerCase()
-        );
+        const recordsForStaff = liveRecords.filter(r => r.profile_id === staff.id);
         const activeRec = recordsForStaff.find(r => !r.checkout_at);
         if (activeRec) {
           map.set(staff.id, {
@@ -338,13 +300,15 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
               recordedBy: activeRec.recorded_by,
               notes: activeRec.notes ?? undefined,
               status: activeRec.status,
-              review_required:
-                activeRec.review_required || activeRec.clock_validation_status === 'review_required',
+              review_required: needsReview(activeRec),
               clock_validation_status: activeRec.clock_validation_status,
             },
           });
         } else {
-          const latestClosed = recordsForStaff[0];
+          const latestClosed = recordsForStaff.reduce<StaffAttendanceItem | undefined>(
+            (latest, r) => (!latest || r.occurred_at > latest.occurred_at ? r : latest),
+            undefined
+          );
           map.set(staff.id, {
             isClockedIn: false,
             activeRecord: latestClosed
@@ -355,9 +319,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                   recordedBy: latestClosed.recorded_by,
                   notes: latestClosed.notes ?? undefined,
                   status: latestClosed.status,
-                  review_required:
-                    latestClosed.review_required ||
-                    latestClosed.clock_validation_status === 'review_required',
+                  review_required: needsReview(latestClosed),
                   clock_validation_status: latestClosed.clock_validation_status,
                 }
               : undefined,
@@ -431,111 +393,49 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   }, [activeStaff, staffStatuses, statusFilter, departmentFilter, searchQuery]);
 
 
-  const hasScheduledShiftToday = useCallback((staff: StaffAttendancePerson): boolean => {
-    const todayStr = businessDate();
-    const todayWeekday = (new Date().getDay() + 6) % 7;
-    const safeSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
-    if (safeSchedules.length > 0) {
-      return branchSchedules.some(s =>
-        s.profile_id === staff.id &&
-        s.start_date <= todayStr &&
-        (!s.end_date || s.end_date >= todayStr) &&
-        (!s.cancelled_from || s.cancelled_from > todayStr) &&
-        s.weekdays.includes(todayWeekday)
-      );
-    }
-    return Boolean(staff.shift && !staff.shift.toLowerCase().startsWith('sin turno') && !staff.shift.toLowerCase().startsWith('descanso'));
-  }, [branchSchedules]);
+  // Today's next schedule series for a person with no attendance yet; undefined when all are taken (unscheduled flow applies).
+  const scheduledSeriesToday = useCallback((staffId: string): StaffScheduleSeriesItem | undefined => {
+    const today = businessDate();
+    const todays = branchSchedules.filter(s => s.profile_id === staffId && seriesRunsOn(s, today));
+    return todays.find(s => !liveRecords.some(r => r.profile_id === staffId && r.series_id === s.id && r.occurrence_date === today));
+  }, [branchSchedules, liveRecords]);
+
+  const hasScheduledShiftToday = useCallback((staff: StaffAttendancePerson): boolean =>
+    branchSchedules.length > 0 ? Boolean(scheduledSeriesToday(staff.id)) : hasRosterShift(staff),
+  [branchSchedules, scheduledSeriesToday]);
 
   const colleaguesWithShift = useMemo(() => {
-    const todayStr = businessDate();
-    const todayWeekday = (new Date().getDay() + 6) % 7;
-    if (branchSchedules.length > 0) {
-      return activeStaff
-        .filter(s => {
-          const isClockedIn = staffStatuses.get(s.id)?.isClockedIn;
-          if (isClockedIn) return false;
-          return branchSchedules.some(series =>
-            series.profile_id === s.id &&
-            series.start_date <= todayStr &&
-            (!series.end_date || series.end_date >= todayStr) &&
-            (!series.cancelled_from || series.cancelled_from > todayStr) &&
-            series.weekdays.includes(todayWeekday)
-          );
-        })
-        .map(s => {
-          const series = branchSchedules.find(series =>
-            series.profile_id === s.id &&
-            series.start_date <= todayStr &&
-            (!series.end_date || series.end_date >= todayStr) &&
-            (!series.cancelled_from || series.cancelled_from > todayStr) &&
-            series.weekdays.includes(todayWeekday)
-          );
-          const timeText = series
-            ? `${series.start_time.slice(0, 5)} - ${series.end_time.slice(0, 5)}`
-            : (s.shift || 'Horario regular');
-          return {
-            staffId: s.id,
-            name: s.name,
-            seriesId: series?.id,
-            displayName: `${s.name} (${timeText})`,
-          };
-        });
-    }
     return activeStaff
-      .filter(s => {
-        const isClockedIn = staffStatuses.get(s.id)?.isClockedIn;
-        if (isClockedIn) return false;
-        return Boolean(s.shift && !s.shift.toLowerCase().startsWith('sin turno') && !s.shift.toLowerCase().startsWith('descanso'));
-      })
-      .map(s => ({
-        staffId: s.id,
-        name: s.name,
-        seriesId: undefined,
-        displayName: `${s.name} (${s.shift})`,
-      }));
-  }, [activeStaff, branchSchedules, staffStatuses]);
+      .filter(s => !staffStatuses.get(s.id)?.isClockedIn && hasScheduledShiftToday(s))
+      .map(s => {
+        const series = scheduledSeriesToday(s.id);
+        const timeText = series
+          ? `${series.start_time.slice(0, 5)} - ${series.end_time.slice(0, 5)}`
+          : (s.shift || 'Horario regular');
+        return {
+          staffId: s.id,
+          name: s.name,
+          seriesId: series?.id,
+          displayName: `${s.name} (${timeText})`,
+        };
+      });
+  }, [activeStaff, staffStatuses, hasScheduledShiftToday, scheduledSeriesToday]);
   async function handleClockIn(staff: StaffAttendancePerson, options?: { series_id?: string; covered_profile_id?: string; notes?: string }) {
     if (isLive) {
+      const today = businessDate();
+      const scope = `in:${staff.id}:${options?.series_id ?? ''}:${today}`;
       try {
-        const idempotencyKey =
-          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? crypto.randomUUID()
-            : `key-${Date.now()}`;
-        const deviceCapturedAt = new Date().toISOString();
-        const today = deviceCapturedAt.slice(0, 10);
-
+        const pending = attempt(scope);
         const payload: RecordAttendancePayload = {
           occurrence_date: today,
-          device_captured_at: deviceCapturedAt,
-          idempotency_key: idempotencyKey,
+          device_captured_at: pending.capturedAt,
+          idempotency_key: pending.key,
           series_id: options?.series_id,
           covered_profile_id: options?.covered_profile_id,
           notes: options?.notes ?? (notesByStaffId[staff.id]?.trim() || undefined),
         };
-        const record = liveRequest
-          ? await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/profiles/${encodeURIComponent(staff.id)}`, {
-              method: 'POST',
-              body: JSON.stringify(payload),
-            }).then(async response => {
-              if (!response.ok) {
-                const messages: Record<number, string> = {
-                  401: 'La sesión expiró o fue revocada. Inicia sesión nuevamente.',
-                  403: 'No tienes autorización para realizar esta acción.',
-                  409: 'La solicitud entra en conflicto con el estado actual.',
-                  429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.',
-                  422: 'Revisa los datos enviados e intenta nuevamente.',
-                };
-                throw new Error(messages[response.status] ?? 'No se pudo registrar la entrada desde la API.');
-              }
-              return response.json() as Promise<StaffAttendanceItem>;
-            })
-          : await recordStaffAttendance(
-          staff.id,
-          payload,
-          operationalToken ?? undefined,
-          branchId
-        );
+        const record = await recordStaffAttendance(staff.id, payload, undefined, branchId, liveRequest);
+        endAttempt(scope);
 
         setLiveRecords(prev => [record, ...prev.filter(r => r.id !== record.id)]);
         const timeStr = formatClockTime(record.device_captured_at ?? record.occurred_at);
@@ -547,14 +447,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
         });
         setNotesByStaffId(prev => ({ ...prev, [staff.id]: '' }));
       } catch (err) {
-        const errorMsg =
-          err instanceof OperationalApiHttpError
-            ? err.message
-            : err instanceof OperationalApiNetworkError
-            ? err.message
-            : err instanceof Error
-            ? err.message
-            : 'Error desconocido al registrar entrada';
+        endAttempt(scope, err);
+        const errorMsg = errorMessage(err, 'Error desconocido al registrar entrada');
         setToast({
           open: true,
           type: 'error',
@@ -603,7 +497,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       setUnscheduledStaff(staff);
       return;
     }
-    void handleClockIn(staff);
+    void handleClockIn(staff, { series_id: scheduledSeriesToday(staff.id)?.id });
   }
   async function handleClockOut(staff: StaffAttendancePerson) {
     if (isLive) {
@@ -620,12 +514,9 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
       }
 
       try {
-        const checkout = liveRequest
-          ? await liveRequest(`/api/v1/staff-attendance/${encodeURIComponent(activeRecordId)}/checkout`, { method: 'POST', body: '{}' }).then(async response => {
-              if (!response.ok) throw new Error('No se pudo registrar la salida desde la API.');
-              return response.json() as Promise<{ occurred_at: string; recorded_by: string }>;
-            })
-          : await recordStaffCheckout(activeRecordId, operationalToken ?? undefined);
+        const scope = `out:${activeRecordId}`;
+        const checkout = await recordStaffCheckout(activeRecordId, undefined, attempt(scope).key, liveRequest);
+        endAttempt(scope);
         setLiveRecords(prev =>
           prev.map(r =>
             r.id === activeRecordId
@@ -645,14 +536,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
           description: `${staff.name} ha concluido su turno (${timeStr}).`,
         });
       } catch (err) {
-        const errorMsg =
-          err instanceof OperationalApiHttpError
-            ? err.message
-            : err instanceof OperationalApiNetworkError
-            ? err.message
-            : err instanceof Error
-            ? err.message
-            : 'Error desconocido al registrar salida';
+        endAttempt(`out:${activeRecordId}`, err);
+        const errorMsg = errorMessage(err, 'Error desconocido al registrar salida');
         setToast({
           open: true,
           type: 'error',
@@ -911,16 +796,8 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
             const dept = staff.department ?? 'Staff';
             const deptClass = getDepartmentClass(staff.department);
 
-            const todayStr = businessDate();
-            const todayWeekday = (new Date().getDay() + 6) % 7;
             const safeBranchSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
-            const todaySeries = safeBranchSchedules.find(s =>
-              s.profile_id === staff.id &&
-              s.start_date <= todayStr &&
-              (!s.end_date || s.end_date >= todayStr) &&
-              (!s.cancelled_from || s.cancelled_from > todayStr) &&
-              s.weekdays.includes(todayWeekday)
-            );
+            const todaySeries = safeBranchSchedules.find(s => s.profile_id === staff.id && seriesRunsOn(s, businessDate()));
             const hasAnySchedule = safeBranchSchedules.some(s => s.profile_id === staff.id);
             const displayShift = safeBranchSchedules.length > 0 && hasAnySchedule
               ? (todaySeries ? `${todaySeries.start_time.slice(0, 5)} - ${todaySeries.end_time.slice(0, 5)}` : 'Descanso hoy')

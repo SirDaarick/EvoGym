@@ -8,6 +8,37 @@ import {
 
 export { OperationalApiHttpError, OperationalApiNetworkError };
 
+export type AttendanceRequest = (path: string, init?: RequestInit) => Promise<Response>;
+
+const HTTP_MESSAGES: Record<number, string> = {
+  401: 'La sesión expiró o fue revocada. Inicia sesión nuevamente.',
+  403: 'No tienes autorización para realizar esta acción.',
+  409: 'La solicitud entra en conflicto con el estado actual.',
+  429: 'Demasiadas solicitudes. Intenta nuevamente más tarde.',
+  422: 'Revisa los datos enviados e intenta nuevamente.',
+};
+
+// Without an injected request this keeps the token/fetch behavior of receptionApi.
+async function send<T>(path: string, init: RequestInit, token?: string, injected?: AttendanceRequest): Promise<T> {
+  if (!injected) {
+    return request<T>(getReceptionConfig(), path, token ?? readOperationalToken() ?? undefined, init);
+  }
+  let response: Response;
+  try {
+    response = await (init.body ? injected(path, { ...init, headers: { 'Content-Type': 'application/json' } }) : injected(path));
+  } catch {
+    throw new OperationalApiNetworkError();
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new OperationalApiHttpError(
+      response.status,
+      typeof body?.detail === 'string' ? body.detail : (HTTP_MESSAGES[response.status] ?? `La solicitud falló (${response.status}).`)
+    );
+  }
+  return response.json() as Promise<T>;
+}
+
 export interface StaffAttendanceItem {
   id: string;
   profile_id: string;
@@ -69,7 +100,7 @@ export interface StaffAttendanceCorrectionItem {
 
 export interface StaffCorrectionRequest {
   field_name: string;
-  original_value: string | null;
+  original_value?: string | null;
   corrected_value: string;
   reason: string;
 }
@@ -78,11 +109,9 @@ export async function listStaffAttendance(
   businessDate?: string,
   token?: string,
   branchId?: string,
-  init?: RequestInit
+  injected?: AttendanceRequest
 ): Promise<StaffAttendancePage> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  const targetBranchId = branchId ?? config.branchId;
+  const targetBranchId = branchId ?? getReceptionConfig().branchId;
   const params = new URLSearchParams();
   if (targetBranchId) {
     params.set('branch_id', targetBranchId);
@@ -91,75 +120,63 @@ export async function listStaffAttendance(
     params.set('business_date', businessDate);
   }
   const queryString = params.toString() ? `?${params.toString()}` : '';
-  return request<StaffAttendancePage>(config, `/api/v1/staff-attendance${queryString}`, activeToken, init);
+  return send<StaffAttendancePage>(`/api/v1/staff-attendance${queryString}`, {}, token, injected);
 }
 
 export async function recordStaffAttendance(
   profileId: string,
   payload?: RecordAttendancePayload,
   token?: string,
-  branchId?: string
+  branchId?: string,
+  injected?: AttendanceRequest
 ): Promise<StaffAttendanceItem> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  const targetBranchId = branchId ?? config.branchId;
-  const body = payload ? JSON.stringify(payload) : JSON.stringify({});
-  return request<StaffAttendanceItem>(
-    config,
+  const targetBranchId = branchId ?? getReceptionConfig().branchId;
+  return send<StaffAttendanceItem>(
     `/api/v1/staff-attendance/branches/${encodeURIComponent(targetBranchId)}/profiles/${encodeURIComponent(profileId)}`,
-    activeToken,
-    {
-      method: 'POST',
-      body,
-    }
+    { method: 'POST', body: JSON.stringify(payload ?? {}) },
+    token,
+    injected
   );
 }
 
 export async function recordStaffCheckout(
   attendanceId: string,
-  token?: string
+  token?: string,
+  idempotencyKey?: string,
+  injected?: AttendanceRequest
 ): Promise<StaffAttendanceCheckoutItem> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  return request<StaffAttendanceCheckoutItem>(
-    config,
+  return send<StaffAttendanceCheckoutItem>(
     `/api/v1/staff-attendance/${encodeURIComponent(attendanceId)}/checkout`,
-    activeToken,
-    {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }
+    { method: 'POST', body: JSON.stringify(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) },
+    token,
+    injected
   );
 }
 
 export async function correctStaffAttendance(
   attendanceId: string,
   payload: StaffCorrectionRequest,
-  token?: string
+  token?: string,
+  injected?: AttendanceRequest
 ): Promise<StaffAttendanceCorrectionItem> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  return request<StaffAttendanceCorrectionItem>(
-    config,
+  return send<StaffAttendanceCorrectionItem>(
     `/api/v1/staff-attendance/${encodeURIComponent(attendanceId)}/corrections`,
-    activeToken,
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }
+    { method: 'POST', body: JSON.stringify(payload) },
+    token,
+    injected
   );
 }
 
 export async function getStaffAttendanceCorrections(
   attendanceId: string,
-  token?: string
+  token?: string,
+  injected?: AttendanceRequest
 ): Promise<StaffAttendanceCorrectionItem[]> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  return request<StaffAttendanceCorrectionItem[]>(
-    config,
+  return send<StaffAttendanceCorrectionItem[]>(
     `/api/v1/staff-attendance/${encodeURIComponent(attendanceId)}/corrections`,
-    activeToken
+    {},
+    token,
+    injected
   );
 }
 
@@ -167,20 +184,18 @@ export async function listBranchAttendanceCorrections(
   branchId?: string,
   businessDate?: string,
   token?: string,
-  init?: RequestInit
+  injected?: AttendanceRequest
 ): Promise<StaffAttendanceCorrectionItem[]> {
-  const config = getReceptionConfig();
-  const activeToken = token ?? readOperationalToken() ?? undefined;
-  const targetBranchId = branchId ?? config.branchId;
+  const targetBranchId = branchId ?? getReceptionConfig().branchId;
   const params = new URLSearchParams();
   if (businessDate) {
     params.set('business_date', businessDate);
   }
   const queryString = params.toString() ? `?${params.toString()}` : '';
-  return request<StaffAttendanceCorrectionItem[]>(
-    config,
+  return send<StaffAttendanceCorrectionItem[]>(
     `/api/v1/staff-attendance/branches/${encodeURIComponent(targetBranchId)}/corrections${queryString}`,
-    activeToken,
-    init
+    {},
+    token,
+    injected
   );
 }

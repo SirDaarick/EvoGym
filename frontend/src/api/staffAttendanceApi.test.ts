@@ -232,3 +232,21 @@ describe('staffAttendanceApi', () => {
     });
   });
 });
+
+describe('staffAttendanceApi injected request', () => {
+  it('sends checkout idempotency_key through the injected request and maps HTTP errors', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'c1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 409 }));
+    await recordStaffCheckout('att-1', undefined, 'key-1', request);
+    expect(request).toHaveBeenCalledWith(
+      '/api/v1/staff-attendance/att-1/checkout',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ idempotency_key: 'key-1' }) })
+    );
+    await expect(recordStaffCheckout('att-1', undefined, 'key-1', request)).rejects.toMatchObject({
+      status: 409,
+      message: 'La solicitud entra en conflicto con el estado actual.',
+    });
+  });
+});
