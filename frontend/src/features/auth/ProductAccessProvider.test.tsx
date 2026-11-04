@@ -5,6 +5,7 @@ import { AdminAuthClient } from '../../api/adminAuthApi';
 import type { ProfileIdentityChoice } from '../../api/profileAccessApi';
 import { ProductAccessProvider, useProductAccess } from './ProductAccessProvider';
 import { useAdminSession } from './AdminSessionProvider';
+import { createTestQueryClient } from '../../test/renderWithQuery';
 import { StaffProfileSelection } from '../staff/StaffProfileSelection';
 
 const adminId = '123e4567-e89b-42d3-a456-426614174000';
@@ -236,6 +237,30 @@ describe('live product profile access', () => {
     await waitFor(() => expect(screen.getByLabelText('Admin session status')).toHaveTextContent('authenticated'));
     await waitFor(() => expect(fetchImpl.mock.calls.filter(call => String(call[0]).endsWith('/admin/profile-access/choices'))).toHaveLength(2));
     expect(screen.getByLabelText('Available identities')).toHaveTextContent(adminId);
+  });
+
+  it('clears the query cache when the principal changes or is cleared', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/v1/auth/refresh') return response(401);
+      if (path === '/api/v1/auth/sessions') return response(201, { access_token: 'x'.repeat(43), token_type: 'bearer', expires_at: new Date(Date.now() + 3600000).toISOString() });
+      if (path === '/api/v1/admin/profile-access/choices') return response(200, { current_identity_id: adminId, identities: [adminIdentity] });
+      if (path === '/api/v1/auth/profile-access/context') return response(200, { identities: [] });
+      if (path === '/api/v1/auth/profile-access/logout') return response(204);
+      if (path === '/api/v1/auth/logout') return response(204);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const queryClient = createTestQueryClient();
+    const client = new AdminAuthClient({ apiOrigin: 'https://api.example.test', fetchImpl });
+    render(<MemoryRouter><ProductAccessProvider client={client} queryClient={queryClient} apiOrigin="https://api.example.test" fetchImpl={fetchImpl as typeof fetch}><ExitProbe /></ProductAccessProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in Admin' }));
+    await waitFor(() => expect(screen.getByLabelText('Available identities')).toHaveTextContent(adminId));
+    queryClient.setQueryData(['stale-before-enter'], 1);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Admin' }));
+    await waitFor(() => expect(queryClient.getQueryData(['stale-before-enter'])).toBeUndefined());
+    queryClient.setQueryData(['stale-before-exit'], 2);
+    fireEvent.click(screen.getByRole('button', { name: 'Exit one' }));
+    await waitFor(() => expect(queryClient.getQueryData(['stale-before-exit'])).toBeUndefined());
   });
 
   it('reports Admin logout failure without invoking paired-device unlink', async () => {

@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { QueryClient } from '@tanstack/react-query';
+import { queryClient as defaultQueryClient } from '../../app/queryClient';
 import { AdminAuthClient } from '../../api/adminAuthApi';
 import {
   changeProfileInitialPin, enterEmployeeProfile, getAdminProfileChoices, getPairedProfileChoices, logoutEmployeeProfileSession, logoutProfileAccess, ProfileAccessApiError,
@@ -38,7 +40,7 @@ function safeMessage(reason: unknown): string {
   return 'Profile access could not be completed. Check your connection and try again.';
 }
 
-function ProductAccessState({ children, apiOrigin, fetchImpl }: { children: ReactNode; apiOrigin?: string; fetchImpl?: typeof fetch }) {
+function ProductAccessState({ children, apiOrigin, fetchImpl, queryClient }: { children: ReactNode; apiOrigin?: string; fetchImpl?: typeof fetch; queryClient: QueryClient }) {
   const admin = useAdminSession();
   const [loading, setLoading] = useState(true);
   const [identities, setIdentities] = useState<ProfileIdentityChoice[]>([]);
@@ -66,6 +68,16 @@ function ProductAccessState({ children, apiOrigin, fetchImpl }: { children: Reac
     }
     return complete;
   }, [apiOrigin, fetchImpl]);
+
+  // Cache isolation: any change of the active principal (sign-in, profile switch,
+  // leaveProfile, sign-out, session expiry) drops every cached query.
+  const principalKey = principal ? `${principal.kind}:${principal.identity.id}:${principal.kind === 'employee' ? `${principal.branch.profile_id}:${principal.session.accessToken}` : ''}` : '';
+  const previousPrincipalKey = useRef(principalKey);
+  useEffect(() => {
+    if (previousPrincipalKey.current === principalKey) return;
+    previousPrincipalKey.current = principalKey;
+    queryClient.clear();
+  }, [principalKey, queryClient]);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; }; }, []);
 
@@ -320,8 +332,8 @@ function ProductAccessState({ children, apiOrigin, fetchImpl }: { children: Reac
   return <ProductAccessContext.Provider value={value}>{children}</ProductAccessContext.Provider>;
 }
 
-export function ProductAccessProvider({ children, apiOrigin, client, fetchImpl }: {
-  children: ReactNode; apiOrigin?: string; client?: AdminAuthClient; fetchImpl?: typeof fetch;
+export function ProductAccessProvider({ children, apiOrigin, client, fetchImpl, queryClient = defaultQueryClient }: {
+  children: ReactNode; apiOrigin?: string; client?: AdminAuthClient; fetchImpl?: typeof fetch; queryClient?: QueryClient;
 }) {
   const [created] = useState(() => {
     if (client) return { value: client, error: '' };
@@ -330,7 +342,7 @@ export function ProductAccessProvider({ children, apiOrigin, client, fetchImpl }
   });
   if (!created.value) return <main role="alert">{created.error}</main>;
   return <AdminSessionProvider client={created.value}>
-    <ProductAccessState apiOrigin={apiOrigin} fetchImpl={fetchImpl}>{children}</ProductAccessState>
+    <ProductAccessState apiOrigin={apiOrigin} fetchImpl={fetchImpl} queryClient={queryClient}>{children}</ProductAccessState>
   </AdminSessionProvider>;
 }
 
