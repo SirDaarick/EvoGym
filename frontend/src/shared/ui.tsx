@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { Dialog } from './components/ui/Dialog';
 import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 export function Button({ variant = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' }) {
@@ -77,7 +78,6 @@ export function Modal({
   isOpen,
   onClose,
   title,
-  titleId = 'modal-title',
   children,
   actions,
   maxWidth = '440px',
@@ -85,61 +85,19 @@ export function Modal({
   className = '',
   cardClassName = '',
 }: ModalProps) {
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !isSubmitting) {
-        onClose();
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting, onClose]);
-
-  if (!isOpen) return null;
-
+  // titleId is kept for API compatibility; Dialog generates its own accessible ids.
   return (
-    <div
-      className={`staff-modal-overlay ${className}`.trim()}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={e => {
-        if (e.target === e.currentTarget && !isSubmitting) {
-          onClose();
-        }
-      }}
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      title={title}
+      footer={actions}
+      maxWidth={maxWidth}
+      dismissible={!isSubmitting}
+      className={className}
+      panelClassName={cardClassName}
     >
-      <div
-        className={`staff-modal-card ${cardClassName}`.trim()}
-        style={{ maxWidth, textAlign: 'left', alignItems: 'stretch' }}
-      >
-        <div
-          className="staff-modal-header"
-          style={{
-            display: 'flex',
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
-          <h2 id={titleId} style={{ margin: 0 }}>
-            {title}
-          </h2>
-          <button
-            type="button"
-            className="staff-modal-close"
-            onClick={onClose}
-            disabled={isSubmitting}
-            aria-label="Cerrar"
-          >
-            ✕
-          </button>
-        </div>
-        {children}
-        {actions && <div className="staff-modal-actions">{actions}</div>}
-      </div>
-    </div>
+      {children}
+    </Dialog>
   );
 }
