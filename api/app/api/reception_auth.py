@@ -2,15 +2,13 @@
 
 from datetime import datetime, timezone
 import re
-from threading import BoundedSemaphore
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.admin_auth import _bounded_body, _staff_rate_limit
-from app.auth.authorization import AuthorizationDenied
-from app.auth.sessions import issue_reception_session, reception_profiles
+from app.auth import reception as service
 
 router = APIRouter(prefix="/api/v1/auth/reception", tags=["reception authentication"])
 
@@ -35,10 +33,7 @@ def _station_credential(request: Request) -> str:
 async def profiles(request: Request, response: Response, configured=Depends(_staff_rate_limit)):
     credential = _station_credential(request)
     _settings, factory = configured
-    try:
-        rows = reception_profiles(factory, credential)
-    except AuthorizationDenied:
-        raise HTTPException(401, "Authentication failed.") from None
+    rows = service.profiles(factory, credential)
     response.headers["Cache-Control"] = "no-store"
     return {"profiles": [{"id": row.id, "full_name": row.full_name, "position": row.position} for row in rows]}
 
@@ -48,15 +43,7 @@ async def login(request: Request, response: Response, configured=Depends(_staff_
     body = await _bounded_body(request, ReceptionLoginBody)
     credential = _station_credential(request)
     _settings, factory = configured
-    semaphore: BoundedSemaphore = request.app.state.password_hash_capacity
-    if not semaphore.acquire(blocking=False):
-        raise HTTPException(503, "Authentication is temporarily unavailable.")
-    try:
-        result = issue_reception_session(factory, credential, body.profile_id, body.pin)
-    except AuthorizationDenied:
-        raise HTTPException(401, "Authentication failed.") from None
-    finally:
-        semaphore.release()
+    result = service.login(factory, request.app.state.password_hash_capacity, credential, body.profile_id, body.pin)
     response.headers["Cache-Control"] = "no-store"
     return {"access_token": result.token, "token_type": "bearer",
             "expires_at": result.expires_at.astimezone(timezone.utc).isoformat()}

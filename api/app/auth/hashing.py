@@ -1,4 +1,9 @@
+from contextlib import contextmanager
+from threading import BoundedSemaphore
+
 import bcrypt
+
+from app.errors import HttpStatusError
 
 
 _BCRYPT_ROUNDS = 12
@@ -24,3 +29,14 @@ def verify_pin(pin: str, stored_hash: str) -> bool:
         return bcrypt.checkpw(_encode_pin(pin), stored_hash.encode("ascii"))
     except (ValueError, TypeError, UnicodeError):
         return False
+
+
+@contextmanager
+def hash_capacity(semaphore: BoundedSemaphore):
+    """Bound concurrent PIN hashing: 503 when no capacity is free."""
+    if not semaphore.acquire(blocking=False):
+        raise HttpStatusError(503)
+    try:
+        yield
+    finally:
+        semaphore.release()

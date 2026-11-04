@@ -9,13 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied
-from app.auth.devices import (
-    DevicePairingDenied,
-    issue_device_pairing_code,
-    list_paired_devices,
-    pair_device,
-    revoke_paired_device,
-)
+from app.auth import device_pairing as service
 from app.observability.logging import request_id
 from app.api.deps import SessionFactoryDep
 
@@ -72,16 +66,7 @@ def issue_pairing_code(
     admin_id, _current_session = _admin_principal(request, credentials)
     req_id = UUID(request_id())
     ttl = payload.ttl_seconds if payload else 900
-    try:
-        issued = issue_device_pairing_code(
-            factory,
-            admin_id=admin_id,
-            staff_id=staff_id,
-            ttl_seconds=ttl,
-            request_id=req_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, detail=str(exc))
+    issued = service.issue_pairing_code(factory, admin_id, staff_id, ttl, req_id)
     return {
         "id": str(issued.id),
         "pairing_code": issued.raw_code,
@@ -96,7 +81,7 @@ def list_devices(
     *, factory: SessionFactoryDep,
 ):
     admin_id, _current_session = _admin_principal(request, credentials)
-    devices = list_paired_devices(factory, admin_id)
+    devices = service.list_devices(factory, admin_id)
     return {
         "devices": [
             {
@@ -123,9 +108,7 @@ def revoke_device(
 ):
     admin_id, _current_session = _admin_principal(request, credentials)
     req_id = UUID(request_id())
-    success = revoke_paired_device(factory, admin_id, device_id, request_id=req_id)
-    if not success:
-        raise HTTPException(404, "The requested resource was not found.")
+    service.revoke_device(factory, admin_id, device_id, req_id)
     return {"revoked": True}
 
 
@@ -138,17 +121,10 @@ def submit_device_pairing(
 ):
     _settings, factory = _rate_limit(request)
     req_id = UUID(request_id())
-    try:
-        device_id = pair_device(
-            factory,
-            login_identifier=payload.login_identifier,
-            pairing_code_str=payload.pairing_code,
-            device_identifier_str=payload.device_identifier,
-            device_name=payload.device_name,
-            request_id=req_id,
-        )
-    except DevicePairingDenied as exc:
-        raise HTTPException(401, detail=str(exc))
+    device_id = service.submit_pairing(
+        factory, payload.login_identifier, payload.pairing_code, payload.device_identifier,
+        payload.device_name, req_id,
+    )
     return {
         "device_id": str(device_id),
         "status": "paired",
