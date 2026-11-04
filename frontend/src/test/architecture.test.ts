@@ -10,7 +10,7 @@ const ALLOWED_DEMO_IMPORTS: Record<string, string[]> = {
   'app/ProductRoutes.tsx': ['DemoProvider', 'adapter'],
   'features/gimi/GimiChatWidget.tsx': ['DemoProvider'],
   'features/gimi/GimiDashboard.tsx': ['DemoProvider'],
-  'features/inventory/Inventory.tsx': ['DemoProvider', 'inventoryOperations'],
+  'features/inventory/DemoReceptionInventory.tsx': ['DemoProvider', 'inventoryOperations'],
   'features/members/MemberDetail.tsx': ['DemoProvider', 'memberAnalyticsSelector', 'memberNotes'],
   'features/members/MemberSearch.tsx': ['DemoProvider'],
   'features/members/Members.tsx': ['DemoProvider', 'attendanceOperations', 'operations'],
