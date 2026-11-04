@@ -1,7 +1,7 @@
+import { formatMoney } from '@/shared/formatters/money';
+import type { FinanceRow, FinanceSourceFamily, FinanceSourceTotal } from '@/domain/finance';
 import { useMemo } from 'react';
 import type { PendingMoneyResponse } from '../../../api/pendingMoneyApi';
-import { formatMoney } from '../../../demo/adapter';
-import type { FinanceRow, FinanceSourceFamily, FinanceSourceTotal } from '../../../demo/financeReportSelector';
 import { Badge, Button, EmptyState, Field, Notice, Panel } from '../../../shared/ui';
 import { FinanceRankingChart, FinanceSourcesDonutChart } from './FinanceCharts';
 import { FinanceTable } from './FinanceTable';

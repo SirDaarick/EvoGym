@@ -1,5 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useEffect } from 'react';
-import { formatMoney } from '../../demo/adapter';
 import { Button, Notice, Panel } from '../../shared/ui';
 
 export interface PendingBalanceModalProps {

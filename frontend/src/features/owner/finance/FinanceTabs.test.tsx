@@ -1,3 +1,4 @@
+import type { FinanceProjection, FinanceRow } from '@/domain/finance';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
@@ -5,7 +6,6 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DemoProvider, useDemo } from '../../../demo/DemoProvider';
 import { getFixedCosts, resetFixedCosts } from '../../../demo/fixedCostsStore';
-import type { FinanceProjection, FinanceRow } from '../../../demo/financeReportSelector';
 import { resetStaff } from '../../staff/staffStore';
 import { ExpenseReport } from '../ExpenseReport';
 import { CollectionsView } from './CollectionsView';

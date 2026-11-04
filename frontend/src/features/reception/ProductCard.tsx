@@ -1,5 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
 import type { Product } from '../../domain/models';
-import { formatMoney } from '../../demo/adapter';
 import './ProductCard.css';
 
 export type ProductCardItem = {

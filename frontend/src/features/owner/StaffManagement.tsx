@@ -1,3 +1,4 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   flexRender,
@@ -8,7 +9,6 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import { useStaff, saveStaffProfile, toggleStaffActive, type StaffProfile } from '../staff/staffStore';
-import { formatMoney, parseMoney } from '../../demo/adapter';
 import { Button, Panel, PageHeader, EmptyState } from '../../shared/ui';
 import SquishSwitch from '../catalog/react-bits/SquishSwitch';
 import CodeSlots, { type CodeSlotsStatus } from '../catalog/react-bits/CodeSlots';

@@ -1,3 +1,6 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { membershipHistory, membershipRenewalStreak } from '@/domain/membership';
+import { openAttendance } from '@/domain/attendance';
 import { useEffect, useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -5,8 +8,7 @@ import type { AttendanceVisit, GloveItem, GloveRentalRecord, LockerItem, LockerR
 import type { MemberPurchasePage, MemberReloadResponse, MemberSummary } from '../../api/memberReadsApi';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import type { MemberNoteDTO } from '../../api/membersApi';
-import { formatMoney } from '../../demo/adapter';
-import { addMemberNote, membershipHistory, membershipRenewalStreak } from '../../demo/memberNotes';
+import { addMemberNote } from '../../demo/memberNotes';
 import { getMemberHabits } from '../../demo/memberAnalyticsSelector';
 import { useDemo } from '../../demo/DemoProvider';
 
@@ -18,7 +20,6 @@ function useOptionalDemo() {
   }
 }
 import { getSelectedStaff } from '../staff/staffStore';
-import { openAttendance } from '../../demo/attendanceOperations';
 import { getMemberStatusInfo, rentalStatus } from './memberDetailUtils';
 import { Badge, Button, EmptyState, Panel, TableRegion } from '../../shared/ui';
 import { AttendanceCalendar } from '../attendance/AttendanceCalendar';

@@ -1,7 +1,7 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import { cashCountTotal, demoDenominations, parseCashQuantity } from '@/domain/cash';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { CashDenominationCount, DemoState, ShiftWindow } from '../../domain/models';
-import { formatMoney, parseMoney } from '../../demo/adapter';
-import { cashCountTotal, demoDenominations, parseCashQuantity } from '../../demo/cashDenominations';
 import { expectedStock } from '../../demo/inventoryOperations';
 import { getSelectedStaff, getStaffList } from '../staff/staffStore';
 import { Badge, Button, Notice } from '../../shared/ui';

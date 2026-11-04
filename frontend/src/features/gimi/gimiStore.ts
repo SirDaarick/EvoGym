@@ -1,3 +1,4 @@
+import { formatMoney } from '@/shared/formatters/money';
 import type {
   KnowledgeItem,
   KnowledgeCategory,
@@ -7,7 +8,6 @@ import type {
   GimiChatMessage,
 } from '../../domain/gimi';
 import type { DemoState, Role } from '../../domain/models';
-import { formatMoney } from '../../demo/adapter';
 
 const STORAGE_KEY_VAULT = 'evogym_gimi_vault_items';
 const STORAGE_KEY_ALERTS = 'evogym_gimi_alerts';

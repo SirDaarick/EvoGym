@@ -1,3 +1,4 @@
+import type { AttendancePeriod } from '@/domain/attendance';
 import { useMemo, useState } from 'react';
 import { barY, defineChart } from '@tanstack/charts';
 import { Chart } from '@tanstack/charts/react';
@@ -28,13 +29,7 @@ import {
 
 import { useDemo } from '../../demo/DemoProvider';
 import { isDemoDataDisabled } from '../../demo/adapter';
-import {
-  getAttendanceAnalytics,
-  type AttendancePeriod,
-  type DayOfWeekTrafficBin,
-  type HourlyTrafficBin,
-  type LiveOccupant,
-} from '../../demo/attendanceAnalyticsSelector';
+import { getAttendanceAnalytics, type DayOfWeekTrafficBin, type HourlyTrafficBin, type LiveOccupant } from '../../demo/attendanceAnalyticsSelector';
 import { Badge, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './AttendanceAnalytics.css';
 

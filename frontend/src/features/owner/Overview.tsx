@@ -1,3 +1,7 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { localDateKey } from '@/shared/formatters/date';
+import { validPeriod, type ReportingPeriod } from '@/domain/reporting';
+import type { AlertPeriod } from '@/domain/alerts';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -9,18 +13,11 @@ import {
 } from '@hugeicons/core-free-icons';
 
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import {
-  defaultPeriod,
-  localDateKey,
-  ownerSummary,
-  validPeriod,
-  type ReportingPeriod,
-} from '../../demo/ownerOperations';
+import { defaultPeriod, ownerSummary } from '../../demo/ownerOperations';
 import { getAttendanceAnalytics } from '../../demo/attendanceAnalyticsSelector';
 import { getMemberAnalytics } from '../../demo/memberAnalyticsSelector';
 import { getInventoryAnalytics } from '../../demo/inventoryAnalyticsSelector';
-import { getOperationalAlerts, type AlertPeriod } from '../../demo/alertCenterSelector';
+import { getOperationalAlerts } from '../../demo/alertCenterSelector';
 import { getStoredConversations } from '../gimi/gimiStore';
 import type { DemoState } from '../../domain/models';
 import type { GimiConversation } from '../../domain/gimi';

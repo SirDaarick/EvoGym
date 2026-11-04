@@ -1,6 +1,6 @@
+import { memberStatus } from '@/domain/membership';
 import type { Member } from '../../domain/models';
 import type { Tone } from '../../shared/ui';
-import { memberStatus } from '../../demo/memberStatus';
 
 export function getMemberStatusInfo(member: Member, referenceDate?: string) {
   const st = memberStatus(member, referenceDate);

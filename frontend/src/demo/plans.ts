@@ -1,20 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { PlanComposition, PlanService, PurchasedPlanSnapshot } from '../domain/models';
 
-export interface Plan {
-  id: string;
-  name: string;
-  amountMinor: number;
-  referenceAmountMinor?: number;
-  applicability: string;
-  restriction?: string;
-  kind: 'membership' | 'visit';
-  active?: boolean;
-  revision?: number;
-  composition?: PlanComposition;
-  sourceLabel?: string;
-  legacy?: boolean;
-}
+import type { PlanComposition, PlanService, PurchasedPlanSnapshot } from '../domain/models';
+import type { Plan } from '../domain/plans';
+export type { Plan } from '../domain/plans';
+
 
 const LEGACY_PLANS: Plan[] = [
   { id: 'gym-month', name: 'Gym mensual', amountMinor: 50000, applicability: 'Una área: Gym. Mensual por fechas de calendario.', kind: 'membership', active: true },

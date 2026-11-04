@@ -1,3 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { categoryLabels, validPeriod } from '@/domain/reporting';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import {
@@ -10,15 +12,7 @@ import {
 import type { ColumnDef, SortingState } from '@tanstack/react-table';
 import type { PaymentMethod } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import {
-  categoryLabels,
-  defaultPeriod,
-  ownerHistory,
-  validPeriod,
-  type HistoryFilter,
-  type HistoryRecord,
-} from '../../demo/ownerOperations';
+import { defaultPeriod, ownerHistory, type HistoryFilter, type HistoryRecord } from '../../demo/ownerOperations';
 import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { NotebookNotice, paymentMethods } from '../../shared/operationPresentation';
 import { PeriodFields } from './PeriodFields';

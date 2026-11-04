@@ -1,5 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useEffect, useState } from 'react';
-import { formatMoney } from '../../demo/adapter';
 import { Button } from '../../shared/ui';
 import './PointPaymentModal.css';
 

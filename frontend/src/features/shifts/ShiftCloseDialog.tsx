@@ -1,7 +1,7 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import { cashCountTotal, demoDenominations, parseCashQuantity } from '@/domain/cash';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react';
 import type { CashDenominationCount } from '../../domain/models';
-import { formatMoney, parseMoney } from '../../demo/adapter';
-import { cashCountTotal, demoDenominations, parseCashQuantity } from '../../demo/cashDenominations';
 import { useDemo } from '../../demo/DemoProvider';
 import { Button, Notice } from '../../shared/ui';
 import { closeShift as closeApiShift, getShift } from '../../api/shiftsApi';

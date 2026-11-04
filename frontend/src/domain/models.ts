@@ -247,7 +247,7 @@ export interface ExpenseRecord {
   amountMinor: Money;
   shiftId: string;
   recordedAt: string;
-  category?: import('../api/expensesApi').ExpenseCategory;
+  category?: import('./expenses').ExpenseCategoryKey;
   voucherReference?: string;
 }
 

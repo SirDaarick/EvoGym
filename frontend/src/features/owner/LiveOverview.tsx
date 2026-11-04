@@ -1,7 +1,7 @@
+import { validPeriod, type ReportingPeriod } from '@/domain/reporting';
 import { useEffect, useState } from 'react';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import { getOwnerOverview, type OwnerOverviewResponse } from '../../api/ownerOverviewApi';
-import { validPeriod, type ReportingPeriod } from '../../demo/ownerOperations';
 import { Notice, PageHeader } from '../../shared/ui';
 import { OverviewView } from './Overview';
 

@@ -1,3 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
+import type { Plan } from '@/domain/plans';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   flexRender,
@@ -15,15 +17,7 @@ import {
 } from '@hugeicons/core-free-icons';
 
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import {
-  savePlan,
-  togglePlanActive,
-  updatePlan,
-  getPlanStorageIssue,
-  usePlans,
-  type Plan,
-} from '../../demo/plans';
+import { savePlan, togglePlanActive, updatePlan, getPlanStorageIssue, usePlans } from '../../demo/plans';
 import { Badge, Button, EmptyState, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import './PlanCatalog.css';
 import { PlanEditor } from './PlanEditor';

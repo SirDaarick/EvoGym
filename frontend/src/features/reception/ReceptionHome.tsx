@@ -1,8 +1,8 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import { memberStatus } from '@/domain/membership';
 import { useEffect, useRef, useState } from 'react';
 import type { LedgerEvent, PaymentMethod, Sale } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
-import { memberStatus } from '../../demo/memberStatus';
 import { expectedStock, recordMovement } from '../../demo/inventoryOperations';
 import { cartQuote, registerCart } from '../../demo/salesOperations';
 import { Button, EmptyState, Notice, PageHeader, Panel } from '../../shared/ui';

@@ -1,7 +1,7 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ExtraRecord } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
 import { registerExtra } from '../../demo/extraOperations';
 import { Button } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';

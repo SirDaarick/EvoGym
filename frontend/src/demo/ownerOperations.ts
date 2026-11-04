@@ -1,7 +1,8 @@
 import type { DemoState, PaymentMethod } from '../domain/models';
+import { localDateKey } from '../shared/formatters/date';
+import { categoryLabels, validPeriod, type HistoryCategory, type ReportingPeriod } from '../domain/reporting';
+export { localDateKey, categoryLabels, validPeriod, type HistoryCategory, type ReportingPeriod };
 
-export type HistoryCategory = 'membership' | 'product' | 'visit' | 'restock' | 'waste' | 'count' | 'shift';
-export interface ReportingPeriod { from: string; to: string }
 export interface HistoryFilter extends ReportingPeriod { category?: HistoryCategory | 'all'; method?: PaymentMethod | 'all' }
 export interface HistoryRecord {
   id: string;
@@ -14,19 +15,6 @@ export interface HistoryRecord {
   amountMinor: number | null;
   method: PaymentMethod | null;
   memberId?: string;
-}
-export const categoryLabels: Record<HistoryCategory, string> = {
-  membership: 'Membresías', product: 'Productos', visit: 'Visitas', restock: 'Reposición', waste: 'Merma', count: 'Conteo físico', shift: 'Turnos',
-};
-const reportingDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' });
-export function localDateKey(timestamp: string) {
-  const parts = reportingDate.formatToParts(new Date(timestamp));
-  const part = (type: string) => parts.find(item => item.type === type)?.value;
-  return `${part('year')}-${part('month')}-${part('day')}`;
-}
-export function validPeriod(period: ReportingPeriod) {
-  const validDate = (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date;
-  return validDate(period.from) && validDate(period.to) && period.from <= period.to;
 }
 function inPeriod(timestamp: string, period: ReportingPeriod) {
   const date = localDateKey(timestamp);

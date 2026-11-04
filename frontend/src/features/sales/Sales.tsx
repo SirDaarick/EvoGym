@@ -1,9 +1,9 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import type { PaymentMethod, Role, VisitArea } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
 import { activeShift, expectedStock } from '../../demo/inventoryOperations';
 import { registerSale, saleQuote, visitAreas, visitPrice, type SaleRequest, type SaleResult } from '../../demo/salesOperations';
 import { Button, EmptyState, Field, Notice, PageHeader, Panel } from '../../shared/ui';

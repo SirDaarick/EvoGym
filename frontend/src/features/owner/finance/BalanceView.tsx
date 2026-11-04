@@ -1,8 +1,7 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { getFinanceComparison, getFinanceTimeBins, getPreviousComparableRange, type FinanceProjection, type FinanceDateRange } from '@/domain/finance';
 import { useMemo } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { formatMoney } from '../../../demo/adapter';
-import { getFinanceComparison, getFinanceTimeBins, getPreviousComparableRange, type FinanceProjection } from '../../../demo/financeReportSelector';
-import type { FinanceDateRange } from '../../../demo/financeReportSelector';
 import { Badge, Panel } from '../../../shared/ui';
 import {
   FinanceFlowChart,

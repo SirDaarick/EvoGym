@@ -1,7 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, businessDate } from './date';
+import { GYM_TIME_ZONE, addDays, businessDate, getDayOfWeekInGymTz, getHourInGymTz, getMexicoCityDateKey, localDateKey } from './date';
 
 describe('businessDate', () => {
+  it('uses the gym time zone, not UTC', () => {
+    expect(GYM_TIME_ZONE).toBe('America/Mexico_City');
+    expect(businessDate(new Date('2026-11-04T01:30:00Z'))).toBe('2026-11-03');
+    expect(businessDate(new Date('2026-11-04T07:00:00Z'))).toBe('2026-11-04');
+  });
+
+  it('accepts an explicit time zone', () => {
+    expect(businessDate(new Date('2026-11-04T01:30:00Z'), 'UTC')).toBe('2026-11-04');
+  });
+});
+
+describe('localDateKey', () => {
+  it('handles strings and dates, and returns empty for invalid input', () => {
+    expect(localDateKey('2026-11-04T01:30:00Z')).toBe('2026-11-03');
+    expect(localDateKey(new Date('2026-11-04T12:00:00Z'))).toBe('2026-11-04');
+    expect(localDateKey('nope')).toBe('');
+    expect(getMexicoCityDateKey('nope')).toBeNull();
+  });
+});
+
+describe('gym time zone helpers', () => {
+  it('returns hour and weekday in the gym zone', () => {
+    expect(getHourInGymTz('2026-11-04T01:30:00Z')).toBe(19);
+    expect(getDayOfWeekInGymTz('2026-11-04T01:30:00Z')).toBe(1); // Tuesday Nov 3
+  });
+});
+
+describe('businessDate (calendar rollover)', () => {
   it('uses the Mexico City calendar day, not UTC', () => {
     expect(businessDate(new Date('2026-11-04T01:30:00Z'))).toBe('2026-11-03');
   });

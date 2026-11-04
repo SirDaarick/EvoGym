@@ -1,6 +1,6 @@
+import { formatMoney } from '@/shared/formatters/money';
 import React, { useEffect, useState } from 'react';
 import type { DemoState, Product } from '../../domain/models';
-import { formatMoney } from '../../demo/adapter';
 import { expectedStock } from '../../demo/inventoryOperations';
 import { Button, Notice } from '../../shared/ui';
 

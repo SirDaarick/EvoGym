@@ -1,4 +1,4 @@
-import { parseMoney, formatMoney } from '../../demo/adapter';
+import { parseMoney, formatMoney } from '@/shared/formatters/money';
 import { Button } from '../../shared/ui';
 import './CashTenderCalculator.css';
 

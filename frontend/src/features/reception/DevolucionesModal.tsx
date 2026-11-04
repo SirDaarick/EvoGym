@@ -1,6 +1,6 @@
+import { formatMoney } from '@/shared/formatters/money';
 import React, { useEffect, useState } from 'react';
 import type { DemoState, Member } from '../../domain/models';
-import { formatMoney } from '../../demo/adapter';
 import {
   getEligibleReturnsForMember,
   processReturn,

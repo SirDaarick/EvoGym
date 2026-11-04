@@ -1,3 +1,5 @@
+import { memberStatus, membershipRenewalStreak } from '@/domain/membership';
+import { openAttendance } from '@/domain/attendance';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
@@ -14,9 +16,7 @@ import { addMember } from '../../demo/operations';
 import { Badge, Button, EmptyState, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import type { Tone } from '../../shared/ui';
 import { NotebookNotice } from '../../shared/operationPresentation';
-import { memberStatus } from '../../demo/memberStatus';
-import { enterMember, exitMember, openAttendance } from '../../demo/attendanceOperations';
-import { membershipRenewalStreak } from '../../demo/memberNotes';
+import { enterMember, exitMember } from '../../demo/attendanceOperations';
 import { MemberCounterView, MemberDetailSections } from './MemberDetail';
 import { formatAttendanceError, getMemberStatusInfo } from './memberDetailUtils';
 import { NewMemberRegistration } from './NewMemberRegistration';

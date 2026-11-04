@@ -1,10 +1,11 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { memberStatus } from '@/domain/membership';
+import { calculateNextMonthExpiry } from '@/domain/lockers';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { LockerItem, LockerStatus, PaymentMethod } from '../../domain/models';
 import type { GimiAlert } from '../../domain/gimi';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import { memberStatus } from '../../demo/memberStatus';
-import { assignLocker as demoAssignLocker, calculateNextMonthExpiry, releaseLocker as demoReleaseLocker, renewLocker as demoRenewLocker } from '../../demo/lockerOperations';
+import { assignLocker as demoAssignLocker, releaseLocker as demoReleaseLocker, renewLocker as demoRenewLocker } from '../../demo/lockerOperations';
 import { getStoredAlerts, saveStoredAlerts } from '../gimi/gimiStore';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';

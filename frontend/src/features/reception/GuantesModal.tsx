@@ -1,8 +1,8 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { memberStatus } from '@/domain/membership';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { GloveItem, PaymentMethod } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import { memberStatus } from '../../demo/memberStatus';
 import { rentGlove as demoRentGlove, returnGlove as demoReturnGlove } from '../../demo/gloveOperations';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';

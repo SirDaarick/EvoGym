@@ -1,6 +1,6 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import type { Plan } from '@/domain/plans';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { formatMoney, parseMoney } from '../../demo/adapter';
-import type { Plan } from '../../demo/plans';
 import type { PlanComposition, PlanService } from '../../domain/models';
 import { useIsDarkMode } from '../../shared/theme';
 import { Button } from '../../shared/ui';

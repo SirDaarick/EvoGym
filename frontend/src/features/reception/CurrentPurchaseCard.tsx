@@ -1,6 +1,6 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import type { PaymentMethod } from '../../domain/models';
-import { formatMoney, parseMoney } from '../../demo/adapter';
 import { useIsDarkMode } from '../../shared/theme';
 import { Panel, Button, Notice } from '../../shared/ui';
 import JellyRadio from '../catalog/react-bits/JellyRadio';

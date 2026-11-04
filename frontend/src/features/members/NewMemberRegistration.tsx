@@ -1,8 +1,8 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { rolePath } from '../../app/navigation';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
 import { registerNewMember, type RegistrationResult } from '../../demo/newMemberRegistration';
 import { useActivePlans } from '../../demo/plans';
 import type { Role, VisitArea } from '../../domain/models';

@@ -1,8 +1,8 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import { memberStatus } from '@/domain/membership';
 import React, { useEffect, useRef, useState } from 'react';
 import type { PaymentMethod, SupplementProduct } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
-import { memberStatus } from '../../demo/memberStatus';
 import { quoteSupplementCart, registerSupplementCart } from '../../demo/supplementOperations';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';

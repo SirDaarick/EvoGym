@@ -1,7 +1,7 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { ColumnDef } from '@tanstack/react-table';
-import { formatMoney } from '../../../demo/adapter';
 import { computeFixedCostsSummary } from '../../../demo/expenseReportSelector';
 import { saveFixedCosts, type FixedCostsConfig } from '../../../demo/fixedCostsStore';
 import type { StaffProfile } from '../../staff/staffStore';

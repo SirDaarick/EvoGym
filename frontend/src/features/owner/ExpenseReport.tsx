@@ -1,3 +1,7 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { EXPENSE_CATEGORIES } from '@/domain/expenses';
+import { formatExpenseDate, formatExpenseTime, localDateKey } from '@/shared/formatters/date';
+import { getCurrentCalendarMonthRange, getPreviousComparableRange, isValidFinanceRange } from '@/domain/finance';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { PaginationState, SortingState, Updater } from '@tanstack/react-table';
@@ -9,12 +13,12 @@ import {
   reviewTransferPayment,
   type PendingMoneyResponse,
 } from '../../api/pendingMoneyApi';
-import { createEmptyDemoState, formatMoney } from '../../demo/adapter';
+import { createEmptyDemoState } from '../../demo/adapter';
 import { useDemo } from '../../demo/DemoProvider';
-import { EXPENSE_CATEGORIES, formatExpenseDate, formatExpenseTime, getExpenseReport, localDateKey } from '../../demo/expenseReportSelector';
+import { getExpenseReport } from '../../demo/expenseReportSelector';
 import { GastoModal } from '../reception/GastoModal';
 import { useFixedCosts } from '../../demo/fixedCostsStore';
-import { getCurrentCalendarMonthRange, getFinanceProjection, getPreviousComparableRange, isValidFinanceRange } from '../../demo/financeReportSelector';
+import { getFinanceProjection } from '../../demo/financeReportSelector';
 import type { DemoState } from '../../domain/models';
 import { useStaff } from '../staff/staffStore';
 import { BalanceView } from './finance/BalanceView';

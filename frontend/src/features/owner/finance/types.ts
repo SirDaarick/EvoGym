@@ -1,5 +1,5 @@
+import type { FinanceDateRange, FinanceProjection, FinanceRow, FinanceSourceFamily } from '@/domain/finance';
 import type { PaginationState, SortingState, Updater } from '@tanstack/react-table';
-import type { FinanceDateRange, FinanceProjection, FinanceRow, FinanceSourceFamily } from '../../../demo/financeReportSelector';
 
 export type FinanceTab = 'balance' | 'cobros' | 'gastos' | 'presupuesto';
 export type FlowGranularity = 'day' | 'week';

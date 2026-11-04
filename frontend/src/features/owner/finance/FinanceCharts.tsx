@@ -1,3 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { getFinanceTimeBins, type FinanceDateRange, type FinanceRow, type FinanceSourceFamily, type FinanceSourceTotal, type FinanceTotals } from '@/domain/finance';
 import { useMemo } from 'react';
 import { addDays } from '../../../shared/formatters/date';
 import { barX, barY, defineChart, group, text, waterfall } from '@tanstack/charts';
@@ -5,15 +7,6 @@ import { Chart } from '@tanstack/charts/react';
 import { pie, polar, radialArc } from '@tanstack/charts/polar';
 import { scaleBand } from '@tanstack/charts/scales/band';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
-import { formatMoney } from '../../../demo/adapter';
-import { getFinanceTimeBins } from '../../../demo/financeReportSelector';
-import type {
-  FinanceDateRange,
-  FinanceRow,
-  FinanceSourceFamily,
-  FinanceSourceTotal,
-  FinanceTotals,
-} from '../../../demo/financeReportSelector';
 import type { FlowGranularity } from './types';
 
 interface FlowChartProps {

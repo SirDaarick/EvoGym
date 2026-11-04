@@ -2,7 +2,10 @@ import type { AttendanceVisit, Member } from '../domain/models';
 import { isDemoDataDisabled } from './adapter';
 import { attendanceDay, attendanceDuration, openAttendance } from './attendanceOperations';
 
-export type AttendancePeriod = 'today' | 'week' | 'month';
+import { GYM_CAPACITY, DAYS_SPANISH, DAYS_SHORT_SPANISH, type AttendancePeriod } from '../domain/attendance';
+import { getHourInGymTz, getDayOfWeekInGymTz, formatTimeInGymTz } from '../shared/formatters/date';
+export { GYM_CAPACITY, DAYS_SPANISH, DAYS_SHORT_SPANISH, getHourInGymTz, getDayOfWeekInGymTz, formatTimeInGymTz };
+export type { AttendancePeriod };
 
 export interface HourlyTrafficBin {
   hour: number;             // 6..21
@@ -94,27 +97,6 @@ export interface AttendanceAnalyticsOptions {
   gymCapacity?: number;
 }
 
-export const GYM_CAPACITY = 50;
-
-export const DAYS_SPANISH = [
-  'Lunes',
-  'Martes',
-  'Miércoles',
-  'Jueves',
-  'Viernes',
-  'Sábado',
-  'Domingo',
-] as const;
-
-export const DAYS_SHORT_SPANISH = [
-  'Lun',
-  'Mar',
-  'Mié',
-  'Jue',
-  'Vie',
-  'Sáb',
-  'Dom',
-] as const;
 
 // Realistic commercial gym hourly distribution weights (06:00 to 22:00, 16 operating hours)
 // Peak: 19:00 (15%), Valley: 11:00 (2.5%) / 13:00 (3%)
@@ -147,60 +129,6 @@ export const BASELINE_DAY_WEIGHTS: Record<number, number> = {
   5: 0.08, // Sábado
   6: 0.05, // Domingo
 };
-
-/**
- * Returns the local hour (0..23) in America/Mexico_City timezone.
- */
-export function getHourInGymTz(dateStr: string): number {
-  const d = new Date(dateStr);
-  if (!Number.isFinite(d.getTime())) return 0;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Mexico_City',
-    hour: 'numeric',
-    hourCycle: 'h23',
-  }).formatToParts(d);
-  const hourPart = parts.find(p => p.type === 'hour')?.value ?? '0';
-  return parseInt(hourPart, 10);
-}
-
-/**
- * Returns 0 for Monday (Lunes) ... 6 for Sunday (Domingo) in America/Mexico_City.
- */
-export function getDayOfWeekInGymTz(dateStr: string): number {
-  const d = new Date(dateStr);
-  if (!Number.isFinite(d.getTime())) return 0;
-  const weekdayShort = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Mexico_City',
-    weekday: 'short',
-  }).format(d);
-  const map: Record<string, number> = {
-    Mon: 0,
-    Tue: 1,
-    Wed: 2,
-    Thu: 3,
-    Fri: 4,
-    Sat: 5,
-    Sun: 6,
-  };
-  return map[weekdayShort] ?? 0;
-}
-
-/**
- * Formats a time string in Mexico City as 'HH:mm hrs'.
- */
-export function formatTimeInGymTz(dateStr: string): string {
-  const d = new Date(dateStr);
-  if (!Number.isFinite(d.getTime())) return '—';
-  const parts = new Intl.DateTimeFormat('es-MX', {
-    timeZone: 'America/Mexico_City',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(d);
-  const hour = parts.find(p => p.type === 'hour')?.value ?? '00';
-  const minute = parts.find(p => p.type === 'minute')?.value ?? '00';
-  return `${hour}:${minute} hrs`;
-}
 
 /**
  * Filter visits by selected period relative to current clock.

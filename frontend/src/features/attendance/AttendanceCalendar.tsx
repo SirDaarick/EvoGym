@@ -1,9 +1,9 @@
+import { attendanceDay, attendanceDuration } from '@/domain/attendance';
 import { useMemo, useRef, useState } from 'react';
 import { defineChart, rect } from '@tanstack/charts';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
 import { Chart } from '@tanstack/charts/react';
 import type { AttendanceVisit } from '../../domain/models';
-import { attendanceDay, attendanceDuration } from '../../demo/attendanceOperations';
 
 import { useIsDarkMode } from '../../shared/theme';
 import { addDays } from '../../shared/formatters/date';

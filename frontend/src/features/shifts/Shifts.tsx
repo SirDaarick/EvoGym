@@ -1,3 +1,4 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -13,7 +14,6 @@ import { Cash01Icon, ChartBarBigIcon, CreditCardIcon, PackageIcon } from '@hugei
 import type { Role, ShiftWindow } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
 import { openShift, shiftSummary } from '../../demo/shiftOperations';
 import { shiftDashboard, type ShiftActivityRow, type ShiftInventoryRow } from '../../demo/shiftDashboard';
 import { Badge, Button, Field, Notice, PageHeader, Panel, TableRegion } from '../../shared/ui';

@@ -1,3 +1,4 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useEffect, useRef, useState } from 'react';
 import { listBranchInventory, listBranches, type AuthenticatedRequest, type BranchItem, type StockItem } from '../api/inventoryApi';
 import { listCashRegisters, type CashRegisterDTO } from '../api/shiftsApi';
@@ -16,7 +17,6 @@ import {
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from '../features/reception/CurrentPurchaseCard';
 import { ProductCard } from '../features/reception/ProductCard';
 import { shortcutIcons } from '../features/reception/ReceptionHome';
-import { formatMoney } from '../demo/adapter';
 import { MobileDetailPanel } from '../shared/MobileDetailPanel';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { DevolucionesModal } from '../features/reception/DevolucionesModal';

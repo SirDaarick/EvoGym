@@ -1,6 +1,6 @@
+import type { FinanceProjection, FinanceRow } from '@/domain/finance';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { FinanceProjection, FinanceRow } from '../../../demo/financeReportSelector';
 import { BalanceView } from './BalanceView';
 
 const range = { from: '2026-10-01', to: '2026-10-02' };

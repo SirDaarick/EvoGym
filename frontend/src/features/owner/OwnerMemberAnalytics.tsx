@@ -1,3 +1,4 @@
+import { formatMoney } from '@/shared/formatters/money';
 import { useMemo } from 'react';
 import { Chart } from '@tanstack/charts/react';
 import { barY, defineChart } from '@tanstack/charts';
@@ -15,7 +16,6 @@ import {
 } from '@hugeicons/core-free-icons';
 
 import type { AttendanceVisit, Member, Sale, SupplementSale } from '../../domain/models';
-import { formatMoney } from '../../demo/adapter';
 import { Badge } from '../../shared/ui';
 import {
   getMemberAnalytics,

@@ -1,27 +1,10 @@
-import type { AttendanceVisit, DemoState } from '../domain/models';
+import type { DemoState } from '../domain/models';
 import type { Transaction } from './operations';
 import type { OperationResult } from './inventoryOperations';
 import { memberStatus } from './memberStatus';
 
-export const demoGymTimezone = 'America/Mexico_City';
-const dayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: demoGymTimezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-export function attendanceDay(value: string) {
-  if (!Number.isFinite(Date.parse(value))) return null;
-  const parts = dayFormatter.formatToParts(new Date(value));
-  const part = (type: string) => parts.find(item => item.type === type)!.value;
-  return `${part('year')}-${part('month')}-${part('day')}`;
-}
-export function attendanceClosing(value: string) {
-  const day = attendanceDay(value);
-  // The controlled 2026 Mexico City demo uses UTC-06. Other gym zones remain Q-02.
-  return day ? new Date(`${day}T22:00:00-06:00`).toISOString() : null;
-}
-export function attendanceDuration(visit: AttendanceVisit): number | null {
-  if (!visit.observedCheckOut || visit.autoClosedAt) return null;
-  const difference = Date.parse(visit.observedCheckOut) - Date.parse(visit.observedCheckIn);
-  return Number.isFinite(difference) && difference >= 0 ? difference / 60000 : null;
-}
-export function openAttendance(visit: AttendanceVisit) { return !visit.observedCheckOut && !visit.autoClosedAt; }
+import { attendanceDay, attendanceClosing, attendanceDuration, openAttendance, demoGymTimezone } from '../domain/attendance';
+export { attendanceDay, attendanceClosing, attendanceDuration, openAttendance, demoGymTimezone };
 const fail = (state: DemoState, message: string): Transaction<OperationResult> => ({ state, result: { status: 'error', message } });
 function validClock(state: DemoState, now: string) {
   return Number.isFinite(Date.parse(now)) && Date.parse(now) >= Date.parse(state.demoClock);

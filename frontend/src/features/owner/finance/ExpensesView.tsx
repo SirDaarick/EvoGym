@@ -1,10 +1,11 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { EXPENSE_CATEGORIES, type ExpenseCategoryKey } from '@/domain/expenses';
 import { useMemo, useState } from 'react';
 import { barX, defineChart } from '@tanstack/charts';
 import { Chart } from '@tanstack/charts/react';
 import { scaleBand } from '@tanstack/charts/scales/band';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
-import { formatMoney } from '../../../demo/adapter';
-import { EXPENSE_CATEGORIES, type ExpenseCategoryKey, type ExpenseReportItem } from '../../../demo/expenseReportSelector';
+import { type ExpenseReportItem } from '../../../demo/expenseReportSelector';
 import { Badge, Button, EmptyState, Field, Panel } from '../../../shared/ui';
 import { FinanceTable } from './FinanceTable';
 import type { ExpenseFilters, TableState } from './types';

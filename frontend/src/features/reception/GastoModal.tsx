@@ -1,13 +1,13 @@
+import { formatMoney, parseMoney } from '@/shared/formatters/money';
+import { EXPENSE_CATEGORIES } from '@/domain/expenses';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ExpenseRecord } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney, parseMoney } from '../../demo/adapter';
 import { registerExpense } from '../../demo/expenseOperations';
 import { Badge, Button } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { createBusinessExpense, createShiftExpense, listShiftExpenses, requestEvidenceUpload, uploadEvidence, voidExpense, ExpenseApiError, type ExpenseCategory, type ExpenseDTO, type ExpenseInput, type ExpenseMethod } from '../../api/expensesApi';
 import type { ApiRequest } from '../../api/shiftsApi';
-import { EXPENSE_CATEGORIES } from '../../demo/expenseReportSelector';
 import { compressToWebp } from '../../shared/compressToWebp';
 
 export interface GastoModalProps {

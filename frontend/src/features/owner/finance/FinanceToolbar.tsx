@@ -1,5 +1,4 @@
-import type { FinanceDateRange, FinanceProjection } from '../../../demo/financeReportSelector';
-import { isValidFinanceRange } from '../../../demo/financeReportSelector';
+import { type FinanceDateRange, type FinanceProjection, isValidFinanceRange } from '@/domain/finance';
 import { Button, Field, Notice, PageHeader, Panel } from '../../../shared/ui';
 import type { FinanceTab } from './types';
 

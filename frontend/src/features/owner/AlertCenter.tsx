@@ -1,3 +1,5 @@
+import { formatMoney } from '@/shared/formatters/money';
+import { ALERT_CATEGORY_CONFIG, type AlertCategory, type AlertPeriod } from '@/domain/alerts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Chart } from '@tanstack/charts/react';
@@ -15,14 +17,7 @@ import { Alert01Icon, Cash01Icon, CreditCardIcon } from '@hugeicons/core-free-ic
 
 import { Badge, Button, EmptyState, PageHeader, Panel, TableRegion } from '../../shared/ui';
 import { useDemo } from '../../demo/DemoProvider';
-import { formatMoney } from '../../demo/adapter';
-import {
-  ALERT_CATEGORY_CONFIG,
-  getOperationalAlerts,
-  type AlertCategory,
-  type AlertPeriod,
-  type OperationalAlert,
-} from '../../demo/alertCenterSelector';
+import { getOperationalAlerts, type OperationalAlert } from '../../demo/alertCenterSelector';
 import {
   acknowledgeAdminSecurityAlert,
   AdminSecurityAlertsApiError,

@@ -1,4 +1,4 @@
-import type { Plan } from '../demo/plans';
+import type { Plan } from '@/domain/plans';
 import type { PlanService } from '../domain/models';
 
 export type CatalogRequest = (path: string, init?: RequestInit) => Promise<Response>;

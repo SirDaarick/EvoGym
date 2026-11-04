@@ -1,4 +1,7 @@
 import type { DemoState, Money, Product, Sale, StockMovement } from '../domain/models';
+import { formatMoney } from '../shared/formatters/money';
+import { localDateKey } from '../shared/formatters/date';
+export { formatMoney, localDateKey };
 import type { Transaction } from './operations';
 import { expectedStock } from './inventoryOperations';
 
@@ -63,31 +66,6 @@ export type ProductOperationResult =
   | { status: 'ok'; product: Product }
   | { status: 'error'; message: string };
 
-const currencyFormatter = new Intl.NumberFormat('es-MX', {
-  style: 'currency',
-  currency: 'MXN',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-export function formatMoney(amountMinor: Money): string {
-  return currencyFormatter.format(amountMinor / 100);
-}
-
-const mexicoCityDateFormatter = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Mexico_City',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-
-export function localDateKey(timestamp: string | Date): string {
-  const dateObj = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
-  if (Number.isNaN(dateObj.getTime())) return '';
-  const parts = mexicoCityDateFormatter.formatToParts(dateObj);
-  const part = (type: string) => parts.find(item => item.type === type)?.value;
-  return `${part('year')}-${part('month')}-${part('day')}`;
-}
 
 function matchesPeriod(
   saleRecordedAt: string,

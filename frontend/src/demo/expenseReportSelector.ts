@@ -1,84 +1,38 @@
 import type { DemoState, ExpenseRecord, Money } from '../domain/models';
-import { formatMoney } from './adapter';
+import { formatMoney } from '../shared/formatters/money';
+import { formatExpenseDate, formatExpenseTime, localDateKey } from '../shared/formatters/date';
+import {
+  EXPENSE_CATEGORIES,
+  classifyExpenseConcept,
+  type ExpenseCategoryConfig,
+  type ExpenseCategoryKey,
+  type ExpenseCategoryLabel,
+  type ExpenseMethod,
+} from '../domain/expenses';
+import { INITIAL_STAFF, type StaffProfile } from '../domain/staff';
+
+export {
+  EXPENSE_CATEGORIES,
+  classifyExpenseConcept,
+  formatExpenseDate,
+  formatExpenseTime,
+  localDateKey,
+};
+export type { ExpenseCategoryConfig, ExpenseCategoryKey, ExpenseCategoryLabel };
+
+// The staff roster lives in a feature store; it registers itself here so demo code
+// does not depend upward on features/. Defaults to the seed roster until registered.
+let staffSource: () => StaffProfile[] = () => INITIAL_STAFF;
+export function setDefaultStaffSource(source: () => StaffProfile[]): void {
+  staffSource = source;
+}
+const getStaffList = (): StaffProfile[] => staffSource();
 import {
   DEFAULT_FIXED_COSTS,
   getFixedCosts,
   type FixedCostsConfig,
 } from './fixedCostsStore';
-import {
-  INITIAL_STAFF,
-  getStaffList,
-  type StaffProfile,
-} from '../features/staff/staffStore';
 
-export type ExpenseCategoryKey =
-  | 'consumibles'
-  | 'limpieza'
-  | 'mantenimiento_piso'
-  | 'mantenimiento_peso'
-  | 'mantenimiento_cardio'
-  | 'mantenimiento_box'
-  | 'servicios'
-  | 'general';
-
-export type ExpenseCategoryLabel =
-  | 'Consumibles'
-  | 'Limpieza'
-  | 'Mantenimiento: Piso'
-  | 'Mantenimiento: Peso'
-  | 'Mantenimiento: Cardio'
-  | 'Mantenimiento: Box'
-  | 'Servicios'
-  | 'General';
-
-export interface ExpenseCategoryConfig {
-  key: ExpenseCategoryKey;
-  label: ExpenseCategoryLabel;
-  color: string;
-}
-
-export const EXPENSE_CATEGORIES: Record<ExpenseCategoryKey, ExpenseCategoryConfig> = {
-  consumibles: {
-    key: 'consumibles',
-    label: 'Consumibles',
-    color: '#2455A4', // Accessible Blue
-  },
-  limpieza: {
-    key: 'limpieza',
-    label: 'Limpieza',
-    color: '#0284C7', // Sky Cyan
-  },
-  mantenimiento_piso: {
-    key: 'mantenimiento_piso',
-    label: 'Mantenimiento: Piso',
-    color: '#9A3412', // Terracotta
-  },
-  mantenimiento_peso: {
-    key: 'mantenimiento_peso',
-    label: 'Mantenimiento: Peso',
-    color: '#D97706', // Amber
-  },
-  mantenimiento_cardio: {
-    key: 'mantenimiento_cardio',
-    label: 'Mantenimiento: Cardio',
-    color: '#EA580C', // Orange-red
-  },
-  mantenimiento_box: {
-    key: 'mantenimiento_box',
-    label: 'Mantenimiento: Box',
-    color: '#DC2626', // Red
-  },
-  servicios: {
-    key: 'servicios',
-    label: 'Servicios',
-    color: '#FC6C06', // Official EGC Orange
-  },
-  general: {
-    key: 'general',
-    label: 'General',
-    color: '#6B7280', // Technical Neutral Gray
-  },
-};
 
 export interface StaffPayrollItem {
   id: string;
@@ -232,7 +186,7 @@ export interface ExpenseReportItem {
   payeeName: string;
   amountMinor: Money;
   amountFormatted: string;
-  method?: import('../api/expensesApi').ExpenseMethod;
+  method?: ExpenseMethod;
   origin?: 'shift' | 'business';
   voucherReference?: string | null;
   evidenceUrl?: string | null;
@@ -286,114 +240,7 @@ export interface ExpenseReportResult {
   items: ExpenseReportItem[];
 }
 
-const mexicoCityDateFormatter = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Mexico_City',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
 
-const displayDateFormatter = new Intl.DateTimeFormat('es-MX', {
-  timeZone: 'America/Mexico_City',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
-
-const displayTimeFormatter = new Intl.DateTimeFormat('es-MX', {
-  timeZone: 'America/Mexico_City',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
-
-export function localDateKey(timestamp: string | Date): string {
-  const dateObj = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
-  if (Number.isNaN(dateObj.getTime())) return '';
-  const parts = mexicoCityDateFormatter.formatToParts(dateObj);
-  const part = (type: string) => parts.find(item => item.type === type)?.value;
-  return `${part('year')}-${part('month')}-${part('day')}`;
-}
-
-export function formatExpenseDate(timestamp: string): string {
-  const d = new Date(timestamp);
-  if (Number.isNaN(d.getTime())) return '';
-  return displayDateFormatter.format(d);
-}
-
-export function formatExpenseTime(timestamp: string): string {
-  const d = new Date(timestamp);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${displayTimeFormatter.format(d)} hrs`;
-}
-
-/**
- * Automatically classifies an expense concept into an Excel business category:
- * Consumibles | Limpieza | Mantenimiento: Piso | Mantenimiento: Peso | Mantenimiento: Cardio | Mantenimiento: Box | Servicios | General
- */
-export function classifyExpenseConcept(concept: string): ExpenseCategoryLabel {
-  const normalized = (concept || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-
-  // 1. Limpieza
-  if (
-    /cloro|jabon|detergente|trapeador|escoba|desinfectante|sanitizante|sanitas|aromatizante|franela|atomizador/.test(
-      normalized
-    ) ||
-    (normalized.includes('limpieza') && !normalized.includes('mantenimiento'))
-  ) {
-    return 'Limpieza';
-  }
-
-  // 2. Mantenimiento subcategories
-  // 2a. Mantenimiento: Box
-  if (/costal|pera|box|boxeo|ring|guante/.test(normalized)) {
-    return 'Mantenimiento: Box';
-  }
-
-  // 2b. Mantenimiento: Piso
-  if (/piso|loseta|duela|caucho|tapete/.test(normalized)) {
-    return 'Mantenimiento: Piso';
-  }
-
-  // 2c. Mantenimiento: Cardio
-  if (/caminadora|eliptica|escaladora|banda|bicicleta|spinning|cardio|polea|cable/.test(normalized)) {
-    return 'Mantenimiento: Cardio';
-  }
-
-  // 2d. Mantenimiento: Peso
-  if (/mancuerna|disco|barra|rack|banco|peso|pesas|soldadura|herreria/.test(normalized)) {
-    return 'Mantenimiento: Peso';
-  }
-
-  // Generic Mantenimiento fallback -> Mantenimiento: Peso
-  if (/mantenimiento|reparacion|refaccion|tecnico|plomeria|cerrajeria|aire|clima|foco|balastra|tornillo/.test(normalized)) {
-    return 'Mantenimiento: Peso';
-  }
-
-  // 3. Servicios
-  if (
-    /luz|cfe|electricidad|internet|telefono|telmex|servicio|gas|alestra|izzi|megacable|software|suscripcion|linea/.test(
-      normalized
-    )
-  ) {
-    return 'Servicios';
-  }
-
-  // 4. Consumibles
-  if (
-    /garrafon|agua|vaso|cafe|azucar|\bte\b|servilleta|insumo|papel|bolsa/.test(
-      normalized
-    )
-  ) {
-    return 'Consumibles';
-  }
-
-  // 5. General fallback
-  return 'General';
-}
 
 function resolvePeriodAndRange(
   input: ExpensePeriodInput,

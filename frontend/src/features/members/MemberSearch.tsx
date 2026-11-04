@@ -1,9 +1,9 @@
+import { memberSearchGroups, memberStatus, memberStatusLabels, type MemberStatus } from '@/domain/membership';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import type { Role } from '../../domain/models';
 import { listMembers, type AuthenticatedRequest, type MemberListItemDTO } from '../../api/membersApi';
 import { useDemo } from '../../demo/DemoProvider';
-import { memberSearchGroups, memberStatus, memberStatusLabels, type MemberStatus } from '../../demo/memberStatus';
 import { rolePath } from '../../app/navigation';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import JellyRadio, { type JellyRadioItem } from '../catalog/react-bits/JellyRadio';
