@@ -6,6 +6,7 @@ import type { AttendanceVisit } from '../../domain/models';
 import { attendanceDay, attendanceDuration } from '../../demo/attendanceOperations';
 
 import { useIsDarkMode } from '../../shared/theme';
+import { addDays } from '../../shared/formatters/date';
 
 export type HeatCell = { date: string; x0: number; x1: number; y0: number; y1: number; count: number; minutes: number; unknown: number; level: number; future: boolean };
 const COLORS_LIGHT = ['#f4f4f5', '#fed7aa', '#fb923c', '#c2410c'];
@@ -47,7 +48,7 @@ export function buildAttendanceYearCells(year: number, visits: AttendanceVisit[]
     totalsByDay.set(day, total);
   }
   return Array.from({ length: count }, (_, index) => {
-    const date = new Date(start.getTime() + index * 86400000).toISOString().slice(0, 10);
+    const date = addDays(`${year}-01-01`, index);
     const { count: visitsOnDay, minutes, unknown } = totalsByDay.get(date) ?? { count: 0, minutes: 0, unknown: 0 };
     const weekday = (offset + index) % 7;
     return { date, x0: Math.floor((offset + index) / 7), x1: Math.floor((offset + index) / 7) + 1,
@@ -91,7 +92,7 @@ export function AttendanceCalendar({ visits, now, label = 'Frecuencia de asisten
 
   const visitsInYear = cells.reduce((sum, cell) => sum + cell.count, 0);
   const today = attendanceDay(now) ?? now.slice(0, 10);
-  const start30 = new Date(Date.parse(`${today}T12:00:00Z`) - 29 * 86400000).toISOString().slice(0, 10);
+  const start30 = addDays(today, -29);
   const daysIn30 = visits.filter(visit => { const day = attendanceDay(visit.observedCheckIn); return day !== null && day >= start30 && day <= today; }).length;
   const totalVisits = visits.length;
   const visibleCells: (HeatCell | null)[] = useMemo(() => [

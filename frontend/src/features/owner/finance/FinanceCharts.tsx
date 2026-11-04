@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { addDays } from '../../../shared/formatters/date';
 import { barX, barY, defineChart, group, text, waterfall } from '@tanstack/charts';
 import { Chart } from '@tanstack/charts/react';
 import { pie, polar, radialArc } from '@tanstack/charts/polar';
@@ -40,10 +41,8 @@ const sourceLabels: Record<string, string> = {
 };
 
 function weekStart(dateKey: string): string {
-  const date = new Date(`${dateKey}T00:00:00Z`);
-  const weekday = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - weekday);
-  return date.toISOString().slice(0, 10);
+  const weekday = (new Date(`${dateKey}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return addDays(dateKey, -weekday);
 }
 
 export function FinanceFlowChart({

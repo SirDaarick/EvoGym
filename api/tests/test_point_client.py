@@ -19,7 +19,14 @@ from test_shifts import _seed_branch, _seed_receptionist, _setup_db
 
 
 def _settings(environment, **extra):
-    return Settings(database_url=SecretStr("sqlite+pysqlite:///:memory:"), environment=environment, **extra)
+    params = {
+        "database_url": SecretStr("sqlite+pysqlite:///:memory:"),
+        "environment": environment,
+        "debug": False,
+        "_env_file": None,
+    }
+    params.update(extra)
+    return Settings(**params)
 
 
 @pytest.mark.parametrize("environment", ["development", "test"])
