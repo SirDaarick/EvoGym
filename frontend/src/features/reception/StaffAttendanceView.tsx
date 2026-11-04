@@ -22,6 +22,7 @@ import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi
 import type { StaffScheduleSeriesItem } from '../../api/staffSchedulesApi';
 import type { RecordAttendancePayload } from '../../api/staffAttendanceApi';
 import { createEmptyDemoState } from '../../demo/adapter';
+import { businessDate } from '../../shared/formatters/date';
 import { Button, EmptyState, PageHeader } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { UnscheduledClockInModal } from './UnscheduledClockInModal';
@@ -139,7 +140,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   const fetchLiveAttendance = useCallback(async () => {
     if (!operationalToken && !liveRequest) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = businessDate();
       let records: StaffAttendanceItem[];
       if (liveRequest) {
         const response = await liveRequest(`/api/v1/staff-attendance?branch_id=${encodeURIComponent(branchId ?? '')}&business_date=${today}`);
@@ -419,7 +420,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
 
 
   const hasScheduledShiftToday = useCallback((staff: StaffAttendancePerson): boolean => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = businessDate();
     const todayWeekday = (new Date().getDay() + 6) % 7;
     const safeSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
     if (safeSchedules.length > 0) {
@@ -435,7 +436,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   }, [branchSchedules]);
 
   const colleaguesWithShift = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = businessDate();
     const todayWeekday = (new Date().getDay() + 6) % 7;
     if (branchSchedules.length > 0) {
       return activeStaff
@@ -881,7 +882,7 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
             const dept = staff.department ?? 'Staff';
             const deptClass = getDepartmentClass(staff.department);
 
-            const todayStr = new Date().toISOString().slice(0, 10);
+            const todayStr = businessDate();
             const todayWeekday = (new Date().getDay() + 6) % 7;
             const safeBranchSchedules = Array.isArray(branchSchedules) ? branchSchedules : [];
             const todaySeries = safeBranchSchedules.find(s =>

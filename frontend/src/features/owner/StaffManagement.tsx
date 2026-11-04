@@ -17,6 +17,7 @@ import JellyRadio from '../catalog/react-bits/JellyRadio';
 import { DevicePairingModal } from '../staff/DevicePairingModal';
 import { useAdminSession } from '../auth/AdminSessionProvider';
 import { branchPayrollDate, getPayrollWeek, payPayrollWeek, recordPayrollAdvance, type PayrollItem, type PayrollWeek } from '../../api/payrollApi';
+import { addDays, businessDate } from '../../shared/formatters/date';
 import {
   issueInitialPin,
   listAdminBranches,
@@ -59,12 +60,6 @@ function useOptionalAdminSession() {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function validUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
-}
-
-function addDays(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 export function StaffManagement() {
@@ -909,8 +904,8 @@ export function ApiStaffManagement() {
   const loadOccurrences = useCallback(async (seriesId: string) => {
     if (!adminSession || adminSession.status !== 'authenticated') return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const toDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const today = businessDate();
+      const toDate = addDays(today, 7);
       const list = await listScheduleOccurrences(adminSession.request, seriesId, today, toDate);
       setOccurrences(list);
     } catch {
@@ -929,7 +924,7 @@ export function ApiStaffManagement() {
     setOverridingDate(null);
 
     const active = getActiveSeriesForProfile(profile.id);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = businessDate();
     if (active) {
       setScheduleWeekdays(active.weekdays.length ? active.weekdays : [0, 1, 2, 3, 4]);
       setScheduleStartTime(active.start_time.slice(0, 5));

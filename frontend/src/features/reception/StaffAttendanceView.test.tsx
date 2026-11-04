@@ -668,5 +668,38 @@ describe('StaffAttendanceView', () => {
       // In the audit table, the coverage note is displayed
       expect(screen.getByText('Cubriendo turno de Bob')).toBeInTheDocument();
     });
+
+    it('requests attendance, corrections for the CDMX business day (not the UTC day)', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        // 19:00 in Mexico City on 2026-11-03 is already 2026-11-04 in UTC.
+        vi.setSystemTime(new Date('2026-11-04T01:00:00Z'));
+        sessionStorage.setItem('evogym:operational-session', 'live-token');
+        const urls: string[] = [];
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+          urls.push(String(input));
+          if (String(input).includes('/staff-attendance') && !String(input).includes('/corrections')) {
+            return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+          }
+          return new Response(JSON.stringify([]), { status: 200 });
+        });
+
+        render(
+          <DemoProvider>
+            <StaffAttendanceView liveStaff={[]} branchId={testBranchId} />
+          </DemoProvider>
+        );
+
+        await waitFor(() => {
+          expect(urls.some(u => u.includes('/corrections'))).toBe(true);
+        });
+        const attendanceUrl = urls.find(u => u.includes('/api/v1/staff-attendance?'));
+        expect(attendanceUrl).toContain('business_date=2026-11-03');
+        expect(urls.find(u => u.includes('/corrections'))).toContain('business_date=2026-11-03');
+        expect(urls.some(u => u.includes('2026-11-04'))).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
