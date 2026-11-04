@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.api.member_reads import router as member_reads_router
+from app.errors import install_error_handlers
 from app.main import create_app
 from app.auth.hashing import hash_pin
 from app.auth.sessions import issue_session
@@ -96,6 +97,7 @@ def _create_test_app(factory) -> FastAPI:
     app.state.session_factory = factory
     app.state.settings = configured_settings(str(factory.kw["bind"].url))
     app.include_router(member_reads_router)
+    install_error_handlers(app)
     return app
 
 
@@ -239,7 +241,7 @@ def test_t01_unauthenticated_request_returns_401(tmp_path):
             # 1. No Authorization header
             res1 = client.get(f"/api/v1/members/{member.id}/reload")
             assert res1.status_code == 401
-            assert "detail" in res1.json()
+            assert res1.json()["error"]["code"] == "http_error"
 
             # 2. Invalid bearer scheme
             res2 = client.get(
@@ -411,14 +413,14 @@ def test_t04_cross_branch_profile_read_permitted_and_cross_org_concealed(tmp_pat
                 },
             )
             assert res_org.status_code == 404
-            assert res_org.json()["detail"] == "The requested resource was not found."
+            assert res_org.json()["error"]["message"] == "The requested resource was not found."
 
             history = client.get(
                 f"/api/v1/members/{member.id}/check-ins?month=1&year=2026",
                 headers={"Authorization": f"Bearer {token_b}", "X-Organization-ID": str(foreign_org)},
             )
             assert history.status_code == 404
-            assert history.json()["detail"] == "The requested resource was not found."
+            assert history.json()["error"]["message"] == "The requested resource was not found."
     finally:
         engine.dispose()
 

@@ -1,19 +1,21 @@
 """Reloadable member read queries for operational profile projection (P2.3)."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
 
+from app.db.models.authorization import Branch
 from app.db.models.catalog import PlanVersion
 from app.db.models.class_samples import ClassSampleCheckIn, ClassSampleEntitlement
 from app.db.models.member_check_ins import MemberCheckIn
-from app.db.models.members import Member
+from app.db.models.members import Member, MemberNote
 from app.db.models.membership_debts import MembershipDebt
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.memberships import MembershipPeriod
-from app.db.models.orders import Order, OrderItem
-from app.db.models.rentals import Rental, RentalAsset
+from app.db.models.orders import Order, OrderItem, Payment
+from app.db.models.rentals import Rental, RentalAsset, RentalCharge, RentalReceipt
+from app.db.models.staff import StaffUser
 from app.members.read_schemas import (
     ClassSampleReadDTO,
     MemberDebtItemDTO,
@@ -24,7 +26,7 @@ from app.members.read_schemas import (
     MemberRentalDebtItemDTO,
     MemberVisitLogDTO,
 )
-from app.rentals.payments import rental_outstanding_minor
+from app.rentals.payments import charge_outstanding_minor, rental_outstanding_minor
 from app.memberships.eligibility import MembershipAccessStatus, evaluate_membership_access
 
 _DEFAULT_ORG_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -370,3 +372,128 @@ def get_member_reload_data(
         recent_visits=recent_visits,
         server_time=now_utc,
     )
+
+
+def get_member(session: Session, member_id: UUID) -> Member | None:
+    return session.get(Member, member_id)
+
+
+def first_active_branch_id(session: Session) -> UUID | None:
+    return session.scalar(select(Branch.id).where(Branch.is_active.is_(True)).limit(1))
+
+
+def list_purchase_events(session: Session, member_id: UUID, branch: UUID, from_date: date | None,
+                         to_date: date | None, page: int, page_size: int):
+    """Returns (total, rows) of the member's purchase-like events in a branch, newest first."""
+    events = union_all(
+        select(Order.id.label("id"), Order.created_at.label("created_at"), literal("order").label("kind"))
+            .where(Order.member_id == member_id, Order.branch_id == branch),
+        select(RentalCharge.id, RentalCharge.created_at, literal("rental"))
+            .join(Rental, Rental.id == RentalCharge.rental_id)
+            .where(Rental.member_id == member_id, Rental.branch_id == branch),
+        select(RentalReceipt.id, RentalReceipt.created_at, literal("rental_payment"))
+            .join(Rental, Rental.id == RentalReceipt.rental_id)
+            .where(Rental.member_id == member_id, RentalReceipt.branch_id == branch),
+        select(MembershipDebtPayment.id, MembershipDebtPayment.created_at, literal("debt_payment"))
+            .where(MembershipDebtPayment.member_id == member_id, MembershipDebtPayment.branch_id == branch),
+    ).subquery()
+    query = select(events)
+    if from_date:
+        query = query.where(events.c.created_at >= datetime.combine(from_date, datetime.min.time(), timezone.utc))
+    if to_date and to_date < date.max:
+        query = query.where(events.c.created_at < datetime.combine(to_date + timedelta(days=1), datetime.min.time(), timezone.utc))
+    filtered = query.subquery()
+    total = session.scalar(select(func.count()).select_from(filtered)) or 0
+    rows = session.execute(select(filtered).order_by(filtered.c.created_at.desc(), filtered.c.kind, filtered.c.id.desc())
+                           .offset((page - 1) * page_size).limit(page_size)).all()
+    return total, rows
+
+
+def purchase_item(session: Session, row) -> dict:
+    """Description/amount/method/status of one purchase event row."""
+    if row.kind == "order":
+        order = session.get(Order, row.id)
+        debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == order.id))
+        paid = session.scalar(select(func.coalesce(func.sum(MembershipDebtPayment.amount_minor), 0))
+                              .where(MembershipDebtPayment.debt_id == debt.id)) if debt else 0
+        status = "pending" if (debt and debt.initial_outstanding_minor > paid) or not order.payment or order.payment.status != "confirmed" else "paid"
+        return {"description": ", ".join(line.description_snapshot for line in order.items),
+                "amount_minor": order.total_minor, "method": order.payment.method if order.payment else None,
+                "status": status}
+    if row.kind == "rental":
+        charge = session.get(RentalCharge, row.id)
+        rental = session.get(Rental, charge.rental_id)
+        asset = session.get(RentalAsset, rental.asset_id)
+        payment = session.scalar(select(Payment).where(Payment.rental_charge_id == charge.id).order_by(Payment.received_at).limit(1))
+        return {"description": f"{rental.kind} · {asset.code}", "amount_minor": charge.amount_minor,
+                "method": payment.method if payment else None,
+                "status": "pending" if charge_outstanding_minor(session, charge) > 0 else "paid"}
+    if row.kind == "rental_payment":
+        receipt = session.get(RentalReceipt, row.id)
+        return {"description": "Rental payment", "amount_minor": receipt.amount_minor,
+                "method": receipt.method, "status": "paid" if receipt.status == "confirmed" else "pending"}
+    payment = session.get(MembershipDebtPayment, row.id)
+    return {"description": "Membership debt payment", "amount_minor": payment.amount_minor,
+            "method": "cash", "status": "paid"}
+
+
+def summary_data(session: Session, member_id: UUID, branch: UUID, now: datetime) -> dict:
+    """Raw rows for the member summary card; `rental_debt` is already summed."""
+    today = now.date()
+    period = session.execute(
+        select(MembershipPeriod, OrderItem)
+        .join(OrderItem, OrderItem.id == MembershipPeriod.order_item_id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(MembershipPeriod.member_id == member_id, Order.branch_id == branch,
+               MembershipPeriod.starts_on <= today, MembershipPeriod.ends_on > today)
+        .order_by(MembershipPeriod.ends_on.desc()).limit(1)
+    ).first()
+    repayments = select(
+        MembershipDebtPayment.debt_id,
+        func.sum(MembershipDebtPayment.amount_minor).label("paid"),
+    ).where(MembershipDebtPayment.member_id == member_id).group_by(MembershipDebtPayment.debt_id).subquery()
+    outstanding = MembershipDebt.initial_outstanding_minor - func.coalesce(repayments.c.paid, 0)
+    debts = session.execute(
+        select(MembershipDebt.order_id, outstanding.label("remaining"))
+        .join(Order, Order.id == MembershipDebt.order_id)
+        .outerjoin(repayments, repayments.c.debt_id == MembershipDebt.id)
+        .where(MembershipDebt.member_id == member_id, Order.branch_id == branch, outstanding > 0)
+        .order_by(MembershipDebt.created_at, MembershipDebt.id)
+    ).all()
+    rentals = session.execute(
+        select(Rental, RentalAsset).join(RentalAsset, RentalAsset.id == Rental.asset_id)
+        .where(Rental.member_id == member_id, Rental.branch_id == branch, Rental.status.in_(("active", "returned", "released")))
+        .order_by(Rental.created_at.desc())
+    ).all()
+    rental_debt = sum(rental_outstanding_minor(session, rental) for rental, _ in rentals)
+    visit_count = session.scalar(select(func.count(func.distinct(MemberCheckIn.visit_id))).where(
+        MemberCheckIn.member_id == member_id, MemberCheckIn.branch_id == branch,
+        MemberCheckIn.occurred_at >= now - timedelta(days=28), MemberCheckIn.occurred_at <= now,
+    )) or 0
+    last_visit = session.scalar(select(func.max(MemberCheckIn.occurred_at)).where(
+        MemberCheckIn.member_id == member_id, MemberCheckIn.branch_id == branch,
+        MemberCheckIn.occurred_at <= now,
+    ))
+    favorite = session.scalar(
+        select(OrderItem.description_snapshot).join(Order, Order.id == OrderItem.order_id)
+        .join(Payment, Payment.order_id == Order.id)
+        .where(Order.member_id == member_id, Order.branch_id == branch, OrderItem.item_kind == "product",
+               Payment.status == "confirmed", Order.created_at >= now - timedelta(days=60), Order.created_at <= now)
+        .group_by(OrderItem.product_id, OrderItem.description_snapshot)
+        .order_by(func.sum(OrderItem.quantity).desc(), OrderItem.description_snapshot).limit(1)
+    )
+    note = session.execute(select(MemberNote, StaffUser.login_identifier)
+        .join(StaffUser, StaffUser.id == MemberNote.author_id)
+        .where(MemberNote.member_id == member_id, MemberNote.voided_at.is_(None))
+        .order_by(MemberNote.created_at.desc(), MemberNote.id.desc()).limit(1)).first()
+    return {"period": period, "debts": debts, "rentals": rentals, "rental_debt": rental_debt,
+            "visit_count": visit_count, "last_visit": last_visit, "favorite": favorite, "note": note}
+
+
+def list_check_ins_between(session: Session, member_id: UUID, branch: UUID, start: datetime, end: datetime):
+    return session.scalars(
+        select(MemberCheckIn)
+        .where(MemberCheckIn.member_id == member_id, MemberCheckIn.branch_id == branch,
+               MemberCheckIn.occurred_at >= start, MemberCheckIn.occurred_at < end)
+        .order_by(MemberCheckIn.occurred_at.desc(), MemberCheckIn.id.desc())
+    ).all()

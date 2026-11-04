@@ -2,13 +2,13 @@ from uuid import UUID
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from app.errors import HttpStatusError
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db.models import ClassSampleEntitlement
 from app.main import create_app
-from app.api.member_check_ins import _resolve_sample_checkin_conflict
+from app.memberships.service import _resolve_sample_checkin_conflict
 from test_admin_auth import configured_settings
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db
 
@@ -25,7 +25,7 @@ def test_conflict_resolution_prefers_matching_idempotency_key_to_consumed_entitl
 
 def test_conflict_resolution_rejects_key_reuse_with_different_fingerprint():
     replay_event = SimpleNamespace(request_fingerprint="first-request")
-    with pytest.raises(HTTPException, match="different check-in"):
+    with pytest.raises(HttpStatusError):
         _resolve_sample_checkin_conflict(
             key_event=replay_event, entitlement_event=None, fingerprint="different-request",
         )

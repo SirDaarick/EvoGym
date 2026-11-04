@@ -142,6 +142,14 @@ def get_member_by_id(session: Session, member_id: UUID | str) -> Member | None:
     return session.get(Member, member_id)
 
 
+def get_member_note(session: Session, note_id: UUID) -> MemberNote | None:
+    return session.get(MemberNote, note_id)
+
+
+def get_member_eligibility_record(session: Session, record_id: UUID) -> MemberEligibilityRecord | None:
+    return session.get(MemberEligibilityRecord, record_id)
+
+
 def get_member_pending_balance_minor(session: Session, member_id: UUID) -> int:
     """Return remaining partial-sale debt after explicit order-specific cash receipts."""
     debts: dict[UUID, int] = {}

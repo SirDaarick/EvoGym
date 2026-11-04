@@ -200,7 +200,7 @@ def test_configured_admin_secret_is_passed_to_every_consumer(module, consumer, m
         with pytest.raises(Exception) as error:
             consumer(uuid4(), membership_access.AccessDecisionRequest(action="restrict", reason="test"), request,
                      Response(), idempotency_key="synthetic-key", credentials=credentials)
-        assert getattr(error.value, "status_code", None) == 404
+        assert error.value.status == 404  # HttpStatusError from the service
     else:
         consumer(request, credentials)
     validator.assert_called_once_with(factory, "synthetic-admin-token", signing_secret)
@@ -239,7 +239,7 @@ def test_missing_admin_signing_secret_preserves_staff_fallback(module, consumer,
         with pytest.raises(Exception) as error:
             consumer(uuid4(), membership_access.AccessDecisionRequest(action="restrict", reason="test"), request,
                      Response(), idempotency_key="synthetic-key", credentials=credentials)
-        assert getattr(error.value, "status_code", None) == 404
+        assert error.value.status == 404  # HttpStatusError from the service
     else:
         result = consumer(request, credentials)
         assert getattr(result, "staff_id", None) == staff_principal.staff_id

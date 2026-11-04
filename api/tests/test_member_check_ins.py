@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-import app.api.member_check_ins as check_in_api
+import app.memberships.service as check_in_api
 
 from app.db.models import Member, MembershipPeriod, MemberCheckIn, Plan, PlanVersion
 from app.main import create_app
