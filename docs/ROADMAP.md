@@ -11,7 +11,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | **Fase 0** | Trabajo en Curso (Suplementos y Porciones) | Alto (migración DB y stock) | ✅ **Completado** |
 | **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | ✅ **Completado** |
 | **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | ✅ **Completado** |
-| **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | 🟡 **Media-Alta** |
+| **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | ✅ **Completado** |
 | **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟢 **Media** |
 | **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 **Media** |
 | **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🔵 **Final** |
@@ -102,30 +102,40 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 ## 🎨 Fase 3: Arquitectura y Calidad del Frontend
 > **Objetivo:** Desacoplar la UI de demostración, estructurar componentes con Atomic Design y optimizar la reactividad.
 
-- [ ] **T3.1 — Romper acoplamiento con `frontend/src/demo/` (F1)**
+- [x] **T3.1 — Romper acoplamiento con `frontend/src/demo/` (F1)**
   - **Problema:** Utilidades críticas de negocio (`formatMoney`, tipos `Plan`, estado de membresía) se importan directamente desde `demo/` en más de 55 archivos.
   - **Acción:** Trasladar tipos y funciones puras a `frontend/src/domain/` y `frontend/src/shared/formatters/`. Restringir `demo/` exclusivamente para datos simulados aislados.
+  - **Resultado:** Commit `a5ef61b` (+ `09326d1`). Utilidades puras en `shared/formatters/` (money, date) y `domain/` (membership, plans, finance, cash, reporting, expenses, alerts, lockers, attendance, staff); `demo/` las re-exporta. 47 importadores migrados a `@/`. `src/test/architecture.test.ts` prohíbe importar `demo/` desde `api/`, `shared/`, `domain/` y congela los 36 consumidores de estado mock restantes como allowlist que solo puede reducirse.
 
-- [ ] **T3.2 — Cliente HTTP centralizado e interceptores (F3, R3)**
+- [x] **T3.2 — Cliente HTTP centralizado e interceptores (F3, R3)**
   - **Archivos:** `frontend/src/api/http.ts`.
   - **Acción:** Crear un cliente HTTP único con tipado consistente, inyección automática de tokens de sesión, cabeceras de sucursal, reintentos seguros y mapeo de errores estructurados.
+  - **Resultado:** Commit `2c41e2a` (+ endurecimiento en `81dbc80`). `api/http.ts`: `ApiRequest`, `HttpError`/`NetworkError`, `parseErrorEnvelope`, `requestJson` (reintentos seguros solo GET/HEAD, abort, `Idempotency-Key`), `createHttpClient` (Authorization + `X-Branch-ID`). Adoptado en `receptionApi` y `membershipCheckoutApi`; sin `fetch(` crudo en componentes. Los demás clientes migran al tocarse en Fase 4.
 
-- [ ] **T3.3 — Descomposición de componentes gigantes (Container / Presentational) (F4)**
+- [x] **T3.3 — Descomposición de componentes gigantes (Container / Presentational) (F4)**
   - **Archivos:** `Inventory.tsx`, `ApiReceptionHome.tsx`, `StaffManagement.tsx` (componentes de 800 a 1,500 líneas).
   - **Acción:** Separar la lógica de datos y mutaciones (Contenedor / Custom Hooks) de la presentación visual pura (Presentational). Reducir archivos a unidades testeables de <250 líneas.
+  - **Resultado:** Commits `b61a8ba` (Inventory), `45fad01` (ApiReceptionHome: 421 → 121 líneas), `f26400e` (StaffManagement: 1,719 → barrel de 10 líneas sobre `owner/staff/`). Todos los archivos piloto < 250 líneas (máx. 187). Resto de pantallas: *per feature, as touched* en Fase 4.
 
-- [ ] **T3.4 — Adoptar TanStack Query (React Query)**
+- [x] **T3.4 — Adoptar TanStack Query (React Query)**
   - **Acción:** Reemplazar peticiones manuales en `useEffect` y estados locales dispersos por consultas cacheadas (`useQuery`, `useMutation`), logrando invalidación automática y estados de carga transparentes.
+  - **Resultado:** Commit `c27bef0` (QueryClient, provider, `api/queryKeys.ts`, `renderWithQuery`) y pilotos anteriores con `useQuery`/`useMutation` + invalidación en lugar de recargas manuales; se preservan intents idempotentes en `sessionStorage`. Caché reiniciada al cambiar de principal (`81dbc80`).
 
-- [ ] **T3.5 — Primitivo accesible para Diálogos y Modales (U1)**
+- [x] **T3.5 — Primitivo accesible para Diálogos y Modales (U1)**
   - **Archivos:** `frontend/src/shared/components/ui/Dialog.tsx`.
   - **Problema:** Cerca de 30 implementaciones manuales de modales carecen de trampa de foco (Tab trap), tecla Escape y atributos WAI-ARIA.
   - **Acción:** Construir un componente primitivo sobre `<dialog>` nativo con `showModal()`, foco atrapado y retorno de foco al cerrar; migrar los modales gradualmente.
+  - **Resultado:** Commit `e8661e5` (+ `81dbc80`). `shared/components/ui/Dialog.tsx` y `ConfirmDialog.tsx` sobre `<dialog>` nativo: trampa de Tab, Escape, retorno de foco, `aria-labelledby/describedby`. `Modal` de `shared/ui.tsx` y los 5 diálogos de staff ya lo usan; verificado en Chromium. Los ~20 modales restantes migran al tocarse.
 
-- [ ] **T3.6 — Corrección de tokens y accesibilidad visual (U2, U3)**
+- [x] **T3.6 — Corrección de tokens y accesibilidad visual (U2, U3)**
   - **Archivos:** `styles.css`, `Design.md`.
   - **Problema:** El texto naranja `#FC6C06` sobre fondo claro tiene un contraste de 2.8:1 (falla WCAG AA).
   - **Acción:** Crear token `--color-primary-ink` (`#A83D08` con contraste 5.98:1) para tipografía e iconos, reservando `#FC6C06` solo para rellenos interactivos.
+  - **Resultado:** Commits `333659e` (U2: token `--color-primary-ink`, 119 reglas en 21 hojas; contraste ≥ 4.98:1 medido en claro/oscuro) y `84acf84` (U3: `FormField`/`useFieldErrors`, errores inline con `aria-invalid` en Gasto, Extra, Merma, Devoluciones, Guantes, Casilleros, PlanEditor, ExpensesView y staff; toasts de error persistentes con `role="alert"`). Suite Vitest: 952/953 (único fallo preexistente `OvertimeSaleToggle`, dependiente de zona horaria).
+
+---
+
+> **Nota Fase 3:** Se aplicó la estrategia *cimientos + primitivos + pilotos*. La migración del resto de modales a `<Dialog>`, de los `useEffect`-fetch a TanStack Query y de los clientes `src/api/*` a `http.ts` se hace por feature conforme se toque en la Fase 4.
 
 ---
 
