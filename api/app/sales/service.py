@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
-from app.db.models import ProductSaleIntent
+from app.db.models import ProductSaleIntent, ProductSaleResolution
 from app.errors import AppError, HttpStatusError, http_errors
 from app.sales import queries as q
 from app.sales.point import PointTerminalUnavailable, get_point_client
@@ -21,7 +21,7 @@ from app.sales.queries import (
     ProductReturnNotFoundError, ProductSaleIdempotencyConflict, ProductSaleRejected,
 )
 from app.sales.schemas import (
-    CardIntentResponse, CashMembershipSaleDTO, CashProductSaleDTO, CashSaleItemDTO, CashSaleOrderDTO,
+    CardIntentResponse, CashMembershipSaleDTO, CashProductSaleDTO, CashProductSaleRequest, CashSaleItemDTO, CashSaleOrderDTO,
     CashSalePaymentDTO, ClassSampleEntitlementDTO, MembershipDebtPaymentDTO, MembershipPeriodDTO,
     ProductRefundDTO, ProductSaleItemDTO, ProductSaleOrderDTO, ProductSalePaymentDTO,
 )
@@ -224,6 +224,20 @@ def resolve_product_sale(factory, principal: Principal, register_id: UUID, paylo
                 "status": "completed", "order_id": str(order.id), "total_minor": order.total_minor}
             session.commit()
             return result
+
+
+def resolve_intent_as_admin(session, admin_id: UUID, seller_id: UUID, intent: ProductSaleIntent) -> dict:
+    """Admin resolution of a seller's pending intent inside the caller's transaction (caller commits)."""
+    payload = CashProductSaleRequest.model_validate(intent.payload)
+    order = q.resolve_product_sale(
+        session, register_id=intent.register_id, actor_id=seller_id, member_id=payload.member_id,
+        items=payload.items, expected_total_minor=payload.expected_total_minor,
+        idempotency_key=intent.idempotency_key)
+    result = "completed" if order is not None else "cancelled"
+    session.add(ProductSaleResolution(actor_id=admin_id, seller_id=seller_id, register_id=intent.register_id,
+                                      idempotency_key=intent.idempotency_key, result=result))
+    session.delete(intent)
+    return {"status": result, "order_id": str(order.id) if order else None}
 
 
 # --- card (Mercado Pago Point) flow --------------------------------------------------------------
