@@ -5,14 +5,20 @@ from pathlib import Path
 import pytest
 
 API = Path(__file__).resolve().parents[1]
-WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py", "app/api/staff_attendance.py"]  # later slices append their router here
+WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py", "app/api/staff_attendance.py",
+                   "app/api/inventory.py", "app/api/catalog.py"]  # later slices append their router here
 
 FORBIDDEN_CALLS = {"select", "execute", "scalar", "scalars", "add", "delete", "flush", "commit",
                    "rollback", "begin", "with_for_update", "authorize"}
 FORBIDDEN_MODULES = ("sqlalchemy", "app.db", "app.auth.authorization")
+# Principal resolvers are transport: exception classes and the Permission enum are not business logic.
+ALLOWED_MODULES = ("sqlalchemy.exc",)
+ALLOWED_NAMES = {"app.auth.authorization": {"AuthorizationDenied", "Permission"}}
 
 
 def _bad_module(name: str) -> bool:
+    if any(name == m or name.startswith(m + ".") for m in ALLOWED_MODULES):
+        return False
     return (name.split(".")[-1] == "queries"
             or any(name == m or name.startswith(m + ".") for m in FORBIDDEN_MODULES))
 
@@ -32,13 +38,22 @@ def violations(source: str) -> list[str]:
             module = node.module or ""
             # `from app.sales import queries` names the forbidden module in the imported names.
             found += [f"line {node.lineno}: from {module} import {a.name}" for a in node.names
-                      if _bad_module(module) or _bad_module(f"{module}.{a.name}")]
+                      if a.name not in ALLOWED_NAMES.get(module, ())
+                      and (_bad_module(module) or _bad_module(f"{module}.{a.name}"))]
     return found
 
 
 @pytest.mark.parametrize("router", WATCHED_ROUTERS)
 def test_router_is_transport_only(router):
     assert violations((API / router).read_text()) == []
+
+
+@pytest.mark.parametrize("source", [
+    "from sqlalchemy.exc import OperationalError",
+    "from app.auth.authorization import AuthorizationDenied, Permission",
+])
+def test_guard_allows_resolver_imports(source):
+    assert violations(source) == []
 
 
 @pytest.mark.parametrize("source", [

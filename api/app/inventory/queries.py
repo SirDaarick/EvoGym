@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.models import (
     Branch,
     Product,
+    RoleGrant,
     RegisterInventorySnapshotItem,
     RegisterInventorySnapshot,
     StockInitialization,
@@ -545,3 +546,11 @@ def _validate_page(offset: int, limit: int) -> None:
         raise ValueError("Offset must be a nonnegative signed 64-bit integer.")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("Limit must be between 1 and 100.")
+
+
+def has_receptionist_grant(session: Session, *, staff_id: UUID, branch_id: UUID | None) -> bool:
+    return session.scalar(select(RoleGrant.id).where(
+        RoleGrant.staff_id == staff_id, RoleGrant.role == "receptionist",
+        RoleGrant.scope_kind == "branch", RoleGrant.branch_id == branch_id,
+        RoleGrant.is_active.is_(True),
+    )) is not None
