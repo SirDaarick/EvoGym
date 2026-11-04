@@ -146,9 +146,10 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
   - **Archivos:** `api/app/api/rentals.py`, `frontend/src/features/reception/GuantesModal.tsx`, `frontend/src/features/reception/CasillerosModal.tsx`.
   - **Detalle:** Conectar los modales de recepción a los endpoints reales de `rentals.py`. Eliminar fallbacks a `demoRentGlove`/`useDemo`. Soporte para renta diaria de guantes vs renta mensual de casilleros, cobro, vencimiento y devolución de depósitos.
 
-- [ ] **T4.2 — Módulo de Gastos de Operación y Caja Chica (BK-045)**
+- [x] **T4.2 — Módulo de Gastos de Operación y Caja Chica (BK-045)**
   - **Archivos:** `api/app/api/expenses.py` (crear), `api/app/db/models/expenses.py`, `frontend/src/features/reception/GastoModal.tsx`.
   - **Detalle:** Crear tabla y migración Alembic para gastos (`expenses`), endpoints de registro con comprobante y categoría, vinculación contable al turno activo y descuento directo del arqueo físico de efectivo.
+  - **Resultado (verificado 2026-11-04):** pytest `test_expenses`/`test_shifts`/`test_migrations` 98 passed; vitest GastoModal/ExtraModal/ExpenseReport/ExpensesView 32 passed (5 archivos); typecheck verde.
 
 - [ ] **T4.3 — Finanzas, Compensaciones y Nómina de Personal (BK-043, BK-044)**
   - **Archivos:** `api/app/api/staff_payroll.py`, `frontend/src/features/owner/StaffManagement.tsx`.
