@@ -58,6 +58,27 @@ class AppError(Exception):
     metadata: MembershipDenialMetadata | None = None
 
 
+_HTTP_MESSAGES = {404: "The requested resource was not found.", 405: "The request method is not allowed."}
+
+
+def http_error_message(status: int) -> str:
+    return _HTTP_MESSAGES.get(status, "The request could not be completed.")
+
+
+class HttpStatusError(AppError):
+    """Service-side stand-in for HTTPException(status): same wire output as the http_error handler."""
+
+    code = "http_error"
+
+    def __init__(self, status: int):
+        self.status = status
+        super().__init__(status)
+
+    @property
+    def message(self):
+        return http_error_message(self.status)
+
+
 class PublicDomainError(AppError):
     """Explicit internal boundary; arbitrary HTTPException details never enter it."""
 
@@ -163,8 +184,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        messages = {404: "The requested resource was not found.", 405: "The request method is not allowed."}
-        response = _response(exc.status_code, "http_error", messages.get(exc.status_code, "The request could not be completed."), request)
+        response = _response(exc.status_code, "http_error", http_error_message(exc.status_code), request)
         response.headers.update(_safe_protocol_headers(exc))
         return response
 

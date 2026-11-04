@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied
 from app.db.session import get_session as _session_lifecycle
+from app.settings import Settings
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -58,3 +59,10 @@ def get_admin_principal(
 
 
 AdminDep = Annotated[AdminPrincipal, Depends(get_admin_principal)]
+
+
+def get_app_settings(request: Request) -> Settings | None:
+    return getattr(request.app.state, "settings", None)
+
+
+SettingsDep = Annotated[Settings | None, Depends(get_app_settings)]

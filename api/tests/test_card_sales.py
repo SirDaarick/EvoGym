@@ -545,7 +545,7 @@ def test_point_calls_hold_no_db_session_and_replay_stays_idempotent(tmp_path, mo
             counting = _CountingFactory(app.state.session_factory)
             fake = _NoSessionPointClient(counting)
             app.state.session_factory = counting
-            monkeypatch.setattr("app.api.sales.get_point_client", lambda settings=None: fake)
+            monkeypatch.setattr("app.sales.service.get_point_client", lambda settings=None: fake)
             # The auth dependency must keep working with the wrapped factory.
             base = f"/api/v1/registers/{register_id}"
             created = client.post(f"{base}/card-intent", headers=headers,

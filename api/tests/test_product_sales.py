@@ -325,7 +325,7 @@ def test_resolution_endpoint_rejects_mismatch_and_commits_cancellation(tmp_path)
     from types import SimpleNamespace
     from app.api.sales import resolve_product_sale_endpoint
     from app.sales.schemas import CashProductSaleRequest
-    from fastapi import HTTPException
+    from app.errors import AppError
     url, engine, factory = _setup_db(tmp_path)
     try:
         branch = _seed_branch(factory)
@@ -338,9 +338,9 @@ def test_resolution_endpoint_rejects_mismatch_and_commits_cancellation(tmp_path)
         payload = CashProductSaleRequest.model_validate({'items': [{'product_id': str(register_id), 'quantity': 1}], 'expected_total_minor': 100})
         assert resolve_product_sale_endpoint(register_id, payload, 'endpoint', principal, factory=factory) == {'status': 'cancelled'}
         assert resolve_product_sale_endpoint(register_id, payload, 'endpoint', principal, factory=factory) == {'status': 'cancelled'}
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(AppError) as exc:
             resolve_product_sale_endpoint(register_id, payload.model_copy(update={'expected_total_minor': 200}), 'endpoint', principal, factory=factory)
-        assert exc.value.status_code == 409
+        assert (exc.value.status, exc.value.code) == (409, 'http_error')
     finally:
         engine.dispose()
 

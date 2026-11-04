@@ -13,6 +13,7 @@ from app.db.models import (
     Branch, CashRegister, ClassSampleEntitlement, Member, MembershipPeriod, Order, OrderItem, Payment,
     MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
     Product, StockInitialization, StockMovement, ProductRefund, ProductSaleCancellation, ProductSaleIntent, StaffUser,
+    PaymentTerminal, RoleGrant,
 )
 from app.errors import AppError
 from app.inventory.queries import get_on_hand_stock
@@ -581,7 +582,7 @@ def _add_duration(value: date, count: int, unit: str) -> date:
     raise ValueError("Published membership duration unit is unsupported.")
 
 
-def _fingerprint(
+def membership_sale_fingerprint(
     register_id: UUID,
     member_id: UUID,
     plan_version_id: UUID,
@@ -601,7 +602,7 @@ def _fingerprint(
     return sha256(payload).hexdigest()
 
 
-def _load_result(session: Session, order: Order, replayed: bool) -> CashMembershipSaleResult:
+def load_sale_result(session: Session, order: Order, replayed: bool) -> CashMembershipSaleResult:
     items = list(order.items)
     if len(items) != 1 or order.payment is None:
         raise RuntimeError("Persisted membership cash sale is incomplete.")
@@ -659,7 +660,7 @@ def post_membership_cash_sale(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = _fingerprint(
+    fingerprint = membership_sale_fingerprint(
         register_id, member_id, plan_version_id, source_shift_id, payment_method,
         cash_amount_minor, cash_amount_provided,
     )
@@ -673,7 +674,7 @@ def post_membership_cash_sale(
     if existing is not None:
         if existing.request_fingerprint != fingerprint:
             raise CashSaleConflictError("Idempotency key was already used for a different request.")
-        return _load_result(session, existing, replayed=True)
+        return load_sale_result(session, existing, replayed=True)
 
     if register.status != "active":
         raise CashSaleConflictError("Cash register is not active.")
@@ -918,7 +919,7 @@ def review_membership_transfer(
     return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=False)
 
 
-def _debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int) -> str:
+def debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int) -> str:
     canonical = f"{register_id}\n{order_id}\n{amount_minor}".encode("ascii")
     return sha256(canonical).hexdigest()
 
@@ -948,7 +949,7 @@ def post_membership_debt_payment(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = _debt_payment_fingerprint(register_id, order_id, amount_minor)
+    fingerprint = debt_payment_fingerprint(register_id, order_id, amount_minor)
     existing = session.scalar(
         select(MembershipDebtPayment).where(
             MembershipDebtPayment.branch_id == register.branch_id,
@@ -1084,3 +1085,72 @@ def list_register_member_open_debts(
             )
     return open_debts
 
+
+
+# --- lookups used by app.sales.service (SQL only; callers decide what a miss means) ---
+
+def lock_receptionist_grant(session: Session, *, staff_id: UUID, branch_id: UUID):
+    """Row-lock the staff's active receptionist grant for the branch; None when absent."""
+    return session.scalar(select(RoleGrant.id).where(
+        RoleGrant.staff_id == staff_id, RoleGrant.role == "receptionist",
+        RoleGrant.is_active.is_(True), RoleGrant.scope_kind == "branch",
+        RoleGrant.branch_id == branch_id,
+    ).with_for_update())
+
+
+def lock_staff_key_share(session: Session, staff_id: UUID) -> None:
+    session.scalar(select(StaffUser.id).where(StaffUser.id == staff_id).with_for_update(key_share=True))
+
+
+def get_register(session: Session, register_id: UUID):
+    return session.scalar(select(CashRegister).where(CashRegister.id == register_id))
+
+
+def find_order_by_key(session: Session, *, branch_id: UUID, seller_id: UUID, idempotency_key: str):
+    return session.scalar(select(Order).where(
+        Order.branch_id == branch_id, Order.seller_id == seller_id, Order.idempotency_key == idempotency_key))
+
+
+def find_refund_by_key(session: Session, *, branch_id: UUID, actor_id: UUID, idempotency_key: str):
+    return session.scalar(select(ProductRefund).where(
+        ProductRefund.branch_id == branch_id, ProductRefund.actor_id == actor_id,
+        ProductRefund.idempotency_key == idempotency_key))
+
+
+def find_debt_payment_by_key(session: Session, *, branch_id: UUID, received_by: UUID, idempotency_key: str):
+    return session.scalar(select(MembershipDebtPayment).where(
+        MembershipDebtPayment.branch_id == branch_id, MembershipDebtPayment.received_by == received_by,
+        MembershipDebtPayment.idempotency_key == idempotency_key))
+
+
+def find_active_terminal(session: Session, register: CashRegister):
+    """The register's default terminal, else the branch's first active one (by code)."""
+    return register.default_terminal or session.scalar(
+        select(PaymentTerminal).where(
+            PaymentTerminal.branch_id == register.branch_id, PaymentTerminal.status == "active",
+        ).order_by(PaymentTerminal.code.asc()))
+
+
+def create_mock_terminal(session: Session, register: CashRegister) -> PaymentTerminal:
+    terminal = PaymentTerminal(
+        branch_id=register.branch_id, code="POINT-01", name="Terminal Mostrador 01",
+        device_id="GERTEC_MP35P__8701012345", provider="mercado_pago", status="active",
+    )
+    session.add(terminal)
+    session.flush()
+    register.default_terminal_id = terminal.id
+    session.flush()
+    return terminal
+
+
+def load_transfer_review_order(session: Session, payment_id: UUID):
+    """Transfer order for a review, with register and member row-locked in sale/review lock order."""
+    payment = session.scalar(select(Payment).where(Payment.id == payment_id))
+    if payment is None or payment.method != "transfer":
+        return None
+    order = session.get(Order, payment.order_id)
+    if order is None:
+        return None
+    register = session.scalar(select(CashRegister).where(CashRegister.id == order.register_id).with_for_update())
+    member = session.scalar(select(Member).where(Member.id == order.member_id).with_for_update())
+    return None if register is None or member is None else order
