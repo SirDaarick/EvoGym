@@ -129,7 +129,7 @@ def test_owner_overview_filters_finance_at_branch_midnight(tmp_path, monkeypatch
         def now(cls, tz=None):
             return cls(2026, 10, 2, 5, 59, tzinfo=timezone.utc).astimezone(tz)
 
-    monkeypatch.setattr(import_module("app.api.owner_overview"), "datetime", FixedDateTime)
+    monkeypatch.setattr(import_module("app.finance.overview"), "datetime", FixedDateTime)
     url, engine, factory = _setup_db(tmp_path)
     try:
         branch = _seed_branch(factory)
@@ -321,7 +321,7 @@ def test_owner_overview_absences_respect_start_and_schedule_exceptions(tmp_path,
         def now(cls, tz=None):
             return cls(2026, 10, 1, 18, tzinfo=timezone.utc).astimezone(tz)
 
-    monkeypatch.setattr(import_module("app.api.owner_overview"), "datetime", FixedDateTime)
+    monkeypatch.setattr(import_module("app.finance.overview"), "datetime", FixedDateTime)
     url, engine, factory = _setup_db(tmp_path)
     try:
         branch = _seed_branch(factory)

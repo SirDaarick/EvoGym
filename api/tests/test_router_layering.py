@@ -18,6 +18,11 @@ WATCHED_ROUTERS = ["app/api/sales.py",
                    "app/api/member_reads.py",
                    "app/api/member_check_ins.py",
                    "app/api/membership_access.py"]  # later slices append their router here
+WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py", "app/api/staff_attendance.py",
+                   "app/api/inventory.py", "app/api/catalog.py", "app/api/staff_schedules.py",
+                   "app/api/staff_roster.py", "app/api/staff_credentials.py",
+                   "app/api/expenses.py", "app/api/pending_money.py", "app/api/payroll.py",
+                   "app/api/owner_overview.py"]  # later slices append their router here
 
 FORBIDDEN_CALLS = {"select", "execute", "scalar", "scalars", "add", "delete", "flush", "commit",
                    "rollback", "begin", "with_for_update", "authorize"}

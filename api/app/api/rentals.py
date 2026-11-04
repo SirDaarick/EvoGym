@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 
-from app.api.deps import SettingsDep
+from app.api.deps import RawFactoryDep as Factory, SettingsDep
 from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
 from app.rentals import service
 from app.rentals.schemas import (
@@ -16,27 +16,13 @@ from app.rentals.schemas import (
 
 router = APIRouter(prefix="/api/v1/rentals", tags=["rentals"])
 
-# Raw state: a missing factory becomes 503 inside the service, after its permission checks.
-def _raw_factory(request: Request):
-    return request.app.state.session_factory
-
-
 def _injected_point_client(request: Request):
     return getattr(request.app.state, "rental_point_client", None)
 
 
-Factory = Annotated[object, Depends(_raw_factory)]
 PointClient = Annotated[object, Depends(_injected_point_client)]
 Principal = Annotated[ShiftActorPrincipal, Depends(get_shift_actor_principal)]
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key")]
-
-# Shared with app.api.expenses.
-_receptionist = service.require_receptionist
-
-
-def _factory(request: Request):
-    return service.session_factory(request.app.state.session_factory)
-
 
 def _status(response: Response, replayed: bool) -> None:
     response.status_code = 200 if replayed else 201

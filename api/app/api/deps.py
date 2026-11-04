@@ -28,6 +28,14 @@ def get_session_factory(request: Request) -> sessionmaker[Session]:
 SessionFactoryDep = Annotated[sessionmaker[Session], Depends(get_session_factory)]
 
 
+def get_raw_session_factory(request: Request):
+    """Raw state: a missing factory becomes 503 inside the service, after its permission checks."""
+    return request.app.state.session_factory
+
+
+RawFactoryDep = Annotated[object, Depends(get_raw_session_factory)]
+
+
 def get_session(factory: SessionFactoryDep) -> Generator[Session, None, None]:
     """One session per request; never commits (services own `commit()`), rolls back and closes on exit."""
     yield from _session_lifecycle(factory)
