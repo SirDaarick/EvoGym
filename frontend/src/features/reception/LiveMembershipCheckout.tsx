@@ -17,6 +17,7 @@ import {
   type MembershipTransferSaleRequest,
   type RegisterMemberOpenDebt,
 } from '../../api/membershipCheckoutApi';
+import { browserRequest } from '../../api/http';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList, { type AnimatedListEntry } from '../catalog/react-bits/AnimatedList';
 import { CurrentPurchaseCard } from './CurrentPurchaseCard';
@@ -128,7 +129,7 @@ export function LiveMembershipCheckout({
     if (!selectedMember) {
       let active = true;
       setLoadingMembers(true);
-      const req = apiRequest ?? ((path, init) => fetch(path, init));
+      const req = apiRequest ?? browserRequest;
       req('/api/v1/members?page=1&limit=100')
         .then(res => res.json())
         .then((data: { items?: { id: string; full_name?: string; name?: string }[] }) => {

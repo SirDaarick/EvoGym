@@ -1,3 +1,5 @@
+import { HttpError, NetworkError, parseErrorEnvelope } from './http';
+
 const TOKEN_KEY = 'evogym:operational-session';
 
 export interface ReceptionConfig {
@@ -19,22 +21,14 @@ export interface OperationalMemberDetail extends OperationalMember {
   has_pending_balance: boolean;
 }
 
-export class OperationalApiHttpError extends Error {
-  readonly kind = 'http';
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly code?: string,
-    readonly requestId?: string,
-    readonly issues?: unknown
-  ) {
-    super(message);
+export class OperationalApiHttpError extends HttpError {
+  constructor(status: number, message: string, code?: string, requestId?: string, issues?: unknown) {
+    super(status, message, code, requestId, issues);
     this.name = 'OperationalApiHttpError';
   }
 }
 
-export class OperationalApiNetworkError extends Error {
-  readonly kind = 'network';
+export class OperationalApiNetworkError extends NetworkError {
   constructor() {
     super('No se pudo conectar con el servidor. Intenta nuevamente.');
     this.name = 'OperationalApiNetworkError';
@@ -83,23 +77,7 @@ export async function request<T>(config: ReceptionConfig, path: string, token?: 
     throw new OperationalApiNetworkError();
   }
   if (!response.ok) {
-    let error: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = await response.json();
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        const envelope = (parsed as Record<string, unknown>).error;
-        if (typeof envelope === 'object' && envelope !== null && !Array.isArray(envelope)) error = envelope as Record<string, unknown>;
-      }
-    } catch { /* Keep safe status mapping. */ }
-    const code = typeof error.code === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(error.code) ? error.code : undefined;
-    const requestId = response.headers.get('X-Request-ID') || (typeof error.request_id === 'string' ? error.request_id : undefined);
-    const allowedLocations = new Set(['body', 'query', 'path', 'header', 'cookie']);
-    const allowedTypes = new Set(['missing', 'int_parsing', 'int_type', 'string_type', 'bool_parsing', 'uuid_parsing', 'extra_forbidden', 'json_invalid', 'greater_than', 'greater_than_equal', 'less_than', 'less_than_equal', 'string_too_short', 'string_too_long', 'string_pattern_mismatch', 'literal_error', 'invalid']);
-    const issues = Array.isArray(error.issues) ? error.issues.slice(0, 20).flatMap((issue) => {
-      if (typeof issue !== 'object' || issue === null || Array.isArray(issue)) return [];
-      const candidate = issue as Record<string, unknown>;
-      return [{ location: Array.isArray(candidate.location) ? candidate.location.filter((value): value is string => typeof value === 'string' && allowedLocations.has(value)).slice(0, 1) : [], type: typeof candidate.type === 'string' && allowedTypes.has(candidate.type) ? candidate.type : 'invalid' }];
-    }) : undefined;
+    const { code, requestId, issues } = await parseErrorEnvelope(response);
     const messages: Record<number, string> = {
       401: token ? 'La sesión expiró o fue revocada. Inicia sesión nuevamente.' : 'Credenciales inválidas.',
       403: 'No tienes autorización para realizar esta acción.',

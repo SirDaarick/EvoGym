@@ -1,4 +1,5 @@
-export type AuthenticatedRequest = (path: string, init?: RequestInit) => Promise<Response>;
+import type { AuthenticatedRequest } from './http';
+export type { AuthenticatedRequest };
 
 export interface MemberListItemDTO {
   id: string;
