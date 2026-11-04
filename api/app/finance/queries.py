@@ -114,6 +114,22 @@ def week_payment(session, profile_id, week):
         PayrollPayment.staff_profile_id == profile_id, PayrollPayment.week_start == week))
 
 
+def payroll_activity(session, branch_id, first_week, last_week):
+    """Advances and payments of one branch whose week_start lies in [first_week, last_week] (read-only)."""
+    advances = session.scalars(select(PayrollAdvance).where(
+        PayrollAdvance.branch_id == branch_id, PayrollAdvance.week_start >= first_week,
+        PayrollAdvance.week_start <= last_week)).all()
+    payments = session.scalars(select(PayrollPayment).where(
+        PayrollPayment.branch_id == branch_id, PayrollPayment.week_start >= first_week,
+        PayrollPayment.week_start <= last_week)).all()
+    return advances, payments
+
+
+def profiles_by_ids(session, profile_ids):
+    ids = list(profile_ids)
+    return {p.id: p for p in session.scalars(select(StaffRosterProfile).where(StaffRosterProfile.id.in_(ids)))} if ids else {}
+
+
 # --- owner overview --------------------------------------------------------------------------
 
 def branch_shifts(session, branch_id):

@@ -15,6 +15,8 @@ from app.db.models.staff_schedules import StaffScheduleException, StaffScheduleS
 from app.db.models.enrollment import StaffEnrollmentCode
 from app.db.models.devices import StaffDevicePairingCode, StaffPairedDevice
 from app.db.models.members import Member, MemberEligibilityRecord, MemberNote
+from app.db.models.notifications import NotificationOutbox, WhatsappInboxMessage
+from app.db.models.gimi import GimiKnowledgeChunk
 from app.db.models.rentals import (
     Rental,
     RentalAsset,
@@ -129,4 +131,7 @@ __all__ = [
     "StaffScheduleSeries",
     "StaffScheduleException",
     "StaffUser",
+    "NotificationOutbox",
+    "WhatsappInboxMessage",
+    "GimiKnowledgeChunk",
 ]

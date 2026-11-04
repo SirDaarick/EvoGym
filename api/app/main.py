@@ -281,6 +281,8 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(rentals_router)
     application.include_router(expenses_router)
     application.include_router(payroll_router)
+    from app.api.whatsapp_webhook import router as whatsapp_webhook_router
+    application.include_router(whatsapp_webhook_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)

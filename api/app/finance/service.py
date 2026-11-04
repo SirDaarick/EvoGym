@@ -5,6 +5,7 @@ are `HttpStatusError`s. Pending money is unsettled source events, never revenue.
 factory (None -> 503 where the router passes the raw one).
 """
 import hashlib
+from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
 
@@ -197,6 +198,53 @@ def payroll_week(factory, principal, branch_id, week_start):
                 "paid": {"payment_method": payment.payment_method, "paid_at": payment.created_at.isoformat()} if payment else None})
         return {"items": items, "base_minor": sum(row["base_minor"] for row in items),
                 "advances_minor": sum(row["advances_minor"] for row in items), "net_minor": sum(row["net_minor"] for row in items)}
+
+
+def payroll_history(factory, principal, from_date, to_date, branch_id):
+    """Read-only payroll history: per (week, branch) the profiles with an advance or a payment in the range.
+
+    Paid weeks read the immutable snapshot; weeks with only advances estimate the base from the current salary.
+    `outflow_minor` = advances + net paid, i.e. what really left as Expense rows (no double counting).
+    """
+    if to_date < from_date or (to_date - from_date).days > 366:
+        raise HttpStatusError(422)
+    first_week = from_date - timedelta(days=from_date.weekday())
+    with factory() as session:
+        if not principal.organization_admin:
+            raise HttpStatusError(403)
+        branches = authorized_branches(session, principal, branch_id)
+        weeks = []
+        for branch in branches:
+            advances, payments = q.payroll_activity(session, branch.id, first_week, to_date)
+            profiles = q.profiles_by_ids(session, {r.staff_profile_id for r in (*advances, *payments)})
+            by_week = {}
+            for row in (*advances, *payments):
+                by_week.setdefault(row.week_start, set()).add(row.staff_profile_id)
+            for week_start, profile_ids in by_week.items():
+                items = []
+                for pid in profile_ids:
+                    profile = profiles[pid]
+                    payment = next((p for p in payments if p.staff_profile_id == pid and p.week_start == week_start), None)
+                    if payment:
+                        base, adv = payment.base_minor, payment.advances_minor
+                    else:
+                        base = weekly_base(profile.monthly_salary_minor)
+                        adv = sum(a.amount_minor for a in advances if a.staff_profile_id == pid and a.week_start == week_start)
+                    paid = payment.net_minor if payment else 0
+                    items.append({"profile_id": str(pid), "full_name": profile.full_name, "base_minor": base,
+                        "advances_minor": adv, "net_minor": base - adv, "paid_minor": paid, "outflow_minor": adv + paid,
+                        "paid": {"payment_method": payment.payment_method, "paid_at": payment.created_at.isoformat()} if payment else None})
+                items.sort(key=lambda r: (r["full_name"], r["profile_id"]))
+                weeks.append({"week_start": week_start.isoformat(), "branch_id": str(branch.id), "branch_name": branch.name,
+                              "items": items, **_payroll_totals(items)})
+        weeks.sort(key=lambda w: (w["week_start"], w["branch_id"]), reverse=True)
+        return {"from": from_date.isoformat(), "to": to_date.isoformat(),
+                "branches": [{"id": str(b.id), "name": b.name} for b in branches],
+                "weeks": weeks, **_payroll_totals(weeks)}
+
+
+def _payroll_totals(rows):
+    return {key: sum(r[key] for r in rows) for key in ("base_minor", "advances_minor", "net_minor", "paid_minor", "outflow_minor")}
 
 
 def record_advance(factory, principal, payload, key):

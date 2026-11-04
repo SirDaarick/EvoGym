@@ -30,7 +30,8 @@ WATCHED_ROUTERS = ["app/api/sales.py",
                    "app/api/admin_auth.py",
                    "app/api/admin_security_alerts.py",
                    "app/api/admin_enrollment.py",
-                   "app/api/admin_sessions.py"]  # later slices append their router here
+                   "app/api/admin_sessions.py",
+                   "app/api/whatsapp_webhook.py"]  # later slices append their router here
 
 FORBIDDEN_CALLS = {"select", "execute", "scalar", "scalars", "add", "delete", "flush", "commit",
                    "rollback", "begin", "with_for_update", "authorize"}

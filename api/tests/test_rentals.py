@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from alembic import command
+from alembic.script import ScriptDirectory
 from alembic.config import Config
 from pathlib import Path
 
@@ -570,7 +571,7 @@ def test_rental_migration_0048_preserves_populated_assets_and_adds_payment_owner
         assert {"rental_charge_id", "register_id", "shift_id", "idempotency_key"} <= payment_columns
         with engine.connect() as connection:
             assert connection.execute(text("SELECT code FROM rental_assets")).scalar_one() == "legacy-glove"
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0054_rental_deposits"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == ScriptDirectory.from_config(config).get_current_head()
     finally:
         engine.dispose()
 

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     cors_allowed_origins: str | None = Field(default=None)
     operational_security_log_directory: Path | None = Field(default=None)
     mercado_pago_access_token: SecretStr | None = None
+    whatsapp_app_secret: SecretStr | None = None
+    whatsapp_verify_token: SecretStr | None = None
+    whatsapp_webhook_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
     evidence_s3_endpoint: str | None = None
     evidence_public_endpoint: str | None = None
     evidence_s3_bucket: str | None = None
@@ -80,6 +83,14 @@ class Settings(BaseSettings):
         return (
             self.mercado_pago_access_token is not None
             and len(self.mercado_pago_access_token.get_secret_value().strip()) > 0
+        )
+
+    @property
+    def whatsapp_webhook_configured(self) -> bool:
+        """Webhook stays disabled (503) unless both the app secret and verify token are set."""
+        return all(
+            value is not None and len(value.get_secret_value().strip()) > 0
+            for value in (self.whatsapp_app_secret, self.whatsapp_verify_token)
         )
 
     @model_validator(mode="after")

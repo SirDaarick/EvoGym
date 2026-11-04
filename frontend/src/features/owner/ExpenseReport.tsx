@@ -25,6 +25,7 @@ import { BalanceView } from './finance/BalanceView';
 import { BudgetView } from './finance/BudgetView';
 import { CollectionsView, type PendingMoneyBranchOption } from './finance/CollectionsView';
 import { ExpensesView } from './finance/ExpensesView';
+import { LivePayrollView } from './finance/LivePayrollView';
 import { FinanceToolbar } from './finance/FinanceToolbar';
 import type { CollectionFilters, ExpenseFilters, FinanceTab, FlowGranularity, TableState } from './finance/types';
 import './ExpenseReport.css';
@@ -279,7 +280,9 @@ function ExpenseReportContent({
             branches={expenseBranches} selectedBranchId={selectedBranchId} onBranchChange={apiRequest ? setSelectedBranchId : undefined}
             setSorting={updater => updateSorting(setExpenseTable, updater)} setPagination={updater => updatePagination(setExpenseTable, updater)} />
           {apiRequest && <GastoModal isOpen={businessOpen} onClose={() => setBusinessOpen(false)} apiRequest={apiRequest} mode="business" branches={expenseBranches} onSaved={() => { setBusinessOpen(false); setExpenseRefresh(value => value + 1); }} />}</>
-          : <BudgetView costs={fixedCosts} staff={staff} />;
+          : apiRequest
+            ? <LivePayrollView apiRequest={apiRequest} range={range} branchId={selectedBranchId === 'ALL' ? undefined : selectedBranchId} />
+            : <BudgetView costs={fixedCosts} staff={staff} />;
 
   return <main className="finance-page">
     <FinanceToolbar range={range} projection={projection} active={active} printDetail={printDetail} onRangeChange={updateQuery} />
@@ -293,7 +296,7 @@ function ExpenseReportContent({
           event.preventDefault();
           setFocusTab(next);
           document.getElementById(`finance-tab-${next}`)?.focus();
-        }}>{tabLabels[tab]}</button>)}
+        }}>{apiRequest && tab === 'presupuesto' ? 'Nómina' : tabLabels[tab]}</button>)}
     </nav>
     <section id={`finance-panel-${active}`} className="finance-panel" role="tabpanel" aria-labelledby={`finance-tab-${active}`} tabIndex={0}>
       {page}

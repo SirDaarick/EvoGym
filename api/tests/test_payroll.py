@@ -84,3 +84,56 @@ def test_nine_profiles_total_and_rounding(tmp_path):
             assert (row['base_minor'], row['daily_minor']) == (26, 5)
     finally:
         engine.dispose()
+
+
+def test_payroll_history_matches_expenses_without_double_counting(tmp_path):
+    url, engine, factory, branch, other, desk_token, _branch_admin = _setup(tmp_path)
+    try:
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            token = complete_device_login(client, delivery, 'owner@example.invalid', 'synthetic-admin-password').json()['access_token']
+            admin = {'Authorization': f'Bearer {token}'}
+            desk = {'Authorization': f'Bearer {desk_token}'}
+            profile = client.post(f'/api/v1/staff-roster/branches/{branch}', headers=admin,
+                                  json={'full_name': 'Emigdio', 'position': 'Staff'}).json()['id']
+            client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'monthly_salary_minor': 1400000})
+            body = {'branch_id': str(branch), 'staff_profile_id': profile}
+            paid_week, open_week = '2026-10-26', '2026-11-02'
+            assert client.post('/api/v1/admin/payroll/advances', headers={**admin, 'Idempotency-Key': 'a1'},
+                               json={**body, 'week_start': paid_week, 'amount_minor': 50000}).status_code == 201
+            assert client.post('/api/v1/admin/payroll/payments', headers={**admin, 'Idempotency-Key': 'p1'},
+                               json={**body, 'week_start': paid_week, 'payment_method': 'cash'}).status_code == 201
+            assert client.post('/api/v1/admin/payroll/advances', headers={**admin, 'Idempotency-Key': 'a2'},
+                               json={**body, 'week_start': open_week, 'amount_minor': 20000}).status_code == 201
+            # Salary change after payment must not rewrite the paid snapshot in the history.
+            client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'monthly_salary_minor': 2000000})
+
+            query = f'from=2026-10-28&to=2026-11-04&branch_id={branch}'
+            history = client.get(f'/api/v1/admin/payroll/history?{query}', headers=admin)
+            assert history.status_code == 200, history.text
+            data = history.json()
+            assert [w['week_start'] for w in data['weeks']] == [open_week, paid_week]
+            newer, older = data['weeks']
+            assert older['items'][0]['paid']['payment_method'] == 'cash'
+            assert (older['base_minor'], older['advances_minor'], older['net_minor'], older['paid_minor'], older['outflow_minor']) == (350000, 50000, 300000, 300000, 350000)
+            assert newer['items'][0]['paid'] is None
+            assert (newer['advances_minor'], newer['paid_minor'], newer['outflow_minor']) == (20000, 0, 20000)
+            assert data['outflow_minor'] == 370000 and data['advances_minor'] == 70000 and data['paid_minor'] == 300000
+
+            # Outflow in the payroll history equals the Gastos report for the same range: no double counting.
+            expenses = client.get(f'/api/v1/admin/expenses?{query}', headers=admin).json()['items']
+            assert {e['concept'] for e in expenses} == {'Adelanto de nómina', 'Nómina semanal'}
+            assert all(e['shift_id'] is None and e['category'] == 'general' for e in expenses)
+            assert sum(e['amount_minor'] for e in expenses) == data['outflow_minor']
+            # Paid week: advances + payment expenses add up to exactly the weekly base.
+            assert older['advances_minor'] + older['paid_minor'] == older['base_minor']
+
+            # Range outside the activity is empty; invalid ranges and non-admins are rejected.
+            empty = client.get(f'/api/v1/admin/payroll/history?from=2026-01-01&to=2026-01-31&branch_id={branch}', headers=admin).json()
+            assert empty['weeks'] == [] and empty['outflow_minor'] == 0
+            assert client.get(f'/api/v1/admin/payroll/history?from=2026-11-04&to=2026-11-01', headers=admin).status_code == 422
+            assert client.get(f'/api/v1/admin/payroll/history?{query}', headers=desk).status_code == 403
+            all_branches = client.get('/api/v1/admin/payroll/history?from=2026-10-28&to=2026-11-04', headers=admin)
+            assert all_branches.status_code == 200 and all_branches.json()['outflow_minor'] == 370000
+    finally:
+        engine.dispose()

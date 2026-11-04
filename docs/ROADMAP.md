@@ -12,7 +12,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | ✅ **Completado** |
 | **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | ✅ **Completado** |
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | ✅ **Completado** |
-| **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟢 **Media** |
+| **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟡 **En curso (T4.6 y `/owner/gimi` pendientes)** |
 | **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 **Media** |
 | **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🔵 **Final** |
 
@@ -141,37 +141,29 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 
 ## 💼 Fase 4: Módulos Funcionales y Conexión de Pantallas
 > **Objetivo:** Completar los flujos de negocio del gimnasio que actualmente muestran `UnavailablePage` o dependen de simulación.
+> Plan y verificación: `docs/PHASE4-PLAN.md`, `docs/PHASE4-BASELINE.md`.
 
-- [ ] **T4.1 — Ciclo de vida completo de Rentas (Lockers y Guantes)**
-  - **Archivos:** `api/app/api/rentals.py`, `frontend/src/features/reception/GuantesModal.tsx`, `frontend/src/features/reception/CasillerosModal.tsx`.
-  - **Detalle:** Conectar los modales de recepción a los endpoints reales de `rentals.py`. Eliminar fallbacks a `demoRentGlove`/`useDemo`. Soporte para renta diaria de guantes vs renta mensual de casilleros, cobro, vencimiento y devolución de depósitos.
+- [x] **T4.1 — Ciclo de vida completo de Rentas (Lockers y Guantes)**
+  - **Resultado:** Backend F11 (migr. 0047/0048) + **depósitos** (migr. 0054, `rental_deposit_movements` append-only, integrado al arqueo). `GuantesModal`/`CasillerosModal` solo live (sin `useDemo`), UI de cobro/devolución de depósito y cobro con tarjeta Point. En `ReceptionHome` (prototipo demo) los atajos muestran aviso "no disponible en modo demo".
 
 - [x] **T4.2 — Módulo de Gastos de Operación y Caja Chica (BK-045)**
-  - **Archivos:** `api/app/api/expenses.py` (crear), `api/app/db/models/expenses.py`, `frontend/src/features/reception/GastoModal.tsx`.
-  - **Detalle:** Crear tabla y migración Alembic para gastos (`expenses`), endpoints de registro con comprobante y categoría, vinculación contable al turno activo y descuento directo del arqueo físico de efectivo.
-  - **Resultado (verificado 2026-11-04):** pytest `test_expenses`/`test_shifts`/`test_migrations` 98 passed; vitest GastoModal/ExtraModal/ExpenseReport/ExpensesView 32 passed (5 archivos); typecheck verde.
+  - **Resultado:** Ya implementado (migr. 0049, `expenses.py`, `GastoModal`, descuento en arqueo). Verificado en Oleada 0.
 
-- [ ] **T4.3 — Finanzas, Compensaciones y Nómina de Personal (BK-043, BK-044)**
-  - **Archivos:** `api/app/api/staff_payroll.py`, `frontend/src/features/owner/StaffManagement.tsx`.
-  - **Detalle:** Motor de cálculo de horas ordinarias y extras a partir de `staff_attendance_logs`, registro de anticipos/deducciones y generación de liquidaciones quincenales para el dueño.
+- [x] **T4.3 — Finanzas, Compensaciones y Nómina de Personal**
+  - **Alcance acordado:** la nómina base (semanal, sueldo fijo, anticipos; F13, migr. 0050) se da por cumplida. No se construye motor de horas/extras ni liquidación quincenal.
+  - **Resultado:** `GET /api/v1/admin/payroll/history` y vista de nómina real en el reporte del Owner; el egreso de nómina coincide con Gastos sin doble conteo (test). En modo live el tab Presupuesto ya no muestra costos fijos demo (sin backend).
 
-- [ ] **T4.4 — Resumen Diario de Operaciones (`DailyOperationsSummary`) (BK-047, BK-049)**
-  - **Archivos:** `api/app/api/daily_summary.py`, `frontend/src/features/owner/Overview.tsx`.
-  - **Detalle:** Endpoint y vista para que el dueño consulte ventas consolidadas desglosadas por método (efectivo, transferencias, terminales Point), cancelaciones y discrepancias de caja.
+- [x] **T4.4 — Resumen Diario de Operaciones**
+  - **Resultado:** Implementado extendiendo `owner_overview.py` (no existe `daily_summary.py`): ventas por método y terminal Point, cancelaciones/reembolsos, discrepancias de caja con turno. Los depósitos de renta se reportan aparte (`finances.deposits`) y no cuentan como ingreso.
 
-- [ ] **T4.5 — Conexión de Pantallas Desconectadas (`ApiProductApp.tsx`)**
-  - **Archivos:** `frontend/src/app/ApiProductApp.tsx:107-140`.
-  - **Detalle:** Conectar a la API las rutas que actualmente muestran `<UnavailablePage>`:
-    - `/owner/attendance`: Afluencia y capacidad del gimnasio basada en `member_check_ins`.
-    - `/owner/history`: Historial de movimientos y bitácora contable auditable.
-    - `/owner/gimi`: Monitor del asistente inteligente y métricas de soporte.
+- [~] **T4.5 — Conexión de Pantallas Desconectadas (`ApiProductApp.tsx`)**
+  - [x] `/owner/attendance`: `GET /api/v1/owner/attendance` + vista live.
+  - [x] `/owner/history`: `GET /api/v1/owner/history` (ledger de movimientos, paginación por cursor) + vista live.
+  - [ ] `/owner/gimi`: permanece `UnavailablePage` hasta conectar T4.6 a datos reales.
 
-- [ ] **T4.6 — Asistente Gimi, WhatsApp y Notificaciones (BK-053 a BK-057)**
-  - **Archivos:** `api/app/gimi/`, `api/app/notifications/`.
-  - **Detalle:**
-    - RAG en PostgreSQL con `pgvector` y búsqueda semántica HNSW sobre reglas y planes.
-    - Webhook de WhatsApp emparejando el teléfono con `members.phone` para consulta de adeudos y estatus.
-    - Outbox durable de notificaciones salientes con prevención de envíos duplicados de comprobantes.
+- [~] **T4.6 — Asistente Gimi, WhatsApp y Notificaciones**
+  - **Hecho con adaptadores falsos (sin credenciales):** outbox durable idempotente (migr. 0055), webhook de WhatsApp con firma HMAC, dedupe y match exacto de teléfono, lista de herramientas de solo lectura deny-by-default, RAG con pgvector/HNSW (migr. 0056, condicional por dialecto).
+  - **Pendiente:** proveedor real de WhatsApp (Meta/BSP), embeddings y LLM reales, worker que ejecute el outbox, normalizar `members.phone` a E.164, política de retención, probar contra PostgreSQL con pgvector, y decidir la imagen de Postgres de producción (la migración 0056 falla sin la extensión `vector`).
 
 ---
 

@@ -12,6 +12,12 @@ from app.finance.schemas import AdvanceInput, PaymentInput
 router = APIRouter(prefix="/api/v1/admin/payroll", tags=["payroll"])
 
 
+@router.get("/history")
+def payroll_history(from_date: date = Query(alias="from"), to_date: date = Query(alias="to"), branch_id: UUID | None = None,
+                    principal: FinancePrincipal = Depends(_principal), *, factory: SessionFactoryDep):
+    return service.payroll_history(factory, principal, from_date, to_date, branch_id)
+
+
 @router.get("/weeks/{week_start}")
 def payroll_week(week_start: date, branch_id: UUID = Query(), principal: FinancePrincipal = Depends(_principal), *, factory: SessionFactoryDep):
     return service.payroll_week(factory, principal, branch_id, week_start)

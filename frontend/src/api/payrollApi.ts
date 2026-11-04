@@ -33,3 +33,17 @@ export function branchPayrollDate(timeZone: string, now = new Date()): { weekSta
   local.setUTCDate(local.getUTCDate() - weekday);
   return { weekStart: local.toISOString().slice(0, 10), weekday };
 }
+
+export interface PayrollHistoryItem extends PayrollItem { paid_minor: number; outflow_minor: number }
+export interface PayrollHistoryTotals { base_minor: number; advances_minor: number; net_minor: number; paid_minor: number; outflow_minor: number }
+export interface PayrollHistoryWeek extends PayrollHistoryTotals {
+  week_start: string; branch_id: string; branch_name: string; items: PayrollHistoryItem[];
+}
+export interface PayrollHistory extends PayrollHistoryTotals {
+  from: string; to: string; branches: { id: string; name: string }[]; weeks: PayrollHistoryWeek[];
+}
+
+export const getPayrollHistory = (request: ApiRequest, from: string, to: string, branchId?: string) => {
+  const params = new URLSearchParams({ from, to, ...(branchId ? { branch_id: branchId } : {}) });
+  return json<PayrollHistory>(request, `/api/v1/admin/payroll/history?${params}`);
+};

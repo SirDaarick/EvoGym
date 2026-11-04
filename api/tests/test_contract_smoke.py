@@ -165,6 +165,9 @@ EXPECTED_DATABASE_TABLES = {
     "rentals",
     "rental_charges",
     "rental_deposit_movements",
+    "notification_outbox",
+    "whatsapp_inbox_messages",
+    "gimi_knowledge_chunks",
     "rental_receipts",
     "rental_cancellations",
     "rental_card_attempts",
@@ -319,7 +322,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0054_rental_deposits"
+            assert head_version == "0056_gimi_knowledge"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns
