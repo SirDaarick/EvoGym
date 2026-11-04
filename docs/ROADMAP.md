@@ -9,7 +9,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | Fase | Enfoque | Impacto / Riesgo | Prioridad |
 |---|---|---|---|
 | **Fase 0** | Trabajo en Curso (Suplementos y Porciones) | Alto (migración DB y stock) | ✅ **Completado** |
-| **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | 🔴 **Inmediata** |
+| **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | ✅ **Completado** |
 | **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | 🟡 **Alta** |
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | 🟡 **Media-Alta** |
 | **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟢 **Media** |
@@ -41,32 +41,32 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 ## 🔒 Fase 1: Defectos Críticos de Seguridad y Estabilidad
 > **Objetivo:** Eliminar vulnerabilidades en cobros, prevenir errores 500 en turnos y corregir desfases de fecha operativa (Must-Fix de Auditoría).
 
-- [ ] **T1.1 — Restringir terminal de tarjetas mock a entornos de prueba (P1)**
+- [x] **T1.1 — Restringir terminal de tarjetas mock a entornos de prueba (P1)**
   - **Archivos:** `api/app/sales/point.py:259`.
   - **Problema:** Si Mercado Pago no está configurado, la terminal mock auto-aprueba cualquier cobro simulando una tarjeta "VISA 4242", incluso en producción.
   - **Acción:** Permitir el fallback mock **únicamente** cuando `settings.environment in ('development', 'test', 'demo')`. En staging/producción debe responder error `503 Service Unavailable ("Terminal no configurada")`.
 
-- [ ] **T1.2 — Corregir captura de excepción en asistencia de personal (P2)**
+- [x] **T1.2 — Corregir captura de excepción en asistencia de personal (P2)**
   - **Archivos:** `api/app/api/staff_attendance.py:641`.
   - **Problema:** Un bloque `except Exception: traceback.print_exc(); raise` previo a `except IntegrityError` causa que un doble check-in de empleado resulte en error 500 en vez de 409, saltándose la política de sanitización de logs.
   - **Acción:** Eliminar el bloque inalcanzable de captura genérica y retornar un `409 Conflict` estructurado ante colisiones de registro único.
 
-- [ ] **T1.3 — Desacoplar bloqueos de base de datos de llamadas HTTP externas (P4)**
+- [x] **T1.3 — Desacoplar bloqueos de base de datos de llamadas HTTP externas (P4)**
   - **Archivos:** `api/app/sales.py:225-243`, `api/app/sales/point.py:176`.
   - **Problema:** Al cobrar con tarjeta Point, se retiene abierta la sesión de SQLAlchemy con `with_for_update` mientras `urllib` espera la respuesta de Mercado Pago (~15s). Con un pool de tamaño 5 (`pool_timeout=3`), 5 cobros simultáneos saturan el pool y botan toda la API.
   - **Acción:** Validar acceso, cerrar o liberar la transacción de BD antes de la llamada HTTP externa, y abrir una nueva sesión atómica solo al recibir la respuesta de la terminal para asentar la orden.
 
-- [ ] **T1.4 — Normalizar fecha de negocio del gimnasio en Frontend (R1)**
+- [x] **T1.4 — Normalizar fecha de negocio del gimnasio en Frontend (R1)**
   - **Archivos:** 12 ocurrencias en `frontend/src/` (incluyendo `StaffAttendanceView.tsx`, `StaffManagement.tsx`, `AttendanceCalendar.tsx`).
   - **Problema:** Se utiliza `new Date().toISOString().slice(0, 10)` (UTC). A partir de las 18:00 hrs en Ciudad de México (`America/Mexico_City`), el cliente pide asistencias y cortes con fecha del día siguiente, retornando listas vacías.
   - **Acción:** Mover la función de fecha con zona horaria a `frontend/src/shared/formatters/date.ts` (`businessDate(now, timeZone)`) y reemplazar los 12 cálculos manuales.
 
-- [ ] **T1.5 — Respetar TTL de sesión de staff configurado**
+- [x] **T1.5 — Respetar TTL de sesión de staff configurado**
   - **Archivos:** `api/app/api/admin_auth.py:141`.
   - **Problema:** La expiración de la sesión de recepción está fijada en 90 días en código duro, ignorando la configuración.
-  - **Acción:** Enlazar la expiración a la variable de entorno `STAFF_SESSION_TTL_HOURS`.
+  - **Acción:** Enlazar la expiración a la variable de entorno existente `EVOGYM_STAFF_SESSION_TTL_SECONDS` (60–86400 s); sin configurar, el login falla cerrado con 503.
 
-- [ ] **T1.6 — Manejo robusto de errores y cancelación en cargas secundarias (R2)**
+- [x] **T1.6 — Manejo robusto de errores y cancelación en cargas secundarias (R2)**
   - **Archivos:** `frontend/src/features/reception/StaffAttendanceView.tsx:139-211`.
   - **Problema:** Promesas con bloques `catch {}` vacíos ocultan caídas de red, y la falta de `AbortController` permite que peticiones desfasadas sigan escribiendo estado al cambiar de sucursal.
   - **Acción:** Mostrar errores en interfaz mediante `liveError`, implementar señales de aborto y consolidar llamadas en paralelo con `Promise.all`.

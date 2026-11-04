@@ -295,7 +295,10 @@ describe('API product routes', () => {
     expect(screen.getByTestId('staff-card-profile-1')).not.toHaveTextContent('·');
     expect(screen.queryByText('Emigdio')).not.toBeInTheDocument();
     expect(access.request).toHaveBeenCalledWith(`/api/v1/staff-roster?branch_id=${branchId}`);
-    expect(access.request).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/v1\/staff-attendance\?branch_id=/));
+    expect(access.request).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/v1\/staff-attendance\?branch_id=.+&business_date=\d{4}-\d{2}-\d{2}$/),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('uses the employee request path and keeps Admin-only itemized debts hidden', async () => {
