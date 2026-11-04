@@ -22,7 +22,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 def test_migration_graph_has_one_head_with_distinct_admin_and_staff_revision_ids():
     scripts = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
 
-    assert scripts.get_heads() == ["0051_member_history_index"]
+    assert scripts.get_heads() == ["0053_scoop_products"]
     assert scripts.get_revision("0031_admin_session_policy").revision == "0031_admin_session_policy"
     assert scripts.get_revision("0038_staff_occurrence_attendance").revision == "0038_staff_occurrence_attendance"
     assert scripts.get_revision("0039_shift_inv_obs_reason").down_revision == "0038_staff_occurrence_attendance"
