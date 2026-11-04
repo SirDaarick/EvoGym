@@ -462,3 +462,103 @@ def test_card_product_sale_eligible_for_return(tmp_path):
             assert res_refund.json()["payout_method"] == "card"
     finally:
         engine.dispose()
+
+
+class _CountingFactory:
+    """Wraps a sessionmaker and tracks how many sessions are currently open."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.open = 0
+
+    def _track(self, session):
+        original_close = session.close
+        state = {"closed": False}
+
+        def close():
+            if not state["closed"]:
+                state["closed"] = True
+                self.open -= 1
+            return original_close()
+
+        session.close = close
+        self.open += 1
+        return session
+
+    def __call__(self, *args, **kwargs):
+        return self._track(self.inner(*args, **kwargs))
+
+    def begin(self, *args, **kwargs):
+        return self.inner.begin(*args, **kwargs)  # auth dependency only; runs before the endpoint
+
+
+class _NoSessionPointClient(MockPointTerminalClient):
+    def __init__(self, counting):
+        super().__init__()
+        self.counting = counting
+        self.calls = 0
+
+    def _assert_free(self):
+        self.calls += 1
+        assert self.counting.open == 0, "DB session held open during Point HTTP call"
+
+    def create_payment_intent(self, *args, **kwargs):
+        self._assert_free()
+        return super().create_payment_intent(*args, **kwargs)
+
+    def get_payment_intent_status(self, *args, **kwargs):
+        self._assert_free()
+        return super().get_payment_intent_status(*args, **kwargs)
+
+    def cancel_payment_intent(self, *args, **kwargs):
+        self._assert_free()
+        return super().cancel_payment_intent(*args, **kwargs)
+
+
+def test_point_calls_hold_no_db_session_and_replay_stays_idempotent(tmp_path, monkeypatch):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "pos", "POS")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            product = Product(code="towel", name="Gym Towel", price_minor=2000, created_by=staff_id)
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=branch_id, product_id=product.id, quantity=10, initialized_by=staff_id))
+            register_id, product_id = register.id, str(product.id)
+
+        headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "no-lock-1"}
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            counting = _CountingFactory(app.state.session_factory)
+            fake = _NoSessionPointClient(counting)
+            app.state.session_factory = counting
+            monkeypatch.setattr("app.api.sales.get_point_client", lambda settings=None: fake)
+            # The auth dependency must keep working with the wrapped factory.
+            base = f"/api/v1/registers/{register_id}"
+            created = client.post(f"{base}/card-intent", headers=headers,
+                                  json={"amount_minor": 2000, "external_reference": "r1"})
+            assert created.status_code == 201, created.text
+            intent_id = created.json()["payment_intent_id"]
+            assert client.get(f"{base}/card-intent/{intent_id}", headers=headers).status_code == 200
+            other = client.post(f"{base}/card-intent", headers=headers,
+                                json={"amount_minor": 500, "external_reference": "r2"}).json()["payment_intent_id"]
+            assert client.delete(f"{base}/card-intent/{other}", headers=headers).status_code == 200
+
+            sale = {"member_id": None, "items": [{"product_id": product_id, "quantity": 1}],
+                    "expected_total_minor": 2000, "card_intent_id": intent_id}
+            first = client.post(f"{base}/product-sales/card", headers=headers, json=sale)
+            assert first.status_code == 201, first.text
+            calls_after_first = fake.calls
+            replay = client.post(f"{base}/product-sales/card", headers=headers, json=sale)
+            assert replay.status_code == 200 and replay.json() == first.json()
+            assert fake.calls == calls_after_first  # replay never reaches the terminal
+            assert fake.calls >= 4
+            assert counting.open == 0
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(Order)) == 1
+    finally:
+        engine.dispose()

@@ -1,4 +1,5 @@
 """Cash membership-sale posting endpoint."""
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -221,6 +222,76 @@ def resolve_product_sale_endpoint(register_id: UUID, payload: CashProductSaleReq
         raise HTTPException(409, str(exc)) from exc
 
 
+@dataclass(frozen=True)
+class _CardContext:
+    """Plain values copied out of the short phase-A session (no ORM objects)."""
+    device_id: str
+    terminal_id: UUID | None
+    replay: "CashProductSaleDTO | None" = None
+
+
+def _session_factory(request: Request):
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(500, "Database session factory not configured.")
+    return factory
+
+
+def _load_card_context(request: Request, principal, register_id: UUID, replay_check=None) -> _CardContext:
+    """Phase A: short session that validates access/register/terminal, then closes.
+
+    Nothing (connection, transaction, row lock) stays open once this returns, so the
+    caller can talk to Mercado Pago without holding database resources.
+    """
+    with _session_factory(request)() as session:
+        _product_sales_access(session, principal)
+        register = session.get(CashRegister, register_id)
+        if register is None:
+            raise HTTPException(404, "Cash register not found.")
+        if not principal.is_admin and register.branch_id != principal.branch_id:
+            raise HTTPException(403, "Access restricted to staff branch.")
+        replay = replay_check(session, register) if replay_check is not None else None
+        if replay is not None:
+            return _CardContext(device_id="", terminal_id=None, replay=replay)
+        terminal = _get_or_create_terminal_for_register(
+            session, register, getattr(request.app.state, "settings", None)
+        )
+        context = _CardContext(device_id=terminal.device_id, terminal_id=terminal.id)
+        session.commit()
+        return context
+
+
+def _verify_intent_processed(intent_dto, expected_total_minor: int) -> None:
+    if intent_dto.status != "PROCESSED":
+        raise HTTPException(409, f"Payment intent is not processed (status: {intent_dto.status}).")
+    if intent_dto.amount_minor != expected_total_minor:
+        raise HTTPException(
+            409,
+            f"Payment intent amount ({intent_dto.amount_minor}) does not match expected total ({expected_total_minor}).",
+        )
+
+
+def _card_intent_response(intent) -> CardIntentResponse:
+    return CardIntentResponse(
+        id=intent.id,
+        payment_intent_id=intent.id,
+        device_id=intent.device_id,
+        amount_minor=intent.amount_minor,
+        status=intent.status,
+        authorization_code=intent.authorization_code,
+        card_brand=intent.card_brand,
+        last_four_digits=intent.last_four_digits,
+    )
+
+
+def _product_sale_dto(order) -> CashProductSaleDTO:
+    return CashProductSaleDTO(
+        order=ProductSaleOrderDTO.model_validate(order),
+        items=[ProductSaleItemDTO.model_validate(item) for item in order.items],
+        payment=ProductSalePaymentDTO.model_validate(order.payment),
+    )
+
+
 @router.post("/{register_id}/card-intent", response_model=CardIntentResponse, status_code=201)
 def create_card_intent_endpoint(
     register_id: UUID,
@@ -228,37 +299,17 @@ def create_card_intent_endpoint(
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
 ) -> CardIntentResponse:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
-    with factory() as session:
-        _product_sales_access(session, principal)
-        register = session.get(CashRegister, register_id)
-        if register is None:
-            raise HTTPException(404, "Cash register not found.")
-        if not principal.is_admin and register.branch_id != principal.branch_id:
-            raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
-        client = _point_client(request)
-        try:
-            intent = client.create_payment_intent(
-                device_id=terminal.device_id,
-                amount_minor=payload.amount_minor,
-                external_reference=payload.external_reference,
-            )
-        except Exception as exc:
-            raise HTTPException(502, f"Failed to create terminal payment intent: {exc}") from exc
-        session.commit()
-        return CardIntentResponse(
-            id=intent.id,
-            payment_intent_id=intent.id,
-            device_id=intent.device_id,
-            amount_minor=intent.amount_minor,
-            status=intent.status,
-            authorization_code=intent.authorization_code,
-            card_brand=intent.card_brand,
-            last_four_digits=intent.last_four_digits,
+    context = _load_card_context(request, principal, register_id)
+    client = _point_client(request)
+    try:
+        intent = client.create_payment_intent(
+            device_id=context.device_id,
+            amount_minor=payload.amount_minor,
+            external_reference=payload.external_reference,
         )
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to create terminal payment intent: {exc}") from exc
+    return _card_intent_response(intent)
 
 
 @router.get("/{register_id}/card-intent/{intent_id}", response_model=CardIntentResponse)
@@ -268,37 +319,18 @@ def get_card_intent_status_endpoint(
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
 ) -> CardIntentResponse:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
-    with factory() as session:
-        _product_sales_access(session, principal)
-        register = session.get(CashRegister, register_id)
-        if register is None:
-            raise HTTPException(404, "Cash register not found.")
-        if not principal.is_admin and register.branch_id != principal.branch_id:
-            raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
-        client = _point_client(request)
-        try:
-            intent = client.get_payment_intent_status(
-                device_id=terminal.device_id,
-                payment_intent_id=intent_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(404, str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(502, f"Failed to query terminal payment intent: {exc}") from exc
-        return CardIntentResponse(
-            id=intent.id,
-            payment_intent_id=intent.id,
-            device_id=intent.device_id,
-            amount_minor=intent.amount_minor,
-            status=intent.status,
-            authorization_code=intent.authorization_code,
-            card_brand=intent.card_brand,
-            last_four_digits=intent.last_four_digits,
+    context = _load_card_context(request, principal, register_id)
+    client = _point_client(request)
+    try:
+        intent = client.get_payment_intent_status(
+            device_id=context.device_id,
+            payment_intent_id=intent_id,
         )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to query terminal payment intent: {exc}") from exc
+    return _card_intent_response(intent)
 
 
 @router.delete("/{register_id}/card-intent/{intent_id}")
@@ -308,26 +340,16 @@ def cancel_card_intent_endpoint(
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
 ):
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
-    with factory() as session:
-        _product_sales_access(session, principal)
-        register = session.get(CashRegister, register_id)
-        if register is None:
-            raise HTTPException(404, "Cash register not found.")
-        if not principal.is_admin and register.branch_id != principal.branch_id:
-            raise HTTPException(403, "Access restricted to staff branch.")
-        terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
-        client = _point_client(request)
-        try:
-            cancelled = client.cancel_payment_intent(
-                device_id=terminal.device_id,
-                payment_intent_id=intent_id,
-            )
-        except Exception as exc:
-            raise HTTPException(502, f"Failed to cancel terminal payment intent: {exc}") from exc
-        return {"cancelled": cancelled, "payment_intent_id": intent_id}
+    context = _load_card_context(request, principal, register_id)
+    client = _point_client(request)
+    try:
+        cancelled = client.cancel_payment_intent(
+            device_id=context.device_id,
+            payment_intent_id=intent_id,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to cancel terminal payment intent: {exc}") from exc
+    return {"cancelled": cancelled, "payment_intent_id": intent_id}
 
 
 @router.post("/{register_id}/product-sales/card", response_model=CashProductSaleDTO, status_code=201)
@@ -345,63 +367,46 @@ def post_card_product_sale_endpoint(
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
 ) -> CashProductSaleDTO:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
+    factory = _session_factory(request)
+
+    def replay_check(session, register):
+        # Check idempotency replay before consulting the terminal.
+        fingerprint = product_sale_fingerprint(
+            register_id, payload.member_id, payload.items, payload.expected_total_minor
+        )
+        existing_order = session.scalar(
+            select(Order).where(
+                Order.seller_id == principal.staff_id,
+                Order.branch_id == register.branch_id,
+                Order.idempotency_key == idempotency_key,
+            )
+        )
+        if existing_order is None:
+            return None
+        if existing_order.request_fingerprint != fingerprint or existing_order.order_kind != "product":
+            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+        return _product_sale_dto(existing_order)
+
     try:
+        # Phase A: short session, closed before any Mercado Pago call.
+        context = _load_card_context(request, principal, register_id, replay_check)
+        if context.replay is not None:
+            response.status_code = 200
+            return context.replay
+
+        # Phase B0: terminal verification with no DB session or lock held.
+        client = _point_client(request)
+        try:
+            intent_dto = client.get_payment_intent_status(context.device_id, payload.card_intent_id)
+        except ValueError as exc:
+            raise HTTPException(404, f"Card intent not found: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(502, f"Failed to verify card intent on terminal: {exc}") from exc
+        _verify_intent_processed(intent_dto, payload.expected_total_minor)
+
+        # Phase B: fresh atomic session; re-authorize and post the sale.
         with factory() as session:
             _product_sales_access(session, principal)
-            register = session.get(CashRegister, register_id)
-            if register is None:
-                raise HTTPException(404, "Cash register not found.")
-            if not principal.is_admin and register.branch_id != principal.branch_id:
-                raise HTTPException(403, "Access restricted to staff branch.")
-
-            # Check idempotency replay before consulting terminal
-            fingerprint = product_sale_fingerprint(
-                register_id, payload.member_id, payload.items, payload.expected_total_minor
-            )
-            existing_order = session.scalar(
-                select(Order).where(
-                    Order.seller_id == principal.staff_id,
-                    Order.branch_id == register.branch_id,
-                    Order.idempotency_key == idempotency_key,
-                )
-            )
-            if existing_order is not None:
-                if (
-                    existing_order.request_fingerprint != fingerprint
-                    or existing_order.order_kind != "product"
-                ):
-                    raise CashSaleConflictError("Idempotency key was already used for a different request.")
-                response.status_code = 200
-                return CashProductSaleDTO(
-                    order=ProductSaleOrderDTO.model_validate(existing_order),
-                    items=[ProductSaleItemDTO.model_validate(item) for item in existing_order.items],
-                    payment=ProductSalePaymentDTO.model_validate(existing_order.payment),
-                )
-
-            terminal = _get_or_create_terminal_for_register(session, register, getattr(request.app.state, "settings", None))
-            client = _point_client(request)
-            try:
-                intent_dto = client.get_payment_intent_status(
-                    terminal.device_id, payload.card_intent_id
-                )
-            except ValueError as exc:
-                raise HTTPException(404, f"Card intent not found: {exc}") from exc
-            except Exception as exc:
-                raise HTTPException(502, f"Failed to verify card intent on terminal: {exc}") from exc
-
-            if intent_dto.status != "PROCESSED":
-                raise HTTPException(
-                    409, f"Payment intent is not processed (status: {intent_dto.status})."
-                )
-            if intent_dto.amount_minor != payload.expected_total_minor:
-                raise HTTPException(
-                    409,
-                    f"Payment intent amount ({intent_dto.amount_minor}) does not match expected total ({payload.expected_total_minor}).",
-                )
-
             order, replayed = post_card_product_sale(
                 session,
                 register_id=register_id,
@@ -411,7 +416,7 @@ def post_card_product_sale_endpoint(
                 expected_total_minor=payload.expected_total_minor,
                 idempotency_key=idempotency_key,
                 card_intent_id=payload.card_intent_id,
-                terminal_id=terminal.id,
+                terminal_id=context.terminal_id,
                 card_brand=intent_dto.card_brand,
                 card_last_four=intent_dto.last_four_digits,
                 authorization_code=intent_dto.authorization_code,
@@ -422,11 +427,7 @@ def post_card_product_sale_endpoint(
             session.commit()
             if replayed:
                 response.status_code = 200
-            return CashProductSaleDTO(
-                order=ProductSaleOrderDTO.model_validate(order),
-                items=[ProductSaleItemDTO.model_validate(item) for item in order.items],
-                payment=ProductSalePaymentDTO.model_validate(order.payment),
-            )
+            return _product_sale_dto(order)
     except CashSaleNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except CashSaleConflictError as exc:
