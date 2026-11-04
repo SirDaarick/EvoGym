@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductRoutes } from './ProductRoutes';
+import { withQuery } from '../test/renderWithQuery';
 
 const { access, admin } = vi.hoisted(() => ({
   access: {
@@ -435,7 +436,7 @@ describe('API product routes', () => {
       return new Response('{}');
     });
 
-    render(<MemoryRouter initialEntries={['/reception/inventory']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/reception/inventory']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByRole('heading', { name: 'Inventario' })).toBeInTheDocument();
     expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
   });
@@ -471,7 +472,7 @@ describe('API product routes', () => {
       return new Response('{}');
     });
 
-    render(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByRole('heading', { name: 'Transferencias pendientes' })).toBeInTheDocument();
     expect(await screen.findByText(/Sofía Delgado \(EVO-0900\)/i)).toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith('/api/v1/admin/pending-money', expect.any(Object));
@@ -485,7 +486,7 @@ describe('API product routes', () => {
       branch: { branch_id: 'branch-1', name: 'Central Branch' },
       session: { purpose: 'desk' },
     };
-    render(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/expenses']}><ProductRoutes /></MemoryRouter>));
     expect(screen.queryByRole('heading', { name: 'Transferencias pendientes' })).not.toBeInTheDocument();
     expect(access.request).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/admin/pending-money'), expect.anything());
   });

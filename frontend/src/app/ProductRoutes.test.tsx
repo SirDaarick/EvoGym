@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import { withQuery } from '../test/renderWithQuery';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,6 +41,13 @@ vi.mock('../demo/DemoProvider', () => ({
 vi.mock('./App', () => ({ App: () => <div>Demo business app</div> }));
 vi.mock('../features/staff/StaffProfileSelection', () => ({ StaffProfileSelection: () => <div>Profile selection</div> }));
 
+/** Branch options arrive through TanStack Query (async), so wait for the option before selecting it. */
+async function selectBranchWhenLoaded(branchId: string) {
+  const select = await screen.findByLabelText('Sucursal');
+  await waitFor(() => expect(select.querySelector(`option[value="${branchId}"]`)).not.toBeNull());
+  await userEvent.selectOptions(select, branchId);
+}
+
 describe('ProductRoutes mode boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -74,7 +82,7 @@ describe('ProductRoutes mode boundary', () => {
       vi.unstubAllEnvs();
       vi.stubEnv('VITE_DEMO_MODE', value);
       window.sessionStorage.setItem('evogym:demo-mode', 'true');
-      const view = render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
+      const view = render(withQuery(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>));
       expect(await screen.findByText('Profile selection')).toBeInTheDocument();
       expect(demoMounted).not.toHaveBeenCalled();
       view.unmount();
@@ -84,7 +92,7 @@ describe('ProductRoutes mode boundary', () => {
   it('mounts the original demo app only when mode and explicit selection are both true', async () => {
     vi.stubEnv('VITE_DEMO_MODE', 'true');
     window.sessionStorage.setItem('evogym:demo-mode', 'true');
-    render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByText('Demo business app')).toBeInTheDocument();
     expect(demoMounted).toHaveBeenCalledOnce();
   });
@@ -96,7 +104,7 @@ describe('ProductRoutes mode boundary', () => {
       access.principal = null;
       access.listeners.forEach(listener => listener());
     });
-    render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>));
     await userEvent.click(screen.getByRole('button', { name: 'Cambiar perfil' }));
     expect(await screen.findByText('Profile selection')).toBeInTheDocument();
     expect(access.leaveProfile).toHaveBeenCalledOnce();
@@ -108,7 +116,7 @@ describe('ProductRoutes mode boundary', () => {
     vi.stubEnv('VITE_DEMO_MODE', 'false');
     access.principal = { kind: 'employee', identity: { is_owner: false, can_manage_employees: false }, session: { purpose: 'phone' } };
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>));
     const unlink = await screen.findByRole('button', { name: 'Desvincular este dispositivo' });
     await userEvent.click(unlink);
     expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/nuevo código de vinculación/i));
@@ -123,7 +131,7 @@ describe('ProductRoutes mode boundary', () => {
   it('does not expose paired-device unlink for Reception-purpose sessions', async () => {
     vi.stubEnv('VITE_DEMO_MODE', 'false');
     access.principal = { kind: 'employee', identity: { is_owner: false, can_manage_employees: false }, session: { purpose: 'reception' } };
-    render(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/reception/home']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByTestId('application-shell')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Desvincular este dispositivo' })).toBeNull();
   });
@@ -148,8 +156,8 @@ describe('ProductRoutes mode boundary', () => {
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     expect(await screen.findByText('Ana Pérez')).toBeInTheDocument();
     expect(screen.getAllByText('No disponible en API').length).toBeGreaterThan(0);
     const staffPage = screen.getByRole('heading', { name: 'Equipo de Recepción' }).closest('.staff-mgmt-page') as HTMLElement;
@@ -191,8 +199,8 @@ describe('ProductRoutes mode boundary', () => {
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     await userEvent.click(await screen.findByRole('button', { name: 'Vincular Dispositivo' }));
 
     const pairingDialog = await screen.findByRole('dialog', { name: /vincular dispositivo/i });
@@ -227,8 +235,8 @@ describe('ProductRoutes mode boundary', () => {
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     await userEvent.click(await screen.findByRole('button', { name: 'Vincular Dispositivo' }));
     await userEvent.click(await screen.findByRole('button', { name: /generar nuevo/i }));
     await waitFor(() => expect(adminSession.request).toHaveBeenCalledWith(`/api/v1/admin/staff/${accountId}/device-pairing`, expect.objectContaining({ method: 'POST' })));
@@ -253,8 +261,8 @@ describe('ProductRoutes mode boundary', () => {
       throw new Error('Device API unavailable');
     });
 
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     await userEvent.click(await screen.findByRole('button', { name: 'Vincular Dispositivo' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/no se pudo cargar la lista de dispositivos/i);
@@ -275,8 +283,8 @@ describe('ProductRoutes mode boundary', () => {
       if (path === '/api/v1/admin/staff-accounts/branches') return new Response(JSON.stringify({ branches: [{ id: branchId, code: 'CTR', name: 'Centro' }] }));
       throw new Error('API unavailable');
     });
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     expect(await screen.findByRole('alert')).toHaveTextContent(/no se pudo cargar/i);
     expect(screen.queryByText('Esteban Morales')).not.toBeInTheDocument();
     expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
@@ -294,8 +302,8 @@ describe('ProductRoutes mode boundary', () => {
       if (path.endsWith(`/roster-profiles/${profileId}/link`)) return new Response(JSON.stringify({ detail: 'forbidden' }), { status: 403 });
       throw new Error(`Unexpected request: ${path}`);
     });
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
-    await userEvent.selectOptions(await screen.findByLabelText('Sucursal'), branchId);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
+    await selectBranchWhenLoaded(branchId);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     await userEvent.selectOptions(screen.getByLabelText('Vincular cuenta de acceso'), accountId);
     await userEvent.click(screen.getByRole('button', { name: 'Vincular cuenta' }));
@@ -321,8 +329,9 @@ describe('ProductRoutes mode boundary', () => {
       if (path === `/api/v1/staff/credentials/${firstAccount}/initial-pin`) return pinResponse;
       throw new Error(`Unexpected request: ${path}`);
     });
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
     const branch = await screen.findByLabelText('Sucursal');
+    await waitFor(() => expect(branch.querySelectorAll('option').length).toBeGreaterThan(1));
     await userEvent.selectOptions(branch, firstBranch);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -355,8 +364,9 @@ describe('ProductRoutes mode boundary', () => {
       if (path === `/api/v1/admin/staff-accounts?branch_id=${secondBranch}`) return new Response(JSON.stringify({ accounts: [] }));
       throw new Error(`Unexpected request: ${path}`);
     });
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
     const branch = await screen.findByLabelText('Sucursal');
+    await waitFor(() => expect(branch.querySelectorAll('option').length).toBeGreaterThan(1));
     await userEvent.selectOptions(branch, firstBranch);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     await userEvent.selectOptions(screen.getByLabelText('Vincular cuenta de acceso'), accountId);
@@ -372,7 +382,7 @@ describe('ProductRoutes mode boundary', () => {
   it('does not expose staff management actions to an Admin without employee capability', async () => {
     adminSession.status = 'authenticated';
     access.principal = { kind: 'admin', identity: { is_owner: false, can_manage_employees: false } };
-    render(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/staff']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByRole('heading', { name: 'Personal' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Función no disponible' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Emitir PIN' })).not.toBeInTheDocument();

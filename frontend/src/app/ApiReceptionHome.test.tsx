@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderWithQuery as render } from '@/test/renderWithQuery';
 import { ApiReceptionHome } from './ApiReceptionHome';
 
 describe('live reception cash checkout', () => {
@@ -26,15 +27,15 @@ describe('live reception cash checkout', () => {
       throw new Error(path);
     });
     render(<ApiReceptionHome request={request} actorId="actor" />);
-    expect(await screen.findByRole('button', { name: 'Seleccionar Bottle' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Seleccionar Bottle' }, { timeout: 5000 })).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Seleccionar Protein scoop' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Suplementos' }));
-    expect(await screen.findByText('~30 scoops disponibles')).toBeVisible();
+    expect(await screen.findByText('~30 scoops disponibles', {}, { timeout: 5000 })).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Protein scoop' }));
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
     await userEvent.click(screen.getByRole('radio', { name: method === 'cash' ? 'Efectivo' : 'Tarjeta' }));
     await userEvent.click(screen.getByRole('button', { name: method === 'cash' ? 'Realizar cobro' : 'Cobrar con Tarjeta' }));
-    expect(await screen.findByText(method === 'cash' ? 'Compra registrada.' : 'Compra con tarjeta registrada.')).toBeVisible();
+    expect(await screen.findByText(method === 'cash' ? 'Compra registrada.' : 'Compra con tarjeta registrada.', {}, { timeout: 5000 })).toBeVisible();
     expect(request.mock.calls.some(([path]) => path.endsWith(method === 'cash' ? '/product-sales' : '/product-sales/card'))).toBe(true);
   }, 15000);
 
@@ -324,7 +325,7 @@ describe('live reception cash checkout', () => {
 
     render(<ApiReceptionHome request={request} actorId="actor" />);
     const devolucionesBtn = await screen.findByRole('button', { name: 'Devoluciones' });
-    expect(devolucionesBtn).not.toBeDisabled();
+    await vi.waitFor(() => expect(devolucionesBtn).toBeEnabled());
     await userEvent.click(devolucionesBtn);
 
     expect(await screen.findByRole('heading', { name: 'Registrar devolución' })).toBeVisible();
@@ -368,7 +369,7 @@ it('opens guantes and casilleros modals from operational shortcuts in live mode'
 
     // Click Guantes shortcut
     const guantesBtn = await screen.findByRole('button', { name: /Guantes/ });
-    expect(guantesBtn).not.toBeDisabled();
+    await vi.waitFor(() => expect(guantesBtn).toBeEnabled());
     await userEvent.click(guantesBtn);
 
     expect(await screen.findByRole('heading', { name: 'Guantes' })).toBeVisible();
@@ -378,7 +379,7 @@ it('opens guantes and casilleros modals from operational shortcuts in live mode'
 
     // Click Casilleros shortcut
     const casillerosBtn = await screen.findByRole('button', { name: /Casilleros/ });
-    expect(casillerosBtn).not.toBeDisabled();
+    await vi.waitFor(() => expect(casillerosBtn).toBeEnabled());
     await userEvent.click(casillerosBtn);
 
     expect(await screen.findByRole('heading', { name: 'Casilleros' })).toBeVisible();

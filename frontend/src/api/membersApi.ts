@@ -318,3 +318,21 @@ export async function listMembers(
   return response.json() as Promise<MemberListResponse>;
 }
 
+
+export async function getMember(request: AuthenticatedRequest, memberId: string): Promise<MemberDetailDTO> {
+  let response: Response;
+  try {
+    response = await request(`/api/v1/members/${encodeURIComponent(memberId)}`, {
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    throw new MemberApiNetworkError();
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new MemberApiError(response.status, extractErrorMessage(body, response.status));
+  }
+
+  return response.json() as Promise<MemberDetailDTO>;
+}
