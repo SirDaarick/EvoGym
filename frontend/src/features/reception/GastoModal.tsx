@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ExpenseRecord } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { registerExpense } from '../../demo/expenseOperations';
-import { Badge, Button } from '../../shared/ui';
+import { Badge, Button, FormField, focusFirstInvalid, useFieldErrors } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { createBusinessExpense, createShiftExpense, listShiftExpenses, requestEvidenceUpload, uploadEvidence, voidExpense, ExpenseApiError, type ExpenseCategory, type ExpenseDTO, type ExpenseInput, type ExpenseMethod } from '../../api/expensesApi';
 import type { ApiRequest } from '../../api/shiftsApi';
@@ -32,6 +32,7 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
   const [photo, setPhoto] = useState<File | null>(null);
   const [voidTarget, setVoidTarget] = useState<ExpenseDTO | null>(null);
   const [voidReason, setVoidReason] = useState('');
+  const [voidReasonError, setVoidReasonError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const pendingKey = useRef<string | null>(null);
   const pendingBody = useRef<ExpenseInput | null>(null);
@@ -42,6 +43,7 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
   const [concept, setConcept] = useState('');
   const [payeeName, setPayeeName] = useState('');
   const [amountStr, setAmountStr] = useState('');
+  const { errors, setErrors, clear: clearError, clearAll: clearErrors } = useFieldErrors();
 
   const [toast, setToast] = useState<{
     open: boolean;
@@ -70,8 +72,9 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
       setVoucher('');
       setPhoto(null);
       setToast(null);
+      clearErrors();
     }
-  }, [isOpen]);
+  }, [isOpen, clearErrors]);
 
   useEffect(() => {
     if (!isOpen || !apiRequest || !registerId || mode !== 'shift') return;
@@ -92,39 +95,21 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
     e.preventDefault();
     const amountMinor = parseMoney(amountStr);
 
-    if (!concept.trim()) {
-      setToast({
-        open: true,
-        title: 'Concepto requerido',
-        description: 'Escribe el concepto del gasto.',
-        type: 'error',
-      });
+    const found: Record<string, string> = {};
+    if (!concept.trim()) found.concept = 'Escribe el concepto del gasto.';
+    if (!payeeName.trim()) found.payee = 'Escribe el nombre del proveedor o persona responsable.';
+    if (!amountMinor || amountMinor <= 0) found.amount = 'Ingresa un monto numérico válido mayor a $0.00.';
+    if (!category) found.category = 'Selecciona una categoría.';
+    if (apiRequest && (registerId || mode === 'business') && mode === 'business' && !businessBranch) found.branch = 'Selecciona una sucursal.';
+    if (Object.keys(found).length) {
+      setErrors(found);
+      focusFirstInvalid([found.concept && 'gasto-concept-input', found.payee && 'gasto-payee-input', found.amount && 'gasto-amount-input', found.category && 'gasto-category', found.branch && 'gasto-branch']);
       return;
     }
-
-    if (!payeeName.trim()) {
-      setToast({
-        open: true,
-        title: 'Nombre requerido',
-        description: 'Escribe el nombre del proveedor o persona responsable.',
-        type: 'error',
-      });
-      return;
-    }
-
-    if (!amountMinor || amountMinor <= 0) {
-      setToast({
-        open: true,
-        title: 'Monto inválido',
-        description: 'Ingresa un monto numérico válido mayor a $0.00.',
-        type: 'error',
-      });
-      return;
-    }
-    if (!category) return;
+    setErrors({});
+    if (!amountMinor || amountMinor <= 0 || !category) return; // narrowing; already reported above
 
     if (apiRequest && (registerId || mode === 'business')) {
-      if (mode === 'business' && !businessBranch) return;
       if (inFlight.current) return;
       const draft = JSON.stringify({ category, concept: concept.trim(), payeeName: payeeName.trim(), amountMinor, voucher: voucher.trim(), mode, registerId, branch: mode === 'business' ? businessBranch : branchId, method: mode === 'business' ? method : 'cash' });
       if (pendingDraft.current && (pendingDraft.current !== draft || pendingPhoto.current !== photo)) {
@@ -243,54 +228,48 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
         </div>
 
         {/* Form Inputs (Sketch: Concepto, Nombre, Saldo, Agregar) */}
-        <form onSubmit={handleSubmit} className="op-flow-form">
+        <form onSubmit={handleSubmit} className="op-flow-form" noValidate>
           <div className="op-flow-inputs-row">
-            <div className="field" style={{ flex: 2 }}>
-              <label htmlFor="gasto-concept-input">Concepto *</label>
+            <FormField label="Concepto *" id="gasto-concept-input" error={errors.concept} style={{ flex: 2 }}>
               <input
-                id="gasto-concept-input"
                 type="text"
                 placeholder="Ej. Garrafón de agua, insumos de limpieza"
                 value={concept}
-                onChange={e => setConcept(e.target.value)}
+                onChange={e => { setConcept(e.target.value); clearError('concept'); }}
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="field" style={{ flex: 1.5 }}>
-              <label htmlFor="gasto-payee-input">Nombre *</label>
+            <FormField label="Nombre *" id="gasto-payee-input" error={errors.payee} style={{ flex: 1.5 }}>
               <input
-                id="gasto-payee-input"
                 type="text"
                 placeholder="Proveedor o responsable"
                 value={payeeName}
-                onChange={e => setPayeeName(e.target.value)}
+                onChange={e => { setPayeeName(e.target.value); clearError('payee'); }}
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="gasto-amount-input">Saldo / Monto *</label>
+            <FormField label="Saldo / Monto *" id="gasto-amount-input" error={errors.amount} style={{ flex: 1 }}>
               <input
-                id="gasto-amount-input"
                 type="text"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amountStr}
-                onChange={e => setAmountStr(e.target.value)}
+                onChange={e => { setAmountStr(e.target.value); clearError('amount'); }}
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="field"><label htmlFor="gasto-category">Categoría *</label>
-              <select id="gasto-category" value={category} onChange={event => setCategory(event.target.value as ExpenseCategory)} required>
+            <FormField label="Categoría *" id="gasto-category" error={errors.category}>
+              <select value={category} onChange={event => { setCategory(event.target.value as ExpenseCategory); clearError('category'); }} required>
                 <option value="">Selecciona una categoría</option>
                 {Object.values(EXPENSE_CATEGORIES).map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
               </select>
-            </div>
-            {mode === 'business' && <><div className="field"><label htmlFor="gasto-branch">Sucursal *</label>
-              <select id="gasto-branch" value={businessBranch} onChange={event => setBusinessBranch(event.target.value)} required><option value="">Selecciona una sucursal</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
-            </div><div className="field"><label htmlFor="gasto-method">Método de pago *</label>
+            </FormField>
+            {mode === 'business' && <><FormField label="Sucursal *" id="gasto-branch" error={errors.branch}>
+              <select value={businessBranch} onChange={event => { setBusinessBranch(event.target.value); clearError('branch'); }} required><option value="">Selecciona una sucursal</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
+            </FormField><div className="field"><label htmlFor="gasto-method">Método de pago *</label>
               <select id="gasto-method" value={method} onChange={event => setMethod(event.target.value as ExpenseMethod)}><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="card">Tarjeta</option></select>
             </div></>}
 
@@ -339,7 +318,7 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
                       <td>{expense.payeeName}</td>
                       <td>{expense.category ? EXPENSE_CATEGORIES[expense.category].label : '—'}</td>
                       <td>{expense.voucherReference || '—'} {expense.evidenceUrl && <a href={expense.evidenceUrl} target="_blank" rel="noreferrer">Ver foto</a>}</td>
-                      <td>{expense.voided ? <Badge tone="warning">Anulado</Badge> : apiRequest && <button type="button" onClick={() => { setVoidTarget(liveExpenses.find(item => item.id === expense.id) ?? null); setVoidReason(''); }}>Anular</button>}</td>
+                      <td>{expense.voided ? <Badge tone="warning">Anulado</Badge> : apiRequest && <button type="button" onClick={() => { setVoidTarget(liveExpenses.find(item => item.id === expense.id) ?? null); setVoidReason(''); setVoidReasonError(''); }}>Anular</button>}</td>
                       <td className="muted">
                         {new Date(expense.recordedAt).toLocaleTimeString('es-MX', {
                           hour: '2-digit',
@@ -361,15 +340,16 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
       {voidTarget && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="void-expense-title">
         <div className="staff-modal-card"><h2 id="void-expense-title">Anular gasto</h2>
           <p>{voidTarget.concept} · {formatMoney(voidTarget.amount_minor)} MXN</p>
-          <form onSubmit={async event => {
+          <form noValidate onSubmit={async event => {
             event.preventDefault();
-            if (!apiRequest || !registerId || !voidReason.trim()) return;
+            if (!apiRequest || !registerId) return;
+            if (!voidReason.trim()) { setVoidReasonError('Escribe el motivo de la anulación.'); document.getElementById('void-expense-reason')?.focus(); return; }
             try {
               await voidExpense(apiRequest, voidTarget.id, voidReason.trim());
               setVoidTarget(null);
               setLiveExpenses((await listShiftExpenses(apiRequest, registerId)).items);
             } catch (error) { setToast({ open: true, title: 'Error al anular', description: error instanceof Error ? error.message : 'No se pudo anular el gasto.', type: 'error' }); }
-          }}><div className="field"><label htmlFor="void-expense-reason">Motivo *</label><textarea id="void-expense-reason" required value={voidReason} onChange={event => setVoidReason(event.target.value)} /></div>
+          }}><FormField label="Motivo *" id="void-expense-reason" error={voidReasonError}><textarea required value={voidReason} onChange={event => { setVoidReason(event.target.value); setVoidReasonError(''); }} /></FormField>
             <Button type="submit">Confirmar anulación</Button><Button variant="secondary" onClick={() => setVoidTarget(null)}>Cancelar</Button>
           </form></div>
       </div>}
@@ -383,6 +363,7 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
             description={toast.description}
             duration={3200}
             fuse={toast.type === 'error' ? 'none' : 'bottom'}
+            tone={toast.type === 'error' ? 'error' : 'default'}
             closeButton
             closeLabel="Cerrar notificación"
             background="var(--color-surface)"

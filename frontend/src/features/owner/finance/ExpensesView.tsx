@@ -6,7 +6,7 @@ import { Chart } from '@tanstack/charts/react';
 import { scaleBand } from '@tanstack/charts/scales/band';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
 import { type ExpenseReportItem } from '../../../demo/expenseReportSelector';
-import { Badge, Button, EmptyState, Field, Panel } from '../../../shared/ui';
+import { Badge, Button, EmptyState, Field, FormField, Panel } from '../../../shared/ui';
 import { FinanceTable } from './FinanceTable';
 import type { ExpenseFilters, TableState } from './types';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -30,6 +30,7 @@ interface ExpensesViewProps {
 export function ExpensesView({ items, filters, onFiltersChange, table, setSorting, setPagination, onAdd, onVoid, branches = [], selectedBranchId = 'ALL', onBranchChange }: ExpensesViewProps) {
   const [voidTarget, setVoidTarget] = useState<ExpenseReportItem | null>(null);
   const [voidReason, setVoidReason] = useState('');
+  const [voidReasonError, setVoidReasonError] = useState('');
   const [voidError, setVoidError] = useState('');
   const filteredItems = useMemo(() => {
     const needle = filters.search.trim().toLocaleLowerCase('es-MX');
@@ -191,8 +192,8 @@ export function ExpensesView({ items, filters, onFiltersChange, table, setSortin
     </Panel>
     {voidTarget && <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="owner-void-title"><div className="staff-modal-card">
       <h2 id="owner-void-title">Anular gasto</h2><p>{voidTarget.concept} · {mxn(voidTarget.amountMinor)}</p>
-      <form onSubmit={async event => { event.preventDefault(); if (!onVoid || !voidReason.trim()) return; try { await onVoid(voidTarget.id, voidReason.trim()); setVoidTarget(null); } catch (error) { setVoidError(error instanceof Error ? error.message : 'No se pudo anular el gasto.'); } }}>
-        <div className="field"><label htmlFor="owner-void-reason">Motivo *</label><textarea id="owner-void-reason" value={voidReason} onChange={event => setVoidReason(event.target.value)} required /></div>
+      <form noValidate onSubmit={async event => { event.preventDefault(); if (!onVoid) return; if (!voidReason.trim()) { setVoidReasonError('Escribe el motivo de la anulación.'); document.getElementById('owner-void-reason')?.focus(); return; } try { await onVoid(voidTarget.id, voidReason.trim()); setVoidTarget(null); } catch (error) { setVoidError(error instanceof Error ? error.message : 'No se pudo anular el gasto.'); } }}>
+        <FormField label="Motivo *" id="owner-void-reason" error={voidReasonError}><textarea value={voidReason} onChange={event => { setVoidReason(event.target.value); setVoidReasonError(''); }} required /></FormField>
         {voidError && <p role="alert">{voidError}</p>}<Button type="submit">Confirmar anulación</Button><Button variant="secondary" onClick={() => setVoidTarget(null)}>Cancelar</Button>
       </form></div></div>}
   </div>;

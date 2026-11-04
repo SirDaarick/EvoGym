@@ -143,6 +143,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
   const description = descriptionEdited ? descriptionDraft : plan?.applicability ?? `${serviceLabel} · ${periodLabel}. Fechas efectivas pendientes.`;
   const id = (field: string) => `${prefix}-${field}`;
   const errorProps = (field: string) => ({ 'aria-invalid': Boolean(errors[field]), 'aria-describedby': errors[field] ? id(`${field}-error`) : undefined });
+  const clearError = (...fields: string[]) => setErrors(previous => fields.some(field => field in previous) ? Object.fromEntries(Object.entries(previous).filter(([key]) => !fields.includes(key))) : previous);
   const error = (field: string) => errors[field] ? <p className="plan-editor-error" id={id(`${field}-error`)}>{errors[field]}</p> : null;
 
   useEffect(() => {
@@ -187,6 +188,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
   }
 
   function changeFinal(value: string) {
+    clearError('price', 'percentage');
     setPricing(previous => {
       const final = parseMoney(value);
       const reference = parseMoney(previous.reference);
@@ -198,6 +200,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
   }
 
   function changePercentage(value: string) {
+    clearError('price', 'percentage');
     setPricing(previous => {
       const ratio = parsePercentage(value);
       const reference = parseMoney(previous.reference);
@@ -211,6 +214,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
   }
 
   function changeReference(value: string) {
+    clearError('reference', 'price', 'percentage');
     setPricing(previous => {
       const reference = parseMoney(value);
       if (!reference) return { ...previous, reference: value };
@@ -320,14 +324,14 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
           <fieldset className="plan-editor-services" aria-describedby={errors.services ? id('services-error') : undefined}>
             <legend>Servicios incluidos</legend>
             <div className="plan-editor-service-grid">{serviceOptions.map(service => <label key={service.id} className={`plan-editor-service ${services.includes(service.id) ? 'is-selected' : ''}`}>
-              <input id={id(service.id)} aria-label={service.label} type="checkbox" checked={services.includes(service.id)} onChange={event => setServices(previous => event.target.checked ? [...previous, service.id] : previous.filter(item => item !== service.id))} />
+              <input id={id(service.id)} aria-label={service.label} type="checkbox" checked={services.includes(service.id)} onChange={event => { clearError('services'); setServices(previous => event.target.checked ? [...previous, service.id] : previous.filter(item => item !== service.id)); }} />
               <span><strong>{service.label}</strong><small>{service.detail}</small></span>
             </label>)}</div>{error('services')}
           </fieldset>
           <div className="field"><label htmlFor={id('kind')}>Tipo de acceso</label><select id={id('kind')} value={kind} onChange={event => { const next = event.target.value as Plan['kind']; setKind(next); if (next === 'visit') { setPeriodValue('1'); setPeriodUnit('session'); setExpiryRule('pending'); setCustomPeriod(false); } }}><option value="membership">Membresía</option><option value="visit">Pase por visita</option></select></div>
           <details className="plan-editor-details" open={pendingService || undefined}>
             <summary>¿La actividad todavía no está definida?</summary>
-            <label className="plan-editor-check"><input type="checkbox" checked={pendingService} onChange={event => setPendingService(event.target.checked)} />Actividad pendiente de confirmar</label>
+            <label className="plan-editor-check"><input type="checkbox" checked={pendingService} onChange={event => { setPendingService(event.target.checked); clearError('services'); }} />Actividad pendiente de confirmar</label>
             {pendingService ? <p className="plan-editor-warning">Sin acceso inferido: confirma la actividad antes de ofrecer este plan.</p> : null}
           </details>
         </section> : step === 2 ? <section className="plan-editor-section" aria-labelledby={id('step-title')}>
@@ -338,7 +342,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
             <button type="button" aria-pressed={customPeriod} onClick={() => setCustomPeriod(true)}>Personalizado</button>
           </div>
           {customPeriod ? <div className="plan-editor-grid">
-            <div className="field"><label htmlFor={id('period')}>Cantidad del periodo</label><input id={id('period')} type="number" min="1" step="1" value={periodValue} onChange={event => setPeriodValue(event.target.value)} {...errorProps('period')} />{error('period')}</div>
+            <div className="field"><label htmlFor={id('period')}>Cantidad del periodo</label><input id={id('period')} type="number" min="1" step="1" value={periodValue} onChange={event => { setPeriodValue(event.target.value); clearError('period'); }} {...errorProps('period')} />{error('period')}</div>
             <div className="field"><label htmlFor={id('unit')}>Unidad del periodo</label><select id={id('unit')} value={periodUnit} onChange={event => { setPeriodUnit(event.target.value as typeof periodUnit); setExpiryRule('pending'); }}>{Object.entries(units).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
           </div> : null}
           <p className="plan-editor-period-summary">Periodo seleccionado: <strong>{periodLabel}</strong></p>
@@ -359,7 +363,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
             </div>
             <small id={id('percentage-hint')} className="muted">80% significa cobrar el 80% de la referencia, no descontar 80%. Puedes usar punto o coma decimal en el porcentaje. El importe se redondea a centavos.</small>
           </fieldset>
-          <div className="field"><label htmlFor={id('name')}>Nombre del plan</label><input id={id('name')} value={name} onChange={event => { setNameDraft(event.target.value); setNameEdited(true); }} {...errorProps('name')} />{error('name')}<small className="muted">Puedes cambiar el nombre sugerido. Se conservará al volver a los pasos anteriores.</small></div>
+          <div className="field"><label htmlFor={id('name')}>Nombre del plan</label><input id={id('name')} value={name} onChange={event => { setNameDraft(event.target.value); setNameEdited(true); clearError('name'); }} {...errorProps('name')} />{error('name')}<small className="muted">Puedes cambiar el nombre sugerido. Se conservará al volver a los pasos anteriores.</small></div>
           <dl className="plan-editor-review" aria-label="Resumen del plan">
             <div><dt>Servicios</dt><dd>{serviceLabel}</dd></div>
             <div><dt>Duración</dt><dd>{periodLabel}</dd></div>
@@ -372,7 +376,7 @@ export function PlanEditor({ plan, onClose, onSave }: PlanEditorProps) {
           <details className="plan-editor-details" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
             <summary>Descripción y condiciones (opcional)</summary>
             <div className="plan-editor-section">
-              <div className="field"><label htmlFor={id('description')}>Descripción de aplicabilidad</label><textarea id={id('description')} rows={2} value={description} onChange={event => { setDescriptionDraft(event.target.value); setDescriptionEdited(true); }} {...errorProps('description')} />{error('description')}</div>
+              <div className="field"><label htmlFor={id('description')}>Descripción de aplicabilidad</label><textarea id={id('description')} rows={2} value={description} onChange={event => { setDescriptionDraft(event.target.value); setDescriptionEdited(true); clearError('description'); }} {...errorProps('description')} />{error('description')}</div>
               <div className="field"><label htmlFor={id('eligibility')}>Dirigido a</label><select id={id('eligibility')} value={eligibility} onChange={event => setEligibility(event.target.value as typeof eligibility)}>{Object.entries(eligibilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
               <div className="field"><label htmlFor={id('notes')}>Condiciones del plan (opcional)</label><textarea id={id('notes')} rows={2} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Requisitos y límites; no aplica descuentos automáticamente." /></div>
               <div className="field"><label htmlFor={id('restriction')}>Restricción u observación (opcional)</label><input id={id('restriction')} value={restriction} onChange={event => setRestriction(event.target.value)} /><small className="muted">Una restricción mantiene pendiente su validación para el cobro.</small></div>

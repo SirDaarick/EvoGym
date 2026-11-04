@@ -2,7 +2,7 @@ import { formatMoney } from '@/shared/formatters/money';
 import React, { useEffect, useState } from 'react';
 import type { DemoState, Product } from '../../domain/models';
 import { expectedStock } from '../../demo/inventoryOperations';
-import { Button, Notice } from '../../shared/ui';
+import { Button, FormField, Notice } from '../../shared/ui';
 
 export interface WasteItem {
   product: Product;
@@ -49,11 +49,13 @@ export function MermaModal({
 
   const [reason, setReason] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [reasonError, setReasonError] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
       setReason('');
       setErrorMessage('');
+      setReasonError('');
     }
   }, [isOpen]);
 
@@ -98,10 +100,13 @@ export function MermaModal({
       return;
     }
     if (!reason.trim()) {
-      setErrorMessage('Escribe el motivo o justificación de la merma.');
+      setErrorMessage('');
+      setReasonError('Escribe el motivo o justificación de la merma.');
+      document.getElementById('merma-reason-input')?.focus();
       return;
     }
 
+    setReasonError('');
     const result = onConfirmWaste(activeItems, reason.trim());
     if (result.status === 'error') {
       setErrorMessage(result.message);
@@ -152,7 +157,7 @@ export function MermaModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <form noValidate onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* List of already selected products */}
           <div>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-muted)', display: 'block', marginBottom: '6px' }}>
@@ -219,18 +224,19 @@ export function MermaModal({
           </div>
 
           {/* Reason Input */}
-          <div className="field">
-            <label htmlFor="merma-reason-input" style={{ fontSize: '12px', fontWeight: 600 }}>
-              Motivo o comentario *
-            </label>
+          <FormField
+            id="merma-reason-input"
+            error={reasonError}
+            label={<span style={{ fontSize: '12px', fontWeight: 600 }}>Motivo o comentario *</span>}
+          >
             <input
-              id="merma-reason-input"
               type="text"
               placeholder="Ej. Producto dañado, roto, caducado o consumo interno"
               value={reason}
               onChange={e => {
                 setReason(e.target.value);
                 setErrorMessage('');
+                setReasonError('');
               }}
               required
               style={{
@@ -241,7 +247,7 @@ export function MermaModal({
                 boxSizing: 'border-box',
               }}
             />
-          </div>
+          </FormField>
 
           {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
 
@@ -252,7 +258,7 @@ export function MermaModal({
             <Button
               variant="primary"
               type="submit"
-              disabled={activeItems.length === 0 || Boolean(stockExceededItem) || !reason.trim()}
+              disabled={activeItems.length === 0 || Boolean(stockExceededItem)}
               style={{
                 background: !reason.trim() ? undefined : '#dc2626',
                 borderColor: !reason.trim() ? undefined : '#b91c1c',

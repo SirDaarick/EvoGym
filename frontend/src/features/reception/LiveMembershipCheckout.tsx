@@ -713,7 +713,7 @@ export function LiveMembershipCheckout({
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--color-divider)', paddingTop: '6px' }}>
                       <span className="muted">Saldo pendiente:</span>
-                      <strong style={{ color: '#FC6C06', fontSize: '15px' }}>
+                      <strong style={{ color: 'var(--color-primary-ink)', fontSize: '15px' }}>
                         {selectedDebt ? `${formatMoney(selectedDebt.remaining_balance_minor)} MXN` : '$0.00 MXN'}
                       </strong>
                     </div>
@@ -916,7 +916,7 @@ export function LiveMembershipCheckout({
                       )}
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--color-divider)', paddingTop: '6px' }}>
                         <span className="muted">Total:</span>
-                        <strong style={{ color: '#FC6C06', fontSize: '15px' }}>
+                        <strong style={{ color: 'var(--color-primary-ink)', fontSize: '15px' }}>
                           {price !== null ? `${formatMoney(price)} MXN` : '$0.00 MXN'}
                         </strong>
                       </div>

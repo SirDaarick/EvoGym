@@ -504,6 +504,7 @@ function DemoSuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
             description={toast.description}
             duration={3200}
             fuse={toast.type === 'error' ? 'none' : 'bottom'}
+            tone={toast.type === 'error' ? 'error' : 'default'}
             closeButton
             closeLabel="Cerrar notificación"
             background="var(--color-surface)"

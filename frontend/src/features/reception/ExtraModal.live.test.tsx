@@ -48,3 +48,16 @@ it('reuses the same key and payload after an uncertain submission', async () => 
   expect(calls[1].body).toBe(calls[0].body);
   expect(calls[1].headers).toEqual(calls[0].headers);
 });
+
+it('shows inline field errors and skips the API when the extra form is invalid', async () => {
+  const request = vi.fn(async () => new Response(JSON.stringify({ items: [], total_minor: 0 })));
+  render(<ExtraModal isOpen onClose={() => {}} apiRequest={request} registerId="register" />);
+  await screen.findByText('No hay extras registrados en el turno activo.');
+  const callsBefore = request.mock.calls.length;
+  await userEvent.click(screen.getByRole('button', { name: 'Agregar' }));
+  const amount = screen.getByLabelText('Saldo / Monto *');
+  expect(amount).toHaveAttribute('aria-invalid', 'true');
+  expect(amount).toHaveAccessibleDescription('Ingresa un monto numérico válido mayor a $0.00.');
+  expect(screen.getByLabelText('Concepto *')).toHaveFocus();
+  expect(request.mock.calls.length).toBe(callsBefore);
+});

@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ExtraRecord } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { registerExtra } from '../../demo/extraOperations';
-import { Button } from '../../shared/ui';
+import { Button, FormField, focusFirstInvalid, useFieldErrors } from '../../shared/ui';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { createCashContribution, listCashContributions, ExpenseApiError, type CashContributionDTO, type CashContributionInput } from '../../api/expensesApi';
 import type { ApiRequest } from '../../api/shiftsApi';
@@ -28,6 +28,7 @@ export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraMod
   const [concept, setConcept] = useState('');
   const [staffName, setStaffName] = useState('');
   const [amountStr, setAmountStr] = useState('');
+  const { errors, setErrors, clear: clearError, clearAll: clearErrors } = useFieldErrors();
 
   const [toast, setToast] = useState<{
     open: boolean;
@@ -53,8 +54,9 @@ export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraMod
       setStaffName('');
       setAmountStr('');
       setToast(null);
+      clearErrors();
     }
-  }, [isOpen]);
+  }, [isOpen, clearErrors]);
 
   useEffect(() => {
     if (!isOpen || !apiRequest || !registerId) return;
@@ -75,35 +77,17 @@ export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraMod
     e.preventDefault();
     const amountMinor = parseMoney(amountStr);
 
-    if (!concept.trim()) {
-      setToast({
-        open: true,
-        title: 'Concepto requerido',
-        description: 'Escribe el concepto o motivo del dinero extra.',
-        type: 'error',
-      });
+    const found: Record<string, string> = {};
+    if (!concept.trim()) found.concept = 'Escribe el concepto o motivo del dinero extra.';
+    if (!staffName.trim()) found.staff = 'Escribe el nombre de la recepcionista o persona que aportó el cambio.';
+    if (!amountMinor || amountMinor <= 0) found.amount = 'Ingresa un monto numérico válido mayor a $0.00.';
+    if (Object.keys(found).length) {
+      setErrors(found);
+      focusFirstInvalid([found.concept && 'extra-concept-input', found.staff && 'extra-staff-input', found.amount && 'extra-amount-input']);
       return;
     }
-
-    if (!staffName.trim()) {
-      setToast({
-        open: true,
-        title: 'Nombre requerido',
-        description: 'Escribe el nombre de la recepcionista o persona que aportó el cambio.',
-        type: 'error',
-      });
-      return;
-    }
-
-    if (!amountMinor || amountMinor <= 0) {
-      setToast({
-        open: true,
-        title: 'Monto inválido',
-        description: 'Ingresa un monto numérico válido mayor a $0.00.',
-        type: 'error',
-      });
-      return;
-    }
+    setErrors({});
+    if (!amountMinor || amountMinor <= 0) return; // narrowing; already reported above
 
     if (apiRequest && registerId) {
       if (inFlight.current) return;
@@ -197,44 +181,38 @@ export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraMod
         </div>
 
         {/* Form Inputs (Sketch: Concepto, Nombre, Saldo, Agregar) */}
-        <form onSubmit={handleSubmit} className="op-flow-form">
+        <form onSubmit={handleSubmit} className="op-flow-form" noValidate>
           <div className="op-flow-inputs-row">
-            <div className="field" style={{ flex: 2 }}>
-              <label htmlFor="extra-concept-input">Concepto *</label>
+            <FormField label="Concepto *" id="extra-concept-input" error={errors.concept} style={{ flex: 2 }}>
               <input
-                id="extra-concept-input"
                 type="text"
                 placeholder="Ej. Cambio para cliente, feria propia en caja"
                 value={concept}
-                onChange={e => setConcept(e.target.value)}
+                onChange={e => { setConcept(e.target.value); clearError('concept'); }}
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="field" style={{ flex: 1.5 }}>
-              <label htmlFor="extra-staff-input">Nombre *</label>
+            <FormField label="Nombre *" id="extra-staff-input" error={errors.staff} style={{ flex: 1.5 }}>
               <input
-                id="extra-staff-input"
                 type="text"
                 placeholder="Persona que aportó el dinero"
                 value={staffName}
-                onChange={e => setStaffName(e.target.value)}
+                onChange={e => { setStaffName(e.target.value); clearError('staff'); }}
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="extra-amount-input">Saldo / Monto *</label>
+            <FormField label="Saldo / Monto *" id="extra-amount-input" error={errors.amount} style={{ flex: 1 }}>
               <input
-                id="extra-amount-input"
                 type="text"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={amountStr}
-                onChange={e => setAmountStr(e.target.value)}
+                onChange={e => { setAmountStr(e.target.value); clearError('amount'); }}
                 required
               />
-            </div>
+            </FormField>
 
             <div className="op-flow-submit-wrap">
               <Button variant="primary" type="submit" disabled={submitting}>
@@ -300,6 +278,7 @@ export function ExtraModal({ isOpen, onClose, apiRequest, registerId }: ExtraMod
             description={toast.description}
             duration={3200}
             fuse={toast.type === 'error' ? 'none' : 'bottom'}
+            tone={toast.type === 'error' ? 'error' : 'default'}
             closeButton
             closeLabel="Cerrar notificación"
             background="var(--color-surface)"

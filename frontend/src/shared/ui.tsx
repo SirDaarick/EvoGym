@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { cloneElement, isValidElement, useCallback, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import { Dialog } from './components/ui/Dialog';
 import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
@@ -57,6 +58,42 @@ export function Field({ label, id, error, ...props }: InputHTMLAttributes<HTMLIn
   return <div className="field"><label htmlFor={id}>{label}</label><input id={id} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} {...props} />
     {error && <p id={`${id}-error`} className="field-error">{error}</p>}</div>;
 }
+/**
+ * Wraps any single form control (input, select, textarea, ...). Wires the control's
+ * aria-invalid / aria-describedby to the inline error text (`${id}-error`).
+ */
+export function FormField({ label, id, error, children, className = '', style }: { label: ReactNode; id: string; error?: string; children: ReactElement<Record<string, unknown>>; className?: string; style?: CSSProperties }) {
+  const errorId = `${id}-error`;
+  const control = isValidElement(children)
+    ? cloneElement(children, {
+      id,
+      'aria-invalid': error ? true : undefined,
+      'aria-describedby': [children.props['aria-describedby'], error ? errorId : undefined].filter(Boolean).join(' ') || undefined,
+    })
+    : children;
+  return <div className={`field ${className}`.trim()} style={style}><label htmlFor={id}>{label}</label>{control}
+    {error && <p id={errorId} className="field-error">{error}</p>}</div>;
+}
+
+/** Per-field inline validation state. Keys are field names; clear a key when its field changes. */
+export function useFieldErrors() {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const clear = useCallback((key: string) => setErrors(prev => {
+    if (!(key in prev)) return prev;
+    const next = { ...prev };
+    delete next[key];
+    return next;
+  }), []);
+  const clearAll = useCallback(() => setErrors({}), []);
+  return { errors, setErrors, clear, clearAll };
+}
+
+/** Focuses the first control (by DOM id) in the list. Call right after setting errors. */
+export function focusFirstInvalid(ids: Array<string | undefined | false>) {
+  const id = ids.find(Boolean);
+  if (id) document.getElementById(id)?.focus();
+}
+
 export function TableRegion({ children, label }: { children: ReactNode; label: string }) {
   return <div className="table-region" role="region" aria-label={label} tabIndex={0}>{children}</div>;
 }

@@ -7,7 +7,7 @@ import type { GimiAlert } from '../../domain/gimi';
 import { useDemo } from '../../demo/DemoProvider';
 import { assignLocker as demoAssignLocker, releaseLocker as demoReleaseLocker, renewLocker as demoRenewLocker } from '../../demo/lockerOperations';
 import { getStoredAlerts, saveStoredAlerts } from '../gimi/gimiStore';
-import { Button, Notice } from '../../shared/ui';
+import { Button, FormField, Notice, useFieldErrors } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
@@ -125,6 +125,7 @@ export function CasillerosModal({
   const [newPricePesos, setNewPricePesos] = useState('180');
   const [editingPricePesos, setEditingPricePesos] = useState('');
   const [adminSaving, setAdminSaving] = useState(false);
+  const { errors: fieldErrors, setErrors: setFieldErrors, clear: clearFieldError } = useFieldErrors();
 
   const [selectedLockerId, setSelectedLockerId] = useState<string>('locker-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
@@ -620,25 +621,18 @@ export function CasillerosModal({
   async function handleConfirmCancellationSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!apiRequest || !registerId || !selectedLocker?.rentalId || !cancellationPreview) return;
-    if (!cancellationReason.trim()) {
-      setToast({
-        open: true,
-        title: 'Motivo requerido',
-        description: 'Escribe el motivo de la cancelación anticipada.',
-        type: 'error',
-      });
-      return;
-    }
     const refundMinor = Math.round(parseFloat(cancellationRefundPesos || '0') * 100);
+    const found: Record<string, string> = {};
     if (refundMinor > cancellationPreview.max_refundable_minor) {
-      setToast({
-        open: true,
-        title: 'Monto inválido',
-        description: `El reembolso no puede exceder $${(cancellationPreview.max_refundable_minor / 100).toFixed(2)} MXN.`,
-        type: 'error',
-      });
+      found.refund = `El reembolso no puede exceder $${(cancellationPreview.max_refundable_minor / 100).toFixed(2)} MXN.`;
+    }
+    if (!cancellationReason.trim()) found.reason = 'Escribe el motivo de la cancelación anticipada.';
+    if (Object.keys(found).length) {
+      setFieldErrors(found);
+      document.getElementById(found.refund ? 'cancel-refund-amount' : 'cancel-reason')?.focus();
       return;
     }
+    setFieldErrors({});
 
     setCancellingSubmitting(true);
     try {
@@ -770,7 +764,12 @@ export function CasillerosModal({
   // Admin handlers
   async function handleCreateLockerAsset(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiRequest || !branchId || !newCode.trim()) return;
+    if (!apiRequest || !branchId) return;
+    if (!newCode.trim()) {
+      setFieldErrors({ code: 'Escribe el código del casillero.' });
+      document.getElementById('new-locker-code')?.focus();
+      return;
+    }
     setAdminSaving(true);
     try {
       const priceMinor = Math.round(parseFloat(newPricePesos || '0') * 100);
@@ -804,7 +803,12 @@ export function CasillerosModal({
   async function handleUpdateLockerPrice() {
     if (!apiRequest || !selectedLocker) return;
     const priceMinor = Math.round(parseFloat(editingPricePesos || '0') * 100);
-    if (priceMinor <= 0) return;
+    if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
+      setFieldErrors({ price: 'Ingresa una tarifa válida mayor a $0.00.' });
+      document.getElementById('edit-locker-price')?.focus();
+      return;
+    }
+    clearFieldError('price');
     setAdminSaving(true);
     try {
       await updateRentalAsset(apiRequest, selectedLocker.id, { price_minor: priceMinor });
@@ -942,38 +946,39 @@ export function CasillerosModal({
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <input
                           id="edit-locker-price"
+                          aria-invalid={fieldErrors.price ? true : undefined}
+                          aria-describedby={fieldErrors.price ? 'edit-locker-price-error' : undefined}
                           type="number"
                           step="1.00"
                           min="1"
                           placeholder="180.00"
                           value={editingPricePesos}
-                          onChange={e => setEditingPricePesos(e.target.value)}
+                          onChange={e => { setEditingPricePesos(e.target.value); clearFieldError('price'); }}
                         />
                         <Button
                           variant="secondary"
-                          disabled={adminSaving || !editingPricePesos}
+                          disabled={adminSaving}
                           onClick={handleUpdateLockerPrice}
                         >
                           Actualizar
                         </Button>
                       </div>
+                      {fieldErrors.price && <p id="edit-locker-price-error" className="field-error">{fieldErrors.price}</p>}
                     </div>
 
                     <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--color-border)' }} />
 
                     <h4>Agregar nuevo casillero</h4>
-                    <form onSubmit={handleCreateLockerAsset} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div className="field">
-                        <label htmlFor="new-locker-code">Código</label>
+                    <form noValidate onSubmit={handleCreateLockerAsset} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <FormField label="Código" id="new-locker-code" error={fieldErrors.code}>
                         <input
-                          id="new-locker-code"
                           type="text"
                           placeholder="#43 o C-43"
                           value={newCode}
-                          onChange={e => setNewCode(e.target.value)}
+                          onChange={e => { setNewCode(e.target.value); clearFieldError('code'); }}
                           required
                         />
-                      </div>
+                      </FormField>
                       <div className="field">
                         <label htmlFor="new-locker-number">Número de casillero</label>
                         <input
@@ -995,7 +1000,7 @@ export function CasillerosModal({
                           onChange={e => setNewPricePesos(e.target.value)}
                         />
                       </div>
-                      <Button type="submit" disabled={adminSaving || !newCode.trim()}>
+                      <Button type="submit" disabled={adminSaving}>
                         Guardar nuevo casillero
                       </Button>
                     </form>
@@ -1317,7 +1322,7 @@ export function CasillerosModal({
               </button>
             </div>
 
-            <form onSubmit={handleConfirmCancellationSubmit} style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <form noValidate onSubmit={handleConfirmCancellationSubmit} style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="guantes-bento-card" style={{ background: 'var(--color-surface-sunken, #f8f9fa)' }}>
                 <div className="guantes-spec-list">
                   <div className="guantes-spec-row">
@@ -1355,18 +1360,21 @@ export function CasillerosModal({
                 <label htmlFor="cancel-refund-amount">Monto a reembolsar (MXN)</label>
                 <input
                   id="cancel-refund-amount"
+                  aria-invalid={fieldErrors.refund ? true : undefined}
+                  aria-describedby={fieldErrors.refund ? 'cancel-refund-amount-error' : undefined}
                   type="number"
                   step="0.50"
                   min="0"
                   max={(cancellationPreview.max_refundable_minor / 100).toFixed(2)}
                   value={cancellationRefundPesos}
-                  onChange={e => setCancellationRefundPesos(e.target.value)}
+                  onChange={e => { setCancellationRefundPesos(e.target.value); clearFieldError('refund'); }}
                   disabled={cancellingSubmitting}
                   required
                 />
                 <span className="muted" style={{ fontSize: '0.8rem' }}>
                   Puede ser 0.00 si no se otorga devolución económica.
                 </span>
+                {fieldErrors.refund && <p id="cancel-refund-amount-error" className="field-error">{fieldErrors.refund}</p>}
               </div>
 
               <div className="field">
@@ -1386,17 +1394,20 @@ export function CasillerosModal({
                 <label htmlFor="cancel-reason">Motivo de cancelación (obligatorio)</label>
                 <textarea
                   id="cancel-reason"
+                  aria-invalid={fieldErrors.reason ? true : undefined}
+                  aria-describedby={fieldErrors.reason ? 'cancel-reason-error' : undefined}
                   rows={3}
                   maxLength={240}
                   placeholder="Ej. Socio cambia de residencia o solicita baja anticipada..."
                   value={cancellationReason}
-                  onChange={e => setCancellationReason(e.target.value)}
+                  onChange={e => { setCancellationReason(e.target.value); clearFieldError('reason'); }}
                   disabled={cancellingSubmitting}
                   required
                 />
                 <span className="muted" style={{ fontSize: '0.8rem', textAlign: 'right' }}>
                   {cancellationReason.length}/240
                 </span>
+                {fieldErrors.reason && <p id="cancel-reason-error" className="field-error">{fieldErrors.reason}</p>}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
@@ -1410,7 +1421,7 @@ export function CasillerosModal({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={cancellingSubmitting || !cancellationReason.trim()}
+                  disabled={cancellingSubmitting}
                 >
                   {cancellingSubmitting ? 'Cancelando...' : 'Confirmar cancelación'}
                 </Button>
@@ -1429,6 +1440,7 @@ export function CasillerosModal({
             description={toast.description}
             duration={3200}
             fuse={toast.type === 'error' ? 'none' : 'bottom'}
+            tone={toast.type === 'error' ? 'error' : 'default'}
             closeButton
             closeLabel="Cerrar notificación"
             background="var(--color-surface)"

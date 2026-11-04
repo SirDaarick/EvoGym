@@ -95,3 +95,20 @@ it('continues without the photo when evidence storage is unavailable', async () 
   const create = request.mock.calls.find(([path, init]) => path === '/api/v1/registers/r/expenses' && init?.method === 'POST');
   expect(JSON.parse(String(create?.[1]?.body))).not.toHaveProperty('evidence_key');
 });
+
+it('shows inline field errors (not a toast) and skips the API when the form is invalid', async () => {
+  const request = vi.fn(async () => new Response(JSON.stringify({ items: [], total_minor: 0 })));
+  render(<GastoModal isOpen onClose={() => {}} apiRequest={request} registerId="r" branchId="b" />);
+  await screen.findByText('No hay gastos registrados en el turno activo.');
+  const callsBefore = request.mock.calls.length;
+  await userEvent.click(screen.getByRole('button', { name: 'Agregar' }));
+  const amount = screen.getByLabelText('Saldo / Monto *');
+  expect(amount).toHaveAttribute('aria-invalid', 'true');
+  expect(amount).toHaveAccessibleDescription('Ingresa un monto numérico válido mayor a $0.00.');
+  expect(screen.getByLabelText('Concepto *')).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByLabelText('Concepto *')).toHaveFocus();
+  expect(screen.getByLabelText('Categoría *')).toHaveAttribute('aria-invalid', 'true');
+  expect(request.mock.calls.length).toBe(callsBefore);
+  await userEvent.type(screen.getByLabelText('Saldo / Monto *'), '5');
+  expect(screen.getByLabelText('Saldo / Monto *')).not.toHaveAttribute('aria-invalid');
+});

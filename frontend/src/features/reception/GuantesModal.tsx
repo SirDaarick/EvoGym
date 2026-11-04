@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { GloveItem, PaymentMethod } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { rentGlove as demoRentGlove, returnGlove as demoReturnGlove } from '../../demo/gloveOperations';
-import { Button, Notice } from '../../shared/ui';
+import { Button, FormField, Notice, useFieldErrors } from '../../shared/ui';
 import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
@@ -64,6 +64,7 @@ export function GuantesModal({
   // Admin controls state
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [newCode, setNewCode] = useState('');
+  const { errors: adminErrors, setErrors: setAdminErrors, clear: clearAdminError } = useFieldErrors();
   const [newColor, setNewColor] = useState('Rojo');
   const [newOunces, setNewOunces] = useState(12);
   const [newPricePesos, setNewPricePesos] = useState('25');
@@ -494,7 +495,12 @@ export function GuantesModal({
   // Admin asset management handlers
   async function handleCreateAsset(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiRequest || !branchId || !newCode.trim()) return;
+    if (!apiRequest || !branchId) return;
+    if (!newCode.trim()) {
+      setAdminErrors({ code: 'Escribe el código del guante.' });
+      document.getElementById('new-glove-code')?.focus();
+      return;
+    }
     setAdminSaving(true);
     try {
       const priceMinor = Math.round(parseFloat(newPricePesos || '0') * 100);
@@ -529,7 +535,12 @@ export function GuantesModal({
   async function handleUpdatePrice() {
     if (!apiRequest || !selectedGlove) return;
     const priceMinor = Math.round(parseFloat(editingPricePesos || '0') * 100);
-    if (priceMinor <= 0) return;
+    if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
+      setAdminErrors({ price: 'Ingresa una tarifa válida mayor a $0.00.' });
+      document.getElementById('edit-glove-price')?.focus();
+      return;
+    }
+    clearAdminError('price');
     setAdminSaving(true);
     try {
       await updateRentalAsset(apiRequest, selectedGlove.id, { price_minor: priceMinor });
@@ -653,38 +664,39 @@ export function GuantesModal({
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <input
                         id="edit-glove-price"
+                        aria-invalid={adminErrors.price ? true : undefined}
+                        aria-describedby={adminErrors.price ? 'edit-glove-price-error' : undefined}
                         type="number"
                         step="0.50"
                         min="1"
                         placeholder="25.00"
                         value={editingPricePesos}
-                        onChange={e => setEditingPricePesos(e.target.value)}
+                        onChange={e => { setEditingPricePesos(e.target.value); clearAdminError('price'); }}
                       />
                       <Button
                         variant="secondary"
-                        disabled={adminSaving || !editingPricePesos}
+                        disabled={adminSaving}
                         onClick={handleUpdatePrice}
                       >
                         Actualizar
                       </Button>
                     </div>
+                    {adminErrors.price && <p id="edit-glove-price-error" className="field-error">{adminErrors.price}</p>}
                   </div>
 
                   <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--color-border)' }} />
 
                   <h4>Agregar nuevo par de guantes</h4>
-                  <form onSubmit={handleCreateAsset} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div className="field">
-                      <label htmlFor="new-glove-code">Código</label>
+                  <form noValidate onSubmit={handleCreateAsset} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <FormField label="Código" id="new-glove-code" error={adminErrors.code}>
                       <input
-                        id="new-glove-code"
                         type="text"
                         placeholder="#13 o G-13"
                         value={newCode}
-                        onChange={e => setNewCode(e.target.value)}
+                        onChange={e => { setNewCode(e.target.value); clearAdminError('code'); }}
                         required
                       />
-                    </div>
+                    </FormField>
                     <div className="field">
                       <label htmlFor="new-glove-color">Color</label>
                       <input
@@ -717,7 +729,7 @@ export function GuantesModal({
                         onChange={e => setNewPricePesos(e.target.value)}
                       />
                     </div>
-                    <Button type="submit" disabled={adminSaving || !newCode.trim()}>
+                    <Button type="submit" disabled={adminSaving}>
                       Guardar nuevo activo
                     </Button>
                   </form>
@@ -980,6 +992,7 @@ export function GuantesModal({
             description={toast.description}
             duration={3200}
             fuse={toast.type === 'error' ? 'none' : 'bottom'}
+            tone={toast.type === 'error' ? 'error' : 'default'}
             closeButton
             closeLabel="Cerrar notificación"
             background="var(--color-surface)"

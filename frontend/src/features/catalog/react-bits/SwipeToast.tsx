@@ -28,6 +28,8 @@ export interface SwipeToastProps {
   settleBounce?: number;
   swipeDistance?: number;
   duration?: number;
+  /** 'error' announces as role=alert and never auto-dismisses. */
+  tone?: 'default' | 'error';
   fuse?: SwipeToastFuse;
   pauseOnHover?: boolean;
   closeButton?: boolean;
@@ -88,7 +90,8 @@ const SwipeToast: React.FC<SwipeToastProps> = ({
   slideMs = 400,
   settleBounce = 0.2,
   swipeDistance = 40,
-  duration = 4000,
+  duration: durationProp = 4000,
+  tone = 'default',
   fuse = 'bottom',
   pauseOnHover = true,
   closeButton = false,
@@ -98,6 +101,7 @@ const SwipeToast: React.FC<SwipeToastProps> = ({
   reducedMotion,
   className = ''
 }) => {
+  const duration = tone === 'error' ? 0 : durationProp;
   const motionPreference = useReducedMotion();
   const reduce = reducedMotion ?? motionPreference ?? false;
   const [phase, setPhase] = useState<SwipeToastPhase>('open');
@@ -309,8 +313,8 @@ const SwipeToast: React.FC<SwipeToastProps> = ({
           <motion.div
             ref={cardRef}
             className="swipe-toast__card"
-            role="status"
-            aria-live="polite"
+            role={tone === 'error' ? 'alert' : 'status'}
+            aria-live={tone === 'error' ? 'assertive' : 'polite'}
             aria-atomic="true"
             tabIndex={0}
             style={{ transform, opacity: fade }}

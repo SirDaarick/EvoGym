@@ -262,7 +262,7 @@ export function DevicePairingModal({
         <div className="device-pairing-header">
           <div className="device-pairing-title-group">
             <h2 id="pairing-modal-title">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FC6C06" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary-ink)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
                 <path d="M12 18h.01" />
               </svg>

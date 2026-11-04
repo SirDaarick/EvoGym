@@ -8,7 +8,7 @@ import {
   type ReturnOperationResult,
   type ReturnTargetType,
 } from '../../demo/returnOperations';
-import { Badge, Button, Notice, type Tone } from '../../shared/ui';
+import { Badge, Button, FormField, Notice, type Tone } from '../../shared/ui';
 import type { AuthenticatedRequest } from '../../api/inventoryApi';
 import {
   listEligibleProductReturns,
@@ -69,6 +69,7 @@ export function DevolucionesModal({
   const [refundMethod, setRefundMethod] = useState<'cash' | 'card'>('cash');
   const [disposition, setDisposition] = useState<'restock' | 'waste'>('restock');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [reasonError, setReasonError] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
 
   // Live state
@@ -84,6 +85,7 @@ export function DevolucionesModal({
       setReason('');
       setMemberSearch('');
       setErrorMessage('');
+      setReasonError('');
       setDisposition('restock');
       setSubmitting(false);
       setSelectedLiveMember(null);
@@ -243,9 +245,12 @@ export function DevolucionesModal({
       return;
     }
     if (!reason.trim()) {
-      setErrorMessage('Escribe el motivo o justificación de la devolución.');
+      setErrorMessage('');
+      setReasonError('Escribe el motivo o justificación de la devolución.');
+      document.getElementById('devolucion-reason-input')?.focus();
       return;
     }
+    setReasonError('');
 
     if (apiRequest && registerId) {
       setSubmitting(true);
@@ -399,7 +404,7 @@ export function DevolucionesModal({
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <form noValidate onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* STEP 1: Select Client and Item */}
           {step === 1 && (
             <>
@@ -726,18 +731,19 @@ export function DevolucionesModal({
               </div>
 
               {/* Reason Input */}
-              <div className="field">
-                <label htmlFor="devolucion-reason-input" style={{ fontSize: '12px', fontWeight: 600 }}>
-                  Motivo de la devolución *
-                </label>
+              <FormField
+                id="devolucion-reason-input"
+                error={reasonError}
+                label={<span style={{ fontSize: '12px', fontWeight: 600 }}>Motivo de la devolución *</span>}
+              >
                 <input
-                  id="devolucion-reason-input"
                   type="text"
                   placeholder="Ej. Producto dañado, error de cobro, cambio..."
                   value={reason}
                   onChange={e => {
                     setReason(e.target.value);
                     setErrorMessage('');
+                    setReasonError('');
                   }}
                   required
                   style={{
@@ -748,7 +754,7 @@ export function DevolucionesModal({
                     boxSizing: 'border-box',
                   }}
                 />
-              </div>
+              </FormField>
 
               {errorMessage && <Notice tone="error">{errorMessage}</Notice>}
 
@@ -760,7 +766,7 @@ export function DevolucionesModal({
                 <Button
                   variant="primary"
                   type="submit"
-                  disabled={!reason.trim() || submitting}
+                  disabled={submitting}
                   style={{
                     background: reason.trim() && !submitting ? '#dc2626' : undefined,
                     borderColor: reason.trim() && !submitting ? '#b91c1c' : undefined,
