@@ -77,7 +77,8 @@ export interface StaffCorrectionRequest {
 export async function listStaffAttendance(
   businessDate?: string,
   token?: string,
-  branchId?: string
+  branchId?: string,
+  init?: RequestInit
 ): Promise<StaffAttendancePage> {
   const config = getReceptionConfig();
   const activeToken = token ?? readOperationalToken() ?? undefined;
@@ -90,7 +91,7 @@ export async function listStaffAttendance(
     params.set('business_date', businessDate);
   }
   const queryString = params.toString() ? `?${params.toString()}` : '';
-  return request<StaffAttendancePage>(config, `/api/v1/staff-attendance${queryString}`, activeToken);
+  return request<StaffAttendancePage>(config, `/api/v1/staff-attendance${queryString}`, activeToken, init);
 }
 
 export async function recordStaffAttendance(
@@ -165,7 +166,8 @@ export async function getStaffAttendanceCorrections(
 export async function listBranchAttendanceCorrections(
   branchId?: string,
   businessDate?: string,
-  token?: string
+  token?: string,
+  init?: RequestInit
 ): Promise<StaffAttendanceCorrectionItem[]> {
   const config = getReceptionConfig();
   const activeToken = token ?? readOperationalToken() ?? undefined;
@@ -178,6 +180,7 @@ export async function listBranchAttendanceCorrections(
   return request<StaffAttendanceCorrectionItem[]>(
     config,
     `/api/v1/staff-attendance/branches/${encodeURIComponent(targetBranchId)}/corrections${queryString}`,
-    activeToken
+    activeToken,
+    init
   );
 }

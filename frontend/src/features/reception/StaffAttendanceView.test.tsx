@@ -701,5 +701,69 @@ describe('StaffAttendanceView', () => {
         vi.useRealTimers();
       }
     });
+
+    it('shows a secondary warning when corrections or schedules fail to load but keeps attendance', async () => {
+      sessionStorage.setItem('evogym:operational-session', 'live-token');
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes('/corrections')) return new Response('boom', { status: 500 });
+        if (url.includes('/staff-schedules/')) return new Response('boom', { status: 500 });
+        return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+      });
+
+      render(
+        <DemoProvider>
+          <StaffAttendanceView liveStaff={[]} branchId={testBranchId} />
+        </DemoProvider>
+      );
+
+      expect(await screen.findByText('No se pudieron cargar las correcciones.')).toBeInTheDocument();
+      expect(screen.getByText('No se pudieron cargar los horarios.')).toBeInTheDocument();
+      expect(screen.queryByText('Error al sincronizar asistencia.')).not.toBeInTheDocument();
+    });
+
+    it('does not render stale data from a previous branch after switching branches', async () => {
+      sessionStorage.setItem('evogym:operational-session', 'live-token');
+      const branchA = '00000000-0000-4000-8000-0000000000aa';
+      const branchB = '00000000-0000-4000-8000-0000000000bb';
+      const staff = [{ id: 'staff-x', name: 'Xavier', active: true, avatarInitials: 'X', department: 'Staff' }];
+      const record = {
+        id: 'att-a-1', profile_id: 'staff-x', branch_id: branchA, full_name: 'Xavier', position: 'Staff',
+        recorded_by: 'Operador', occurred_at: '2026-11-03T14:00:00Z', business_date: '2026-11-03', status: 'present',
+        expected_entry_time: null, grace_tolerance_minutes: 15, checkout_at: null, checkout_recorded_by: null,
+        series_id: null, occurrence_date: null, device_captured_at: '2026-11-03T14:00:00Z',
+        server_received_at: '2026-11-03T14:00:01Z', idempotency_key: 'k', clock_validation_status: 'accepted',
+        review_required: false, schedule_conflict: false, notes: null,
+      };
+      let releaseA: () => void = () => {};
+      const gateA = new Promise<void>(resolve => { releaseA = resolve; });
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        const isA = url.includes(branchA);
+        if (url.includes('/corrections') || url.includes('/staff-schedules/')) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (isA) {
+          await gateA;
+          return new Response(JSON.stringify({ items: [record], total: 1 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 });
+      });
+
+      const view = (id: string) => (
+        <DemoProvider>
+          <StaffAttendanceView liveStaff={staff} branchId={id} />
+        </DemoProvider>
+      );
+      const { rerender } = render(view(branchA));
+      rerender(view(branchB));
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining(branchB), expect.anything());
+      });
+      releaseA();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(screen.getByTestId('staff-card-staff-x')).toHaveTextContent('Fuera del gym');
+    });
   });
 });

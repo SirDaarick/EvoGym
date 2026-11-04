@@ -137,78 +137,83 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   // Pending clock-in for unscheduled staff member
   const [unscheduledStaff, setUnscheduledStaff] = useState<StaffAttendancePerson | null>(null);
 
-  const fetchLiveAttendance = useCallback(async () => {
-    if (!operationalToken && !liveRequest) return;
-    try {
-      const today = businessDate();
-      let records: StaffAttendanceItem[];
-      if (liveRequest) {
-        const response = await liveRequest(`/api/v1/staff-attendance?branch_id=${encodeURIComponent(branchId ?? '')}&business_date=${today}`);
-        if (!response.ok) throw new Error('No se pudo sincronizar la asistencia desde la API.');
-        records = (await response.json() as { items: StaffAttendanceItem[] }).items;
-      } else {
-        records = (await listStaffAttendance(today, operationalToken!)).items;
-      }
-      let correctionsList: StaffAttendanceCorrectionItem[] = [];
-      if (liveRequest) {
-        try {
-          const corrRes = await liveRequest(`/api/v1/staff-attendance/branches/${encodeURIComponent(branchId ?? '')}/corrections?business_date=${today}`);
-          if (corrRes.ok) {
-            correctionsList = (await corrRes.json()) as StaffAttendanceCorrectionItem[];
-          }
-        } catch {
-          // ignore corrections load error
-        }
-      } else {
-        try {
-          correctionsList = await listBranchAttendanceCorrections(branchId, today, operationalToken!);
-        } catch {
-          // ignore corrections load error
-        }
-      }
+  const [liveWarnings, setLiveWarnings] = useState<string[]>([]);
 
-      let seriesList: StaffScheduleSeriesItem[] = [];
+  const fetchLiveAttendance = useCallback(async (signal: AbortSignal) => {
+    if (!operationalToken && !liveRequest) return;
+    const today = businessDate();
+    const encodedBranch = encodeURIComponent(branchId ?? '');
+    const init: RequestInit = { signal };
+
+    const loadAttendance = async (): Promise<StaffAttendanceItem[]> => {
       if (liveRequest) {
-        try {
-          const schedRes = await liveRequest(`/api/v1/staff-schedules/branches/${encodeURIComponent(branchId ?? '')}`);
-          if (schedRes.ok) {
-            const data = await schedRes.json();
-            seriesList = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
-          }
-        } catch {
-          // ignore schedule load error
-        }
-      } else if (operationalToken) {
-        try {
-          const config = getReceptionConfig();
-          const targetBranchId = branchId ?? config.branchId;
-          const schedRes = await fetch(`${config.apiOrigin}/api/v1/staff-schedules/branches/${encodeURIComponent(targetBranchId)}`, {
-            headers: { Authorization: `Bearer ${operationalToken}` },
-          });
-          if (schedRes.ok) {
-            const data = await schedRes.json();
-            seriesList = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
-          }
-        } catch {
-          // ignore schedule load error
-        }
+        const response = await liveRequest(`/api/v1/staff-attendance?branch_id=${encodedBranch}&business_date=${today}`, init);
+        if (!response.ok) throw new Error('No se pudo sincronizar la asistencia desde la API.');
+        return (await response.json() as { items: StaffAttendanceItem[] }).items;
       }
-      setBranchSchedules(Array.isArray(seriesList) ? seriesList : []);
-      setLiveRecords(records);
-      const corrMap: Record<string, StaffAttendanceCorrectionItem[]> = {};
-      correctionsList.forEach(c => {
-        if (!corrMap[c.attendance_id]) corrMap[c.attendance_id] = [];
-        corrMap[c.attendance_id].push(c);
-      });
-      setCorrectionsByAttendanceId(corrMap);
-      setLiveError(null);
-    } catch (err) {
-      if (err instanceof OperationalApiHttpError || err instanceof OperationalApiNetworkError) {
+      return (await listStaffAttendance(today, operationalToken!, branchId, init)).items;
+    };
+
+    const loadCorrections = async (): Promise<StaffAttendanceCorrectionItem[]> => {
+      if (liveRequest) {
+        const res = await liveRequest(`/api/v1/staff-attendance/branches/${encodedBranch}/corrections?business_date=${today}`, init);
+        if (!res.ok) throw new Error('corrections');
+        return (await res.json()) as StaffAttendanceCorrectionItem[];
+      }
+      return listBranchAttendanceCorrections(branchId, today, operationalToken!, init);
+    };
+
+    const loadSchedules = async (): Promise<StaffScheduleSeriesItem[]> => {
+      let res: Response;
+      if (liveRequest) {
+        res = await liveRequest(`/api/v1/staff-schedules/branches/${encodedBranch}`, init);
+      } else {
+        const config = getReceptionConfig();
+        const targetBranchId = branchId ?? config.branchId;
+        res = await fetch(`${config.apiOrigin}/api/v1/staff-schedules/branches/${encodeURIComponent(targetBranchId)}`, {
+          headers: { Authorization: `Bearer ${operationalToken}` },
+          signal,
+        });
+      }
+      if (!res.ok) throw new Error('schedules');
+      const data = await res.json();
+      return Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    };
+
+    const [attendance, corrections, schedules] = await Promise.allSettled([
+      loadAttendance(),
+      loadCorrections(),
+      loadSchedules(),
+    ]);
+    if (signal.aborted) return;
+
+    if (attendance.status === 'rejected') {
+      const err = attendance.reason;
+      if (err instanceof OperationalApiHttpError || err instanceof OperationalApiNetworkError || (err instanceof Error && err.message)) {
         setLiveError(err.message);
       } else {
         setLiveError('Error al sincronizar asistencia.');
       }
+      return;
     }
+
+    const warnings: string[] = [];
+    const corrMap: Record<string, StaffAttendanceCorrectionItem[]> = {};
+    if (corrections.status === 'fulfilled') {
+      (Array.isArray(corrections.value) ? corrections.value : []).forEach(c => {
+        if (!corrMap[c.attendance_id]) corrMap[c.attendance_id] = [];
+        corrMap[c.attendance_id].push(c);
+      });
+    } else {
+      warnings.push('No se pudieron cargar las correcciones.');
+    }
+    if (schedules.status === 'rejected') warnings.push('No se pudieron cargar los horarios.');
+
+    setBranchSchedules(schedules.status === 'fulfilled' ? schedules.value : []);
+    setLiveRecords(attendance.value);
+    setCorrectionsByAttendanceId(corrMap);
+    setLiveWarnings(warnings);
+    setLiveError(null);
   }, [branchId, liveRequest, operationalToken]);
 
   function handleStartCorrection(recId: string) {
@@ -294,9 +299,16 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
   }
 
   useEffect(() => {
-    if (isLive) {
-      fetchLiveAttendance();
-    }
+    if (!isLive) return;
+    const controller = new AbortController();
+    // Drop data from the previous branch/session while the new load is in flight.
+    setLiveRecords([]);
+    setCorrectionsByAttendanceId({});
+    setBranchSchedules([]);
+    setLiveWarnings([]);
+    setLiveError(null);
+    void fetchLiveAttendance(controller.signal);
+    return () => controller.abort();
   }, [isLive, fetchLiveAttendance]);
 
   const activeStaff = useMemo(() => {
@@ -723,6 +735,23 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
           }}
         >
           {liveError}
+        </div>
+      )}
+
+      {liveWarnings.length > 0 && (
+        <div
+          role="status"
+          style={{
+            padding: '10px 16px',
+            marginBottom: '16px',
+            background: '#FFFBEB',
+            border: '1px solid #F59E0B',
+            borderRadius: '8px',
+            color: '#92400E',
+            fontSize: '14px',
+          }}
+        >
+          {liveWarnings.map(w => <div key={w}>{w}</div>)}
         </div>
       )}
 
