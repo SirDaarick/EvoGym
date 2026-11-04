@@ -10,6 +10,7 @@ from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied
 from app.auth.enrollment import issue_enrollment_code, list_enrollment_codes, revoke_enrollment_code
 from app.observability.logging import request_id
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/admin/enrollment-codes", tags=["admin enrollment"])
 _bearer = HTTPBearer(auto_error=False)
@@ -39,9 +40,9 @@ def issue_code(
     payload: IssueEnrollmentCodePayload,
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     staff_id, _current_session = _principal(request, credentials)
-    factory = request.app.state.session_factory
     req_id = UUID(request_id())
     try:
         issued = issue_enrollment_code(
@@ -70,9 +71,9 @@ def issue_code(
 def list_codes(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     staff_id, _current_session = _principal(request, credentials)
-    factory = request.app.state.session_factory
     records = list_enrollment_codes(factory, staff_id)
     return {
         "enrollment_codes": [
@@ -98,9 +99,9 @@ def revoke_code(
     code_id: UUID,
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     staff_id, _current_session = _principal(request, credentials)
-    factory = request.app.state.session_factory
     req_id = UUID(request_id())
     success = revoke_enrollment_code(factory, staff_id, code_id, request_id=req_id)
     if not success:

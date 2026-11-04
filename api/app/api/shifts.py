@@ -50,6 +50,7 @@ from app.shifts.schemas import (
     ShiftPageDTO,
     ShiftSummaryDTO,
 )
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1", tags=["shifts"])
 _bearer = HTTPBearer(auto_error=False)
@@ -111,14 +112,11 @@ def get_shift_actor_principal(
 
 @router.get("/terminals", response_model=list[PaymentTerminalDTO])
 def list_terminals_endpoint(
-    request: Request,
     branch_id: UUID | None = Query(None, description="Optional branch filter for admin."),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[PaymentTerminalDTO]:
     """List payment terminals. Accessible by Staff (filtered to branch) or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     if not principal.is_admin:
         if branch_id is not None and branch_id != principal.branch_id:
@@ -135,16 +133,13 @@ def list_terminals_endpoint(
 @router.post("/terminals", response_model=PaymentTerminalDTO, status_code=201)
 def create_terminal_endpoint(
     payload: CreatePaymentTerminalDTO,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> PaymentTerminalDTO:
     """Create a new payment terminal. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         branch_uuid = UUID(payload.branch_id)
@@ -179,14 +174,11 @@ def create_terminal_endpoint(
 
 @router.get("/registers", response_model=list[CashRegisterDTO])
 def list_registers_endpoint(
-    request: Request,
     branch_id: UUID | None = Query(None, description="Optional branch filter for admin."),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[CashRegisterDTO]:
     """List cash registers. Accessible by Staff (filtered to branch) or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     with factory() as session:
         from app.db.models import RoleGrant
@@ -212,16 +204,13 @@ def list_registers_endpoint(
 @router.post("/registers", response_model=CashRegisterDTO, status_code=201)
 def create_register_endpoint(
     payload: CreateCashRegisterDTO,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashRegisterDTO:
     """Create a new cash register. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         branch_uuid = UUID(payload.branch_id)
@@ -260,14 +249,11 @@ def create_register_endpoint(
 
 @router.get("/shifts/current", response_model=ShiftDTO)
 def get_current_shift_endpoint(
-    request: Request,
     register_id: UUID = Query(..., description="Cash register UUID."),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftDTO:
     """Retrieve the current active open shift on a cash register."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     with factory() as session:
         register = get_cash_register(session, register_id)
@@ -287,13 +273,10 @@ def get_current_shift_endpoint(
 @router.post("/shifts/open", response_model=ShiftDTO, status_code=201)
 def open_shift_endpoint(
     payload: OpenShiftDTO,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftDTO:
     """Open a new shift on a cash register. Accessible by Staff or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         register_uuid = UUID(payload.cash_register_id)
@@ -339,14 +322,11 @@ def open_shift_endpoint(
 def close_shift_endpoint(
     shift_id: UUID,
     payload: CloseShiftDTO,
-    request: Request,
     response: Response,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftDTO:
     """Persist and freeze physical cash evidence for an open shift."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         with factory() as session:
@@ -387,13 +367,10 @@ def close_shift_endpoint(
 @router.get("/shifts/{shift_id}", response_model=ShiftDTO)
 def get_shift_endpoint(
     shift_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftDTO:
     """Retrieve details of a specific shift by ID."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     with factory() as session:
         shift = get_shift_by_id(session, shift_id)
@@ -409,13 +386,10 @@ def get_shift_endpoint(
 @router.get("/shifts/{shift_id}/summary", response_model=ShiftSummaryDTO)
 def get_shift_summary_endpoint(
     shift_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftSummaryDTO:
     """Read the supported canonical payment summary for a shift."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         shift = get_shift_by_id(session, shift_id)
         if shift is None:
@@ -431,16 +405,13 @@ def get_shift_summary_endpoint(
 
 @router.get("/shifts", response_model=ShiftPageDTO)
 def list_shifts_endpoint(
-    request: Request,
     register_id: UUID = Query(..., description="Cash register UUID."),
     offset: int = Query(0, ge=0, le=2**63 - 1),
     limit: int = Query(50, ge=1, le=100),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ShiftPageDTO:
     """Retrieve a paged history for one cash register."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         register = get_cash_register(session, register_id)
         if register is None:
@@ -463,13 +434,10 @@ def list_shifts_endpoint(
 )
 def capture_register_inventory_snapshot_endpoint(
     register_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> RegisterInventorySnapshotDTO:
     """Capture the full piece catalog currently presented for this register's branch."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     with factory() as session:
         register = get_cash_register(session, register_id)
@@ -492,13 +460,10 @@ def capture_register_inventory_snapshot_endpoint(
 def get_register_inventory_snapshot_endpoint(
     register_id: UUID,
     snapshot_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> RegisterInventorySnapshotDTO:
     """Read a stored observation after rechecking live register authorization."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     with factory() as session:
         register = get_cash_register(session, register_id)

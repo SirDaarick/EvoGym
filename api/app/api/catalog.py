@@ -31,6 +31,7 @@ from app.catalog.schemas import (
     PublishPlanVersionDTO,
     ServiceDTO,
 )
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["catalog"])
 _bearer = HTTPBearer(auto_error=False)
@@ -92,14 +93,11 @@ def get_catalog_actor_principal(
 
 @router.get("/services", response_model=list[ServiceDTO])
 def list_services_endpoint(
-    request: Request,
     status: str | None = Query(None, pattern="^(active|inactive)$"),
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[ServiceDTO]:
     """List commercial services. Accessible by Staff or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         services = list_services(session, status=status)
         return [to_service_dto(s) for s in services]
@@ -108,16 +106,13 @@ def list_services_endpoint(
 @router.post("/services", response_model=ServiceDTO, status_code=201)
 def create_service_endpoint(
     payload: CreateServiceDTO,
-    request: Request,
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ServiceDTO:
     """Create a commercial service. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         with factory() as session:
@@ -140,16 +135,13 @@ def create_service_endpoint(
 
 @router.get("/plans", response_model=list[PlanDTO])
 def list_plans_endpoint(
-    request: Request,
     kind: str | None = Query(None, pattern="^(membership|visit)$"),
     status: str | None = Query(None, pattern="^(active|inactive|archived)$"),
     eligibility_type: str | None = Query(None, max_length=64),
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[PlanDTO]:
     """List commercial plans with filtering. Accessible by Staff or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         plans = list_plans(session, kind=kind, status=status, eligibility_type=eligibility_type)
         return [to_plan_dto(p) for p in plans]
@@ -158,16 +150,13 @@ def list_plans_endpoint(
 @router.post("/plans", response_model=PlanDTO, status_code=201)
 def create_plan_endpoint(
     payload: CreatePlanDTO,
-    request: Request,
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> PlanDTO:
     """Create a commercial plan with optional initial version. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         with factory() as session:
@@ -189,13 +178,10 @@ def create_plan_endpoint(
 @router.get("/plans/{plan_id}", response_model=PlanDTO)
 def get_plan_endpoint(
     plan_id: UUID,
-    request: Request,
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> PlanDTO:
     """Retrieve detailed plan by ID including version history. Accessible by Staff or Admin."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         plan = get_plan_by_id(session, plan_id)
         if plan is None:
@@ -207,15 +193,12 @@ def get_plan_endpoint(
 def patch_plan_endpoint(
     plan_id: UUID,
     payload: PatchPlanDTO,
-    request: Request,
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> PlanDTO:
     """Update plan display name or active status. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             plan = update_plan(session, plan_id, payload)
@@ -230,16 +213,13 @@ def patch_plan_endpoint(
 def publish_plan_version_endpoint(
     plan_id: UUID,
     payload: PublishPlanVersionDTO,
-    request: Request,
     principal: CatalogActorPrincipal = Depends(get_catalog_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> PlanVersionDTO:
     """Publish a new immutable version for an existing plan. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
 
     try:
         with factory() as session:

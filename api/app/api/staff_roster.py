@@ -14,6 +14,7 @@ from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.auth.sessions import validate_session
 from app.db.models import Branch, PayrollAdvance, PayrollPayment, StaffRosterProfile
 from app.api.payroll import weekly_base
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/staff-roster", tags=["staff-roster"])
 _bearer = HTTPBearer(auto_error=False)
@@ -126,12 +127,11 @@ def _require_manage(session, principal: RosterPrincipal, branch_id: UUID) -> Bra
 
 @router.get("", response_model=StaffRosterPage)
 def list_staff_roster(
-    request: Request,
     branch_id: UUID | None = Query(default=None),
     include_inactive: bool = Query(default=False),
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory() as session:
         branches = _allowed_branches(session, principal, branch_id)
         ids = [branch.id for branch in branches]
@@ -147,10 +147,9 @@ def list_staff_roster(
 
 @router.post("/branches/{branch_id}", response_model=StaffRosterItem, status_code=201)
 def create_staff_profile(
-    branch_id: UUID, payload: StaffRosterCreate, request: Request,
-    principal: RosterPrincipal = Depends(_principal),
+    branch_id: UUID, payload: StaffRosterCreate, principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     try:
         with factory.begin() as session:
             _require_manage(session, principal, branch_id)
@@ -168,10 +167,9 @@ def create_staff_profile(
 
 @router.patch("/{profile_id}", response_model=StaffRosterPatchResult, response_model_exclude_unset=True)
 def update_staff_profile(
-    profile_id: UUID, payload: StaffRosterUpdate, request: Request,
-    principal: RosterPrincipal = Depends(_principal),
+    profile_id: UUID, payload: StaffRosterUpdate, principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     try:
         with factory.begin() as session:
             profile = session.get(StaffRosterProfile, profile_id)

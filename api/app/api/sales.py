@@ -50,6 +50,7 @@ from app.sales.schemas import (
     CardProductSaleRequest, CreateCardIntentRequest, CardIntentResponse,
     EligibleProductReturnDTO, ProductRefundDTO, ProductReturnRequest,
 )
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/registers", tags=["sales"])
 
@@ -103,18 +104,22 @@ def _get_or_create_terminal_for_register(session, register: CashRegister, settin
 
 
 @router.get("/product-sale-intent")
-def get_product_sale_intent_endpoint(request: Request, principal: ShiftActorPrincipal = Depends(get_shift_actor_principal)):
-    with request.app.state.session_factory() as session:
+def get_product_sale_intent_endpoint(principal: ShiftActorPrincipal = Depends(get_shift_actor_principal), *, factory: SessionFactoryDep):
+    with factory() as session:
         _product_sales_access(session, principal)
         return _intent_response(session.get(ProductSaleIntent, principal.staff_id))
 
 
 @router.post("/{register_id}/product-sale-intent")
-def prepare_product_sale_endpoint(register_id: UUID, payload: CashProductSaleRequest, request: Request,
-    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
-    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal)):
+def prepare_product_sale_endpoint(
+    register_id: UUID, payload: CashProductSaleRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128,
+                                  pattern=r"^[A-Za-z0-9._:-]+$"),
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
+):
     try:
-        with request.app.state.session_factory() as session:
+        with factory() as session:
             _product_sales_access(session, principal)
             intent = prepare_product_sale(session, register_id=register_id, actor_id=principal.staff_id,
                 member_id=payload.member_id, items=payload.items, expected_total_minor=payload.expected_total_minor,
@@ -130,14 +135,12 @@ def prepare_product_sale_endpoint(register_id: UUID, payload: CashProductSaleReq
 
 @router.post("/{register_id}/product-sales", response_model=CashProductSaleDTO, status_code=201)
 def post_cash_product_sale_endpoint(
-    register_id: UUID, payload: CashProductSaleRequest, request: Request, response: Response,
+    register_id: UUID, payload: CashProductSaleRequest, response: Response,
     idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128,
                                   pattern=r"^[A-Za-z0-9._:-]+$"),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashProductSaleDTO:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             if not principal.is_admin and session.scalar(select(RoleGrant.id).where(
@@ -189,12 +192,13 @@ def post_cash_product_sale_endpoint(
 
 
 @router.post("/{register_id}/product-sales/resolve")
-def resolve_product_sale_endpoint(register_id: UUID, payload: CashProductSaleRequest, request: Request,
-    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
-    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal)):
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
+def resolve_product_sale_endpoint(
+    register_id: UUID, payload: CashProductSaleRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128,
+                                  pattern=r"^[A-Za-z0-9._:-]+$"),
+    principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
+):
     try:
         with factory() as session:
             if not principal.is_admin and session.scalar(select(RoleGrant.id).where(
@@ -227,20 +231,13 @@ class _CardContext:
     replay: "CashProductSaleDTO | None" = None
 
 
-def _session_factory(request: Request):
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
-    return factory
-
-
-def _load_card_context(request: Request, principal, register_id: UUID, replay_check=None) -> _CardContext:
+def _load_card_context(factory, request: Request, principal, register_id: UUID, replay_check=None) -> _CardContext:
     """Phase A: short session that validates access/register/terminal, then closes.
 
     Nothing (connection, transaction, row lock) stays open once this returns, so the
     caller can talk to Mercado Pago without holding database resources.
     """
-    with _session_factory(request)() as session:
+    with factory() as session:
         _product_sales_access(session, principal)
         register = session.get(CashRegister, register_id)
         if register is None:
@@ -295,8 +292,9 @@ def create_card_intent_endpoint(
     payload: CreateCardIntentRequest,
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CardIntentResponse:
-    context = _load_card_context(request, principal, register_id)
+    context = _load_card_context(factory, request, principal, register_id)
     client = _point_client(request)
     try:
         intent = client.create_payment_intent(
@@ -315,8 +313,9 @@ def get_card_intent_status_endpoint(
     intent_id: str,
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CardIntentResponse:
-    context = _load_card_context(request, principal, register_id)
+    context = _load_card_context(factory, request, principal, register_id)
     client = _point_client(request)
     try:
         intent = client.get_payment_intent_status(
@@ -336,8 +335,9 @@ def cancel_card_intent_endpoint(
     intent_id: str,
     request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ):
-    context = _load_card_context(request, principal, register_id)
+    context = _load_card_context(factory, request, principal, register_id)
     client = _point_client(request)
     try:
         cancelled = client.cancel_payment_intent(
@@ -363,9 +363,8 @@ def post_card_product_sale_endpoint(
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashProductSaleDTO:
-    factory = _session_factory(request)
-
     def replay_check(session, register):
         # Check idempotency replay before consulting the terminal.
         fingerprint = product_sale_fingerprint(
@@ -386,7 +385,7 @@ def post_card_product_sale_endpoint(
 
     try:
         # Phase A: short session, closed before any Mercado Pago call.
-        context = _load_card_context(request, principal, register_id, replay_check)
+        context = _load_card_context(factory, request, principal, register_id, replay_check)
         if context.replay is not None:
             response.status_code = 200
             return context.replay
@@ -437,13 +436,10 @@ def post_card_product_sale_endpoint(
 def get_eligible_product_returns_endpoint(
     register_id: UUID,
     member_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[EligibleProductReturnDTO]:
     """Retrieve product order items from same-day confirmed member sales eligible for return."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             register = session.get(CashRegister, register_id)
@@ -463,7 +459,6 @@ def get_eligible_product_returns_endpoint(
 def post_product_return_endpoint(
     register_id: UUID,
     payload: ProductReturnRequest,
-    request: Request,
     response: Response,
     idempotency_key: str = Header(
         ...,
@@ -473,11 +468,9 @@ def post_product_return_endpoint(
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> ProductRefundDTO:
     """Record a compensating product line refund and adjust stock and shift totals."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             register = session.get(CashRegister, register_id)
@@ -583,18 +576,15 @@ def _debt_payment_dto(receipt: MembershipDebtPayment) -> MembershipDebtPaymentDT
 def post_cash_membership_sale_endpoint(
     register_id: UUID,
     payload: CashMembershipSaleRequest,
-    request: Request,
     response: Response,
     idempotency_key: str = Header(
         ..., alias="Idempotency-Key", min_length=1, max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashMembershipSaleDTO:
     """Post one published-plan membership purchase to the live open cash shift."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     cash_amount_provided = "cash_amount_minor" in payload.model_fields_set
     if cash_amount_provided and payload.cash_amount_minor is None:
         raise HTTPException(422, "cash_amount_minor must be a positive integer when supplied.")
@@ -668,13 +658,10 @@ def post_cash_membership_sale_endpoint(
 def list_register_member_open_debts_endpoint(
     register_id: UUID,
     member_id: UUID,
-    request: Request,
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[RegisterMemberOpenDebtDTO]:
     """List open membership debts for a member on the specified active branch register."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             return list_register_member_open_debts(
@@ -695,18 +682,15 @@ def list_register_member_open_debts_endpoint(
 def post_membership_debt_payment_endpoint(
     register_id: UUID,
     payload: MembershipDebtPaymentRequest,
-    request: Request,
     response: Response,
     idempotency_key: str = Header(
         ..., alias="Idempotency-Key", min_length=1, max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MembershipDebtPaymentDTO:
     """Collect an explicit membership debt abono to the current open branch shift."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             result = post_membership_debt_payment(
@@ -756,22 +740,19 @@ def post_membership_debt_payment_endpoint(
 def post_membership_transfer_endpoint(
     register_id: UUID,
     payload: CashMembershipSaleRequest,
-    request: Request,
     response: Response,
     idempotency_key: str = Header(
         ..., alias="Idempotency-Key", min_length=1, max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashMembershipSaleDTO:
     """Record a bank transfer as pending without settlement or activation."""
     if "cash_amount_minor" in payload.model_fields_set:
         raise HTTPException(422, "Bank transfers do not accept a partial cash amount.")
     if payload.source_shift_id is not None:
         raise HTTPException(422, "Pending transfers do not accept a source shift.")
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             register = session.scalar(select(CashRegister).where(CashRegister.id == register_id))
@@ -833,17 +814,14 @@ def post_membership_transfer_endpoint(
 def review_membership_transfer_endpoint(
     payment_id: UUID,
     payload: TransferReviewRequest,
-    request: Request,
     idempotency_key: str = Header(
         ..., alias="Idempotency-Key", min_length=1, max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
     principal: ShiftActorPrincipal = Depends(get_shift_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> CashMembershipSaleDTO:
     """Record an authorized bank-transfer review decision for its linked membership period."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     try:
         with factory() as session:
             payment = session.scalar(select(Payment).where(Payment.id == payment_id))

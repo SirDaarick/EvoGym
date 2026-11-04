@@ -1,18 +1,17 @@
 """Admin-only lookup and explicit links between employee accounts and branch profiles."""
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.auth.admin import ADMIN_IDLE_SECONDS, validate_admin_session
+from app.api.deps import AdminPrincipal, SessionFactoryDep, get_admin_principal
+from app.auth.admin import ADMIN_IDLE_SECONDS
 from app.auth.authorization import AuthorizationDenied, authorize
 from app.auth.authorization import Permission
 from app.auth.owner import has_organization_permission
@@ -37,13 +36,6 @@ from app.sales.schemas import CashProductSaleRequest
 from app.observability.security import SecurityEventType, make_security_event, queue_security_event
 
 router = APIRouter(prefix="/api/v1/admin/staff-accounts", tags=["admin staff accounts"])
-_bearer = HTTPBearer(auto_error=False)
-
-
-@dataclass(frozen=True, slots=True)
-class AdminPrincipal:
-    staff_id: UUID
-    session_id: UUID
 
 
 class StaffAccountLinkRequest(BaseModel):
@@ -119,21 +111,6 @@ class ReceptionStationIssued(ReceptionStationItem):
     station_credential: str
 
 
-def _principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> AdminPrincipal:
-    settings = request.app.state.settings
-    factory = request.app.state.session_factory
-    if (not settings.admin_auth_configured or not settings.admin_token_signing_configured or factory is None
-            or credentials is None or credentials.scheme.lower() != "bearer"):
-        raise HTTPException(401, "Authentication failed.")
-    try:
-        staff_id, session_id = validate_admin_session(
-            factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
-        )
-    except (AuthorizationDenied, ValueError):
-        raise HTTPException(401, "Authentication failed.") from None
-    return AdminPrincipal(staff_id, session_id)
-
-
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
@@ -198,9 +175,8 @@ def _require_live_admin(
 
 
 @router.post("/deactivate/{staff_id}", status_code=204)
-def deactivate_staff_account(staff_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
+def deactivate_staff_account(staff_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     """Disable one global employee login and revoke only that account's trust."""
-    factory = request.app.state.session_factory
     now = datetime.now(timezone.utc)
     with factory.begin() as session:
         _actor, target, _branch = _require_live_admin(session, principal, target_id=staff_id)
@@ -239,8 +215,8 @@ def deactivate_staff_account(staff_id: UUID, request: Request, principal: AdminP
 
 
 @router.get("/{staff_id}/product-sale-intent")
-def get_staff_product_sale_intent(staff_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def get_staff_product_sale_intent(staff_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _require_live_admin(session, principal, target_id=staff_id, allow_inactive_target=True)
         intent = session.get(ProductSaleIntent, staff_id)
         if intent is None:
@@ -249,9 +225,8 @@ def get_staff_product_sale_intent(staff_id: UUID, request: Request, principal: A
 
 
 @router.post("/{staff_id}/product-sale-intent/resolve")
-def resolve_staff_product_sale_intent(staff_id: UUID, body: ResolveProductSaleIntentRequest, request: Request,
-                                      principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def resolve_staff_product_sale_intent(staff_id: UUID, body: ResolveProductSaleIntentRequest, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _require_live_admin(session, principal, target_id=staff_id, allow_inactive_target=True)
         intent = session.get(ProductSaleIntent, staff_id)
         if intent is None or intent.idempotency_key != body.key:
@@ -268,8 +243,7 @@ def resolve_staff_product_sale_intent(staff_id: UUID, body: ResolveProductSaleIn
 
 
 @router.get("/reception-stations", response_model=ReceptionStationPage)
-def list_reception_stations(request: Request, branch_id: UUID = Query(), principal: AdminPrincipal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def list_reception_stations(branch_id: UUID = Query(), principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         _require_live_admin(session, principal, branch_id=branch_id, computer_only=True)
         rows = session.scalars(select(ReceptionStation).where(ReceptionStation.branch_id == branch_id)
@@ -281,9 +255,7 @@ def list_reception_stations(request: Request, branch_id: UUID = Query(), princip
 
 
 @router.post("/reception-stations", response_model=ReceptionStationIssued, status_code=201)
-def issue_reception_station(payload: ReceptionStationCreateRequest, request: Request,
-                            principal: AdminPrincipal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def issue_reception_station(payload: ReceptionStationCreateRequest, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     raw = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     with factory.begin() as session:
@@ -311,9 +283,8 @@ def issue_reception_station(payload: ReceptionStationCreateRequest, request: Req
 
 
 @router.post("/reception-stations/{station_id}/revoke", status_code=204)
-def revoke_reception_station(station_id: UUID, request: Request, branch_id: UUID = Query(),
-                             principal: AdminPrincipal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def revoke_reception_station(station_id: UUID, branch_id: UUID = Query(),
+                             principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     now = datetime.now(timezone.utc)
     with factory.begin() as session:
         _require_live_admin(session, principal, branch_id=branch_id, computer_only=True)
@@ -339,11 +310,10 @@ def revoke_reception_station(station_id: UUID, request: Request, branch_id: UUID
 
 @router.get("", response_model=StaffAccountPage)
 def list_staff_accounts(
-    request: Request,
     branch_id: UUID = Query(),
-    principal: AdminPrincipal = Depends(_principal),
+    principal: AdminPrincipal = Depends(get_admin_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         _require_live_admin(session, principal, branch_id=branch_id)
         accounts = session.execute(
@@ -369,8 +339,7 @@ def list_staff_accounts(
 
 
 @router.get("/branches", response_model=AdminBranchPage)
-def list_admin_branches(request: Request, principal: AdminPrincipal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def list_admin_branches(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         _require_live_admin(session, principal)
         rows = session.scalars(select(Branch).where(Branch.is_active.is_(True)).order_by(Branch.code, Branch.id)).all()
@@ -379,11 +348,10 @@ def list_admin_branches(request: Request, principal: AdminPrincipal = Depends(_p
 
 @router.get("/roster-profiles", response_model=AdminRosterProfilePage, response_model_exclude_unset=True)
 def list_admin_roster_profiles(
-    request: Request,
     branch_id: UUID = Query(),
-    principal: AdminPrincipal = Depends(_principal),
+    principal: AdminPrincipal = Depends(get_admin_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         _require_live_admin(session, principal, branch_id=branch_id)
         try:
@@ -412,10 +380,9 @@ def list_admin_roster_profiles(
 def link_staff_account(
     profile_id: UUID,
     payload: StaffAccountLinkRequest,
-    request: Request,
-    principal: AdminPrincipal = Depends(_principal),
+    principal: AdminPrincipal = Depends(get_admin_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     try:
         with factory.begin() as session:
             profile_branch_id = session.scalar(

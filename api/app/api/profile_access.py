@@ -23,6 +23,7 @@ from app.auth.profile_access import (
     revoke_employee_profile_session,
 )
 from app.observability.logging import request_id
+from app.api.deps import SessionFactoryDep
 
 
 router = APIRouter(prefix="/api/v1", tags=["profile access"])
@@ -263,9 +264,8 @@ async def logout_employee_session(
 
 @router.get("/admin/profile-access/choices")
 def admin_profiles(request: Request, response: Response,
-                   credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+                   credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), *, factory: SessionFactoryDep):
     admin_id, session_id = _admin_principal(request, credentials)
-    factory = request.app.state.session_factory
     try:
         identities = admin_profile_choices(factory, admin_id, session_id)
     except AuthorizationDenied:

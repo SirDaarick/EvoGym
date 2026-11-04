@@ -235,7 +235,7 @@ def test_direct_cash_sale_rejection_has_distinct_safe_error_code(tmp_path):
         principal = ShiftActorPrincipal(actor, False, branch)
         payload = CashProductSaleRequest(items=[{'product_id': product_id, 'quantity': 1}], expected_total_minor=1)
         with pytest.raises(AppError) as rejected:
-            post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'stale', principal)
+            post_cash_product_sale_endpoint(register_id, payload, Response(), 'stale', principal, factory=factory)
         assert (rejected.value.status, rejected.value.code) == (409, 'product_sale_rejected')
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(Order)) == 0
@@ -336,10 +336,10 @@ def test_resolution_endpoint_rejects_mismatch_and_commits_cancellation(tmp_path)
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=factory)))
         principal = SimpleNamespace(is_admin=True, staff_id=actor, branch_id=branch)
         payload = CashProductSaleRequest.model_validate({'items': [{'product_id': str(register_id), 'quantity': 1}], 'expected_total_minor': 100})
-        assert resolve_product_sale_endpoint(register_id, payload, request, 'endpoint', principal) == {'status': 'cancelled'}
-        assert resolve_product_sale_endpoint(register_id, payload, request, 'endpoint', principal) == {'status': 'cancelled'}
+        assert resolve_product_sale_endpoint(register_id, payload, 'endpoint', principal, factory=factory) == {'status': 'cancelled'}
+        assert resolve_product_sale_endpoint(register_id, payload, 'endpoint', principal, factory=factory) == {'status': 'cancelled'}
         with pytest.raises(HTTPException) as exc:
-            resolve_product_sale_endpoint(register_id, payload.model_copy(update={'expected_total_minor': 200}), request, 'endpoint', principal)
+            resolve_product_sale_endpoint(register_id, payload.model_copy(update={'expected_total_minor': 200}), 'endpoint', principal, factory=factory)
         assert exc.value.status_code == 409
     finally:
         engine.dispose()
@@ -383,12 +383,12 @@ def test_product_sale_intent_endpoint_recovery_and_delayed_request(tmp_path):
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=factory)))
         principal = SimpleNamespace(is_admin=True, staff_id=actor, branch_id=branch)
         payload = CashProductSaleRequest.model_validate({'items': [{'product_id': str(register_id), 'quantity': 1}], 'expected_total_minor': 100})
-        assert prepare_product_sale_endpoint(register_id, payload, request, 'saved', principal)['key'] == 'saved'
-        assert get_product_sale_intent_endpoint(request, principal)['key'] == 'saved'
-        assert resolve_product_sale_endpoint(register_id, payload, request, 'saved', principal)['status'] == 'cancelled'
-        assert get_product_sale_intent_endpoint(request, principal) is None
+        assert prepare_product_sale_endpoint(register_id, payload, 'saved', principal, factory=factory)['key'] == 'saved'
+        assert get_product_sale_intent_endpoint(principal, factory=factory)['key'] == 'saved'
+        assert resolve_product_sale_endpoint(register_id, payload, 'saved', principal, factory=factory)['status'] == 'cancelled'
+        assert get_product_sale_intent_endpoint(principal, factory=factory) is None
         with pytest.raises(AppError) as rejected:
-            post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'saved', principal)
+            post_cash_product_sale_endpoint(register_id, payload, Response(), 'saved', principal, factory=factory)
         assert rejected.value.status == 409
     finally:
         engine.dispose()

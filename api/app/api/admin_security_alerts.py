@@ -1,16 +1,15 @@
 """Global, in-app Admin view of pending employee PIN lockouts."""
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_, select
 
-from app.auth.admin import ADMIN_IDLE_SECONDS, validate_admin_session
-from app.auth.authorization import AuthorizationDenied, Permission
+from app.api.deps import AdminPrincipal, SessionFactoryDep, get_admin_principal
+from app.auth.admin import ADMIN_IDLE_SECONDS
+from app.auth.authorization import Permission
 from app.auth.owner import has_organization_permission
 from app.db.models import (
     AdminPasswordCredential,
@@ -23,13 +22,6 @@ from app.db.models import (
 
 
 router = APIRouter(prefix="/api/v1/admin/security-alerts", tags=["admin security alerts"])
-_bearer = HTTPBearer(auto_error=False)
-
-
-@dataclass(frozen=True, slots=True)
-class AdminPrincipal:
-    staff_id: UUID
-    session_id: UUID
 
 
 class SecurityAlertItem(BaseModel):
@@ -51,21 +43,6 @@ class SecurityAlertAcknowledgement(BaseModel):
     id: UUID
     acknowledged_at: datetime
     acknowledged_by: UUID
-
-
-def _principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> AdminPrincipal:
-    settings = request.app.state.settings
-    factory = request.app.state.session_factory
-    if (not settings.admin_auth_configured or not settings.admin_token_signing_configured or factory is None
-            or credentials is None or credentials.scheme.lower() != "bearer"):
-        raise HTTPException(401, "Authentication failed.")
-    try:
-        staff_id, session_id = validate_admin_session(
-            factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
-        )
-    except (AuthorizationDenied, ValueError):
-        raise HTTPException(401, "Authentication failed.") from None
-    return AdminPrincipal(staff_id, session_id)
 
 
 def _require_live_employee_manager(session, principal: AdminPrincipal) -> StaffUser:
@@ -117,12 +94,12 @@ def _utc(value: datetime) -> datetime:
 
 @router.get("", response_model=SecurityAlertPage)
 def list_security_alerts(
-    request: Request,
     limit: int = Query(default=50, ge=1, le=100),
     cursor: UUID | None = Query(default=None),
-    principal: AdminPrincipal = Depends(_principal),
+    principal: AdminPrincipal = Depends(get_admin_principal),
+    *, factory: SessionFactoryDep,
 ):
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _require_live_employee_manager(session, principal)
         query = select(SecurityEvent, StaffUser).join(StaffUser, StaffUser.id == SecurityEvent.staff_id).where(
             SecurityEvent.acknowledged_at.is_(None)
@@ -147,8 +124,8 @@ def list_security_alerts(
 
 
 @router.post("/{event_id}/acknowledge", response_model=SecurityAlertAcknowledgement)
-def acknowledge_security_alert(event_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def acknowledge_security_alert(event_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _require_live_employee_manager(session, principal)
         event = session.scalar(select(SecurityEvent).where(SecurityEvent.id == event_id)
                                .execution_options(populate_existing=True).with_for_update())

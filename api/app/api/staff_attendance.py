@@ -2,7 +2,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from app.db.models import (
     StaffScheduleSeries,
 )
 from app.db.models.staff_attendance import StaffAttendanceCorrection
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/staff-attendance", tags=["staff-attendance"])
 
@@ -289,14 +290,13 @@ def _existing_record(session, branch_id: UUID, profile_id: UUID, business_date: 
 
 @router.get("", response_model=StaffAttendancePage)
 def list_staff_attendance(
-    request: Request,
     branch_id: UUID | None = Query(default=None),
     business_date: date | None = Query(default=None),
     offset: int = Query(default=0, ge=0, le=2**63 - 1),
     limit: int = Query(default=50, ge=1, le=100),
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory() as session:
         branches = _allowed_branches(session, principal, branch_id)
         branch_ids = [branch.id for branch in branches]
@@ -381,7 +381,6 @@ def list_staff_attendance(
 def record_staff_attendance(
     branch_id: UUID,
     profile_id: UUID,
-    request: Request,
     response: Response,
     payload: StaffAttendanceCreateRequest | None = None,
     series_id: UUID | None = Query(default=None),
@@ -389,8 +388,8 @@ def record_staff_attendance(
     device_captured_at: datetime | None = Query(default=None),
     idempotency_key: str | None = Query(default=None),
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     try:
         with factory.begin() as session:
             branch = _recorder_branch(session, principal, branch_id)
@@ -650,12 +649,11 @@ def record_staff_attendance(
 @router.post("/{attendance_id}/checkout", response_model=StaffAttendanceCheckoutItem, status_code=201)
 def record_staff_checkout(
     attendance_id: UUID,
-    request: Request,
     response: Response,
     payload: StaffCheckoutRequest | None = None,
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     try:
         with factory.begin() as session:
             record = session.get(StaffAttendanceRecord, attendance_id)
@@ -706,10 +704,9 @@ def record_staff_checkout(
 def record_staff_attendance_correction(
     attendance_id: UUID,
     payload: StaffAttendanceCorrectionRequest,
-    request: Request,
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         record = session.get(StaffAttendanceRecord, attendance_id)
         if record is None:
@@ -769,11 +766,10 @@ def record_staff_attendance_correction(
 @router.get("/branches/{branch_id}/corrections", response_model=list[StaffAttendanceCorrectionItem])
 def list_branch_attendance_corrections(
     branch_id: UUID,
-    request: Request,
     business_date: date | None = Query(default=None),
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory() as session:
         if not principal.is_admin:
             if principal.branch_id is None or principal.branch_id != branch_id:
@@ -803,10 +799,9 @@ def list_branch_attendance_corrections(
 @router.get("/records/{attendance_id}/corrections", response_model=list[StaffAttendanceCorrectionItem])
 def list_staff_attendance_corrections(
     attendance_id: UUID,
-    request: Request,
     principal: RosterPrincipal = Depends(_principal),
+    *, factory: SessionFactoryDep,
 ):
-    factory = request.app.state.session_factory
     with factory() as session:
         record = session.get(StaffAttendanceRecord, attendance_id)
         if record is None:

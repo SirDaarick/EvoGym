@@ -4,7 +4,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.pending_money import FinancePrincipal, _authorized_branches, _principal
 from app.db.models import Expense, PayrollAdvance, PayrollPayment, StaffRosterProfile
 from app.rentals.payments import clean_idempotency_key, fingerprint
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/admin/payroll", tags=["payroll"])
 
@@ -107,10 +108,10 @@ def _expense(session, payload, profile, principal, key, request_hash, amount, me
 
 
 @router.get("/weeks/{week_start}")
-def payroll_week(week_start: date, request: Request, branch_id: UUID = Query(), principal: FinancePrincipal = Depends(_principal)):
+def payroll_week(week_start: date, branch_id: UUID = Query(), principal: FinancePrincipal = Depends(_principal), *, factory: SessionFactoryDep):
     if week_start.weekday() != 0:
         raise HTTPException(422, "Week must start on Monday.")
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _authorize(session, principal, branch_id)
         profiles = session.scalars(select(StaffRosterProfile).where(StaffRosterProfile.branch_id == branch_id,
             StaffRosterProfile.is_active.is_(True), StaffRosterProfile.monthly_salary_minor > 0)
@@ -128,12 +129,12 @@ def payroll_week(week_start: date, request: Request, branch_id: UUID = Query(), 
 
 
 @router.post("/advances", status_code=201)
-def record_advance(payload: AdvanceInput, request: Request, key: str | None = Header(None, alias="Idempotency-Key"),
-                   principal: FinancePrincipal = Depends(_principal)):
+def record_advance(payload: AdvanceInput, key: str | None = Header(None, alias="Idempotency-Key"),
+                   principal: FinancePrincipal = Depends(_principal), *, factory: SessionFactoryDep):
     key = _key(key)
     request_hash = fingerprint(payload.model_dump(mode="json"))
     try:
-        with request.app.state.session_factory.begin() as session:
+        with factory.begin() as session:
             _authorize(session, principal, payload.branch_id)
             prior = session.scalar(select(PayrollAdvance).where(PayrollAdvance.branch_id == payload.branch_id,
                 PayrollAdvance.recorded_by_id == principal.staff_id, PayrollAdvance.idempotency_key == key))
@@ -158,12 +159,12 @@ def record_advance(payload: AdvanceInput, request: Request, key: str | None = He
 
 
 @router.post("/payments", status_code=201)
-def pay_week(payload: PaymentInput, request: Request, key: str | None = Header(None, alias="Idempotency-Key"),
-             principal: FinancePrincipal = Depends(_principal)):
+def pay_week(payload: PaymentInput, key: str | None = Header(None, alias="Idempotency-Key"),
+             principal: FinancePrincipal = Depends(_principal), *, factory: SessionFactoryDep):
     key = _key(key)
     request_hash = fingerprint(payload.model_dump(mode="json"))
     try:
-        with request.app.state.session_factory.begin() as session:
+        with factory.begin() as session:
             _authorize(session, principal, payload.branch_id)
             prior = session.scalar(select(PayrollPayment).where(PayrollPayment.branch_id == payload.branch_id,
                 PayrollPayment.recorded_by_id == principal.staff_id, PayrollPayment.idempotency_key == key))

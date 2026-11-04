@@ -18,6 +18,7 @@ from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.auth.sessions import validate_session
 from app.db.models import Branch, StaffRosterProfile, StaffScheduleException, StaffScheduleSeries
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/staff-schedules", tags=["staff-schedules"])
 _bearer = HTTPBearer(auto_error=False)
@@ -527,9 +528,7 @@ def _item(series: StaffScheduleSeries):
 
 
 @router.post("/branches/{branch_id}/profiles/{profile_id}", status_code=201)
-def create_series(branch_id: UUID, profile_id: UUID, payload: SeriesCreate, request: Request,
-                  principal: Principal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def create_series(branch_id: UUID, profile_id: UUID, payload: SeriesCreate, principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         branch = _manage(session, principal, branch_id)
         profile = _lock_profile(session, profile_id)
@@ -550,8 +549,7 @@ def create_series(branch_id: UUID, profile_id: UUID, payload: SeriesCreate, requ
 
 
 @router.get("/branches/{branch_id}")
-def list_series(branch_id: UUID, request: Request, principal: Principal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def list_series(branch_id: UUID, principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         _read_branch(session, principal, branch_id)
         for profile_id in session.scalars(select(StaffRosterProfile.id).where(StaffRosterProfile.branch_id == branch_id)).all():
@@ -562,11 +560,10 @@ def list_series(branch_id: UUID, request: Request, principal: Principal = Depend
 
 
 @router.get("/{series_id}/occurrences")
-def list_occurrences(series_id: UUID, request: Request, from_date: date = Query(), to_date: date = Query(),
-                     principal: Principal = Depends(_principal)):
+def list_occurrences(series_id: UUID, from_date: date = Query(), to_date: date = Query(),
+                     principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     if to_date < from_date or (to_date - from_date).days > 366:
         raise HTTPException(422, "Occurrence query range must be between 0 and 366 days.")
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         series = _locked_series(session, series_id)
         if series is None:
@@ -595,9 +592,7 @@ def list_occurrences(series_id: UUID, request: Request, from_date: date = Query(
 
 
 @router.put("/{series_id}/occurrences/{local_date}")
-def edit_occurrence(series_id: UUID, local_date: date, payload: OccurrenceEdit, request: Request,
-                    principal: Principal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def edit_occurrence(series_id: UUID, local_date: date, payload: OccurrenceEdit, principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         series = _locked_series(session, series_id)
         if series is None:
@@ -634,8 +629,7 @@ def edit_occurrence(series_id: UUID, local_date: date, payload: OccurrenceEdit, 
 
 
 @router.patch("/{series_id}/edit", status_code=201)
-def edit_series(series_id: UUID, payload: SeriesEdit, request: Request, principal: Principal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def edit_series(series_id: UUID, payload: SeriesEdit, principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         old = _locked_series(session, series_id)
         if old is None:
@@ -730,8 +724,7 @@ def edit_series(series_id: UUID, payload: SeriesEdit, request: Request, principa
 
 
 @router.delete("/{series_id}", status_code=204)
-def delete_series(series_id: UUID, request: Request, principal: Principal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def delete_series(series_id: UUID, principal: Principal = Depends(_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         series = _locked_series(session, series_id)
         if series is None:

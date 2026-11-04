@@ -230,7 +230,7 @@ def test_unrelated_organization_admin_bundle_is_not_enough_after_owner_claim(tmp
 
 
 def test_trusted_device_revoked_after_preflight_is_rejected_inside_request_transaction(tmp_path):
-    from app.api.admin_security_alerts import AdminPrincipal, _principal
+    from app.api.deps import AdminPrincipal, get_admin_principal
     from app.auth.admin import validate_admin_session
     from app.main import create_app
     from fastapi.testclient import TestClient
@@ -259,7 +259,7 @@ def test_trusted_device_revoked_after_preflight_is_rejected_inside_request_trans
                 device.revoked_at = datetime.now(timezone.utc)
             return AdminPrincipal(staff_id, session_id)
 
-        app.dependency_overrides[_principal] = revoke_between_preflight_and_route
+        app.dependency_overrides[get_admin_principal] = revoke_between_preflight_and_route
         response = client.get("/api/v1/admin/security-alerts", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
     finally:

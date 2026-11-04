@@ -35,6 +35,7 @@ from app.members.schemas import (
     MemberNoteDTO,
     UpdateMemberDTO,
 )
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
 _bearer = HTTPBearer(auto_error=False)
@@ -146,7 +147,6 @@ def _to_member_detail_dto(member, is_admin: bool, pending_balance_minor: int = 0
 
 @router.get("", response_model=MemberListResponseDTO)
 def list_members_endpoint(
-    request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=100),
@@ -154,11 +154,9 @@ def list_members_endpoint(
     sort_by: str = Query("full_name", pattern="^(full_name|joined_on|member_number)$"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberListResponseDTO:
     """List members with pagination, optional search, status filtering, and sorting."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         result = list_members(
             session,
@@ -198,13 +196,10 @@ def list_members_endpoint(
 @router.post("", response_model=MemberDetailDTO, status_code=201)
 def create_member_endpoint(
     payload: CreateMemberDTO,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberDetailDTO:
     """Create a new member. Accessible by Admin and Staff with operational read."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         try:
             member = create_member(
@@ -223,17 +218,14 @@ def create_member_endpoint(
 @router.get("/{member_id}", response_model=MemberDetailDTO)
 def get_member_endpoint(
     member_id: UUID,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberDetailDTO:
     """Retrieve detailed member profile.
 
     D-012: Receptionist visibility is restricted to the operational profile.
     Sensitive fields like internal notes are strictly reserved for Admin actors.
     """
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -246,17 +238,14 @@ def get_member_endpoint(
 def update_member_endpoint(
     member_id: UUID,
     payload: UpdateMemberDTO,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberDetailDTO:
     """Update existing member attributes under concurrency row locking.
 
     Accessible by Admin and Staff with operational read.
     Sensitive notes field is redacted for Receptionist principals (D-012).
     """
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = update_member(session, member_id, payload)
         if member is None:
@@ -270,15 +259,12 @@ def update_member_endpoint(
 @router.get("/{member_id}/notes", response_model=list[MemberNoteDTO])
 def list_member_notes_endpoint(
     member_id: UUID,
-    request: Request,
     include_voided: bool = Query(False),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[MemberNoteDTO]:
     """List member notes for authenticated member-service staff and admins."""
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -291,14 +277,11 @@ def list_member_notes_endpoint(
 def create_member_note_endpoint(
     member_id: UUID,
     payload: CreateMemberNoteDTO,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberNoteDTO:
     """Create a member note for authenticated member-service staff and admins."""
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -312,16 +295,13 @@ def create_member_note_endpoint(
 def void_member_note_endpoint(
     member_id: UUID,
     note_id: UUID,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberNoteDTO:
     """Soft-delete / void a restricted member note. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -337,14 +317,11 @@ def void_member_note_endpoint(
 @router.get("/{member_id}/eligibility", response_model=list[MemberEligibilityDTO])
 def list_member_eligibility_endpoint(
     member_id: UUID,
-    request: Request,
     only_active: bool = Query(True),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[MemberEligibilityDTO]:
     """List eligibility attestation records for a member. Accessible by Admin and Staff."""
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -357,16 +334,13 @@ def list_member_eligibility_endpoint(
 def create_member_eligibility_endpoint(
     member_id: UUID,
     payload: CreateMemberEligibilityDTO,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberEligibilityDTO:
     """Create a verified eligibility record for a member. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:
@@ -387,16 +361,13 @@ def create_member_eligibility_endpoint(
 def revoke_member_eligibility_endpoint(
     member_id: UUID,
     record_id: UUID,
-    request: Request,
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberEligibilityDTO:
     """Revoke an active eligibility record. Admin only."""
     if not principal.is_admin:
         raise HTTPException(403, "Access restricted to admin.")
 
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(500, "Database session factory not configured.")
     with factory() as session:
         member = get_member_by_id(session, member_id)
         if member is None:

@@ -2,7 +2,7 @@
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.members.read_queries import get_member_reload_data
 from app.members.read_schemas import MemberReloadResponseDTO
 from app.rentals.payments import charge_outstanding_minor, rental_outstanding_minor
 from app.memberships.eligibility import evaluate_membership_access
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/members", tags=["member-reads"])
 
@@ -27,7 +28,6 @@ router = APIRouter(prefix="/api/v1/members", tags=["member-reads"])
 @router.get("/{member_id}/purchases")
 def member_purchases(
     member_id: UUID,
-    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
@@ -35,12 +35,10 @@ def member_purchases(
     branch_id: UUID | None = Query(default=None),
     x_branch_id: UUID | None = Header(default=None, alias="X-Branch-ID"),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> dict:
     if from_date and to_date and from_date > to_date:
         raise HTTPException(status_code=422, detail="Invalid date range.")
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(status_code=500, detail="Database session factory not configured.")
     with factory() as session:
         branch = _resolve_caller_branch(session, principal, branch_id, x_branch_id)
         if session.get(Member, member_id) is None:
@@ -100,14 +98,11 @@ def member_purchases(
 @router.get("/{member_id}/summary")
 def member_summary(
     member_id: UUID,
-    request: Request,
     branch_id: UUID | None = Query(default=None),
     x_branch_id: UUID | None = Header(default=None, alias="X-Branch-ID"),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> dict:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(status_code=500, detail="Database session factory not configured.")
     now = datetime.now(timezone.utc)
     today = now.date()
     with factory() as session:
@@ -189,17 +184,14 @@ def member_summary(
 @router.get("/{member_id}/check-ins")
 def member_check_in_history(
     member_id: UUID,
-    request: Request,
     month: int = Query(ge=1, le=12),
     year: int = Query(ge=1, le=9998),
     branch_id: UUID | None = Query(default=None),
     x_branch_id: UUID | None = Header(default=None, alias="X-Branch-ID"),
     x_organization_id: UUID | None = Header(default=None, alias="X-Organization-ID"),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> list[dict]:
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(status_code=500, detail="Database session factory not configured.")
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc)
     with factory() as session:
@@ -258,12 +250,12 @@ def _resolve_caller_branch(
 @router.get("/{member_id}/reload", response_model=MemberReloadResponseDTO)
 def reload_member_endpoint(
     member_id: UUID,
-    request: Request,
     visit_limit: int = Query(default=20, ge=1, le=50, description="Max recent visits to return"),
     branch_id: UUID | None = Query(default=None, description="Optional branch context override for Admin"),
     x_branch_id: UUID | None = Header(default=None, alias="X-Branch-ID"),
     x_organization_id: UUID | None = Header(default=None, alias="X-Organization-ID"),
     principal: MemberActorPrincipal = Depends(get_member_actor_principal),
+    *, factory: SessionFactoryDep,
 ) -> MemberReloadResponseDTO:
     """Retrieve durable reloadable operational and entitlement state for a member.
 
@@ -271,9 +263,6 @@ def reload_member_endpoint(
     Enforces D-001 (organization-shared profile with branch-partitioned transactions)
     and D-012 (role-projected financial ledger vs receptionist warning flag).
     """
-    factory = request.app.state.session_factory
-    if factory is None:
-        raise HTTPException(status_code=500, detail="Database session factory not configured.")
 
     with factory() as session:
         caller_branch_id = _resolve_caller_branch(

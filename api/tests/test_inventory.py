@@ -79,14 +79,14 @@ def test_direct_cross_branch_reads_authorize_only_active_receptionists(tmp_path)
         stock_actor = InventoryActorPrincipal(actor, False, home)
         shift_actor = ShiftActorPrincipal(actor, False, home)
         assert list_stock_endpoint(other, request, 0, 50, stock_actor).total == 0
-        assert str(register_id) in [row.id for row in list_registers_endpoint(request, None, shift_actor)]
+        assert str(register_id) in [row.id for row in list_registers_endpoint(None, shift_actor, factory=factory)]
         with factory.begin() as session:
             session.query(RoleGrant).filter_by(staff_id=actor).update({'is_active': False})
         with pytest.raises(HTTPException) as stock_denied:
             list_stock_endpoint(other, request, 0, 50, stock_actor)
         assert stock_denied.value.status_code == 403
         with pytest.raises(HTTPException) as register_denied:
-            list_registers_endpoint(request, other, shift_actor)
+            list_registers_endpoint(other, shift_actor, factory=factory)
         assert register_denied.value.status_code == 403
     finally:
         engine.dispose()

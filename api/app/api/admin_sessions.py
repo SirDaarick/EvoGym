@@ -9,6 +9,7 @@ from app.auth.admin import utc_now, validate_admin_session
 from app.auth.authorization import AuthorizationDenied
 from app.db.models import AdminAuthEvent, AdminPasswordCredential, AdminTrustedDevice, StaffSession, StaffUser
 from app.observability.logging import request_id
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/admin/sessions", tags=["admin sessions"])
 _bearer = HTTPBearer(auto_error=False)
@@ -28,9 +29,8 @@ def _principal(request: Request, credentials: HTTPAuthorizationCredentials | Non
 
 
 @router.get("")
-def list_sessions(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+def list_sessions(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), *, factory: SessionFactoryDep):
     staff_id, _current_id = _principal(request, credentials)
-    factory = request.app.state.session_factory
     with factory() as session:
         rows = session.scalars(select(StaffSession).where(StaffSession.staff_id == staff_id,
             StaffSession.scope_kind == "organization", StaffSession.auth_method == "admin_password").order_by(StaffSession.issued_at.desc())).all()
@@ -41,9 +41,8 @@ def list_sessions(request: Request, credentials: HTTPAuthorizationCredentials | 
 
 
 @router.post("/{session_id}/revoke")
-def revoke_session(session_id: UUID, request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+def revoke_session(session_id: UUID, request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), *, factory: SessionFactoryDep):
     staff_id, current_session_id = _principal(request, credentials)
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         row = session.scalar(select(StaffSession).where(StaffSession.id == session_id, StaffSession.staff_id == staff_id,
             StaffSession.scope_kind == "organization", StaffSession.auth_method == "admin_password").with_for_update())
@@ -58,9 +57,8 @@ def revoke_session(session_id: UUID, request: Request, credentials: HTTPAuthoriz
 
 
 @router.get("/devices")
-def list_trusted_devices(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+def list_trusted_devices(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), *, factory: SessionFactoryDep):
     staff_id, _ = _principal(request, credentials)
-    factory = request.app.state.session_factory
     with factory() as session:
         rows = session.scalars(select(AdminTrustedDevice).where(AdminTrustedDevice.staff_id == staff_id)
                                .order_by(AdminTrustedDevice.created_at.desc())).all()
@@ -72,9 +70,8 @@ def list_trusted_devices(request: Request, credentials: HTTPAuthorizationCredent
 
 @router.post("/devices/{device_id}/revoke")
 def revoke_trusted_device(device_id: UUID, request: Request,
-                          credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+                          credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), *, factory: SessionFactoryDep):
     actor_id, _ = _principal(request, credentials)
-    factory = request.app.state.session_factory
     with factory.begin() as session:
         device_probe = session.scalar(select(AdminTrustedDevice).where(AdminTrustedDevice.id == device_id))
         if device_probe is None:

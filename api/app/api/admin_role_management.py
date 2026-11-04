@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from app.auth.admin import validate_admin_session, utc_now
-from app.auth.authorization import AuthorizationDenied, Permission
+from app.api.deps import AdminPrincipal, SessionFactoryDep, get_admin_principal
+from app.auth.admin import utc_now
+from app.auth.authorization import Permission
 from app.auth.owner import has_organization_permission, owner_registry
 from app.db.models import (
     AdminLoginApproval, AdminPasswordCredential, AdminTrustedDevice, OrganizationOwner,
@@ -21,13 +20,6 @@ from app.observability.security import SecurityEventType, make_security_event, q
 
 
 router = APIRouter(prefix="/api/v1/admin/role-management", tags=["admin role management"])
-_bearer = HTTPBearer(auto_error=False)
-
-
-@dataclass(frozen=True, slots=True)
-class AdminPrincipal:
-    staff_id: UUID
-    session_id: UUID
 
 
 class BundlePayload(BaseModel):
@@ -47,20 +39,6 @@ class AssignmentPayload(BaseModel):
 class ReceptionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     branch_id: UUID
-
-
-def _principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> AdminPrincipal:
-    settings, factory = request.app.state.settings, request.app.state.session_factory
-    if (not settings.admin_auth_configured or not settings.admin_token_signing_configured or factory is None
-            or credentials is None or credentials.scheme.lower() != "bearer"):
-        raise HTTPException(401, "Authentication failed.")
-    try:
-        staff_id, session_id = validate_admin_session(
-            factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value()
-        )
-    except (AuthorizationDenied, ValueError):
-        raise HTTPException(401, "Authentication failed.") from None
-    return AdminPrincipal(staff_id, session_id)
 
 
 def _lock_staff_and_owner(session, actor_id: UUID, target_id: UUID | None = None):
@@ -95,8 +73,7 @@ def _bundle_item(session, bundle: RoleBundle) -> dict:
 
 
 @router.get("/me")
-def get_current_owner_status(request: Request, principal: AdminPrincipal = Depends(_principal)):
-    factory = request.app.state.session_factory
+def get_current_owner_status(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     with factory.begin() as session:
         actor = session.scalar(select(StaffUser).where(StaffUser.id == principal.staff_id)
                                .execution_options(populate_existing=True).with_for_update())
@@ -109,8 +86,8 @@ def get_current_owner_status(request: Request, principal: AdminPrincipal = Depen
 
 
 @router.get("/staff")
-def list_staff_accounts(request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def list_staff_accounts(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         rows = session.execute(select(StaffUser, AdminPasswordCredential)
                                .outerjoin(AdminPasswordCredential, AdminPasswordCredential.staff_id == StaffUser.id)
@@ -135,17 +112,17 @@ def list_staff_accounts(request: Request, principal: AdminPrincipal = Depends(_p
 
 
 @router.get("/branches")
-def list_active_branches(request: Request, principal: AdminPrincipal = Depends(_principal)):
+def list_active_branches(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     from app.db.models import Branch
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         rows = session.scalars(select(Branch).where(Branch.is_active.is_(True)).order_by(Branch.code, Branch.id)).all()
         return {"branches": [{"id": row.id, "code": row.code, "name": row.name} for row in rows]}
 
 
 @router.get("/bundles")
-def list_role_bundles(request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def list_role_bundles(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         bundles = session.scalars(select(RoleBundle).order_by(RoleBundle.normalized_name, RoleBundle.id)).all()
         return {"bundles": [_bundle_item(session, row) for row in bundles],
@@ -153,12 +130,12 @@ def list_role_bundles(request: Request, principal: AdminPrincipal = Depends(_pri
 
 
 @router.post("/bundles", status_code=201)
-def create_role_bundle(payload: BundlePayload, request: Request, principal: AdminPrincipal = Depends(_principal)):
+def create_role_bundle(payload: BundlePayload, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     permissions = _permissions(payload.permissions)
     name = payload.name.strip()
     if not name:
         raise HTTPException(422, "Bundle name must not be empty.")
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         bundle = RoleBundle(name=name, normalized_name=name.casefold())
         session.add(bundle)
@@ -169,13 +146,12 @@ def create_role_bundle(payload: BundlePayload, request: Request, principal: Admi
 
 
 @router.put("/bundles/{bundle_id}")
-def replace_role_bundle(bundle_id: UUID, payload: BundlePayload, request: Request,
-                        principal: AdminPrincipal = Depends(_principal)):
+def replace_role_bundle(bundle_id: UUID, payload: BundlePayload, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     permissions = _permissions(payload.permissions)
     name = payload.name.strip()
     if not name:
         raise HTTPException(422, "Bundle name must not be empty.")
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         bundle = session.scalar(select(RoleBundle).where(RoleBundle.id == bundle_id)
                                 .execution_options(populate_existing=True).with_for_update())
@@ -189,8 +165,8 @@ def replace_role_bundle(bundle_id: UUID, payload: BundlePayload, request: Reques
 
 
 @router.delete("/bundles/{bundle_id}")
-def deactivate_role_bundle(bundle_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def deactivate_role_bundle(bundle_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         bundle = session.scalar(select(RoleBundle).where(RoleBundle.id == bundle_id)
                                 .execution_options(populate_existing=True).with_for_update())
@@ -201,9 +177,8 @@ def deactivate_role_bundle(bundle_id: UUID, request: Request, principal: AdminPr
 
 
 @router.post("/assignments", status_code=201)
-def assign_role_bundle(payload: AssignmentPayload, request: Request,
-                       principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def assign_role_bundle(payload: AssignmentPayload, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id, payload.staff_id)
         if payload.staff_id == principal.staff_id:
             raise HTTPException(409, "The owner already has permanent owner authority.")
@@ -242,8 +217,8 @@ def assign_role_bundle(payload: AssignmentPayload, request: Request,
 
 
 @router.get("/assignments")
-def list_assignments(request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def list_assignments(principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         assignments = session.scalars(select(RoleBundleAssignment).order_by(
             RoleBundleAssignment.staff_id, RoleBundleAssignment.scope_kind, RoleBundleAssignment.branch_id,
@@ -255,8 +230,8 @@ def list_assignments(request: Request, principal: AdminPrincipal = Depends(_prin
 
 
 @router.delete("/assignments/{assignment_id}")
-def revoke_assignment(assignment_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def revoke_assignment(assignment_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id)
         assignment = session.scalar(select(RoleBundleAssignment).where(RoleBundleAssignment.id == assignment_id)
                                     .execution_options(populate_existing=True).with_for_update())
@@ -272,8 +247,8 @@ def revoke_assignment(assignment_id: UUID, request: Request, principal: AdminPri
 
 
 @router.post("/staff/{staff_id}/admin", status_code=201)
-def grant_admin(staff_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def grant_admin(staff_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id, staff_id)
         if staff_id == principal.staff_id:
             raise HTTPException(409, "The owner cannot be changed through an Admin grant.")
@@ -297,9 +272,9 @@ def grant_admin(staff_id: UUID, request: Request, principal: AdminPrincipal = De
 
 
 @router.delete("/staff/{staff_id}/admin")
-def revoke_admin(staff_id: UUID, request: Request, principal: AdminPrincipal = Depends(_principal)):
+def revoke_admin(staff_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     now = utc_now()
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id, staff_id)
         if staff_id == principal.staff_id:
             raise HTTPException(409, "The owner cannot be revoked.")
@@ -327,10 +302,9 @@ def revoke_admin(staff_id: UUID, request: Request, principal: AdminPrincipal = D
 
 
 @router.post("/staff/{staff_id}/reception", status_code=201)
-def grant_reception(staff_id: UUID, payload: ReceptionPayload, request: Request,
-                    principal: AdminPrincipal = Depends(_principal)):
+def grant_reception(staff_id: UUID, payload: ReceptionPayload, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
     from app.db.models import Branch
-    with request.app.state.session_factory.begin() as session:
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id, staff_id)
         branch = session.scalar(select(Branch).where(Branch.id == payload.branch_id, Branch.is_active.is_(True))
                                 .execution_options(populate_existing=True).with_for_update())
@@ -354,9 +328,8 @@ def grant_reception(staff_id: UUID, payload: ReceptionPayload, request: Request,
 
 
 @router.delete("/staff/{staff_id}/reception/{branch_id}")
-def revoke_reception(staff_id: UUID, branch_id: UUID, request: Request,
-                     principal: AdminPrincipal = Depends(_principal)):
-    with request.app.state.session_factory.begin() as session:
+def revoke_reception(staff_id: UUID, branch_id: UUID, principal: AdminPrincipal = Depends(get_admin_principal), *, factory: SessionFactoryDep):
+    with factory.begin() as session:
         _lock_staff_and_owner(session, principal.staff_id, staff_id)
         if staff_id == principal.staff_id:
             raise HTTPException(409, "The owner's individual identity cannot be revoked.")

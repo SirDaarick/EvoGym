@@ -10,6 +10,7 @@ from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied
 from app.auth.credentials import change_initial_pin, issue_initial_pin
 from app.db.models import StaffUser
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/staff/credentials", tags=["staff credentials"])
 _bearer = HTTPBearer(auto_error=False)
@@ -56,10 +57,11 @@ def _admin(request: Request, credentials: HTTPAuthorizationCredentials | None):
 def issue_or_reset_initial_pin(
     staff_id: UUID, request: Request, response: Response,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     actor_id, admin_session_id = _admin(request, credentials)
     try:
-        pin = issue_initial_pin(request.app.state.session_factory, staff_id,
+        pin = issue_initial_pin(factory, staff_id,
                                 actor_id=actor_id, admin_session_id=admin_session_id)
     except PermissionError:
         raise HTTPException(404, "The requested resource was not found.") from None

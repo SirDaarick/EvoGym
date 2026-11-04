@@ -17,6 +17,7 @@ from app.auth.devices import (
     revoke_paired_device,
 )
 from app.observability.logging import request_id
+from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1", tags=["device pairing"])
 _bearer = HTTPBearer(auto_error=False)
@@ -66,9 +67,9 @@ def issue_pairing_code(
     payload: IssuePairingCodePayload | None = None,
     request: Request = None,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     admin_id, _current_session = _admin_principal(request, credentials)
-    factory = request.app.state.session_factory
     req_id = UUID(request_id())
     ttl = payload.ttl_seconds if payload else 900
     try:
@@ -92,9 +93,9 @@ def issue_pairing_code(
 def list_devices(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     admin_id, _current_session = _admin_principal(request, credentials)
-    factory = request.app.state.session_factory
     devices = list_paired_devices(factory, admin_id)
     return {
         "devices": [
@@ -118,9 +119,9 @@ def revoke_device(
     device_id: UUID,
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    *, factory: SessionFactoryDep,
 ):
     admin_id, _current_session = _admin_principal(request, credentials)
-    factory = request.app.state.session_factory
     req_id = UUID(request_id())
     success = revoke_paired_device(factory, admin_id, device_id, request_id=req_id)
     if not success:
