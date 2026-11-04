@@ -351,7 +351,7 @@ def test_global_deactivation_revokes_only_target_account_trust_and_protects_owne
 def test_phone_staff_login_assigns_purpose_server_side_and_rejects_client_purpose(tmp_path):
     url, engine, _factory, ids = _setup(tmp_path)
     delivery = FakeRecoveryDelivery()
-    with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+    with TestClient(create_app(configured_settings(url, staff_session_ttl_seconds=900), recovery_delivery=delivery)) as client:
         body = {"login_identifier": "reception@example.invalid", "pin": "2222", "branch_id": str(ids["branch_a"])}
         issued = client.post("/api/v1/auth/staff/sessions", json=body)
         assert issued.status_code == 201, issued.text
