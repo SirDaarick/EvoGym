@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 API = Path(__file__).resolve().parents[1]
-WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py"]  # later slices append their router here
+WATCHED_ROUTERS = ["app/api/sales.py", "app/api/rentals.py", "app/api/staff_attendance.py"]  # later slices append their router here
 
 FORBIDDEN_CALLS = {"select", "execute", "scalar", "scalars", "add", "delete", "flush", "commit",
                    "rollback", "begin", "with_for_update", "authorize"}

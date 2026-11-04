@@ -41,7 +41,7 @@ def test_receptionist_marks_present_once_with_server_time_and_local_date(tmp_pat
     profile_id, unmarked_id, other_profile_id, inactive_id = _create_profiles(factory, branch_a_id, branch_b_id)
     with factory() as session:
         receptionist_id = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 2, 30, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 21, 2, 30, tzinfo=timezone.utc))
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             desk = {"Authorization": f"Bearer {desk_token}"}
@@ -126,7 +126,7 @@ def test_schedule_classification_timezone_and_append_only_checkout(tmp_path, mon
         profile = session.get(StaffRosterProfile, profile_id)
         profile.expected_entry_time = datetime.strptime("21:00", "%H:%M").time()
         profile.grace_tolerance_minutes = 15
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 15, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 15, tzinfo=timezone.utc))
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             desk = {"Authorization": f"Bearer {desk_token}"}
@@ -147,7 +147,7 @@ def test_schedule_classification_timezone_and_append_only_checkout(tmp_path, mon
             assert checkin_replay.json()["checkout_at"] == listed_entry["checkout_at"] == checkout.json()["occurred_at"]
             assert checkin_replay.json()["checkout_recorded_by"] == listed_entry["checkout_recorded_by"]
             assert client.post(f"/api/v1/staff-attendance/{UUID(int=1)}/checkout", headers=desk, json={}).status_code == 404
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 16, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 21, 3, 16, tzinfo=timezone.utc))
             with factory.begin() as session:
                 late_profile = session.get(StaffRosterProfile, late_profile_id)
                 late_profile.expected_entry_time = datetime.strptime("21:00", "%H:%M").time()
@@ -171,7 +171,7 @@ def test_attendance_list_batches_checkout_lookup(tmp_path, monkeypatch):
         session.add_all(profiles)
         session.flush()
         profile_ids = [profile.id for profile in profiles]
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc))
     checkout_selects = []
 
     def record_checkout_select(_connection, _cursor, statement, _parameters, _context, _executemany):
@@ -245,7 +245,7 @@ def test_scheduled_occurrence_check_in_present_vs_late_and_override(tmp_path, mo
             desk = {"Authorization": f"Bearer {desk_token}"}
             # Shift is 09:00 local time (15:00 UTC in Mexico City UTC-6) on 2026-10-23
             # Case 1: On-time entry at 09:10 local (15:10 UTC) <= 09:15 cutoff -> "present"
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 10, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 10, tzinfo=timezone.utc))
             res = client.post(
                 f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}",
                 headers=desk,
@@ -288,7 +288,7 @@ def test_scheduled_occurrence_check_in_present_vs_late_and_override(tmp_path, mo
                 late_series_id = late_series.id
 
             # Case 2: Late entry at 09:20 local (15:20 UTC) > 09:15 cutoff -> "late"
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 20, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 20, tzinfo=timezone.utc))
             res_late = client.post(
                 f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{late_prof_id}",
                 headers=desk,
@@ -317,7 +317,7 @@ def test_scheduled_occurrence_check_in_present_vs_late_and_override(tmp_path, mo
                 session.add(exc)
 
             # Entry at 10:10 local (16:10 UTC) -> with 15m tolerance cutoff is 10:15 -> "present"
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 30, 16, 10, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 30, 16, 10, tzinfo=timezone.utc))
             res_override = client.post(
                 f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{late_prof_id}",
                 headers=desk,
@@ -372,7 +372,7 @@ def test_multi_shift_same_day_across_different_series_and_adhoc(tmp_path, monkey
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             desk = {"Authorization": f"Bearer {desk_token}"}
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
 
             # 1. Morning shift check-in
             r1 = client.post(
@@ -420,7 +420,7 @@ def test_clock_integrity_d033(tmp_path, monkeypatch):
 
     # Server receives payload at 12:00:00 UTC
     server_time = datetime(2026, 10, 23, 12, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: server_time)
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: server_time)
 
     try:
         with TestClient(create_app(configured_settings(url))) as client:
@@ -471,7 +471,7 @@ def test_clock_integrity_d033(tmp_path, monkeypatch):
 def test_idempotency_replay_and_conflict(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _branch_b_id, desk_token, _admin_token = _setup(tmp_path)
     profile_id, prof2_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
 
     try:
         with TestClient(create_app(configured_settings(url))) as client:
@@ -512,7 +512,7 @@ def test_idempotency_replay_and_conflict(tmp_path, monkeypatch):
 def test_missing_and_early_checkout(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _branch_b_id, desk_token, _admin_token = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
 
     try:
         with TestClient(create_app(configured_settings(url))) as client:
@@ -531,7 +531,7 @@ def test_missing_and_early_checkout(tmp_path, monkeypatch):
             assert item["checkout_at"] is None
 
             # 2. Early checkout recorded with actual exit timestamp, without altering status
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 18, 30, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 18, 30, tzinfo=timezone.utc))
             checkout = client.post(
                 f"/api/v1/staff-attendance/{entry_id}/checkout",
                 headers=desk,
@@ -568,7 +568,7 @@ def test_append_only_correction_rbac_and_immutability(tmp_path, monkeypatch):
     )
     desk_b_token = desk_b_session.token
 
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc))
 
     try:
         delivery = FakeRecoveryDelivery()
@@ -688,7 +688,7 @@ def test_offline_event_against_cancelled_series(tmp_path, monkeypatch):
         session.flush()
         series_id = series.id
 
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
 
     try:
         with TestClient(create_app(configured_settings(url))) as client:
@@ -752,7 +752,7 @@ def test_shift_covering_and_adhoc_support_shift(tmp_path, monkeypatch):
             desk = {"Authorization": f"Bearer {desk_token}"}
 
             # 1. Employee A clocks in covering Employee B's series
-            monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 5, tzinfo=timezone.utc))
+            monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 5, tzinfo=timezone.utc))
             res_cover = client.post(
                 f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{emp_a_id}",
                 headers=desk,
@@ -892,7 +892,7 @@ def _post(client, token, branch_id, profile_id, **body):
 def test_non_occurrence_mark_is_stored_for_review(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc))
     series_id = _series(factory, branch_a_id, profile_id, weekdays=[4], end_date=date(2026, 10, 30))
     try:
         with TestClient(create_app(configured_settings(url))) as client:
@@ -910,7 +910,7 @@ def test_non_occurrence_mark_is_stored_for_review(tmp_path, monkeypatch):
 def test_idempotency_replay_compares_full_payload_and_adhoc_is_once_per_day(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
     series_a = _series(factory, branch_a_id, profile_id)
     series_b = _series(factory, branch_a_id, profile_id, start=time(13, 0))
     base = {"series_id": str(series_a), "occurrence_date": "2026-10-23", "idempotency_key": "k1",
@@ -936,7 +936,7 @@ def test_idempotency_replay_compares_full_payload_and_adhoc_is_once_per_day(tmp_
 def test_correction_original_server_side_allowlist_and_own_branch(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 30, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 30, tzinfo=timezone.utc))
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             desk = {"Authorization": f"Bearer {desk_token}"}
@@ -999,7 +999,7 @@ def test_series_tolerance_boundary_and_dst_fall_back(tmp_path, monkeypatch):
 def test_checkout_replay_with_key_returns_record(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc))
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             desk = {"Authorization": f"Bearer {desk_token}"}
@@ -1018,7 +1018,7 @@ def test_keyless_capture_replay_and_skipped_occurrence(tmp_path, monkeypatch):
     url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
     profile_id, *_ = _create_profiles(factory, branch_a_id, branch_a_id)
     clock = [datetime(2026, 10, 23, 15, 0, tzinfo=timezone.utc)]
-    monkeypatch.setattr("app.api.staff_attendance.utc_now", lambda: clock[0])
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: clock[0])
     series_id = _series(factory, branch_a_id, profile_id)
     with factory.begin() as session:
         staff_id = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
@@ -1034,5 +1034,51 @@ def test_keyless_capture_replay_and_skipped_occurrence(tmp_path, monkeypatch):
             skipped = _post(client, desk_token, branch_a_id, profile_id, series_id=str(series_id), occurrence_date="2026-10-30")
             assert skipped.status_code == 201
             assert skipped.json()["schedule_conflict"] is True and skipped.json()["review_required"] is True
+    finally:
+        engine.dispose()
+
+
+def test_replay_after_checkout_returns_checkout_and_notes(tmp_path, monkeypatch):
+    url, engine, factory, branch_a_id, _b, desk_token, _a = _setup(tmp_path)
+    with factory.begin() as session:
+        creator = session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == "roster-desk@example.invalid"))
+        cover = StaffRosterProfile(branch_id=branch_a_id, full_name="Cover Alex", position="Staff")
+        owner = StaffRosterProfile(branch_id=branch_a_id, full_name="Owner Bob", position="Staff")
+        extra = StaffRosterProfile(branch_id=branch_a_id, full_name="Extra Charlie", position="Staff")
+        session.add_all([cover, owner, extra])
+        session.flush()
+        series = StaffScheduleSeries(profile_id=owner.id, branch_id=branch_a_id, start_date=date(2026, 10, 1),
+                                     weekdays=[4], start_time=time(8, 0), end_time=time(16, 0), created_by=creator)
+        session.add(series)
+        session.flush()
+        cover_id, owner_id, extra_id, series_id = cover.id, owner.id, extra.id, series.id
+    monkeypatch.setattr("app.staff.attendance.utc_now", lambda: datetime(2026, 10, 23, 14, 5, tzinfo=timezone.utc))
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            base = f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles"
+            cases = [
+                (cover_id, {"series_id": str(series_id), "occurrence_date": "2026-10-23", "idempotency_key": "k-cover",
+                            "covered_profile_id": str(owner_id), "notes": "Cubriendo turno de Owner Bob"}),
+                (extra_id, {"idempotency_key": "k-extra", "notes": "Turno de apoyo / extraordinario"}),
+            ]
+            for profile_id, body in cases:
+                first = client.post(f"{base}/{profile_id}", headers=desk, json=body)
+                assert first.status_code == 201, first.text
+                assert first.json()["notes"] == body["notes"] and first.json()["checkout_at"] is None
+                entry_id = first.json()["id"]
+                before = client.post(f"{base}/{profile_id}", headers=desk, json=body)
+                assert before.status_code == 200 and before.json()["id"] == entry_id
+                out = client.post(f"/api/v1/staff-attendance/{entry_id}/checkout", headers=desk, json={})
+                assert out.status_code == 201
+                replay = client.post(f"{base}/{profile_id}", headers=desk, json=body)
+                assert replay.status_code == 200, replay.text
+                assert replay.json()["id"] == entry_id
+                assert replay.json()["checkout_at"] == out.json()["occurred_at"]
+                # Keyless replay derives the notes from the stored record.
+                keyless = {k: v for k, v in body.items() if k != "idempotency_key"}
+                again = client.post(f"{base}/{profile_id}", headers=desk, json=keyless)
+                assert again.status_code == 200 and again.json()["notes"] == body["notes"]
+                assert again.json()["checkout_at"] == out.json()["occurred_at"]
     finally:
         engine.dispose()
