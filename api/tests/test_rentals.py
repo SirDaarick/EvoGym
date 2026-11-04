@@ -570,7 +570,7 @@ def test_rental_migration_0048_preserves_populated_assets_and_adds_payment_owner
         assert {"rental_charge_id", "register_id", "shift_id", "idempotency_key"} <= payment_columns
         with engine.connect() as connection:
             assert connection.execute(text("SELECT code FROM rental_assets")).scalar_one() == "legacy-glove"
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0050_payroll"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0053_scoop_products"
     finally:
         engine.dispose()
 

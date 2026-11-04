@@ -79,6 +79,8 @@ EXPECTED_MEMBER_LIST_FIELDS = {
     "emergency_contact_name",
     "emergency_contact_phone",
     "photo_url",
+    "membership_ends_on",
+    "membership_status",
 }
 
 EXPECTED_MEMBER_DETAIL_FIELDS = EXPECTED_MEMBER_LIST_FIELDS | {
@@ -316,7 +318,7 @@ def test_fresh_db_migration_smoke_and_seed(tmp_path, monkeypatch):
 
             # 2. Assert Alembic revision reached the current backend head
             head_version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head_version == "0050_payroll"
+            assert head_version == "0053_scoop_products"
 
             branch_columns = {column["name"] for column in inspector.get_columns("branches")}
             assert "timezone" in branch_columns
