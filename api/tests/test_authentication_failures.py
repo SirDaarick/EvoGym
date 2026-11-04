@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError, ProgrammingError, TimeoutError
 from pydantic import SecretStr
 
-from app.api import catalog, members, shifts
+from app.api import catalog, deps, members, shifts
 from app.api import (
     admin_enrollment, device_pairing, inventory, membership_access,
-    pending_money, staff_roster, staff_schedules,
+    pending_money,
 )
 from app.auth.authorization import AuthorizationDenied
 from app.auth.sessions import SessionPrincipal, revoke_session
@@ -170,8 +170,7 @@ ADMIN_CONSUMERS = [
     pytest.param(inventory, inventory._actor, id="inventory"),
     pytest.param(membership_access, membership_access.record_access_decision, id="membership-access"),
     pytest.param(pending_money, pending_money._principal, id="pending-money"),
-    pytest.param(staff_roster, staff_roster._principal, id="staff-roster"),
-    pytest.param(staff_schedules, staff_schedules._principal, id="staff-schedules"),
+    pytest.param(deps, deps.get_roster_principal, id="staff-roster"),
 ]
 
 
@@ -213,8 +212,7 @@ MIXED_CONSUMERS = [
     pytest.param(shifts, shifts.get_shift_actor_principal, id="shifts"),
     pytest.param(membership_access, membership_access.record_access_decision, id="membership-access"),
     pytest.param(pending_money, pending_money._principal, id="pending-money"),
-    pytest.param(staff_roster, staff_roster._principal, id="staff-roster"),
-    pytest.param(staff_schedules, staff_schedules._principal, id="staff-schedules"),
+    pytest.param(deps, deps.get_roster_principal, id="staff-roster"),
 ]
 
 

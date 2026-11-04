@@ -10,8 +10,6 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import func, select
 
 from app.api.pending_money import FinancePrincipal, _authorized_branches, _bearer, _principal
-from app.api.payroll import weekly_base
-from app.api.staff_schedules import _intervals
 from app.db.models import (
     CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MembershipPeriod,
     Order, OrderItem, Payment, Product, ProductRefund, RegisterInventorySnapshotItem,
@@ -20,6 +18,8 @@ from app.db.models import (
     StaffRosterProfile, StaffScheduleSeries, StockInitialization, StockMovement,
 )
 from app.shifts.queries import shift_financial_summary
+from app.staff.roster import weekly_base
+from app.staff.schedules import intervals
 
 router = APIRouter(prefix="/api/v1/owner/overview", tags=["owner-overview"])
 
@@ -156,7 +156,7 @@ def owner_overview(
         series_rows = session.scalars(select(StaffScheduleSeries).where(StaffScheduleSeries.branch_id == branch.id,
             StaffScheduleSeries.profile_id.in_([profile.id for profile in profiles]))).all()
         for series in series_rows:
-            for begins, _, day in _intervals(session, series, today, today, zone=zone):
+            for begins, _, day in intervals(session, series, today, today, zone=zone):
                 if begins <= now and not any(e.series_id == series.id and e.occurrence_date == day and _utc(e.occurred_at) <= now for e in entries):
                     absent.add(series.profile_id)
         payday = today + timedelta(days=(5 - today.weekday()) % 7)

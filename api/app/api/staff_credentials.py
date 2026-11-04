@@ -2,18 +2,12 @@ from uuid import UUID
 import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
 
-from app.auth.admin import validate_admin_session
-from app.auth.authorization import AuthorizationDenied
-from app.auth.credentials import change_initial_pin, issue_initial_pin
-from app.db.models import StaffUser
-from app.api.deps import SessionFactoryDep
+from app.api.deps import OptionalBearerDep, SessionFactoryDep, resolve_credentials_admin
+from app.staff import credentials as service
 
 router = APIRouter(prefix="/api/v1/staff/credentials", tags=["staff credentials"])
-_bearer = HTTPBearer(auto_error=False)
 
 
 def _staff_rate_limit(request: Request):
@@ -40,33 +34,13 @@ class FirstChangeBody(BaseModel):
     new_pin: str = Field(min_length=1, max_length=72)
 
 
-def _admin(request: Request, credentials: HTTPAuthorizationCredentials | None):
-    settings = request.app.state.settings
-    factory = request.app.state.session_factory
-    if not settings.admin_auth_configured or factory is None or credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(401, "Authentication failed.")
-    if not settings.admin_token_signing_configured:
-        raise HTTPException(503, "Authentication is temporarily unavailable.")
-    try:
-        return validate_admin_session(factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value())
-    except AuthorizationDenied:
-        raise HTTPException(401, "Authentication failed.") from None
-
-
 @router.post("/{staff_id}/initial-pin", status_code=200)
 def issue_or_reset_initial_pin(
-    staff_id: UUID, request: Request, response: Response,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    staff_id: UUID, request: Request, response: Response, credentials: OptionalBearerDep,
     *, factory: SessionFactoryDep,
 ):
-    actor_id, admin_session_id = _admin(request, credentials)
-    try:
-        pin = issue_initial_pin(factory, staff_id,
-                                actor_id=actor_id, admin_session_id=admin_session_id)
-    except PermissionError:
-        raise HTTPException(404, "The requested resource was not found.") from None
-    except LookupError:
-        raise HTTPException(404, "The requested resource was not found.") from None
+    actor_id, admin_session_id = resolve_credentials_admin(request, credentials)
+    pin = service.issue_initial_pin(factory, staff_id, actor_id, admin_session_id)
     response.headers["Cache-Control"] = "no-store"
     return {"initial_pin": pin}
 
@@ -74,18 +48,7 @@ def issue_or_reset_initial_pin(
 @router.post("/first-change", status_code=204)
 def first_change(request: Request, response: Response, body: FirstChangeBody,
                  factory=Depends(_staff_rate_limit)):
-    semaphore = request.app.state.password_hash_capacity
-    if not semaphore.acquire(blocking=False):
-        raise HTTPException(503, "Authentication is temporarily unavailable.")
-    try:
-        with factory() as session:
-            staff_id = session.scalar(select(StaffUser.id).where(
-                StaffUser.login_identifier == body.login_identifier.strip().casefold()))
-        if staff_id is None:
-            raise HTTPException(401, "Authentication failed.")
-        if not change_initial_pin(factory, staff_id, body.branch_id, body.current_pin, body.new_pin):
-            raise HTTPException(401, "Authentication failed.")
-        response.headers["Cache-Control"] = "no-store"
-        return None
-    finally:
-        semaphore.release()
+    service.first_change(factory, request.app.state.password_hash_capacity, body.login_identifier,
+                         body.branch_id, body.current_pin, body.new_pin)
+    response.headers["Cache-Control"] = "no-store"
+    return None

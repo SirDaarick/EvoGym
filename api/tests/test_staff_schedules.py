@@ -373,7 +373,7 @@ def test_canonical_models_module_has_no_utf8_bom():
 
 def test_timezone_loader_uses_current_file_bytes_not_zoneinfo_cache(tmp_path, monkeypatch):
     from importlib.resources import files
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     zone_path = tmp_path / "Test" / "City"
     zone_path.parent.mkdir()
@@ -390,7 +390,7 @@ def test_timezone_loader_uses_current_file_bytes_not_zoneinfo_cache(tmp_path, mo
 
 
 def test_edit_series_refreshes_state_after_profile_lock(tmp_path, monkeypatch):
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     url, engine, _factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
     try:
@@ -424,7 +424,7 @@ def test_edit_series_refreshes_state_after_profile_lock(tmp_path, monkeypatch):
 
 def test_timezone_rule_file_replacement_revalidates_existing_schedule_in_process(tmp_path, monkeypatch):
     from importlib.resources import files
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     url, engine, factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
     rule_root = tmp_path / "tzrules"
@@ -501,7 +501,7 @@ def test_date_and_occurrence_boundaries_fail_with_validation_not_overflow(tmp_pa
 
 def test_timezone_rule_change_rejects_newly_nonexistent_existing_occurrence(tmp_path, monkeypatch):
     from importlib.resources import files
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     url, engine, factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
     rule_root = tmp_path / "tzrules"
@@ -527,13 +527,13 @@ def test_timezone_rule_change_rejects_newly_nonexistent_existing_occurrence(tmp_
 
 
 def test_indefinite_overlap_checks_far_future_exception_dates(tmp_path):
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     _url, engine, factory, branch, _other, profile, _other_profile, _token, _desk = _setup(tmp_path)
     try:
         with factory.begin() as session:
             actor = session.scalar(select(StaffUser).where(StaffUser.login_identifier == "schedule-admin@example.invalid"))
-            zone, digest = schedule_api._zone_for_branch(session.get(Branch, branch))
+            zone, digest = schedule_api.zone_for_branch(session.get(Branch, branch))
             first = StaffScheduleSeries(profile_id=profile, branch_id=branch, start_date=date(2026, 10, 26),
                 weekdays=[0], start_time=datetime.strptime("09:00", "%H:%M").time(),
                 end_time=datetime.strptime("10:00", "%H:%M").time(), created_by=actor.id, timezone_rules_digest=digest)
@@ -704,7 +704,7 @@ def test_future_split_checks_overnight_collision_across_segment_boundary(tmp_pat
 
 def test_timezone_revalidation_checks_far_future_override_wall_time(tmp_path, monkeypatch):
     from importlib.resources import files
-    import app.api.staff_schedules as schedule_api
+    import app.staff.schedules as schedule_api
 
     url, engine, factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
     rules = tmp_path / "tzrules-future-exception"

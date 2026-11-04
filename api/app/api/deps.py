@@ -10,7 +10,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.admin import validate_admin_session
-from app.auth.authorization import AuthorizationDenied
+from app.auth.authorization import AuthorizationDenied, Permission
+from app.auth.sessions import validate_session
 from app.db.session import get_session as _session_lifecycle
 from app.settings import Settings
 
@@ -66,3 +67,55 @@ def get_app_settings(request: Request) -> Settings | None:
 
 
 SettingsDep = Annotated[Settings | None, Depends(get_app_settings)]
+
+
+OptionalBearerDep = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
+
+
+@dataclass(frozen=True, slots=True)
+class RosterPrincipal:
+    staff_id: UUID
+    is_admin: bool
+    branch_id: UUID | None
+
+
+def get_roster_principal(request: Request, credentials: OptionalBearerDep) -> RosterPrincipal:
+    """Admin token (no branch) or a staff session holding STAFF_ROSTER_READ; shared by roster, schedules, attendance."""
+    factory = request.app.state.session_factory
+    if factory is None:
+        raise HTTPException(503, "Database unavailable.")
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(401, "Authentication failed.")
+    token = credentials.credentials
+    settings = getattr(request.app.state, "settings", None)
+    if (
+        settings
+        and getattr(settings, "admin_auth_configured", False)
+        and getattr(settings, "admin_token_signing_configured", False)
+    ):
+        try:
+            staff_id, _session_id = validate_admin_session(
+                factory, token, settings.admin_token_signing_secret.get_secret_value()
+            )
+            return RosterPrincipal(staff_id, True, None)
+        except (AuthorizationDenied, ValueError):
+            pass
+    try:
+        principal = validate_session(factory, token, Permission.STAFF_ROSTER_READ)
+        return RosterPrincipal(principal.staff_id, False, principal.branch_id)
+    except (AuthorizationDenied, ValueError):
+        raise HTTPException(401, "Authentication failed.") from None
+
+
+def resolve_credentials_admin(request: Request, credentials: HTTPAuthorizationCredentials | None):
+    """Admin (staff_id, session_id) for the credentials endpoints; called in the handler, not as a dependency."""
+    settings = request.app.state.settings
+    factory = request.app.state.session_factory
+    if not settings.admin_auth_configured or factory is None or credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(401, "Authentication failed.")
+    if not settings.admin_token_signing_configured:
+        raise HTTPException(503, "Authentication is temporarily unavailable.")
+    try:
+        return validate_admin_session(factory, credentials.credentials, settings.admin_token_signing_secret.get_secret_value())
+    except AuthorizationDenied:
+        raise HTTPException(401, "Authentication failed.") from None

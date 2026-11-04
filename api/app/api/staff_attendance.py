@@ -4,8 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.api.deps import SessionFactoryDep
-from app.api.staff_roster import RosterPrincipal, _principal
+from app.api.deps import RosterPrincipal, SessionFactoryDep, get_roster_principal as _principal
 from app.staff import attendance as service
 from app.staff.schemas import (
     StaffAttendanceCheckoutItem, StaffAttendanceCorrectionItem, StaffAttendanceCorrectionRequest,

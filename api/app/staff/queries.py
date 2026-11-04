@@ -1,12 +1,12 @@
-"""Staff attendance SQL and projections. No permission checks, commits or HTTP concerns."""
+"""Staff attendance, roster, schedule and credential SQL and projections. No permission checks, commits or HTTP concerns."""
 from datetime import date
 from uuid import UUID
 
 from sqlalchemy import func, select
 
 from app.db.models import (
-    Branch, StaffAttendanceCheckout, StaffAttendanceRecord, StaffRosterProfile, StaffScheduleException,
-    StaffScheduleSeries,
+    Branch, PayrollAdvance, PayrollPayment, StaffAttendanceCheckout, StaffAttendanceRecord, StaffRosterProfile,
+    StaffScheduleException, StaffScheduleSeries, StaffUser,
 )
 from app.db.models.staff_attendance import StaffAttendanceCorrection
 
@@ -173,3 +173,100 @@ def record_corrections(session, attendance_id: UUID):
         .where(StaffAttendanceCorrection.attendance_id == attendance_id)
         .order_by(StaffAttendanceCorrection.corrected_at.asc(), StaffAttendanceCorrection.id.asc())
     ).all()
+
+
+# --- roster ----------------------------------------------------------------------------------
+
+def active_branches(session, requested_id: UUID | None) -> list[Branch]:
+    query = select(Branch).where(Branch.is_active.is_(True))
+    if requested_id is not None:
+        query = query.where(Branch.id == requested_id)
+    return session.scalars(query.order_by(Branch.code)).all()
+
+
+def roster_page(session, branch_ids: list[UUID], include_inactive: bool):
+    query = select(StaffRosterProfile).where(StaffRosterProfile.branch_id.in_(branch_ids))
+    count_query = select(func.count()).select_from(StaffRosterProfile).where(StaffRosterProfile.branch_id.in_(branch_ids))
+    if not include_inactive:
+        query = query.where(StaffRosterProfile.is_active.is_(True))
+        count_query = count_query.where(StaffRosterProfile.is_active.is_(True))
+    rows = session.scalars(query.order_by(StaffRosterProfile.full_name, StaffRosterProfile.id)).all() if branch_ids else []
+    total = session.scalar(count_query) if branch_ids else 0
+    return rows, total
+
+
+def lock_profile(session, profile_id: UUID) -> StaffRosterProfile | None:
+    return session.scalar(select(StaffRosterProfile).where(StaffRosterProfile.id == profile_id).with_for_update())
+
+
+def lock_profile_fresh(session, profile_id: UUID) -> StaffRosterProfile | None:
+    return session.scalar(select(StaffRosterProfile).where(StaffRosterProfile.id == profile_id)
+                          .execution_options(populate_existing=True).with_for_update())
+
+
+def over_advanced_week(session, profile_id: UUID, weekly_base_minor: int):
+    """First unpaid week whose advances exceed the new weekly base, else None."""
+    paid = select(PayrollPayment.id).where(PayrollPayment.staff_profile_id == profile_id,
+        PayrollPayment.week_start == PayrollAdvance.week_start).exists()
+    return session.scalar(select(PayrollAdvance.week_start).where(
+        PayrollAdvance.staff_profile_id == profile_id, ~paid).group_by(PayrollAdvance.week_start)
+        .having(func.sum(PayrollAdvance.amount_minor) > weekly_base_minor).limit(1))
+
+
+def branch_profile_ids(session, branch_id: UUID):
+    return session.scalars(select(StaffRosterProfile.id).where(StaffRosterProfile.branch_id == branch_id)).all()
+
+
+# --- schedules -------------------------------------------------------------------------------
+
+def series_profile_id(session, series_id: UUID) -> UUID | None:
+    return session.scalar(select(StaffScheduleSeries.profile_id).where(StaffScheduleSeries.id == series_id))
+
+
+def series_fresh(session, series_id: UUID) -> StaffScheduleSeries | None:
+    return session.scalar(select(StaffScheduleSeries).where(
+        StaffScheduleSeries.id == series_id).execution_options(populate_existing=True))
+
+
+def profile_series_ordered(session, profile_id: UUID):
+    return session.scalars(select(StaffScheduleSeries).where(
+        StaffScheduleSeries.profile_id == profile_id).order_by(StaffScheduleSeries.id)).all()
+
+
+def profile_series(session, profile_id: UUID):
+    return session.scalars(select(StaffScheduleSeries).where(StaffScheduleSeries.profile_id == profile_id)).all()
+
+
+def peer_series(session, profile_id: UUID, series_id: UUID):
+    return session.scalars(select(StaffScheduleSeries).where(
+        StaffScheduleSeries.profile_id == profile_id, StaffScheduleSeries.id != series_id)).all()
+
+
+def branch_series(session, branch_id: UUID):
+    return session.scalars(select(StaffScheduleSeries).where(
+        StaffScheduleSeries.branch_id == branch_id).order_by(StaffScheduleSeries.start_date, StaffScheduleSeries.id)).all()
+
+
+def exceptions_between(session, series_id: UUID, first: date, last: date):
+    return session.scalars(select(StaffScheduleException).where(
+        StaffScheduleException.series_id == series_id,
+        StaffScheduleException.local_date >= first,
+        StaffScheduleException.local_date <= last)).all()
+
+
+def exceptions_from(session, series_id: UUID, first: date):
+    return session.scalars(select(StaffScheduleException).where(
+        StaffScheduleException.series_id == series_id,
+        StaffScheduleException.local_date >= first)).all()
+
+
+def exception_dates_from(session, series_id: UUID, first: date):
+    return session.scalars(select(StaffScheduleException.local_date).where(
+        StaffScheduleException.series_id == series_id,
+        StaffScheduleException.local_date >= first)).all()
+
+
+# --- credentials -----------------------------------------------------------------------------
+
+def staff_id_by_login(session, login_identifier: str) -> UUID | None:
+    return session.scalar(select(StaffUser.id).where(StaffUser.login_identifier == login_identifier))

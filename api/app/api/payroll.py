@@ -12,13 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from app.api.pending_money import FinancePrincipal, _authorized_branches, _principal
 from app.db.models import Expense, PayrollAdvance, PayrollPayment, StaffRosterProfile
 from app.rentals.payments import clean_idempotency_key, fingerprint
+from app.staff.roster import weekly_base
 from app.api.deps import SessionFactoryDep
 
 router = APIRouter(prefix="/api/v1/admin/payroll", tags=["payroll"])
-
-
-def weekly_base(monthly: int) -> int:
-    return (monthly + 2) // 4
 
 
 class PayrollInput(BaseModel):

@@ -14,10 +14,10 @@ from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.db.models import StaffAttendanceCheckout, StaffAttendanceRecord, StaffRosterProfile
 from app.db.models.staff_attendance import StaffAttendanceCorrection
 from app.errors import HttpStatusError
-# shortcut: imports router helpers; must move to app/staff before any app.api.* module imports app.staff (circular import).
-from app.api.staff_roster import _allowed_branches
-from app.api.staff_schedules import _occurrence_dates, _zone_for_branch
 from app.staff import queries as q
+from app.staff.recurrence import occurrence_dates
+from app.staff.roster import allowed_branches
+from app.staff.schedules import zone_for_branch
 from app.staff.schemas import (
     StaffAttendanceCheckoutItem, StaffAttendanceCorrectionItem, StaffAttendanceCorrectionRequest,
     StaffAttendanceCreateRequest, StaffAttendanceItem, StaffAttendancePage, StaffCheckoutRequest,
@@ -190,7 +190,7 @@ def _require_corrections_view(session, principal: Principal, branch_id: UUID) ->
 def list_staff_attendance(factory, principal: Principal, branch_id: UUID | None, business_date: date | None,
                           offset: int, limit: int) -> StaffAttendancePage:
     with factory() as session:
-        branches = _allowed_branches(session, principal, branch_id)
+        branches = allowed_branches(session, principal, branch_id)
         branch_ids = [branch.id for branch in branches]
         rows, total = q.attendance_page(session, branch_ids, business_date, offset, limit)
         checkouts_by_attendance_id = q.checkouts_by_attendance(session, [record.id for record, _profile in rows])
@@ -248,7 +248,7 @@ def record_staff_attendance(
             eff_idempotency_key = payload.idempotency_key if (payload and payload.idempotency_key is not None) else idempotency_key
 
             server_received_at = _utc(utc_now())
-            zone = _zone_for_branch(branch)[0]
+            zone = zone_for_branch(branch)[0]
 
             if eff_device_captured_at is not None:
                 if eff_device_captured_at.tzinfo is None or eff_device_captured_at.utcoffset() is None:
@@ -334,7 +334,7 @@ def record_staff_attendance(
                         raise HttpStatusError(400)
 
                 # Cancelled series or a date that is not a real occurrence: retain for review (D-033).
-                if next(_occurrence_dates(series, occ_date, occ_date), None) is None:
+                if next(occurrence_dates(series, occ_date, occ_date), None) is None:
                     schedule_conflict = True
                     review_required = True
 
