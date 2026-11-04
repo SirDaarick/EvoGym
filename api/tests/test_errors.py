@@ -239,3 +239,31 @@ def test_stream_exception_does_not_emit_second_response_start():
     assert response.status_code == 200
     assert response.content.startswith(b"first")
     assert "stream secret" not in response.text
+
+
+def test_app_error_renders_fixed_envelope_without_internal_text():
+    from app.errors import AppError
+
+    class Rejected(AppError):
+        code, status, message = "rejected", 409, "The request could not be completed."
+
+    app = FastAPI()
+    install_error_handlers(app)
+    app.add_middleware(RequestIdMiddleware)
+
+    @app.get("/rejected")
+    def rejected():
+        raise Rejected("private DSN password=not-for-output")
+
+    response = run(app, path="/rejected", headers={"X-Request-ID": "req-1"})
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error == {"code": "rejected", "message": "The request could not be completed.", "request_id": response.headers["X-Request-ID"]}
+    assert "not-for-output" not in response.text
+
+
+def test_product_return_conflict_hides_unvetted_message():
+    from app.sales.queries import ProductReturnConflictError
+
+    assert ProductReturnConflictError("Cash register is not active.").message == "Cash register is not active."
+    assert ProductReturnConflictError("secret id 42").message == "The request could not be completed."

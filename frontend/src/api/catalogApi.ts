@@ -21,12 +21,7 @@ const eligibilities: PlanCompositionEligibility[] = ['general', 'student', 'kids
 async function call<T>(request: CatalogRequest, path: string, init?: RequestInit): Promise<T> {
   const response = await request(path, init);
   if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    const detail = body && typeof body === 'object' ? (body as Record<string, unknown>).detail : body;
-    const message = typeof detail === 'string' ? detail
-      : detail && typeof detail === 'object' && typeof (detail as Record<string, unknown>).message === 'string' ? (detail as Record<string, unknown>).message as string
-        : `No se pudo completar la solicitud al catálogo (${response.status}).`;
-    throw new Error(message);
+    throw new Error(`No se pudo completar la solicitud al catálogo (${response.status}).`);
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

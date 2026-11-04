@@ -279,9 +279,9 @@ describe('PlanCatalog owner screen', () => {
   });
 
   it('shows API authorization failures without substituting demo plans', async () => {
-    const request = vi.fn(async () => new Response(JSON.stringify({ detail: 'Forbidden' }), { status: 403 }));
+    const request = vi.fn(async () => new Response(JSON.stringify({ error: { code: 'http_error', message: 'Forbidden' } }), { status: 403 }));
     render(<DemoProvider><PlanCatalog apiRequest={request} /></DemoProvider>);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Forbidden');
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la solicitud al catálogo (403).');
     expect(screen.queryByText('Gym mensual')).not.toBeInTheDocument();
   });
 

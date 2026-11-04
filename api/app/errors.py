@@ -49,12 +49,35 @@ class PublicDomainPayload(BaseModel):
         return self
 
 
-class PublicDomainError(Exception):
+class AppError(Exception):
+    """Typed error rendered as the envelope. Subclasses fix code/status/message; args stay internal."""
+
+    code = "app_error"
+    status = 500
+    message = "An internal error occurred."
+    metadata: MembershipDenialMetadata | None = None
+
+
+class PublicDomainError(AppError):
     """Explicit internal boundary; arbitrary HTTPException details never enter it."""
+
+    status = 409  # All currently admitted business denials are conflicts.
 
     def __init__(self, code: str, *, metadata: dict | None = None):
         self.payload = PublicDomainPayload.model_validate({"code": code, "metadata": metadata})
         super().__init__(self.payload.code)
+
+    @property
+    def code(self):
+        return self.payload.code
+
+    @property
+    def message(self):
+        return _PUBLIC_MESSAGES[self.payload.code]
+
+    @property
+    def metadata(self):
+        return self.payload.metadata
 
 
 class PublicDomainErrorBody(PublicDomainPayload):
@@ -134,10 +157,9 @@ def _safe_protocol_headers(exc: StarletteHTTPException) -> dict[str, str]:
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(PublicDomainError)
-    async def domain_error(request: Request, exc: PublicDomainError) -> JSONResponse:
-        # All currently admitted business denials are conflicts, never caller-selected statuses.
-        return _response(409, exc.payload.code, _PUBLIC_MESSAGES[exc.payload.code], request, metadata=exc.payload.metadata)
+    @app.exception_handler(AppError)
+    async def app_error(request: Request, exc: AppError) -> JSONResponse:
+        return _response(exc.status, exc.code, exc.message, request, metadata=exc.metadata)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:

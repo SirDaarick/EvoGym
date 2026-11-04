@@ -410,3 +410,26 @@ def test_admin_resolves_pending_sale_before_deactivation(tmp_path):
     finally:
         if client is not None: client.close()
         engine.dispose()
+
+
+def test_resolving_intent_whose_key_was_used_for_a_different_request_conflicts(tmp_path):
+    from app.db.models import CashRegister, ProductSaleCancellation, ProductSaleIntent
+    url, engine, factory, ids = _setup(tmp_path)
+    client = None
+    try:
+        payload = {'member_id': None, 'items': [{'product_id': str(UUID(int=1)), 'quantity': 1}], 'expected_total_minor': 0}
+        with factory.begin() as session:
+            register = CashRegister(branch_id=ids['branch_a'], code='clash', name='Clash')
+            session.add(register)
+            session.flush()
+            session.add(ProductSaleIntent(seller_id=ids['employee'], register_id=register.id,
+                idempotency_key='clash', request_fingerprint='intent', payload=payload))
+            session.add(ProductSaleCancellation(seller_id=ids['employee'], branch_id=ids['branch_a'],
+                idempotency_key='clash', request_fingerprint='other'))
+        client, admin = _client(url)
+        res = client.post(f"/api/v1/admin/staff-accounts/{ids['employee']}/product-sale-intent/resolve", headers=admin, json={'key': 'clash'})
+        assert res.status_code == 409
+        assert res.json()['error']['code'] == 'idempotency_conflict'
+    finally:
+        if client is not None: client.close()
+        engine.dispose()

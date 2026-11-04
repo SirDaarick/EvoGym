@@ -3,12 +3,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.errors import AppError
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
-from app.observability.logging import request_id
 from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
 from app.db.models import (
     Branch, CashRegister, Member, MembershipDebtPayment, MembershipPeriod, Order, OrderItem, Payment, PaymentTerminal, ProductRefund, RoleGrant, ProductSaleIntent, StaffUser,
@@ -18,6 +17,8 @@ from app.sales.queries import (
     CashSaleAccessDenied,
     CashSaleConflictError,
     CashSaleNotFoundError,
+    ProductSaleIdempotencyConflict,
+    ProductSaleRejected,
     InvalidBranchTimezoneError,
     list_register_member_open_debts,
     post_membership_debt_payment,
@@ -32,7 +33,6 @@ from app.sales.queries import (
     post_product_return,
     product_return_fingerprint,
     ProductReturnNotFoundError,
-    ProductReturnConflictError,
 )
 from app.sales.schemas import (
     CashMembershipSaleDTO,
@@ -150,9 +150,9 @@ def post_cash_product_sale_endpoint(
             intent = session.get(ProductSaleIntent, principal.staff_id)
             fingerprint = product_sale_fingerprint(register_id, payload.member_id, payload.items, payload.expected_total_minor)
             if intent is not None and intent.idempotency_key == idempotency_key and (intent.register_id != register_id or intent.request_fingerprint != fingerprint):
-                raise CashSaleConflictError("Idempotency key was already used for a different request.")
+                raise ProductSaleIdempotencyConflict
             if intent is None or intent.register_id != register_id or intent.idempotency_key != idempotency_key:
-                raise CashSaleConflictError("Product sale intent is missing or different.")
+                raise ProductSaleRejected
             order, replayed = post_cash_product_sale(
                 session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                 items=payload.items, expected_total_minor=payload.expected_total_minor, idempotency_key=idempotency_key,
@@ -165,11 +165,8 @@ def post_cash_product_sale_endpoint(
                                       payment=ProductSalePaymentDTO.model_validate(order.payment))
     except CashSaleNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    except CashSaleConflictError as exc:
-        code = ("idempotency_conflict" if str(exc) == "Idempotency key was already used for a different request."
-                else "first_shift_required" if str(exc) == "Open the first shift before making a sale."
-                else "product_sale_rejected")
-        return JSONResponse(status_code=409, content={"error": {"code": code, "message": "The request could not be completed.", "request_id": request_id()}})
+    except AppError:
+        raise
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except IntegrityError as exc:
@@ -384,7 +381,7 @@ def post_card_product_sale_endpoint(
         if existing_order is None:
             return None
         if existing_order.request_fingerprint != fingerprint or existing_order.order_kind != "product":
-            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+            raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return _product_sale_dto(existing_order)
 
     try:
@@ -430,24 +427,8 @@ def post_card_product_sale_endpoint(
             return _product_sale_dto(order)
     except CashSaleNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    except CashSaleConflictError as exc:
-        code = (
-            "idempotency_conflict"
-            if str(exc) == "Idempotency key was already used for a different request."
-            else "first_shift_required"
-            if str(exc) == "Open the first shift before making a sale."
-            else "product_sale_rejected"
-        )
-        return JSONResponse(
-            status_code=409,
-            content={
-                "error": {
-                    "code": code,
-                    "message": "The request could not be completed.",
-                    "request_id": request_id(),
-                }
-            },
-        )
+    except AppError:
+        raise
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -474,8 +455,6 @@ def get_eligible_product_returns_endpoint(
             return list_eligible_product_returns(session, register_id=register_id, member_id=member_id)
     except ProductReturnNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    except ProductReturnConflictError as exc:
-        raise HTTPException(409, str(exc)) from exc
     except InvalidBranchTimezoneError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -524,12 +503,6 @@ def post_product_return_endpoint(
             return ProductRefundDTO.model_validate(refund)
     except ProductReturnNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    except ProductReturnConflictError as exc:
-        code = "idempotency_conflict" if "Idempotency key was already used" in str(exc) else "product_return_rejected"
-        return JSONResponse(
-            status_code=409,
-            content={"error": {"code": code, "message": str(exc), "request_id": request_id()}},
-        )
     except InvalidBranchTimezoneError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:

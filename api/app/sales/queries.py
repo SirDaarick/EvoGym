@@ -14,6 +14,7 @@ from app.db.models import (
     MembershipDebt, MembershipDebtPayment, PaymentReviewEvent, Plan, PlanVersion, Shift,
     Product, StockInitialization, StockMovement, ProductRefund, ProductSaleCancellation, ProductSaleIntent, StaffUser,
 )
+from app.errors import AppError
 from app.inventory.queries import get_on_hand_stock
 from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, RegisterMemberOpenDebtDTO
 
@@ -65,18 +66,18 @@ def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, 
     fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
-        raise CashSaleConflictError("Product sale intent was cancelled.")
+        raise ProductSaleRejected("Product sale intent was cancelled.")
     existing = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
                                                   Order.idempotency_key == idempotency_key).with_for_update())
     if existing:
         if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
-            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+            raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return existing, True
     if register.status != "active":
-        raise CashSaleConflictError("Cash register is not active.")
+        raise ProductSaleRejected("Cash register is not active.")
     branch = session.get(Branch, register.branch_id)
     if branch is None or not branch.is_active:
-        raise CashSaleConflictError("Branch is not active.")
+        raise ProductSaleRejected("Branch is not active.")
     shift = session.scalar(select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update())
     is_overtime = shift is None
     if is_overtime:
@@ -84,11 +85,11 @@ def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, 
             Shift.cash_register_id == register_id, Shift.status == "closed", Shift.closed_at.is_not(None)
         ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update())
         if shift is None:
-            raise CashSaleConflictError("Open the first shift before making a sale.")
+            raise FirstShiftRequired("Open the first shift before making a sale.")
     if member_id is not None and session.get(Member, member_id) is None:
         raise CashSaleNotFoundError("Member not found.")
     if len({item.product_id for item in items}) != len(items):
-        raise CashSaleConflictError("Each product may occur only once.")
+        raise ProductSaleRejected("Each product may occur only once.")
     rows = []
     total = 0
     for item in sorted(items, key=lambda line: str(line.product_id)):
@@ -99,14 +100,14 @@ def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, 
             StockInitialization.branch_id == register.branch_id, StockInitialization.product_id == product.id
         ).with_for_update())
         if initialization is None or get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id) < item.quantity:
-            raise CashSaleConflictError("Product stock is not initialized or insufficient.")
+            raise ProductSaleRejected("Product stock is not initialized or insufficient.")
         line_total = product.price_minor * item.quantity
         total += line_total
         if total > MAX_MINOR:
             raise ValueError("Sale total exceeds supported minor units.")
         rows.append((product, item.quantity, line_total))
     if total != expected_total_minor:
-        raise CashSaleConflictError("Product prices changed; review the total.")
+        raise ProductSaleRejected("Product prices changed; review the total.")
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
@@ -153,18 +154,18 @@ def post_card_product_sale(
     fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
-        raise CashSaleConflictError("Product sale intent was cancelled.")
+        raise ProductSaleRejected("Product sale intent was cancelled.")
     existing = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
                                                   Order.idempotency_key == idempotency_key).with_for_update())
     if existing:
         if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
-            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+            raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return existing, True
     if register.status != "active":
-        raise CashSaleConflictError("Cash register is not active.")
+        raise ProductSaleRejected("Cash register is not active.")
     branch = session.get(Branch, register.branch_id)
     if branch is None or not branch.is_active:
-        raise CashSaleConflictError("Branch is not active.")
+        raise ProductSaleRejected("Branch is not active.")
     shift = session.scalar(select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update())
     is_overtime = shift is None
     if is_overtime:
@@ -172,11 +173,11 @@ def post_card_product_sale(
             Shift.cash_register_id == register_id, Shift.status == "closed", Shift.closed_at.is_not(None)
         ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update())
         if shift is None:
-            raise CashSaleConflictError("Open the first shift before making a sale.")
+            raise FirstShiftRequired("Open the first shift before making a sale.")
     if member_id is not None and session.get(Member, member_id) is None:
         raise CashSaleNotFoundError("Member not found.")
     if len({item.product_id for item in items}) != len(items):
-        raise CashSaleConflictError("Each product may occur only once.")
+        raise ProductSaleRejected("Each product may occur only once.")
     rows = []
     total = 0
     for item in sorted(items, key=lambda line: str(line.product_id)):
@@ -187,14 +188,14 @@ def post_card_product_sale(
             StockInitialization.branch_id == register.branch_id, StockInitialization.product_id == product.id
         ).with_for_update())
         if initialization is None or get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id) < item.quantity:
-            raise CashSaleConflictError("Product stock is not initialized or insufficient.")
+            raise ProductSaleRejected("Product stock is not initialized or insufficient.")
         line_total = product.price_minor * item.quantity
         total += line_total
         if total > MAX_MINOR:
             raise ValueError("Sale total exceeds supported minor units.")
         rows.append((product, item.quantity, line_total))
     if total != expected_total_minor:
-        raise CashSaleConflictError("Product prices changed; review the total.")
+        raise ProductSaleRejected("Product prices changed; review the total.")
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
@@ -241,12 +242,12 @@ def resolve_product_sale(session, *, register_id, actor_id, member_id, items, ex
                                                Order.idempotency_key == idempotency_key))
     if order is not None:
         if order.order_kind != "product" or order.request_fingerprint != fingerprint:
-            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+            raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return order
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
         if cancellation.request_fingerprint != fingerprint:
-            raise CashSaleConflictError("Idempotency key was already used for a different request.")
+            raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return None
     session.add(ProductSaleCancellation(seller_id=actor_id, branch_id=register.branch_id,
                                         idempotency_key=idempotency_key, request_fingerprint=fingerprint))
@@ -262,8 +263,34 @@ class ProductReturnNotFoundError(LookupError):
     """A requested member, register, order item, or shift is unavailable."""
 
 
-class ProductReturnConflictError(ValueError):
+_PUBLIC_RETURN_MESSAGES = frozenset({
+    "Branch is not active.",
+    "Cash register is not active.",
+    "Cross-branch returns are not allowed.",
+    "Idempotency key was already used for a different request.",
+    "Only orders with confirmed payment can be returned.",
+    "Only product order items can be returned.",
+    "Only product orders can be returned.",
+    "Open the first shift before recording a return.",
+    "Returns are only allowed on the same calendar day of purchase.",
+    "Staff account is inactive.",
+    "This product order item has already been returned.",
+    "Unassigned sales cannot be returned.",
+})
+
+
+class ProductReturnConflictError(AppError):
     """A return request conflicts with eligibility, idempotency, or current state."""
+
+    code, status = "product_return_rejected", 409
+
+    @property
+    def message(self):  # Only vetted literals reach the client; anything else is generic.
+        return str(self) if str(self) in _PUBLIC_RETURN_MESSAGES else "The request could not be completed."
+
+
+class ProductReturnIdempotencyConflict(ProductReturnConflictError):
+    code = "idempotency_conflict"
 
 
 def list_eligible_product_returns(
@@ -375,7 +402,7 @@ def post_product_return(
     )
     if existing is not None:
         if existing.request_fingerprint != fingerprint:
-            raise ProductReturnConflictError("Idempotency key was already used for a different request.")
+            raise ProductReturnIdempotencyConflict("Idempotency key was already used for a different request.")
         return existing, True
 
     shift = session.scalar(
@@ -487,6 +514,20 @@ class CashSaleNotFoundError(LookupError):
 
 class CashSaleConflictError(ValueError):
     """A request conflicts with current state or an existing idempotency key."""
+
+
+class ProductSaleRejected(CashSaleConflictError, AppError):
+    """Product-sale precondition failed; internal text stays in args."""
+
+    code, status, message = "product_sale_rejected", 409, "The request could not be completed."
+
+
+class ProductSaleIdempotencyConflict(ProductSaleRejected):
+    code = "idempotency_conflict"
+
+
+class FirstShiftRequired(ProductSaleRejected):
+    code = "first_shift_required"
 
 
 class InvalidBranchTimezoneError(ValueError):

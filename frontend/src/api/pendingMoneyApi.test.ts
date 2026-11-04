@@ -111,10 +111,10 @@ describe('pendingMoneyApi (F07-F01)', () => {
   it('propagates 403 Forbidden and 409 Conflict errors via PendingMoneyApiError', async () => {
     const mockRequest = vi.fn<AuthenticatedRequest>()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: 'Forbidden branch access' }), { status: 403 }),
+        new Response(JSON.stringify({ error: { code: 'http_error', message: 'Forbidden branch access' } }), { status: 403 }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: 'Confirmed transfer payments cannot be marked pending.' }), { status: 409 }),
+        new Response(JSON.stringify({ error: { code: 'http_error', message: 'Confirmed transfer payments cannot be marked pending.' } }), { status: 409 }),
       );
 
     await expect(getPendingMoney({ branchId: 'other-branch', apiRequest: mockRequest })).rejects.toMatchObject({

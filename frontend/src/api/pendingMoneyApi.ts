@@ -106,14 +106,11 @@ async function requestPendingMoney<T>(
       const parsed: unknown = await response.json();
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         const record = parsed as Record<string, unknown>;
-        if (typeof record.detail === 'string' && record.detail.trim()) {
-          detailMessage = record.detail.trim();
-        }
         if (typeof record.error === 'object' && record.error !== null && !Array.isArray(record.error)) {
           const envelope = record.error as Record<string, unknown>;
           if (typeof envelope.code === 'string') code = envelope.code;
           if (!requestId && typeof envelope.request_id === 'string') requestId = envelope.request_id;
-          if (!detailMessage && typeof envelope.message === 'string' && envelope.message.trim()) {
+          if (typeof envelope.message === 'string' && envelope.message.trim()) {
             detailMessage = envelope.message.trim();
           }
         }

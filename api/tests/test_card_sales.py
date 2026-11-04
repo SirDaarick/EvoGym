@@ -277,6 +277,15 @@ def test_card_product_sale_atomic_and_replayable(tmp_path):
             assert res_replay.status_code == 200
             assert res_replay.json() == sale_data
 
+            # Same key with a different cart is an idempotency conflict, not a 422.
+            res_conflict = client.post(
+                f"/api/v1/registers/{register_id}/product-sales/card",
+                headers=headers,
+                json={**sale_payload, "items": [{"product_id": p1_id, "quantity": 1}], "expected_total_minor": 2000},
+            )
+            assert res_conflict.status_code == 409
+            assert res_conflict.json()["error"]["code"] == "idempotency_conflict"
+
             # 4. Check stock decremented
             with factory() as session:
                 assert get_on_hand_stock(session, branch_id=branch_id, product_id=UUID(p1_id)) == 8

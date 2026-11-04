@@ -211,10 +211,10 @@ def test_metadata_preserves_legacy_membership_amounts_but_rejects_wrong_product_
 
 
 def test_direct_cash_sale_rejection_has_distinct_safe_error_code(tmp_path):
-    import json
     from types import SimpleNamespace
     from fastapi import Response
     from app.api.sales import post_cash_product_sale_endpoint
+    from app.errors import AppError
     from app.api.shifts import ShiftActorPrincipal
     from app.sales.schemas import CashProductSaleRequest
 
@@ -234,9 +234,9 @@ def test_direct_cash_sale_rejection_has_distinct_safe_error_code(tmp_path):
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_factory=factory)))
         principal = ShiftActorPrincipal(actor, False, branch)
         payload = CashProductSaleRequest(items=[{'product_id': product_id, 'quantity': 1}], expected_total_minor=1)
-        response = post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'stale', principal)
-        assert response.status_code == 409
-        assert json.loads(response.body)['error']['code'] == 'product_sale_rejected'
+        with pytest.raises(AppError) as rejected:
+            post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'stale', principal)
+        assert (rejected.value.status, rejected.value.code) == (409, 'product_sale_rejected')
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(Order)) == 0
     finally:
@@ -371,6 +371,7 @@ def test_product_sale_intent_endpoint_recovery_and_delayed_request(tmp_path):
     from types import SimpleNamespace
     from fastapi import Response
     from app.api.sales import prepare_product_sale_endpoint, get_product_sale_intent_endpoint, resolve_product_sale_endpoint, post_cash_product_sale_endpoint
+    from app.errors import AppError
     from app.sales.schemas import CashProductSaleRequest
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -386,7 +387,8 @@ def test_product_sale_intent_endpoint_recovery_and_delayed_request(tmp_path):
         assert get_product_sale_intent_endpoint(request, principal)['key'] == 'saved'
         assert resolve_product_sale_endpoint(register_id, payload, request, 'saved', principal)['status'] == 'cancelled'
         assert get_product_sale_intent_endpoint(request, principal) is None
-        result = post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'saved', principal)
-        assert result.status_code == 409
+        with pytest.raises(AppError) as rejected:
+            post_cash_product_sale_endpoint(register_id, payload, request, Response(), 'saved', principal)
+        assert rejected.value.status == 409
     finally:
         engine.dispose()

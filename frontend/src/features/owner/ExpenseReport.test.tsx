@@ -147,7 +147,7 @@ describe('ExpenseReport live pending money integration (F07-F02, F07-F03)', () =
       }
       if (path === '/api/v1/registers/transfer-payments/pay-tx-101/review' && init?.method === 'POST') {
         if (shouldFailNextReview) {
-          return jsonResponse({ detail: 'Transfer payment has already been confirmed' }, 409);
+          return jsonResponse({ error: { code: 'http_error', message: 'Transfer payment has already been confirmed' } }, 409);
         }
         const body = JSON.parse(String(init.body)) as { status: 'confirmed' | 'pending' };
         transferStatus = body.status;

@@ -110,11 +110,7 @@ export async function createCardIntent(
     }
   );
   if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    const detail = body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
-      ? body.detail
-      : 'No se pudo iniciar el cobro con tarjeta en la terminal.';
-    throw new Error(detail);
+    throw new Error('No se pudo iniciar el cobro con tarjeta en la terminal.');
   }
   return (await response.json()) as CardIntent;
 }
@@ -275,11 +271,9 @@ export async function submitProductReturn(
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const message =
-      body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
-        ? body.detail
-        : body && typeof body === 'object' && 'error' in body && body.error && typeof body.error === 'object' && 'message' in body.error && typeof body.error.message === 'string'
-          ? body.error.message
-          : 'No se pudo registrar la devolución.';
+      body && typeof body === 'object' && 'error' in body && body.error && typeof body.error === 'object' && 'message' in body.error && typeof body.error.message === 'string'
+        ? body.error.message
+        : 'No se pudo registrar la devolución.';
     throw new Error(message);
   }
   return (await response.json()) as ProductRefundResult;
