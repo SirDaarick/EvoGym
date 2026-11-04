@@ -111,6 +111,7 @@ class SeriesEdit(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope(self):
+        # all_future is an alias of series ("Toda la serie" in the frontend).
         if self.scope not in {"this_and_future", "series", "all_future"}:
             raise ValueError("scope must be this_and_future or series")
         if self.end_date is not None and self.occurrence_count is not None:
@@ -326,6 +327,13 @@ def _intervals(session, series: StaffScheduleSeries, first: date, last: date, *,
         yield start_dt.astimezone(timezone.utc), end_dt.astimezone(timezone.utc), day
 
 
+def _next_future_occurrence(series: StaffScheduleSeries, first: date, zone: ZoneInfo, now_local: datetime) -> date | None:
+    for day in _occurrence_dates(series, first, _validation_end(series)):
+        if _local_datetime(day, series.start_time, zone) > now_local:
+            return day
+    return None
+
+
 def _validation_end(series: StaffScheduleSeries) -> date:
     if series.end_date is not None:
         return series.end_date
@@ -377,6 +385,8 @@ def _overlaps(session, candidate: StaffScheduleSeries, other: StaffScheduleSerie
     first = max(candidate.start_date, other.start_date)
     if first > date.min:
         first -= timedelta(days=1)
+    # shortcut: recurring pairs expand every occurrence over a full 400-year cycle (~20k per series), O(n) per check;
+    # replace with arithmetic period comparison if schedules per profile grow or checks get slow.
     recurring = candidate.end_date is None and other.end_date is None and candidate.occurrence_count is None and other.occurrence_count is None
     if recurring:
         # Weekly weekdays and the Gregorian/IANA recurring timezone rules repeat
@@ -567,12 +577,15 @@ def list_occurrences(series_id: UUID, request: Request, from_date: date = Query(
             StaffScheduleSeries.id == series_id
         ).execution_options(populate_existing=True))
         results = []
+        exceptions = {row.local_date: row for row in session.scalars(select(StaffScheduleException).where(
+            StaffScheduleException.series_id == series.id,
+            StaffScheduleException.local_date >= from_date,
+            StaffScheduleException.local_date <= to_date)).all()}
+        branch = session.get(Branch, series.branch_id)
         for start, end, day in _intervals(session, series, from_date, to_date):
-            exception = session.scalar(select(StaffScheduleException).where(StaffScheduleException.series_id == series.id,
-                                                                           StaffScheduleException.local_date == day))
+            exception = exceptions.get(day)
             start_time = exception.override_start_time if exception else series.start_time
             end_time = exception.override_end_time if exception else series.end_time
-            branch = session.get(Branch, series.branch_id)
             results.append({"series_id": str(series.id), "local_date": day.isoformat(),
                             "local_start": datetime.combine(day, start_time).isoformat(),
                             "local_end": datetime.combine(_end_day(day, start_time, end_time), end_time).isoformat(),
@@ -640,13 +653,9 @@ def edit_series(series_id: UUID, payload: SeriesEdit, request: Request, principa
         if payload.effective_date < now_local.date():
             raise HTTPException(422, "Series edits must start on a future local date.")
         effective_from = max(now_local.date(), old.start_date) if payload.scope in {"series", "all_future"} else payload.effective_date
-        search_end = date.max if effective_from > date.max - timedelta(days=13) else effective_from + timedelta(days=13)
-        split_day = next((
-            day for day in _occurrence_dates(old, effective_from, search_end)
-            if _local_datetime(day, old.start_time, zone) > now_local
-        ), None)
+        split_day = _next_future_occurrence(old, effective_from, zone, now_local)
         if split_day is None:
-            raise HTTPException(422, "No future scheduled occurrence exists within two weeks.")
+            raise HTTPException(422, "No future scheduled occurrence exists.")
         original_end_date = old.end_date
         original_count = old.occurrence_count
         edit_fields = payload.model_fields_set
@@ -706,8 +715,13 @@ def edit_series(series_id: UUID, payload: SeriesEdit, request: Request, principa
                                   timezone_rules_digest=digest)
         session.add(new)
         session.flush()
+        # Exceptions are append-only: copy them to the new series and leave the originals on the old one.
         for exception in moved_exceptions:
-            exception.series_id = new.id
+            session.add(StaffScheduleException(
+                series_id=new.id, local_date=exception.local_date, action=exception.action,
+                original_start_time=exception.original_start_time, original_end_time=exception.original_end_time,
+                override_start_time=exception.override_start_time, override_end_time=exception.override_end_time,
+                recorded_by=exception.recorded_by, recorded_at=exception.recorded_at))
         session.flush()
         _validate_wall_times(session, new, _zone)
         _ensure_self_no_overlap(session, new, split_day)
@@ -730,16 +744,7 @@ def delete_series(series_id: UUID, request: Request, principal: Principal = Depe
         branch = session.get(Branch, series.branch_id)
         zone = _zone_for_branch(branch)[0]
         now_local = datetime.now(zone)
-        try:
-            search_end = _validation_end(series)
-        except HTTPException:
-            raise
-        anchor = None
-        for day in _occurrence_dates(series, max(now_local.date(), series.start_date), search_end):
-            occurrence = _local_datetime(day, series.start_time, zone)
-            if occurrence > now_local:
-                anchor = day
-                break
+        anchor = _next_future_occurrence(series, max(now_local.date(), series.start_date), zone, now_local)
         if anchor is None:
             return None
         series.cancelled_from = anchor

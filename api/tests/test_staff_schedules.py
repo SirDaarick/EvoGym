@@ -205,30 +205,30 @@ def test_overnight_weekly_shifts_overlap_the_following_local_day(tmp_path):
 
 def test_full_series_edit_changes_all_future_occurrences_and_keeps_history(tmp_path):
     url, engine, _factory, branch, _other, profile, _other_profile, admin_token, _desk = _setup(tmp_path)
+    today = date.today()
+    first = today - timedelta(days=21)  # Fixtures are relative to today so the edit target is always in the future.
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             headers = {"Authorization": f"Bearer {admin_token}"}
             created = client.post(f"/api/v1/staff-schedules/branches/{branch}/profiles/{profile}", headers=headers, json={
-                "start_date": "2026-10-12", "weekdays": [0], "start_time": "09:00", "end_time": "10:00",
+                "start_date": first.isoformat(), "weekdays": [first.weekday()], "start_time": "09:00", "end_time": "10:00",
             })
             assert created.status_code == 201, created.text
             series_id = created.json()["id"]
             edited = client.patch(f"/api/v1/staff-schedules/{series_id}/edit", headers=headers, json={
-                "effective_date": "2026-11-02", "scope": "series", "start_time": "11:00", "end_time": "12:00",
+                "effective_date": today.isoformat(), "scope": "series", "start_time": "11:00", "end_time": "12:00",
             })
             assert edited.status_code == 201, edited.text
-            old = client.get(f"/api/v1/staff-schedules/{series_id}/occurrences", headers=headers,
-                             params={"from_date": "2026-10-12", "to_date": "2026-11-02"}).json()
-            new = client.get(f"/api/v1/staff-schedules/{edited.json()['id']}/occurrences", headers=headers,
-                             params={"from_date": "2026-10-12", "to_date": "2026-11-02"}).json()
-            assert [item["local_start"] for item in old] == [
-                "2026-10-12T09:00:00", "2026-10-19T09:00:00", "2026-10-26T09:00:00"
-            ]
-            assert [item["local_start"] for item in new] == ["2026-11-02T11:00:00"]
+            split = date.fromisoformat(edited.json()["start_date"])
+            assert today <= split <= today + timedelta(days=7)
+            params = {"from_date": first.isoformat(), "to_date": split.isoformat()}
+            old = client.get(f"/api/v1/staff-schedules/{series_id}/occurrences", headers=headers, params=params).json()
+            new = client.get(f"/api/v1/staff-schedules/{edited.json()['id']}/occurrences", headers=headers, params=params).json()
+            assert all(item["local_start"].endswith("T09:00:00") for item in old)
+            assert old and old[-1]["local_date"] < split.isoformat()
+            assert [item["local_start"] for item in new] == [f"{split.isoformat()}T11:00:00"]
     finally:
         engine.dispose()
-
-
 
 
 def _next_weekday(target, *, days_ahead=0):
@@ -744,17 +744,128 @@ def test_timezone_revalidation_checks_far_future_override_wall_time(tmp_path, mo
 
 def test_far_overnight_exception_overlaps_peer_starting_next_local_day(tmp_path):
     url, engine, _factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    sunday_date = _next_weekday(6, days_ahead=7)  # Relative: overrides must target future occurrences.
     try:
         with TestClient(create_app(configured_settings(url))) as client:
             headers = {"Authorization": f"Bearer {token}"}
             sunday = client.post(f"/api/v1/staff-schedules/branches/{branch}/profiles/{profile}", headers=headers, json={
-                "start_date": "2026-10-25", "weekdays": [6], "start_time": "09:00", "end_time": "10:00"})
+                "start_date": sunday_date.isoformat(), "weekdays": [6], "start_time": "09:00", "end_time": "10:00"})
             assert sunday.status_code == 201, sunday.text
-            exception = client.put(f"/api/v1/staff-schedules/{sunday.json()['id']}/occurrences/2026-11-01", headers=headers,
+            exception = client.put(f"/api/v1/staff-schedules/{sunday.json()['id']}/occurrences/{sunday_date.isoformat()}", headers=headers,
                                    json={"action": "override", "start_time": "22:00", "end_time": "02:00"})
             assert exception.status_code == 200, exception.text
             monday = client.post(f"/api/v1/staff-schedules/branches/{branch}/profiles/{profile}", headers=headers, json={
-                "start_date": "2026-11-02", "weekdays": [0], "start_time": "01:00", "end_time": "03:00"})
+                "start_date": (sunday_date + timedelta(days=1)).isoformat(), "weekdays": [0], "start_time": "01:00", "end_time": "03:00"})
             assert monday.status_code == 409, monday.text
+    finally:
+        engine.dispose()
+
+
+def _post_series(client, headers, branch, profile, **fields):
+    body = {"weekdays": [0], "start_time": "09:00", "end_time": "10:00", **fields}
+    return client.post(f"/api/v1/staff-schedules/branches/{branch}/profiles/{profile}", headers=headers, json=body)
+
+
+def test_edit_succeeds_when_next_occurrence_is_beyond_two_weeks(tmp_path):
+    url, engine, _factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    start = _next_weekday(0, days_ahead=35)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            created = _post_series(client, headers, branch, profile, start_date=start.isoformat())
+            assert created.status_code == 201, created.text
+            edited = client.patch(f"/api/v1/staff-schedules/{created.json()['id']}/edit", headers=headers, json={
+                "effective_date": date.today().isoformat(), "scope": "this_and_future", "start_time": "11:00", "end_time": "12:00"})
+            assert edited.status_code == 201, edited.text
+            assert edited.json()["start_date"] == start.isoformat() and edited.json()["start_time"] == "11:00:00"
+    finally:
+        engine.dispose()
+
+
+def test_edit_copies_exceptions_to_new_series_and_keeps_originals(tmp_path):
+    url, engine, factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    monday = _next_weekday(0, days_ahead=14)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            created = _post_series(client, headers, branch, profile, start_date=(monday - timedelta(days=14)).isoformat())
+            series_id = created.json()["id"]
+            skipped = client.put(f"/api/v1/staff-schedules/{series_id}/occurrences/{monday.isoformat()}", headers=headers,
+                                 json={"action": "skip"})
+            assert skipped.status_code == 200, skipped.text
+            edited = client.patch(f"/api/v1/staff-schedules/{series_id}/edit", headers=headers, json={
+                "effective_date": monday.isoformat(), "scope": "this_and_future", "start_time": "11:00", "end_time": "12:00"})
+            assert edited.status_code == 201, edited.text
+        with factory() as session:
+            owners = session.scalars(select(StaffScheduleException.series_id).where(
+                StaffScheduleException.local_date == monday)).all()
+        assert sorted(owners) == sorted([UUID(series_id), UUID(edited.json()["id"])])
+    finally:
+        engine.dispose()
+
+
+def test_delete_far_first_occurrence_cancels_all_and_repeat_is_idempotent(tmp_path):
+    url, engine, factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            for offset, weekday in ((30, 0), (365, 1)):
+                start = _next_weekday(weekday, days_ahead=offset)
+                created = _post_series(client, headers, branch, profile, start_date=start.isoformat(), weekdays=[weekday],
+                                       start_time=f"0{weekday + 6}:00", end_time=f"0{weekday + 7}:00")
+                assert created.status_code == 201, created.text
+                url_ = f"/api/v1/staff-schedules/{created.json()['id']}"
+                for _ in range(2):
+                    assert client.delete(url_, headers=headers).status_code == 204
+                    with factory() as session:
+                        assert session.scalar(select(StaffScheduleSeries.cancelled_from).where(
+                            StaffScheduleSeries.id == UUID(created.json()["id"]))) == start
+                remaining = client.get(f"{url_}/occurrences", headers=headers, params={
+                    "from_date": start.isoformat(), "to_date": (start + timedelta(days=366)).isoformat()})
+                assert remaining.json() == []
+    finally:
+        engine.dispose()
+
+
+def test_occurrence_listing_query_count_is_constant_over_a_year(tmp_path):
+    from sqlalchemy import event
+
+    url, engine, _factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    start = date.today() + timedelta(days=1)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            created = _post_series(client, headers, branch, profile, start_date=start.isoformat(), weekdays=[0, 1, 2, 3, 4, 5, 6])
+            assert created.status_code == 201, created.text
+            app_engine = client.app.state.session_factory.kw["bind"]
+            statements = []
+            event.listen(app_engine, "before_cursor_execute", lambda *args: statements.append(args[2]))
+            response = client.get(f"/api/v1/staff-schedules/{created.json()['id']}/occurrences", headers=headers, params={
+                "from_date": start.isoformat(), "to_date": (start + timedelta(days=366)).isoformat()})
+            assert response.status_code == 200 and len(response.json()) == 367
+            assert len(statements) < 40, len(statements)
+    finally:
+        engine.dispose()
+
+
+def test_overlap_validation_worst_case_stays_fast(tmp_path):
+    import time as clock
+
+    url, engine, _factory, branch, _other, profile, _other_profile, token, _desk = _setup(tmp_path)
+    start = _next_weekday(0, days_ahead=7)
+    try:
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            # Two indefinite daily series that never collide expand a full 400-year cycle each.
+            first = _post_series(client, headers, branch, profile, start_date=start.isoformat(), weekdays=[0, 1, 2, 3, 4, 5, 6],
+                                 start_time="06:00", end_time="07:00")
+            assert first.status_code == 201, first.text
+            began = clock.perf_counter()
+            second = _post_series(client, headers, branch, profile, start_date=start.isoformat(), weekdays=[0, 1, 2, 3, 4, 5, 6],
+                                  start_time="08:00", end_time="09:00")
+            elapsed = clock.perf_counter() - began
+            assert second.status_code == 201, second.text
+            # Guards against runaways; not a benchmark.
+            assert elapsed < 15, elapsed
     finally:
         engine.dispose()
