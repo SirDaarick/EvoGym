@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Branch, CashRegister, Member, Payment, PaymentReviewEvent, PaymentTerminal, Rental, RentalAsset,
-    RentalCancellation, RentalCardAttempt, RentalCharge, RentalReceipt, RoleGrant, StaffUser,
+    RentalCancellation, RentalCardAttempt, RentalCharge, RentalDepositMovement, RentalReceipt, RoleGrant,
+    StaffUser,
 )
 from app.rentals.payments import (
     MAX_MINOR, RentalAccessDenied, RentalConflictError, RentalNotFoundError,
     active_rental_id, cancel_pending_card_attempts, cancellation_facts, charge_collectable_minor,
-    charge_outstanding_minor, charges_for_rental, clean_idempotency_key, charge_settled_minor,
+    charge_outstanding_minor, charges_for_rental, deposit_movements, deposit_state, clean_idempotency_key, charge_settled_minor,
     fingerprint, lock_asset, lock_branch, lock_member, lock_register, month_end,
     oldest_open_charge, open_shift, pending_transfer_exists, record_components,
     rental_outstanding_minor, rental_paid_minor, settle_card_attempt, staff_display_name,
@@ -48,6 +49,7 @@ def rental_dto(session: Session, rental: Rental) -> RentalDTO:
         paid_minor=rental_paid_minor(session, rental),
         outstanding_minor=rental_outstanding_minor(session, rental),
         cancelled_debt_minor=cancellation.cancelled_debt_minor if cancellation else 0,
+        **deposit_state(session, rental.id),
         assigned_by_name=staff_display_name(session, rental.actor_id, rental.branch_id),
         charges=[_charge_dto(session, charge) for charge in charges],
         created_at=rental.created_at or datetime.now(timezone.utc),
@@ -122,7 +124,7 @@ def create_rental(
     session: Session, *, kind: str, branch_id: UUID, asset_id: UUID, member_id: UUID,
     register_id: UUID, actor_id: UUID, authorized_branch_id: UUID | None,
     components, expected_total_minor: int, accepted_shortfall_minor: int,
-    idempotency_key: str,
+    idempotency_key: str, expected_deposit_minor: int = 0,
 ) -> tuple[Rental, bool]:
     clean_idempotency_key(idempotency_key)
     _lock_actor(session, actor_id)
@@ -130,7 +132,10 @@ def create_rental(
     branch = lock_branch(session, branch_id, authorized_branch_id)
     member = lock_member(session, member_id)
     contents = _component_fingerprint(register_id, components)
-    request_fingerprint = fingerprint(branch_id, kind, str(asset_id), str(member_id), str(register_id), contents)
+    parts = [branch_id, kind, str(asset_id), str(member_id), str(register_id), contents]
+    if expected_deposit_minor:
+        parts.append(expected_deposit_minor)
+    request_fingerprint = fingerprint(*parts)
     existing = session.scalar(select(Rental).where(
         Rental.actor_id == actor_id, Rental.branch_id == branch_id, Rental.idempotency_key == idempotency_key,
     ).with_for_update())
@@ -140,6 +145,8 @@ def create_rental(
         return existing, True
     asset = lock_asset(session, asset_id, branch_id, kind)
     _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components)
+    if expected_deposit_minor != asset.deposit_minor:
+        raise RentalConflictError("Rental deposit changed; review the current deposit.")
     if active_rental_id(session, asset.id) is not None:
         raise RentalConflictError("Rental asset is already occupied by an active rental.")
     charge_start = cancellation_facts_today(branch)
@@ -165,6 +172,12 @@ def create_rental(
     session.flush()
     record_components(session, rental=rental, charge=charge, register=register, shift=shift,
                       actor_id=actor_id, components=components)
+    if asset.deposit_minor > 0:
+        session.add(RentalDepositMovement(
+            rental_id=rental.id, branch_id=branch_id, register_id=register.id, shift_id=shift.id,
+            kind="hold", amount_minor=asset.deposit_minor, retained_minor=0,
+            idempotency_key=idempotency_key, request_fingerprint=request_fingerprint, actor_id=actor_id,
+        ))
     session.flush()
     return rental, False
 
@@ -222,7 +235,11 @@ def renew_rental(
 
 
 def end_rental(session: Session, *, rental_id: UUID, actor_id: UUID,
-               authorized_branch_id: UUID | None, action: str) -> Rental:
+               authorized_branch_id: UUID | None, action: str, register_id: UUID | None = None,
+               deposit_refund_minor: int | None = None, reason: str | None = None,
+               idempotency_key: str | None = None) -> Rental:
+    if idempotency_key is not None:
+        clean_idempotency_key(idempotency_key)
     _lock_actor(session, actor_id)
     rental = _locked_rental(session, rental_id)
     _rental_branch(session, rental, authorized_branch_id)
@@ -230,10 +247,35 @@ def end_rental(session: Session, *, rental_id: UUID, actor_id: UUID,
     finished_status = "returned" if action == "return" else "released"
     if rental.kind != expected_kind:
         raise RentalConflictError(f"{action.title()} is not allowed for this rental kind.")
+    hold, refund = deposit_movements(session, rental.id)
+    request_fingerprint = fingerprint(str(rental.id), str(register_id), deposit_refund_minor, reason)
     if rental.status == finished_status:
+        if refund is not None and (refund.idempotency_key != idempotency_key
+                                   or refund.request_fingerprint != request_fingerprint):
+            raise RentalConflictError("Rental deposit was already settled by a different request.")
         return rental
     if rental.status != "active":
         raise RentalConflictError("Only active rentals can be ended.")
+    if hold is None:
+        if deposit_refund_minor:
+            raise RentalConflictError("Rental holds no deposit to refund.")
+    else:
+        if register_id is None or idempotency_key is None:
+            raise ValueError("A register is required to settle the rental deposit.")
+        held = hold.amount_minor
+        refunded = held if deposit_refund_minor is None else deposit_refund_minor
+        if refunded > held:
+            raise RentalConflictError("Deposit refund cannot exceed the held deposit.")
+        retained = held - refunded
+        if retained > 0 and not reason:
+            raise ValueError("A reason is required when part of the deposit is retained.")
+        register = lock_register(session, register_id, rental.branch_id)
+        shift = open_shift(session, register_id)
+        session.add(RentalDepositMovement(
+            rental_id=rental.id, branch_id=rental.branch_id, register_id=register.id, shift_id=shift.id,
+            kind="refund", amount_minor=refunded, retained_minor=retained, reason=reason,
+            idempotency_key=idempotency_key, request_fingerprint=request_fingerprint, actor_id=actor_id,
+        ))
     rental.status = finished_status
     rental.ended_by = actor_id
     rental.ended_at = datetime.now(timezone.utc)
@@ -391,6 +433,14 @@ def confirm_cancellation(
         request_fingerprint=request_fingerprint,
     )
     session.add(cancellation)
+    hold, refund = deposit_movements(session, rental.id)
+    if hold is not None and refund is None:
+        session.add(RentalDepositMovement(
+            rental_id=rental.id, branch_id=rental.branch_id, register_id=register.id, shift_id=shift.id,
+            kind="refund", amount_minor=hold.amount_minor, retained_minor=0,
+            reason="Cancelación de renta", idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint, actor_id=actor_id,
+        ))
     rental.status = "cancelled"
     rental.ended_by = actor_id
     rental.ended_at = datetime.now(timezone.utc)

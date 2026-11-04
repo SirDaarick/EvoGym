@@ -45,6 +45,7 @@ class RentalAsset(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    deposit_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="available", server_default="available")
     color: Mapped[str | None] = mapped_column(String(64))
     ounces: Mapped[int | None] = mapped_column(Integer)
@@ -273,3 +274,46 @@ class RentalCardAttempt(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class RentalDepositMovement(Base):
+    """Append-only deposit ledger: one cash `hold` at rental time, one cash `refund` when the asset returns."""
+
+    __tablename__ = "rental_deposit_movements"
+    __table_args__ = (
+        CheckConstraint("kind IN ('hold', 'refund')", name="ck_rental_deposit_movements_kind"),
+        CheckConstraint(
+            "(kind = 'hold' AND amount_minor BETWEEN 1 AND 9223372036854775807 AND retained_minor = 0) OR "
+            "(kind = 'refund' AND amount_minor BETWEEN 0 AND 9223372036854775807 "
+            "AND retained_minor BETWEEN 0 AND 9223372036854775807)",
+            name="ck_rental_deposit_movements_amounts",
+        ),
+        CheckConstraint(
+            "retained_minor = 0 OR (reason IS NOT NULL AND length(trim(reason)) BETWEEN 1 AND 240)",
+            name="ck_rental_deposit_movements_reason",
+        ),
+        CheckConstraint("length(idempotency_key) BETWEEN 1 AND 128", name="ck_rental_deposit_movements_key_length"),
+        CheckConstraint("length(request_fingerprint) = 64", name="ck_rental_deposit_movements_fingerprint"),
+        UniqueConstraint("rental_id", "kind", name="uq_rental_deposit_movements_rental_kind"),
+        Index("ix_rental_deposit_movements_shift", "shift_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    rental_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("rentals.id", ondelete="RESTRICT"), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False)
+    register_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("cash_registers.id", ondelete="RESTRICT"), nullable=False)
+    shift_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("shifts.id", ondelete="RESTRICT"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    retained_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    reason: Mapped[str | None] = mapped_column(String(240))
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+@event.listens_for(RentalDepositMovement, "before_update")
+@event.listens_for(RentalDepositMovement, "before_delete")
+def _reject_deposit_movement_mutation(*_args) -> None:
+    raise ValueError("Rental deposit movements are append-only")

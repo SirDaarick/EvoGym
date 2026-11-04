@@ -27,6 +27,8 @@ commands return `201`.
 | `POST` | `/assets` | Admin. Gloves require `color` and `ounces`; lockers require `locker_number` and no glove fields. |
 | `PATCH` | `/assets/{asset_id}` | Admin. An occupied asset accepts only `price_minor`; any other field returns `409`. |
 
+Assets carry `deposit_minor` (default `0`); like other non-price fields it can be changed only while the asset is free (`409` when occupied).
+
 Asset `status` is `available`, `employee`, or `out_of_service`. Out-of-service
 assets cannot be rented, and `employee` applies to lockers only.
 
@@ -51,6 +53,28 @@ the same asset returns `409`.
 per-charge `outstanding_minor`. Transfers stay `pending` and count toward
 outstanding debt; card and cash payments are `confirmed` once recorded.
 
+## Deposits
+
+A refundable deposit is configured per asset (`deposit_minor`, centavos, default `0`).
+
+- Renting (`POST /gloves`, `/lockers`) accepts `expected_deposit_minor` (default `0`); it must equal the asset's current
+  `deposit_minor` or the call returns `409` with no effects. The deposit is collected in full, in cash, with the initial
+  charge in the register's open shift. It is not part of the price, tender components or shortfall, and never becomes debt.
+- The amount is snapshotted in the append-only `rental_deposit_movements` ledger (`hold` at rental, `refund` at end;
+  one of each per rental). Later asset changes do not affect existing rentals.
+- `POST /{id}/return` (gloves) and `POST /{id}/release` (lockers) accept an optional body
+  `{"register_id", "deposit_refund_minor", "reason"}`. When a deposit is held, `register_id` is required (`422` otherwise)
+  and `deposit_refund_minor` defaults to the full held amount. The refund must satisfy `0 <= refund <= held` (above held:
+  `409`; negative: `422`); when `refund < held` a `reason` of 1-240 characters is required (`422`) and the difference is
+  recorded as retained. The refund is paid in cash from the open shift of that register.
+- Replaying the same `Idempotency-Key` and body returns `200` unchanged; a different key or body on an already settled
+  deposit returns `409`.
+- Cancelling a locker returns any held deposit in full, in cash, in the cancellation shift.
+- `RentalDTO` reports `deposit_minor`, `deposit_status` (`none`, `held`, `refunded`, `partially_retained`, `retained`),
+  `deposit_held_minor`, `deposit_refunded_minor`, `deposit_retained_minor` and `deposit_reason`.
+- Shift expected cash adds held deposits and subtracts refunds; the summary lists "Depósito de renta" and
+  "Devolución de depósito" rows (family `rental`, method `cash`). Retained amounts stay in the drawer.
+
 ## Receivables
 
 | Method | Path | Notes |
@@ -58,7 +82,7 @@ outstanding debt; card and cash payments are `confirmed` once recorded.
 | `POST` | `/{rental_id}/receivable-payments` | `method` is `cash`, `card`, or `transfer`; cannot exceed the rental outstanding balance. `201` with remaining balance; replay `200`. |
 | `GET` | `/members/{member_id}/receivables?branch_id=` | Open rental receivables for a member with `total_outstanding_minor`. |
 
-Returning or releasing a rental does not erase its debt. A cancelled rental
+Returning or releasing a rental does not erase its debt (deposits are independent of debt). A cancelled rental
 cannot receive repayments.
 
 ## Cancellation (lockers)

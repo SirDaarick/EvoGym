@@ -570,7 +570,7 @@ def test_rental_migration_0048_preserves_populated_assets_and_adds_payment_owner
         assert {"rental_charge_id", "register_id", "shift_id", "idempotency_key"} <= payment_columns
         with engine.connect() as connection:
             assert connection.execute(text("SELECT code FROM rental_assets")).scalar_one() == "legacy-glove"
-            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0053_scoop_products"
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0054_rental_deposits"
     finally:
         engine.dispose()
 
@@ -1013,3 +1013,206 @@ def test_displayed_price_and_shortfall_acceptance_are_enforced_before_effects(re
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(RentalCharge).where(
             RentalCharge.rental_id == UUID(locker_id))) == 1
+
+
+# ==============================================================================
+# Deposits
+# ==============================================================================
+
+from app.db.models import RentalDepositMovement
+from app.shifts.queries import expected_cash_for_shift
+
+
+def _set_deposit(factory, asset_id, amount):
+    with factory.begin() as session:
+        session.get(RentalAsset, asset_id).deposit_minor = amount
+
+
+def _rent_glove_deposit(client, token, branch, ids, deposit=5000, key="glove-dep-1", **kwargs):
+    components = [{"method": "cash", "amount_minor": 2500}]
+    return client.post(
+        "/api/v1/rentals/gloves",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": key},
+        json={"branch_id": str(branch), "asset_id": str(ids["glove"]), "member_id": str(ids["member"]),
+              "register_id": str(ids["register"]), "components": components,
+              "expected_total_minor": 2500, "accepted_shortfall_minor": 0,
+              "expected_deposit_minor": deposit, **kwargs},
+    )
+
+
+def _return(client, token, rental_id, key="ret-1", body=None, action="return"):
+    return client.post(f"/api/v1/rentals/{rental_id}/{action}",
+                       headers={"Authorization": f"Bearer {token}", "Idempotency-Key": key}, json=body)
+
+
+def _expected_cash(factory, branch):
+    with factory() as session:
+        shift = session.scalar(select(Shift).join(CashRegister).where(CashRegister.branch_id == branch))
+        return expected_cash_for_shift(session, shift)
+
+
+def test_asset_deposit_defaults_to_zero_and_is_editable_only_when_free(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    page = client.get(f"/api/v1/rentals/assets?branch_id={branch}&kind=glove", headers=admin)
+    assert page.json()["items"][0]["deposit_minor"] == 0
+    patched = client.patch(f"/api/v1/rentals/assets/{ids['glove']}", headers=admin, json={"deposit_minor": 5000})
+    assert patched.status_code == 200 and patched.json()["deposit_minor"] == 5000
+    assert client.patch(f"/api/v1/rentals/assets/{ids['glove']}", headers=admin,
+                        json={"deposit_minor": -1}).status_code == 422
+    assert _rent_glove_deposit(client, token, branch, ids).status_code == 201
+    blocked = client.patch(f"/api/v1/rentals/assets/{ids['glove']}", headers=admin, json={"deposit_minor": 100})
+    assert blocked.status_code == 409
+
+
+def test_deposit_is_charged_with_initial_charge_snapshot_and_hits_drawer(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["glove"], 5000)
+    stale = _rent_glove_deposit(client, token, branch, ids, deposit=0, key="stale")
+    assert stale.status_code == 409
+    assert _expected_cash(factory, branch) == 0
+    rented = _rent_glove_deposit(client, token, branch, ids)
+    assert rented.status_code == 201, rented.text
+    body = rented.json()
+    assert body["deposit_minor"] == 5000 and body["deposit_status"] == "held"
+    assert body["deposit_held_minor"] == 5000 and body["outstanding_minor"] == 0
+    assert _expected_cash(factory, branch) == 2500 + 5000
+    replay = _rent_glove_deposit(client, token, branch, ids)
+    assert replay.status_code == 200 and replay.json()["id"] == body["id"]
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(RentalDepositMovement)) == 1
+    changed = _rent_glove_deposit(client, token, branch, ids, deposit=5000, key="glove-dep-1",
+                                  components=[])
+    assert changed.status_code in (409, 422)
+    _set_deposit(factory, ids["glove"], 9000)
+    unchanged = client.get(f"/api/v1/rentals/{body['id']}", headers={"Authorization": f"Bearer {token}"})
+    assert unchanged.json()["deposit_minor"] == 5000
+    summary = client.get(f"/api/v1/shifts/{_open_shift_id(factory, branch)}/summary",
+                         headers={"Authorization": f"Bearer {token}"})
+    assert summary.json()["expected_cash_minor"] == 7500
+    assert summary.json()["confirmed_cash_minor"] == 7500
+    assert any(row["description"] == "Depósito de renta" and row["amount_minor"] == 5000
+               for row in summary.json()["payments"])
+
+
+def test_full_deposit_refund_on_glove_return_and_idempotency(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["glove"], 5000)
+    rental_id = _rent_glove_deposit(client, token, branch, ids).json()["id"]
+    missing = _return(client, token, rental_id)
+    assert missing.status_code == 422
+    assert client.get(f"/api/v1/rentals/{rental_id}", headers=admin).json()["status"] == "active"
+    body = {"register_id": str(ids["register"])}
+    done = _return(client, token, rental_id, body=body)
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "returned" and done.json()["deposit_status"] == "refunded"
+    assert done.json()["deposit_refunded_minor"] == 5000 and done.json()["deposit_held_minor"] == 0
+    assert _expected_cash(factory, branch) == 2500
+    replay = _return(client, token, rental_id, body=body)
+    assert replay.status_code == 200 and replay.json()["deposit_refunded_minor"] == 5000
+    assert _return(client, token, rental_id, key="ret-2", body=body).status_code == 409
+    assert _return(client, token, rental_id, body={**body, "deposit_refund_minor": 1}).status_code == 409
+    assert _expected_cash(factory, branch) == 2500
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(RentalDepositMovement)) == 2
+
+
+def test_partial_deposit_refund_requires_reason_and_caps_at_held(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["glove"], 5000)
+    rental_id = _rent_glove_deposit(client, token, branch, ids).json()["id"]
+    register = str(ids["register"])
+    over = _return(client, token, rental_id, body={"register_id": register, "deposit_refund_minor": 5001})
+    assert over.status_code == 409
+    no_reason = _return(client, token, rental_id, body={"register_id": register, "deposit_refund_minor": 3000})
+    assert no_reason.status_code == 422
+    negative = _return(client, token, rental_id, body={"register_id": register, "deposit_refund_minor": -1})
+    assert negative.status_code == 422
+    assert _expected_cash(factory, branch) == 7500
+    partial = _return(client, token, rental_id, body={
+        "register_id": register, "deposit_refund_minor": 3000, "reason": "Guante dañado"})
+    assert partial.status_code == 200, partial.text
+    dto = partial.json()
+    assert dto["deposit_status"] == "partially_retained" and dto["deposit_refunded_minor"] == 3000
+    assert dto["deposit_retained_minor"] == 2000 and dto["deposit_reason"] == "Guante dañado"
+    assert _expected_cash(factory, branch) == 7500 - 3000
+    summary = client.get(f"/api/v1/shifts/{_open_shift_id(factory, branch)}/summary",
+                         headers={"Authorization": f"Bearer {token}"})
+    assert summary.json()["expected_cash_minor"] == 4500
+    assert summary.json()["confirmed_cash_minor"] == 4500
+
+
+def test_full_retention_and_locker_release_refund(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["locker"], 2000)
+    assigned = client.post(
+        "/api/v1/rentals/lockers",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "locker-dep"},
+        json={"branch_id": str(branch), "asset_id": str(ids["locker"]), "member_id": str(ids["member"]),
+              "register_id": str(ids["register"]), "components": [{"method": "cash", "amount_minor": 15000}],
+              "expected_total_minor": 15000, "accepted_shortfall_minor": 0, "expected_deposit_minor": 2000})
+    assert assigned.status_code == 201, assigned.text
+    assert _expected_cash(factory, branch) == 17000
+    released = _return(client, token, assigned.json()["id"], action="release", body={
+        "register_id": str(ids["register"]), "deposit_refund_minor": 0, "reason": "Llave perdida"})
+    assert released.status_code == 200, released.text
+    assert released.json()["status"] == "released" and released.json()["deposit_status"] == "retained"
+    assert released.json()["deposit_retained_minor"] == 2000
+    assert _expected_cash(factory, branch) == 17000
+
+
+def test_locker_cancellation_returns_held_deposit_in_cash(rental_world):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["locker"], 2000)
+    assigned = client.post(
+        "/api/v1/rentals/lockers",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "locker-dep-c"},
+        json={"branch_id": str(branch), "asset_id": str(ids["locker"]), "member_id": str(ids["member"]),
+              "register_id": str(ids["register"]), "components": [{"method": "cash", "amount_minor": 15000}],
+              "expected_total_minor": 15000, "accepted_shortfall_minor": 0, "expected_deposit_minor": 2000})
+    rental_id = assigned.json()["id"]
+    headers = {"Authorization": f"Bearer {token}"}
+    preview = client.get(f"/api/v1/rentals/{rental_id}/cancellation-preview", headers=headers).json()
+    cancelled = client.post(
+        f"/api/v1/rentals/{rental_id}/cancellation",
+        headers={**headers, "Idempotency-Key": "locker-cancel-dep"},
+        json={"register_id": str(ids["register"]), "preview_token": preview["preview_token"],
+              "refund_amount_minor": 0, "refund_method": "cash", "reason": "Error de captura"})
+    assert cancelled.status_code == 201, cancelled.text
+    assert _expected_cash(factory, branch) == 15000
+    detail = client.get(f"/api/v1/rentals/{rental_id}", headers=headers).json()
+    assert detail["deposit_status"] == "refunded" and detail["deposit_refunded_minor"] == 2000
+
+
+def test_deposit_movements_are_append_only_and_migration_0054_roundtrips(rental_world, tmp_path, monkeypatch):
+    client, factory, branch, _other, _actor, token, ids, admin = rental_world
+    _set_deposit(factory, ids["glove"], 5000)
+    assert _rent_glove_deposit(client, token, branch, ids).status_code == 201
+    with pytest.raises(ValueError):
+        with factory.begin() as session:
+            session.scalar(select(RentalDepositMovement)).amount_minor = 1
+    with pytest.raises(ValueError):
+        with factory.begin() as session:
+            session.delete(session.scalar(select(RentalDepositMovement)))
+    # no deposit configured: legacy return without a body still works
+    _set_deposit(factory, ids["locker"], 0)
+    plain = _assign_locker(client, token, branch, ids, components=[{"method": "cash", "amount_minor": 15000}])
+    released = client.post(f"/api/v1/rentals/{plain.json()['id']}/release",
+                           headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "plain-rel"})
+    assert released.status_code == 200 and released.json()["deposit_status"] == "none"
+
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    url = f"sqlite+pysqlite:///{(tmp_path / 'dep-migration.db').as_posix()}"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    try:
+        assert "rental_deposit_movements" in inspect(engine).get_table_names()
+        assert "deposit_minor" in {c["name"] for c in inspect(engine).get_columns("rental_assets")}
+        command.downgrade(config, "0053_scoop_products")
+        assert "rental_deposit_movements" not in inspect(engine).get_table_names()
+        assert "deposit_minor" not in {c["name"] for c in inspect(engine).get_columns("rental_assets")}
+    finally:
+        engine.dispose()

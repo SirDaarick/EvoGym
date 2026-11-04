@@ -21,6 +21,7 @@ from app.db.models.rentals import (
     RentalCancellation,
     RentalCardAttempt,
     RentalCharge,
+    RentalDepositMovement,
     RentalReceipt,
 )
 from app.db.models.catalog import Plan, PlanVersion, PlanVersionService, Service
@@ -76,6 +77,7 @@ __all__ = [
     "RentalCancellation",
     "RentalCardAttempt",
     "RentalCharge",
+    "RentalDepositMovement",
     "RentalReceipt",
     "MembershipPeriod",
     "MembershipDebt",

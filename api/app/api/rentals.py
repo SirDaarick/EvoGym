@@ -10,7 +10,7 @@ from app.rentals import service
 from app.rentals.schemas import (
     CardAttemptDTO, CardAttemptInput, CancellationInput, CancellationPreviewDTO, MemberReceivablePage,
     ReceivablePaymentDTO, ReceivablePaymentInput, RentalAlertPage, RentalAssetDTO, RentalAssetInput,
-    RentalAssetPage, RentalAssetPatch, RentalCancellationDTO, RentalCreateInput, RentalDTO, RentalPage,
+    RentalAssetPage, RentalAssetPatch, RentalCancellationDTO, RentalCreateInput, RentalDTO, RentalEndInput, RentalPage,
     RentalRenewalInput, RentalTransferReviewDTO, TransferReviewInput,
 )
 
@@ -114,13 +114,15 @@ def renew_rental(rental_id: UUID, payload: RentalRenewalInput, response: Respons
 
 
 @router.post("/{rental_id}/return", response_model=RentalDTO)
-def return_gloves(rental_id: UUID, principal: Principal, factory: Factory, idempotency_key: IdempotencyKey):
-    return service.end_rental(factory, principal, rental_id, "return")
+def return_gloves(rental_id: UUID, principal: Principal, factory: Factory, idempotency_key: IdempotencyKey,
+                  payload: RentalEndInput | None = None):
+    return service.end_rental(factory, principal, rental_id, "return", payload, idempotency_key)
 
 
 @router.post("/{rental_id}/release", response_model=RentalDTO)
-def release_locker(rental_id: UUID, principal: Principal, factory: Factory, idempotency_key: IdempotencyKey):
-    return service.end_rental(factory, principal, rental_id, "release")
+def release_locker(rental_id: UUID, principal: Principal, factory: Factory, idempotency_key: IdempotencyKey,
+                   payload: RentalEndInput | None = None):
+    return service.end_rental(factory, principal, rental_id, "release", payload, idempotency_key)
 
 
 @router.post("/{rental_id}/receivable-payments", response_model=ReceivablePaymentDTO)

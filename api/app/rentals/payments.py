@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Branch, CashRegister, Member, Payment, RentalAsset, Shift, StaffRosterProfile, StaffUser
-from app.db.models.rentals import Rental, RentalCardAttempt, RentalCharge
+from app.db.models.rentals import Rental, RentalCardAttempt, RentalCharge, RentalDepositMovement
 
 MAX_MINOR = 2**63 - 1
 
@@ -329,3 +329,33 @@ def settle_card_attempt(session: Session, attempt: RentalCardAttempt, status: st
     attempt.card_brand = card_brand
     attempt.card_last_four = card_last_four
     session.flush()
+
+
+def deposit_movements(session: Session, rental_id: UUID) -> tuple[RentalDepositMovement | None, RentalDepositMovement | None]:
+    """Return the (hold, refund) deposit ledger rows of a rental."""
+    rows = {row.kind: row for row in session.scalars(
+        select(RentalDepositMovement).where(RentalDepositMovement.rental_id == rental_id))}
+    return rows.get("hold"), rows.get("refund")
+
+
+def deposit_state(session: Session, rental_id: UUID) -> dict:
+    hold, refund = deposit_movements(session, rental_id)
+    total = hold.amount_minor if hold else 0
+    refunded = refund.amount_minor if refund else 0
+    retained = refund.retained_minor if refund else 0
+    if hold is None:
+        status = "none"
+    elif refund is None:
+        status = "held"
+    elif retained == 0:
+        status = "refunded"
+    elif refunded == 0:
+        status = "retained"
+    else:
+        status = "partially_retained"
+    return {
+        "deposit_minor": total, "deposit_status": status,
+        "deposit_held_minor": total if refund is None else 0,
+        "deposit_refunded_minor": refunded, "deposit_retained_minor": retained,
+        "deposit_reason": refund.reason if refund else None,
+    }

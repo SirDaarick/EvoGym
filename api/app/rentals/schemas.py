@@ -15,6 +15,7 @@ class RentalAssetInput(BaseModel):
     kind: Literal["glove", "locker"]
     code: str
     price_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    deposit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1)
     status: Literal["available", "employee", "out_of_service"] = "available"
     color: str | None = None
     ounces: StrictInt | None = Field(default=None, gt=0, le=2**31 - 1)
@@ -48,6 +49,7 @@ class RentalAssetPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str | None = None
     price_minor: StrictInt | None = Field(default=None, ge=0, le=2**63 - 1)
+    deposit_minor: StrictInt | None = Field(default=None, ge=0, le=2**63 - 1)
     status: Literal["available", "employee", "out_of_service"] | None = None
     color: str | None = None
     ounces: StrictInt | None = Field(default=None, gt=0, le=2**31 - 1)
@@ -87,6 +89,22 @@ class RentalCreateInput(BaseModel):
     components: list[TenderComponentInput] = Field(default_factory=list, max_length=8)
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
     accepted_shortfall_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    expected_deposit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1)
+
+
+class RentalEndInput(BaseModel):
+    """Body of `/return` and `/release`; required only when the rental holds a deposit."""
+    model_config = ConfigDict(extra="forbid")
+    register_id: UUID | None = None
+    deposit_refund_minor: StrictInt | None = Field(default=None, ge=0, le=2**63 - 1)
+    reason: str | None = Field(default=None, max_length=240)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip() or None
+        return value
 
 
 class RentalRenewalInput(BaseModel):
@@ -152,6 +170,12 @@ class RentalDTO(BaseModel):
     paid_minor: int
     outstanding_minor: int
     cancelled_debt_minor: int = 0
+    deposit_minor: int = 0
+    deposit_status: Literal["none", "held", "refunded", "partially_retained", "retained"] = "none"
+    deposit_held_minor: int = 0
+    deposit_refunded_minor: int = 0
+    deposit_retained_minor: int = 0
+    deposit_reason: str | None = None
     assigned_by_name: str
     charges: list[RentalChargeDTO] = Field(default_factory=list)
     created_at: datetime

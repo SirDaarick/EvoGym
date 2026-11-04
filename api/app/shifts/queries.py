@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.db.models import RoleGrant
 from app.db.models.orders import Order, OrderItem, Payment, ProductRefund
 from app.db.models.membership_debt_payments import MembershipDebtPayment
-from app.db.models.rentals import Rental, RentalCancellation, RentalCharge
+from app.db.models.rentals import Rental, RentalCancellation, RentalCharge, RentalDepositMovement
 from app.db.models.shifts import (
     CashRegister,
     PaymentTerminal,
@@ -435,6 +435,11 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
         if type(amount) is not int or amount < 0 or inflow > maximum - amount:
             raise ValueError("Rental cash inflow exceeds signed 64-bit minor units.")
         inflow += amount
+    for amount in session.scalars(select(RentalDepositMovement.amount_minor).where(
+            RentalDepositMovement.shift_id == shift.id, RentalDepositMovement.kind == "hold")):
+        if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
+            raise ValueError("Rental deposit inflow exceeds signed 64-bit minor units.")
+        inflow += amount
     for amount in session.scalars(select(ShiftCashContribution.amount_minor).where(ShiftCashContribution.shift_id == shift.id)):
         if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
             raise ValueError("Cash contribution inflow exceeds signed 64-bit minor units.")
@@ -463,6 +468,11 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
     for amount in rental_refunds:
         if type(amount) is not int or amount < 0 or refund_outflow > maximum - amount:
             raise ValueError("Rental cash refund outflow exceeds signed 64-bit minor units.")
+        refund_outflow += amount
+    for amount in session.scalars(select(RentalDepositMovement.amount_minor).where(
+            RentalDepositMovement.shift_id == shift.id, RentalDepositMovement.kind == "refund")):
+        if type(amount) is not int or amount < 0 or refund_outflow > maximum - amount:
+            raise ValueError("Rental deposit refund outflow exceeds signed 64-bit minor units.")
         refund_outflow += amount
     for amount in session.scalars(select(Expense.amount_minor).where(Expense.shift_id == shift.id, Expense.voided_at.is_(None))):
         if type(amount) is not int or amount <= 0 or refund_outflow > maximum - amount:
@@ -499,6 +509,10 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         select(RentalCancellation)
         .where(RentalCancellation.shift_id == shift.id)
         .order_by(RentalCancellation.created_at.desc(), RentalCancellation.id.desc())
+    ).all()
+    deposit_rows = session.scalars(
+        select(RentalDepositMovement).where(RentalDepositMovement.shift_id == shift.id)
+        .order_by(RentalDepositMovement.created_at.desc(), RentalDepositMovement.id.desc())
     ).all()
 
     order_descriptions: dict[UUID, str] = {}
@@ -582,6 +596,23 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
             "method": refund.refund_method, "count": 0, "amount_minor": 0})
         bucket["count"] = int(bucket["count"]) + 1
         bucket["amount_minor"] = int(bucket["amount_minor"]) - refund.refund_amount_minor
+
+    for movement in deposit_rows:
+        if movement.kind == "refund" and movement.amount_minor == 0:
+            continue
+        signed = movement.amount_minor if movement.kind == "hold" else -movement.amount_minor
+        payments.append({"id": movement.id,
+                         "description": "Depósito de renta" if movement.kind == "hold" else "Devolución de depósito",
+                         "method": "cash", "status": "confirmed", "amount_minor": signed,
+                         "recorded_at": movement.created_at})
+        confirmed_minor += signed
+        cash_minor += signed
+        activity = families.setdefault("rental", {"family": "rental", "count": 0, "amount_minor": 0})
+        activity["count"] = int(activity["count"]) + 1
+        activity["amount_minor"] = int(activity["amount_minor"]) + signed
+        bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["amount_minor"] = int(bucket["amount_minor"]) + signed
 
     payments.sort(key=lambda row: (row["recorded_at"], str(row["id"])), reverse=True)
     activities = list(families.values()) if confirmed_minor else []

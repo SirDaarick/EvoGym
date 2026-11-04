@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from app.db.models import (
     Branch, CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MembershipDebt, MembershipDebtPayment,
     MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, PayrollAdvance, PayrollPayment, Product,
-    ProductRefund, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, Shift,
+    PaymentTerminal, ProductRefund, ProductSaleCancellation, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, Shift,
     ShiftInventoryObservation, ShiftInventoryReview, StaffAttendanceCheckout, StaffAttendanceRecord,
     StaffRosterProfile, StaffScheduleSeries, StockInitialization, StockMovement,
 )
@@ -129,6 +129,33 @@ def overtime_payments(session, branch_id, start, end):
 def product_refunds(session, branch_id, start, end):
     return session.scalars(select(ProductRefund).where(ProductRefund.branch_id == branch_id,
         ProductRefund.created_at >= start, ProductRefund.created_at < end)).all()
+
+
+def payment_terminal_ids(session, payment_ids):
+    """Map payment id -> terminal id for payments settled on a Point terminal."""
+    ids = list(payment_ids)
+    return {pid: tid for pid, tid in session.execute(select(Payment.id, Payment.terminal_id).where(
+        Payment.id.in_(ids), Payment.terminal_id.is_not(None)))} if ids else {}
+
+
+def terminal_names(session, terminal_ids):
+    ids = list(terminal_ids)
+    return {tid: name for tid, name in session.execute(select(PaymentTerminal.id, PaymentTerminal.name).where(
+        PaymentTerminal.id.in_(ids)))} if ids else {}
+
+
+def product_sale_cancellations(session, branch_id, start, end):
+    return session.scalars(select(ProductSaleCancellation).where(ProductSaleCancellation.branch_id == branch_id,
+        ProductSaleCancellation.created_at >= start, ProductSaleCancellation.created_at < end)).all()
+
+
+def rental_cancellations(session, branch_id, start, end):
+    return session.scalars(select(RentalCancellation).where(RentalCancellation.branch_id == branch_id,
+        RentalCancellation.created_at >= start, RentalCancellation.created_at < end)).all()
+
+
+def register_names(session, branch_id):
+    return {rid: name for rid, name in session.execute(select(CashRegister.id, CashRegister.name).where(CashRegister.branch_id == branch_id))}
 
 
 def count_discrepancies(session, branch_id, start, end):

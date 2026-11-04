@@ -135,6 +135,7 @@ def create_rental(factory, principal, kind: str, payload, idempotency_key: str):
             components=payload.components,
             expected_total_minor=payload.expected_total_minor,
             accepted_shortfall_minor=payload.accepted_shortfall_minor,
+            expected_deposit_minor=payload.expected_deposit_minor,
             idempotency_key=idempotency_key,
         )
         return q.rental_dto(session, rental), replayed
@@ -230,12 +231,15 @@ def renew_rental(factory, principal, rental_id: UUID, payload, idempotency_key: 
         return q.rental_dto(session, rental), replayed
 
 
-def end_rental(factory, principal, rental_id: UUID, action: str):
+def end_rental(factory, principal, rental_id: UUID, action: str, payload=None, idempotency_key: str | None = None):
     with http_errors(*_ERRORS), session_factory(factory).begin() as session:
         rental = _require_rental_receptionist(session, rental_id, principal)
         rental = q.end_rental(
             session, rental_id=rental.id, actor_id=principal.staff_id,
-            authorized_branch_id=principal.branch_id, action=action)
+            authorized_branch_id=principal.branch_id, action=action,
+            register_id=payload.register_id if payload else None,
+            deposit_refund_minor=payload.deposit_refund_minor if payload else None,
+            reason=payload.reason if payload else None, idempotency_key=idempotency_key)
         return q.rental_dto(session, rental)
 
 
