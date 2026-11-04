@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import Literal, get_args
 
 from fastapi import FastAPI, Request
@@ -77,6 +78,20 @@ class HttpStatusError(AppError):
     @property
     def message(self):
         return http_error_message(self.status)
+
+
+@contextmanager
+def http_errors(*mapping):
+    """Translate domain exceptions to HttpStatusError, first match wins; status None re-raises as is."""
+    try:
+        yield
+    except Exception as exc:
+        for kind, status in mapping:
+            if isinstance(exc, kind):
+                if status is None:
+                    raise
+                raise HttpStatusError(status) from exc
+        raise
 
 
 class PublicDomainError(AppError):

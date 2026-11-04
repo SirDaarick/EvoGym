@@ -6,8 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    Branch, CashRegister, Member, Payment, PaymentReviewEvent, Rental, RentalAsset,
-    RentalCancellation, RentalCardAttempt, RentalCharge, RentalReceipt, StaffUser,
+    Branch, CashRegister, Member, Payment, PaymentReviewEvent, PaymentTerminal, Rental, RentalAsset,
+    RentalCancellation, RentalCardAttempt, RentalCharge, RentalReceipt, RoleGrant, StaffUser,
 )
 from app.rentals.payments import (
     MAX_MINOR, RentalAccessDenied, RentalConflictError, RentalNotFoundError,
@@ -584,3 +584,54 @@ def active_rentals_by_asset(session: Session, asset_ids: list[UUID]) -> dict[UUI
     rows = session.execute(select(Rental.asset_id, Rental.id).where(
         Rental.asset_id.in_(asset_ids), Rental.status == "active")).all()
     return {asset_id: rental_id for asset_id, rental_id in rows}
+
+
+# --- service lookups: atomic reads/writes the service composes ---------------------------------
+
+def get_branch(session: Session, branch_id: UUID) -> Branch | None:
+    return session.get(Branch, branch_id)
+
+
+def get_rental(session: Session, rental_id: UUID) -> Rental | None:
+    return session.get(Rental, rental_id)
+
+
+def get_terminal(session: Session, terminal_id: UUID) -> PaymentTerminal | None:
+    return session.get(PaymentTerminal, terminal_id)
+
+
+def receptionist_grant_id(session: Session, *, staff_id: UUID, branch_id: UUID) -> UUID | None:
+    return session.scalar(select(RoleGrant.id).where(
+        RoleGrant.staff_id == staff_id, RoleGrant.role == "receptionist",
+        RoleGrant.scope_kind == "branch", RoleGrant.branch_id == branch_id,
+        RoleGrant.is_active.is_(True),
+    ))
+
+
+def list_assets(session: Session, *, branch_id: UUID, kind: str | None, offset: int, limit: int):
+    filters = [RentalAsset.branch_id == branch_id]
+    if kind is not None:
+        filters.append(RentalAsset.kind == kind)
+    total = session.scalar(select(func.count()).select_from(RentalAsset).where(*filters))
+    rows = session.scalars(select(RentalAsset).where(*filters)
+                           .order_by(RentalAsset.code, RentalAsset.id).offset(offset).limit(limit)).all()
+    return rows, total
+
+
+def add_asset(session: Session, *, values: dict, created_by: UUID) -> RentalAsset:
+    row = RentalAsset(**values, created_by=created_by)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def lock_asset_row(session: Session, asset_id: UUID) -> RentalAsset | None:
+    return session.scalar(select(RentalAsset).where(RentalAsset.id == asset_id).with_for_update())
+
+
+def bind_provider_intent(session: Session, *, attempt_id: UUID, provider_intent_id: str) -> RentalCardAttempt | None:
+    bound = session.get(RentalCardAttempt, attempt_id)
+    if bound is not None:
+        bound.provider_intent_id = provider_intent_id
+        session.flush()
+    return bound

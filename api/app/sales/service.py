@@ -5,7 +5,6 @@ raised as typed `AppError`s (never HTTPException). Rule: a use case takes a `fac
 may need a second transaction (idempotency reconciliation, the Point terminal call between DB
 steps); read-only or single-shot ones take a `session`.
 """
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -14,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.db.models import ProductSaleIntent
-from app.errors import AppError, HttpStatusError
+from app.errors import AppError, HttpStatusError, http_errors
 from app.sales import queries as q
 from app.sales.point import PointTerminalUnavailable, get_point_client
 from app.sales.queries import (
@@ -32,20 +31,6 @@ class Principal(Protocol):
     staff_id: UUID
     branch_id: UUID
     is_admin: bool
-
-
-@contextmanager
-def _http_errors(*mapping):
-    """Translate domain exceptions to HttpStatusError, first match wins; status None re-raises as is."""
-    try:
-        yield
-    except Exception as exc:
-        for kind, status in mapping:
-            if isinstance(exc, kind):
-                if status is None:
-                    raise
-                raise HttpStatusError(status) from exc
-        raise
 
 
 _SALE_ERRORS = (
@@ -177,7 +162,7 @@ def get_product_sale_intent(factory, principal: Principal):
 
 
 def prepare_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
-    with _http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
         with factory() as session:
             _require_product_sales_access(session, principal)
             intent = q.prepare_product_sale(
@@ -196,7 +181,7 @@ def _fingerprint_of(register_id, payload):
 def post_cash_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
     """Returns (dto, replayed)."""
     try:
-        with _http_errors(*_PRODUCT_ERRORS):
+        with http_errors(*_PRODUCT_ERRORS):
             with factory() as session:
                 _require_product_sales_access(session, principal)
                 q.lock_staff_key_share(session, principal.staff_id)
@@ -223,7 +208,7 @@ def post_cash_product_sale(factory, principal: Principal, register_id: UUID, pay
 
 
 def resolve_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
-    with _http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
         with factory() as session:
             _require_product_sales_access(session, principal)
             order = q.resolve_product_sale(
@@ -330,7 +315,7 @@ def post_card_product_sale(factory, settings, principal: Principal, register_id:
             raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return _product_sale_dto(existing)
 
-    with _http_errors(*_PRODUCT_ERRORS):
+    with http_errors(*_PRODUCT_ERRORS):
         # Phase A: short session, closed before any Mercado Pago call.
         context = _load_card_context(factory, settings, principal, register_id, replay_check)
         if context.replay is not None:
@@ -366,7 +351,7 @@ def post_card_product_sale(factory, settings, principal: Principal, register_id:
 # --- product returns ----------------------------------------------------------------------------
 
 def list_eligible_product_returns(session, principal: Principal, register_id: UUID, member_id: UUID):
-    with _http_errors(*_RETURN_ERRORS):
+    with http_errors(*_RETURN_ERRORS):
         _require_register(session, principal, register_id)
         _require_product_sales_access(session, principal)
         return q.list_eligible_product_returns(session, register_id=register_id, member_id=member_id)
@@ -375,7 +360,7 @@ def list_eligible_product_returns(session, principal: Principal, register_id: UU
 def post_product_return(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
     """Returns (dto, replayed)."""
     try:
-        with _http_errors(*_RETURN_ERRORS, (ValueError, 422)):
+        with http_errors(*_RETURN_ERRORS, (ValueError, 422)):
             with factory() as session:
                 _require_register(session, principal, register_id)
                 _require_product_sales_access(session, principal)
@@ -403,7 +388,7 @@ def post_cash_membership_sale(factory, principal: Principal, register_id: UUID, 
     if cash_amount_provided and payload.cash_amount_minor is None:
         raise HttpStatusError(422)
     try:
-        with _http_errors(*_SALE_ERRORS):
+        with http_errors(*_SALE_ERRORS):
             with factory() as session:
                 _require_register(session, principal, register_id)
                 result = q.post_membership_cash_sale(
@@ -430,7 +415,7 @@ def post_membership_transfer(factory, principal: Principal, register_id: UUID, p
     if "cash_amount_minor" in payload.model_fields_set or payload.source_shift_id is not None:
         raise HttpStatusError(422)
     try:
-        with _http_errors(*_SALE_ERRORS):
+        with http_errors(*_SALE_ERRORS):
             with factory() as session:
                 _require_register(session, principal, register_id)
                 result = q.post_membership_cash_sale(
@@ -454,7 +439,7 @@ def post_membership_transfer(factory, principal: Principal, register_id: UUID, p
 
 def review_membership_transfer(session, principal: Principal, payment_id: UUID, payload, idempotency_key: str):
     """Record an authorized bank-transfer review decision for its linked membership period."""
-    with _http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409), (ValueError, 422)):
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409), (ValueError, 422)):
         order = q.load_transfer_review_order(session, payment_id)
         if order is None:
             raise HttpStatusError(404)
@@ -472,7 +457,7 @@ def review_membership_transfer(session, principal: Principal, payment_id: UUID, 
 # --- membership debts --------------------------------------------------------------------------------
 
 def list_register_member_open_debts(session, principal: Principal, register_id: UUID, member_id: UUID):
-    with _http_errors((CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403), (CashSaleConflictError, 409)):
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403), (CashSaleConflictError, 409)):
         return q.list_register_member_open_debts(
             session, register_id=register_id, member_id=member_id, authorized_branch_id=_authorized_branch(principal))
 
@@ -480,7 +465,7 @@ def list_register_member_open_debts(session, principal: Principal, register_id: 
 def post_membership_debt_payment(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
     """Returns (dto, replayed). Collect an explicit membership debt abono to the current open branch shift."""
     try:
-        with _http_errors((CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403),
+        with http_errors((CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403),
                           (CashSaleConflictError, 409), (ValueError, 422)):
             with factory() as session:
                 result = q.post_membership_debt_payment(
