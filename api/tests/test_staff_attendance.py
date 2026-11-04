@@ -832,3 +832,38 @@ def test_attendance_recorded_by_resolves_roster_name(tmp_path):
             assert page.json()["items"][0]["recorded_by"] == "Sheila Recepción"
     finally:
         engine.dispose()
+
+
+def test_integrity_error_at_commit_returns_409_not_500(tmp_path, capsys):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+
+    url, engine, factory, branch_a_id, branch_b_id, desk_token, branch_admin_token = _setup(tmp_path)
+    profile_id, *_ = _create_profiles(factory, branch_a_id, branch_b_id)
+    flushed = []
+
+    def mark_flushed(session, flush_context, instances):
+        if any(isinstance(obj, StaffAttendanceRecord) for obj in session.new):
+            flushed.append(True)
+
+    def fail_commit(session):
+        if flushed:
+            flushed.clear()
+            raise IntegrityError(
+                "INSERT", {}, Exception("UNIQUE constraint failed: staff_attendance_records.profile_id")
+            )
+
+    event.listen(Session, "before_flush", mark_flushed)
+    event.listen(Session, "before_commit", fail_commit)
+    try:
+        with TestClient(create_app(configured_settings(url)), raise_server_exceptions=False) as client:
+            desk = {"Authorization": f"Bearer {desk_token}"}
+            response = client.post(
+                f"/api/v1/staff-attendance/branches/{branch_a_id}/profiles/{profile_id}", headers=desk, json={},
+            )
+            assert response.status_code == 409, response.text
+    finally:
+        event.remove(Session, "before_flush", mark_flushed)
+        event.remove(Session, "before_commit", fail_commit)
+        engine.dispose()
+    assert "Traceback" not in capsys.readouterr().err

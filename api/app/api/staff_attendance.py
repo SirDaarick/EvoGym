@@ -639,10 +639,6 @@ def record_staff_attendance(
             rec_name = _resolve_single_recorder_name(session, principal.staff_id, branch.id)
             return _item(record, profile, notes=eff_notes, recorder_name=rec_name)
 
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise
     except IntegrityError as exc:
         orig_msg = str(getattr(exc, "orig", exc))
         if any(c in orig_msg for c in ("uq_staff_attendance", "UNIQUE constraint", "unique constraint")):
