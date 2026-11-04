@@ -5,8 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import RawFactoryDep
-from app.api.pending_money import FinancePrincipal, _bearer, _principal
+from app.api.deps import FinancePrincipal, RawFactoryDep, _bearer, _principal
 from app.finance import overview
 
 router = APIRouter(prefix="/api/v1/owner/overview", tags=["owner-overview"])

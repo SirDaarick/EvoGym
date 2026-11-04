@@ -266,7 +266,7 @@ def test_evidence_is_branch_scoped_and_returned_as_signed_url(tmp_path):
 
 def test_reception_and_owner_expense_scenario(tmp_path):
     """Cashier records and voids a shift expense; finance records a business expense."""
-    from app.api.pending_money import FinancePrincipal, _principal as finance_principal
+    from app.api.deps import FinancePrincipal, _principal as finance_principal
 
     url, engine, factory = _setup_db(tmp_path)
     try:

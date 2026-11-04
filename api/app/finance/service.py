@@ -16,7 +16,7 @@ from app.finance.schemas import PendingMoneyItem, PendingMoneyResponse
 from app.rentals.payments import (
     charge_collectable_minor, charges_for_rental, clean_idempotency_key, fingerprint,
 )
-from app.rentals.service import session_factory
+from app.errors import session_factory
 from app.staff.roster import weekly_base
 
 

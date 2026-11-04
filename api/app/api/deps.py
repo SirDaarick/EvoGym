@@ -115,6 +115,35 @@ def get_roster_principal(request: Request, credentials: OptionalBearerDep) -> Ro
         raise HTTPException(401, "Authentication failed.") from None
 
 
+@dataclass(frozen=True, slots=True)
+class FinancePrincipal:
+    staff_id: UUID
+    organization_admin: bool
+    branch_id: UUID | None
+
+
+def _principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> FinancePrincipal:
+    factory = request.app.state.session_factory
+    if factory is None or credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(401, "Authentication failed.")
+    token = credentials.credentials
+    try:
+        settings = request.app.state.settings
+        if not settings.admin_auth_configured or not settings.admin_token_signing_configured:
+            raise AuthorizationDenied("Authorization denied")
+        staff_id, _session_id = validate_admin_session(
+            factory, token, settings.admin_token_signing_secret.get_secret_value()
+        )
+        return FinancePrincipal(staff_id, organization_admin=True, branch_id=None)
+    except (AuthorizationDenied, ValueError):
+        pass
+    try:
+        staff = validate_session(factory, token, Permission.MEMBER_OPERATIONAL_READ)
+        return FinancePrincipal(staff.staff_id, organization_admin=False, branch_id=staff.branch_id)
+    except (AuthorizationDenied, ValueError):
+        raise HTTPException(401, "Authentication failed.") from None
+
+
 def resolve_credentials_admin(request: Request, credentials: HTTPAuthorizationCredentials | None):
     """Admin (staff_id, session_id) for the credentials endpoints; called in the handler, not as a dependency."""
     settings = request.app.state.settings

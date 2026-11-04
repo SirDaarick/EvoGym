@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
-from app.errors import HttpStatusError, http_errors
+from app.errors import HttpStatusError, http_errors, session_factory
 from app.rentals import queries as q
 from app.rentals.payments import (
     RentalAccessDenied, RentalConflictError, RentalNotFoundError, RentalProviderUnavailableError,
@@ -25,12 +25,6 @@ _ERRORS = (
     (RentalNotFoundError, 404), (RentalAccessDenied, 403), (RentalConflictError, 409),
     (RentalProviderUnavailableError, 503), (IntegrityError, 409), (ValueError, 422),
 )
-
-
-def session_factory(factory):
-    if factory is None:
-        raise HttpStatusError(503)
-    return factory
 
 
 def _branch(session, branch_id: UUID, principal):

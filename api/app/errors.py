@@ -220,3 +220,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, _exc: Exception) -> JSONResponse:
         return _response(500, "internal_error", "An internal error occurred.", request)
+
+
+def session_factory(factory):
+    """Shared by services: a missing DB factory is a 503. Lives here beside HttpStatusError, which it raises."""
+    if factory is None:
+        raise HttpStatusError(503)
+    return factory

@@ -16,7 +16,8 @@ from app.expenses import queries as q
 from app.finance import queries as fq
 from app.finance.service import authorized_branches
 from app.rentals.payments import clean_idempotency_key, fingerprint, staff_display_name
-from app.rentals.service import require_receptionist, session_factory
+from app.errors import session_factory
+from app.rentals.service import require_receptionist
 from app.shifts.queries import expected_cash_for_shift
 from app.shifts.schemas import _serialize_datetime
 

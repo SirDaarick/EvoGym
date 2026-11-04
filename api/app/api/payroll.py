@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query
 
 from app.api.deps import SessionFactoryDep
-from app.api.pending_money import FinancePrincipal, _principal
+from app.api.deps import FinancePrincipal, _principal
 from app.finance import service
 from app.finance.schemas import AdvanceInput, PaymentInput
 

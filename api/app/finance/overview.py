@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from app.errors import HttpStatusError
 from app.finance import queries as q
 from app.finance.service import authorized_branches
-from app.rentals.service import session_factory
+from app.errors import session_factory
 from app.shifts.queries import shift_financial_summary
 from app.staff.roster import weekly_base
 from app.staff.schedules import intervals

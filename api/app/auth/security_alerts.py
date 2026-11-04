@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from app.auth import admin_queries as q
-from app.auth.admin import ADMIN_IDLE_SECONDS
+from app.auth.admin import ADMIN_IDLE_SECONDS, _utc
 from app.auth.authorization import Permission
 from app.auth.owner import has_organization_permission
 from app.errors import HttpStatusError
@@ -30,10 +30,6 @@ class SecurityAlertAcknowledgement(BaseModel):
     id: UUID
     acknowledged_at: datetime
     acknowledged_by: UUID
-
-
-def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def _require_live_employee_manager(session, principal):

@@ -12,7 +12,6 @@ from pydantic import SecretStr
 from app.api import catalog, deps, members, shifts
 from app.api import (
     admin_enrollment, device_pairing, inventory, membership_access,
-    pending_money,
 )
 from app.auth.authorization import AuthorizationDenied
 from app.auth.sessions import SessionPrincipal, revoke_session
@@ -169,7 +168,7 @@ ADMIN_CONSUMERS = [
     pytest.param(device_pairing, device_pairing._admin_principal, id="device-pairing"),
     pytest.param(inventory, inventory._actor, id="inventory"),
     pytest.param(membership_access, membership_access.record_access_decision, id="membership-access"),
-    pytest.param(pending_money, pending_money._principal, id="pending-money"),
+    pytest.param(deps, deps._principal, id="pending-money"),
     pytest.param(deps, deps.get_roster_principal, id="staff-roster"),
 ]
 
@@ -211,7 +210,7 @@ MIXED_CONSUMERS = [
     pytest.param(catalog, catalog.get_catalog_actor_principal, id="catalog"),
     pytest.param(shifts, shifts.get_shift_actor_principal, id="shifts"),
     pytest.param(membership_access, membership_access.record_access_decision, id="membership-access"),
-    pytest.param(pending_money, pending_money._principal, id="pending-money"),
+    pytest.param(deps, deps._principal, id="pending-money"),
     pytest.param(deps, deps.get_roster_principal, id="staff-roster"),
 ]
 

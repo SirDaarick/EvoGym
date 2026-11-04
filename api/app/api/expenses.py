@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.api.deps import RawFactoryDep
-from app.api.pending_money import FinancePrincipal, _principal as finance_principal
+from app.api.deps import FinancePrincipal, _principal as finance_principal
 from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
 from app.expenses import service
 from app.expenses.schemas import (
