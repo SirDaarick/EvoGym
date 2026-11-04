@@ -23,3 +23,5 @@ tmp/
 output/
 backend/*.xlsx
 backend/*.ipynb
+
+.claude/

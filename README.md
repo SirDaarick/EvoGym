@@ -75,6 +75,7 @@ Para garantizar la integridad financiera y operativa, el sistema opera con dos e
 
 ## 📚 Documentación Técnica Detallada
 
+- [**Roadmap Maestro y Plan de Trabajo Accionable**](docs/ROADMAP.md): inventario priorizado de tareas pendientes, correcciones y mejoras arquitectónicas.
 - [Auditoría del backend](docs/backend-audit/README.md): estado observado, resultados y límites de verificación.
 - [Hallazgos y pasos de corrección](docs/backend-audit/findings.md), [brechas del frontend](docs/backend-audit/frontend-contract-gaps.md) y [ruta de finalización](docs/backend-audit/roadmap.md).
 - [Índice del plan backend](docs/backend-plan/README.md): decisiones de negocio y documentación histórica.
