@@ -315,7 +315,7 @@
   gap: 6px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
   text-decoration: none;
   transition: color 120ms ease, transform 120ms ease;
 }

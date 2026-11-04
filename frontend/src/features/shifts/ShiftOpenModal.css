@@ -55,7 +55,7 @@
 }
 .shift-open-x:hover {
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   transform: scale(1.05);
 }
 .shift-open-x:focus-visible,
@@ -90,7 +90,7 @@
 }
 .shift-step-pill.is-active {
   background: var(--color-surface);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   border-color: var(--color-primary);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   font-weight: 750;
@@ -201,7 +201,7 @@
 .shift-open-cash-banner strong {
   font-size: 1.35rem;
   font-weight: 800;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-variant-numeric: tabular-nums;
 }
 

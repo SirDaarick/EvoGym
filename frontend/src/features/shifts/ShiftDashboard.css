@@ -9,9 +9,9 @@
 .shift-kpi p { margin: .35rem 0 0; line-height: 1.45; }
 .shift-kpi-value { font-size: clamp(1.65rem, 2.3vw, 2.35rem); font-weight: 800; letter-spacing: -.045em; overflow-wrap: anywhere; }
 .shift-formula { margin-top: .55rem; font-size: .8rem; }
-.shift-formula summary { width: fit-content; color: var(--color-primary); cursor: pointer; }
+.shift-formula summary { width: fit-content; color: var(--color-primary-ink); cursor: pointer; }
 .shift-formula p { margin: .35rem 0 0; color: var(--color-muted); font-size: .78rem; }
-.shift-kpi-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 14px; color: var(--color-primary); background: var(--color-surface-raised); }
+.shift-kpi-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 14px; color: var(--color-primary-ink); background: var(--color-surface-raised); }
 .shift-kpi:nth-child(2) .shift-kpi-icon { color: #2455A4; }
 .shift-close-panel { margin: 1rem 0; }
 .shift-method-panel h2, .shift-activity-panel h2, .shift-inventory-panel h2 { display: flex; align-items: center; gap: .55rem; }

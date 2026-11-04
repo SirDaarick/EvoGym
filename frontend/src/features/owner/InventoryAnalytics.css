@@ -53,7 +53,7 @@
 
 .inventory-period-btn.active {
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   border-color: var(--color-primary);
 }
 
@@ -100,7 +100,7 @@
   height: 36px;
   border-radius: 8px;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -189,7 +189,7 @@
 
 .inventory-toggle-btn.active {
   background: var(--color-surface);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -232,7 +232,7 @@
   height: 28px;
   border-radius: 6px;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 700;
   font-size: 13px;
   display: flex;
@@ -416,7 +416,7 @@
 }
 
 .inventory-sort-header-btn:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .inventory-prod-cell {

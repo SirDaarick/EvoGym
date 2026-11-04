@@ -53,7 +53,7 @@
   height: 36px;
   border-radius: 10px;
   background: rgba(252, 108, 6, 0.08);
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
 }
 
 .member-kpi-icon-wrap.tone-success {
@@ -284,7 +284,7 @@
 .member-cohort-count {
   font-size: 0.8125rem;
   font-weight: 800;
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
 }
 
 .member-cohort-desc {
@@ -355,7 +355,7 @@
 
 .member-ranking-units {
   font-weight: 700;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
 }
 
 .member-ranking-revenue {
@@ -393,13 +393,13 @@
 }
 
 .member-insight-icon {
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
   flex-shrink: 0;
   margin-top: 2px;
 }
 
 .member-retention-insight-banner strong {
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
 }
 
 /* Dark theme overrides */

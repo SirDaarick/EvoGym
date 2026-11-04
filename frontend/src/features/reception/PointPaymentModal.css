@@ -60,7 +60,7 @@
   height: 68px;
   border-radius: 50%;
   background: rgba(252, 108, 6, 0.12);
-  color: #FC6C06;
+  color: var(--color-primary-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -142,7 +142,7 @@
 .point-amount-display {
   font-size: 32px;
   font-weight: 800;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   margin: 4px 0 0;
 }
 

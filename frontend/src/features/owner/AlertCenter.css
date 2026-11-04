@@ -49,14 +49,14 @@
 
 .alert-period-btn.active {
   background: var(--color-surface);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 700;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="dark"] .alert-period-btn.active {
   background: var(--color-surface-raised);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
@@ -111,7 +111,7 @@
   height: 36px;
   border-radius: 10px;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   flex-shrink: 0;
 }
 
@@ -157,7 +157,7 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   text-decoration: none;
   margin-top: 4px;
   transition: color 120ms ease;
@@ -335,7 +335,7 @@
 .alert-filter-pill.active {
   background: var(--color-soft);
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 700;
 }
 
@@ -447,7 +447,7 @@
 }
 
 .alert-sort-btn:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .alert-empty-row {

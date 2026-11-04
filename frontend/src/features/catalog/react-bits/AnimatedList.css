@@ -210,6 +210,6 @@
   margin: 8px 4px 4px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   letter-spacing: -0.01em;
 }

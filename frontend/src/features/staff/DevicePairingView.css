@@ -54,7 +54,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #FC6C06;
+  color: var(--color-primary-ink);
 }
 
 .pairing-view-title {
@@ -176,5 +176,5 @@
 }
 
 .pairing-view-back-link:hover {
-  color: #FC6C06;
+  color: var(--color-primary-ink);
 }

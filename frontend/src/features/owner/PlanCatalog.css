@@ -62,7 +62,7 @@
 }
 
 .plan-kpi-icon {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -151,7 +151,7 @@
 
 .plan-pill-btn.active {
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   border-color: var(--color-primary);
 }
 
@@ -183,7 +183,7 @@
 }
 
 .plan-sort-btn:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .plan-table-name {
@@ -363,7 +363,7 @@
 .plan-editor-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
 .plan-editor-presets button { border: 1px solid var(--color-divider); border-radius: var(--radius-control); color: var(--color-ink); background: var(--color-surface); font: inherit; font-size: .85rem; cursor: pointer; padding: .65rem; transition: border-color 150ms, background 150ms; }
 .plan-editor-presets button:hover { border-color: var(--color-primary); }
-.plan-editor-presets button[aria-pressed="true"] { background: var(--color-soft); border-color: var(--color-primary); color: var(--color-primary); font-weight: 600; }
+.plan-editor-presets button[aria-pressed="true"] { background: var(--color-soft); border-color: var(--color-primary); color: var(--color-primary-ink); font-weight: 600; }
 .plan-editor-period-summary { margin: 0; padding: .85rem 1rem; border-radius: var(--radius-control); background: var(--color-soft); font-size: .875rem; }
 .plan-editor-details { min-width: 0; border-top: 1px solid var(--color-divider); }
 .plan-editor-details summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; padding: .75rem .15rem; font-size: .8rem; font-weight: 600; color: var(--color-muted); }

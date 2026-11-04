@@ -99,7 +99,7 @@
   font-weight: 800;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   margin: 0;
 }
 
@@ -395,7 +395,7 @@
 
 .member-tab-btn.is-active {
   background: var(--color-surface, #FCFCFC);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   border-color: var(--color-divider, #E5E3E0);
   box-shadow: var(--shadow-clay, 0 10px 24px rgba(35, 29, 31, 0.10), 0 3px 7px rgba(35, 29, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9));
   font-weight: 700;
@@ -403,7 +403,7 @@
 
 :root[data-theme='dark'] .member-tab-btn.is-active {
   background: var(--color-surface, #1E1E1E);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   border-color: #3F3F46;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
@@ -411,7 +411,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .member-tab-btn.is-active {
     background: var(--color-surface, #1E1E1E);
-    color: var(--color-primary, #FC6C06);
+    color: var(--color-primary-ink);
     border-color: #3F3F46;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
@@ -511,7 +511,7 @@
   min-width: 38px;
   border-radius: 10px;
   background: var(--color-soft, #FFF8F2);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -566,7 +566,7 @@
   padding: 4px 10px;
   border-radius: 8px;
   background: rgba(252, 108, 6, 0.08);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   border: 1px solid rgba(252, 108, 6, 0.2);
   width: fit-content;
 }
@@ -936,7 +936,7 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 800;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   display: block;
 }
 
@@ -968,7 +968,7 @@
 .counter-card-link-btn {
   background: transparent;
   border: none;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -1127,7 +1127,7 @@
   height: 38px;
   border-radius: 10px;
   background: rgba(252, 108, 6, 0.12);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -1173,7 +1173,7 @@
 
 .member-plan-hero-streak {
   font-weight: 600;
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
 }
 
 /* --------------------------------------------------------------------------
@@ -1429,7 +1429,7 @@
 .attendance-year-control button:hover:not(:disabled) {
   background: var(--color-soft);
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   transform: translateY(-1px);
 }
 
@@ -1505,7 +1505,7 @@
 
 .attendance-tooltip-desc {
   font-size: 11px;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 600;
   margin-top: 2px;
 }
@@ -1540,7 +1540,7 @@
   padding: 2px 8px;
   border-radius: 9999px;
   background: var(--color-soft, #FFF8F2);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   border: 1px solid rgba(252, 108, 6, 0.25);
 }
 
@@ -1666,7 +1666,7 @@
   height: 26px;
   border-radius: 8px;
   background: var(--color-soft, #FFF8F2);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   font-size: 11px;
   font-weight: 800;
   display: grid;
@@ -2050,7 +2050,7 @@
 .member-fav-rank {
   font-size: 0.75rem;
   font-weight: 800;
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
 }
 
 .member-habit-empty {
@@ -2087,7 +2087,7 @@
 
 .member-habit-tip-hint {
   font-size: 0.8125rem;
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
   font-weight: 600;
   background: rgba(252, 108, 6, 0.1);
   padding: 8px 12px;
@@ -2135,7 +2135,7 @@
 .member-back-link:hover {
   background: var(--color-soft, #FFF8F2);
   border-color: var(--color-primary, #FC6C06);
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(252, 108, 6, 0.15);
 }

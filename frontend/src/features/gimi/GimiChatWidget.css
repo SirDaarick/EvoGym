@@ -123,7 +123,7 @@
   height: 38px;
   border-radius: 12px;
   background: rgba(252, 108, 6, 0.12);
-  color: var(--color-primary, #fc6c06);
+  color: var(--color-primary-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -279,14 +279,14 @@
 }
 
 :root[data-theme='dark'] .gimi-chip {
-  --gimi-chip-text: var(--color-primary, #fc6c06);
+  --gimi-chip-text: var(--color-primary-ink);
   background: #222222;
   border-color: #383838;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .gimi-chip {
-    --gimi-chip-text: var(--color-primary, #fc6c06);
+    --gimi-chip-text: var(--color-primary-ink);
     background: #222222;
     border-color: #383838;
   }

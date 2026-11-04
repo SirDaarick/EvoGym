@@ -26,7 +26,7 @@
 }
 
 .att-period-icon {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .att-period-pills {
@@ -58,14 +58,14 @@
 
 .att-period-pill.active {
   background: var(--color-surface);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 700;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme='dark'] .att-period-pill.active {
   background: var(--color-surface-raised, #2A2A2A);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
@@ -171,7 +171,7 @@
 }
 
 .att-kpi-value.text-accent {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .att-kpi-value.text-sky {
@@ -219,7 +219,7 @@
 
 .att-stat-badge.peak {
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   border: 1px solid var(--color-primary);
 }
 
@@ -510,7 +510,7 @@
 }
 
 .att-sort-btn:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .att-occupant-name-cell {
@@ -524,7 +524,7 @@
   height: 32px;
   border-radius: 50%;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   display: grid;
   place-items: center;
   font-size: 12px;
@@ -633,7 +633,7 @@
 }
 
 .att-insights-icon {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .att-insights-grid {
@@ -691,7 +691,7 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 
 .att-action-text {

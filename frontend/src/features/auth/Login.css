@@ -105,7 +105,7 @@
 .staff-login-link {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   text-decoration: none;
   transition: opacity 0.16s ease;
 }

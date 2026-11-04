@@ -55,7 +55,7 @@
 }
 .shift-close-x:hover {
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   transform: scale(1.05);
 }
 .shift-close-x:focus-visible,
@@ -312,7 +312,7 @@
   padding: 1px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   white-space: nowrap;
   flex-shrink: 0;
   line-height: 1.2;
@@ -355,7 +355,7 @@
 .denomination-step-btn:hover:not(:disabled) {
   background: var(--color-soft);
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 .denomination-step-btn:disabled {
   opacity: 0.35;
@@ -478,7 +478,7 @@
   color: #b42318;
 }
 .shift-close-summary .shift-close-difference dd.is-positive {
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 .shift-close-breakdown {
   margin-bottom: 0.5rem;
@@ -489,7 +489,7 @@
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
 }
 .shift-close-breakdown dl > div {
   padding: 0.35rem 0;

@@ -66,6 +66,7 @@ The tagline belongs only in an optional welcome/brand context, never repeated ac
 | text.secondary | `#555555` | Official Secondary Gray for supporting text; check other pairings. |
 | brand.black | `#080808` | Official Black for selected high-contrast details; not a default page background. |
 | action.primary | `#FC6C06` | Official EGC Orange paired with `#080808` text; official black text provides 6.95:1 contrast meeting WCAG AA. |
+| action.ink (`--color-primary-ink`) | `#A83D08` | Orange used as text or icon color on light surfaces (5.98:1 on `#FFF8F2`, 6.14:1 on `#FCFCFC`). `#FC6C06` itself is reserved for fills, borders, outlines and interactive surfaces; never for text or icons on light backgrounds (about 2.8:1). |
 | action.hover | `#E05A00` | Primary control hover/pressed candidate. |
 | action.soft | `#FFF8F2` | Quiet orange grouping background. |
 | boundary.essential | `#75717C` | Necessary input/button boundary against white or page canvas. |
@@ -77,6 +78,8 @@ The tagline belongs only in an optional welcome/brand context, never repeated ac
 
 Brand orange is never the sole indicator of selected, overdue, or allowed status.
 Pair statuses with text; reserve warning/error colors for meaningful conditions, not visual variety.
+
+Rule: use `--color-primary` (`#FC6C06`) only for fills, borders, outlines, shadows and progress/interactive surfaces; text and icons use `--color-primary-ink`. Text placed on an orange fill stays `#080808` (`--color-primary-text`).
 
 ### Dark theme palette
 
@@ -91,6 +94,7 @@ Dark mode keeps the same logo, orange accent, roles, and content hierarchy. It d
 | dark.text.primary | `#FCFCFC` | Official EGC White for primary content. |
 | dark.text.secondary | `#CCCCCC` | Derived supporting text with readable contrast on dark surfaces. |
 | dark.action.primary | `#FC6C06` | Official EGC Orange for the primary action; pair with dark text, not white. |
+| dark.action.ink (`--color-primary-ink`) | `#FC6C06` | Orange text/icons on dark surfaces; passes 4.5:1 on all dark surfaces (4.98:1 on the weakest, `#2A2A2A`). |
 | dark.action.text | `#080808` | Official Black on orange primary actions. |
 | dark.border.essential | `#8A8A8A` | Derived visible boundary for controls on `#202020`. |
 | dark.focus | `#9CC5FF` | Derived keyboard focus color that remains distinct on both dark surfaces. |
@@ -112,6 +116,7 @@ Checks apply only to the named opaque pairs, not arbitrary shadows, overlays, or
 | `#080808` / `#FC6C06` | 6.95:1 | Primary button text >= 4.5:1. |
 | `#080808` / `#E05A00` | 5.31:1 | Hover button text >= 4.5:1. |
 | `#A83D08` / `#FFF8F2` | 5.98:1 | Soft action text >= 4.5:1. |
+| `#A83D08` / `#FCFCFC` | 6.13:1 | Orange text/icon (`--color-primary-ink`) >= 4.5:1. |
 | `#75717C` / `#FCFCFC` | 4.64:1 | Essential boundary >= 3:1. |
 | `#75717C` / `#F7F7F5` | 4.43:1 | Boundary only; not normal text on canvas. |
 | `#2455A4` / official white / canvas | 7.03 / 6.73:1 | Focus against these adjacent surfaces >= 3:1. |
@@ -119,6 +124,7 @@ Checks apply only to the named opaque pairs, not arbitrary shadows, overlays, or
 | Dark primary text / canvas (`#FCFCFC` / `#080808`) | 19.52:1 | Normal text >= 4.5:1. |
 | Dark secondary text / surface (`#CCCCCC` / `#202020`) | 10.15:1 | Normal text >= 4.5:1. |
 | Dark action text / orange (`#080808` / `#FC6C06`) | 6.95:1 | Primary button text >= 4.5:1. |
+| Dark ink (`#FC6C06`) / canvas, surface, raised (`#080808` / `#202020` / `#2A2A2A`) | 6.94 / 5.65 / 4.98:1 | Orange text/icon >= 4.5:1. |
 | Dark focus / canvas and surface (`#9CC5FF`) | 11.30 / 9.19:1 | Focus against these adjacent surfaces >= 3:1. |
 | Dark success / warning / error pairs above | 7.86 / 8.62 / 6.92:1 | Normal status text >= 4.5:1. |
 

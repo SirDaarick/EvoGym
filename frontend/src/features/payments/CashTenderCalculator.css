@@ -34,7 +34,7 @@
 }
 
 .cash-change-result strong {
-  color: var(--color-primary, #FC6C06);
+  color: var(--color-primary-ink);
 }
 
 .cash-tender-shortfall {
