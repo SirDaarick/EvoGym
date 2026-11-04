@@ -9,10 +9,27 @@ import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 import { ProductCard } from './ProductCard';
+import type { StockItem } from '../../api/inventoryApi';
 
 export interface SuplementosModalProps {
   isOpen: boolean;
   onClose: () => void;
+  live?: { stock: StockItem[]; quantities: Record<string, number>; disabled: boolean; onQuantityChange: (id: string, quantity: number) => void; checkout: React.ReactNode };
+}
+
+export function SuplementosModal(props: SuplementosModalProps) {
+  if (!props.isOpen) return null;
+  if (!props.live) return <DemoSuplementosModal {...props} />;
+  const { stock, quantities, disabled, onQuantityChange, checkout } = props.live;
+  const supplements = stock.filter(item => item.unit === 'scoop' && item.is_active && item.initialized);
+  return <div className="staff-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="live-supplements-title" onClick={event => { if (event.target === event.currentTarget && !disabled) props.onClose(); }}>
+    <div className="staff-modal-card suplementos-modal-card">
+      <div className="guantes-modal-header"><div><h2 id="live-supplements-title">Suplementos</h2><p className="muted">Venta por porción</p></div><button type="button" aria-label="Cerrar modal de suplementos" disabled={disabled} onClick={props.onClose}>✕</button></div>
+      <div className="guantes-modal-body"><div className="suplementos-grid-container" role="group" aria-label="Catálogo de suplementos">
+        {supplements.length ? supplements.map(item => <div key={item.product_id}><ProductCard product={{ id: item.product_id, name: item.name, priceMinor: item.price_minor }} stock={item.quantity ?? 0} quantity={quantities[item.product_id] ?? 0} disabled={disabled} onQuantityChange={quantity => onQuantityChange(item.product_id, quantity)} /><p>~{item.quantity ?? 0} scoops disponibles</p></div>) : <p>No hay suplementos disponibles.</p>}
+      </div>{checkout}</div>
+    </div>
+  </div>;
 }
 
 function TrashIcon() {
@@ -25,7 +42,7 @@ function TrashIcon() {
   );
 }
 
-export function SuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
+function DemoSuplementosModal({ isOpen, onClose }: SuplementosModalProps) {
   const { state, transact } = useDemo();
   const supplements = state.supplements ?? [];
 

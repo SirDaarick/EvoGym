@@ -24,6 +24,7 @@ import { GuantesModal } from '../features/reception/GuantesModal';
 import { CasillerosModal } from '../features/reception/CasillerosModal';
 import { ExtraModal } from '../features/reception/ExtraModal';
 import { GastoModal } from '../features/reception/GastoModal';
+import { SuplementosModal } from '../features/reception/SuplementosModal';
 
 type Intent = { key: string; registerId: string; payload: ProductSaleInput };
 type Member = { id: string; full_name: string; phone: string };
@@ -55,6 +56,7 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
   const [isCasillerosOpen, setIsCasillerosOpen] = useState(false);
   const [isExtraOpen, setIsExtraOpen] = useState(false);
   const [isGastoOpen, setIsGastoOpen] = useState(false);
+  const [isSuplementosOpen, setIsSuplementosOpen] = useState(false);
   const [activeCardIntentId, setActiveCardIntentId] = useState<string | null>(null);
   const currentBranchId = registers.find(register => register.id === registerId)?.branch_id;
 
@@ -310,6 +312,26 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
     } finally { submitting.current = false; setPending(false); }
   }
 
+  const purchaseContent = <>
+    <CurrentPurchaseCard totalMinor={total} disabled={locked} step={step} onStepChange={setStep}
+      useLiveCardIntent
+      step1ActionDisabled={!selected.length || !registerId || locked} onConfirmPayment={value => void submit(value)}
+      statusMessage={message} statusType={error ? 'error' : pending ? 'warning' : 'success'}
+      assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone } : null}
+      memberAssignment={<div className="cart-member-section"><div className="field"><label htmlFor="product-sale-member">Asignar socio</label>
+        <input id="product-sale-member" value={member?.full_name ?? query} disabled={locked || !!member} onChange={event => setQuery(event.target.value)} />
+        {member && <Button variant="secondary" disabled={locked} onClick={() => { setMember(null); setQuery(''); }}>Desasignar</Button>}
+        {members.map(item => <button type="button" key={item.id} onClick={() => { setMember(item); setMembers([]); }}>{item.full_name}</button>)}
+      </div></div>}>
+      <div className="cart-items-section">{intent ? <><p>Compra pendiente de confirmar. Socio: {intent.payload.member_id ? recoveredMemberName || intent.payload.member_id : 'Sin asignar'}</p><ul className="cart-lines">{intent.payload.items.map(item => <li className="cart-line-row" key={item.product_id}>{item.quantity} × {stock.find(product => product.product_id === item.product_id)?.name ?? item.product_id}</li>)}</ul></> : selected.length ? <ul className="cart-lines">{selected.map(item => <li className="cart-line-row" key={item.product_id}>
+        <span>{quantities[item.product_id]} × {item.name}</span><strong>{formatMoney(item.price_minor * quantities[item.product_id])} MXN</strong>
+        <button type="button" disabled={locked} onClick={() => changeQuantity(item.product_id, 0)}>Quitar</button>
+      </li>)}</ul> : <p className="cart-empty-msg">Sin productos seleccionados.</p>}</div>
+    </CurrentPurchaseCard>
+    {activeCardIntentId && <div style={{ marginTop: '8px' }}><Button variant="secondary" onClick={() => void cancelCurrentCardIntent()}>Cancelar cobro en terminal</Button></div>}
+    {intent && !activeCardIntentId && <div><p role="status">La compra está pendiente de confirmación. Al resolverla se recupera la venta registrada o se cancela el intento si no se registró.</p><Button disabled={pending} onClick={() => void resolveIntent()}>Resolver compra pendiente</Button></div>}
+  </>;
+
   return <>
     <PageHeader eyebrow="RECEPCIÓN · INICIO" title="Inicio de recepción" description="Socios y ventas, a un paso." />
     <div className="reception-checkout">
@@ -320,19 +342,21 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
             const isCasilleros = key === 'casilleros';
             const isExtra = key === 'extra';
             const isGasto = key === 'gasto';
-            const isAvailable = (isGuantes || isCasilleros || isExtra || isGasto) && Boolean(registerId && currentBranchId);
+            const isSuplementos = key === 'suplementos';
+            const isAvailable = (isGuantes || isCasilleros || isExtra || isGasto || isSuplementos) && Boolean(registerId && currentBranchId) && (!isSuplementos || !locked);
             return (
               <Button
                 key={key}
                 variant="secondary"
                 className="shortcut-clay-btn"
                 disabled={!isAvailable}
-                title={isGuantes || isCasilleros || isExtra || isGasto ? (isAvailable ? `Abrir ${label}` : 'Selecciona una caja primero') : 'Aún no disponible'}
+                title={isAvailable ? `Abrir ${label}` : 'Selecciona una caja primero'}
                 onClick={() => {
                   if (isGuantes) setIsGuantesOpen(true);
                   if (isCasilleros) setIsCasillerosOpen(true);
                   if (isExtra) setIsExtraOpen(true);
                   if (isGasto) setIsGastoOpen(true);
+                  if (isSuplementos) setIsSuplementosOpen(true);
                 }}
               >
                 {shortcutIcons[key]}
@@ -348,39 +372,17 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
           <div className="field"><label htmlFor="product-sale-register">Caja</label><select id="product-sale-register" value={registerId} disabled={locked || registers.length === 1} onChange={event => { setRegisterId(event.target.value); setQuantities({}); setStep(1); }}>
             <option value="">Selecciona una caja</option>{registers.map(register => <option key={register.id} value={register.id}>{branches.find(branch => branch.id === register.branch_id)?.name ?? register.branch_id} · {register.name} · {register.code}</option>)}
           </select></div>
-          {stock.length ? <div className="product-grid">{stock.map(item => <ProductCard key={item.product_id}
+          {stock.some(item => item.unit !== 'scoop') ? <div className="product-grid">{stock.filter(item => item.unit !== 'scoop').map(item => <ProductCard key={item.product_id}
             product={{ id: item.product_id, name: item.name, priceMinor: item.price_minor }} stock={item.quantity ?? 0}
             quantity={quantities[item.product_id] ?? 0} disabled={locked} onQuantityChange={quantity => changeQuantity(item.product_id, quantity)} />)}</div>
             : <EmptyState title="Sin productos">Selecciona una caja y revisa el inventario.</EmptyState>}
         </Panel>
       </div>
       <MobileDetailPanel title="Compra actual" triggerLabel="Ver compra actual" className="reception-current-purchase-slot">
-        <CurrentPurchaseCard totalMinor={total} disabled={locked} step={step} onStepChange={setStep}
-          useLiveCardIntent
-          step1ActionDisabled={!selected.length || !registerId || locked} onConfirmPayment={value => void submit(value)}
-          statusMessage={message} statusType={error ? 'error' : pending ? 'warning' : 'success'}
-          assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone } : null}
-          memberAssignment={<div className="cart-member-section"><div className="field"><label htmlFor="product-sale-member">Asignar socio</label>
-            <input id="product-sale-member" value={member?.full_name ?? query} disabled={locked || !!member} onChange={event => setQuery(event.target.value)} />
-            {member && <Button variant="secondary" disabled={locked} onClick={() => { setMember(null); setQuery(''); }}>Desasignar</Button>}
-            {members.map(item => <button type="button" key={item.id} onClick={() => { setMember(item); setMembers([]); }}>{item.full_name}</button>)}
-          </div></div>}>
-          <div className="cart-items-section">{intent ? <><p>Compra pendiente de confirmar. Socio: {intent.payload.member_id ? recoveredMemberName || intent.payload.member_id : 'Sin asignar'}</p><ul className="cart-lines">{intent.payload.items.map(item => <li className="cart-line-row" key={item.product_id}>{item.quantity} × {stock.find(product => product.product_id === item.product_id)?.name ?? item.product_id}</li>)}</ul></> : selected.length ? <ul className="cart-lines">{selected.map(item => <li className="cart-line-row" key={item.product_id}>
-            <span>{quantities[item.product_id]} × {item.name}</span><strong>{formatMoney(item.price_minor * quantities[item.product_id])} MXN</strong>
-            <button type="button" disabled={locked} onClick={() => changeQuantity(item.product_id, 0)}>Quitar</button>
-          </li>)}</ul> : <p className="cart-empty-msg">Sin productos seleccionados.</p>}</div>
-        </CurrentPurchaseCard>
-        {activeCardIntentId && (
-          <div style={{ marginTop: '8px' }}>
-            <Button variant="secondary" onClick={() => void cancelCurrentCardIntent()}>
-              Cancelar cobro en terminal
-            </Button>
-          </div>
-        )}
-        {intent && !activeCardIntentId && <div><p role="status">La compra está pendiente de confirmación. Al resolverla se recupera la venta registrada o se cancela el intento si no se registró.</p>
-          <Button disabled={pending} onClick={() => void resolveIntent()}>Resolver compra pendiente</Button></div>}
+        {!isSuplementosOpen && purchaseContent}
       </MobileDetailPanel>
     </div>
+    <SuplementosModal isOpen={isSuplementosOpen} onClose={() => setIsSuplementosOpen(false)} live={{ stock, quantities, disabled: locked, onQuantityChange: changeQuantity, checkout: purchaseContent }} />
     {registerId && (
       <DevolucionesModal
         isOpen={isDevolucionesOpen}

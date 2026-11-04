@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import re
+import hashlib
 from uuid import UUID, uuid4
 
 from sqlalchemy import case, func, select, text
@@ -45,6 +46,8 @@ def create_product(
     price_minor: int = 0,
     cost_minor: int = 0,
     unit: str = "piece",
+    servings_per_container: int | None = None,
+    container_product_id: UUID | None = None,
     initial_quantity: int | None = None,
     initial_branch_id: UUID | None = None,
 ) -> Product:
@@ -57,10 +60,14 @@ def create_product(
             base_slug = "prod"
         normalized_code = f"{base_slug[:48]}-{uuid4().hex[:8]}"
 
-    if unit != "piece":
-        raise ValueError("Only piece-counted products are supported.")
+    if unit not in ("piece", "scoop") or (unit == "piece" and servings_per_container is not None) or (unit == "scoop" and (type(servings_per_container) is not int or not 1 <= servings_per_container <= 2**31 - 1)):
+        raise ValueError("Invalid product unit or servings per container.")
     if price_minor < 0 or cost_minor < 0:
         raise ValueError("Price and cost must be nonnegative.")
+    if container_product_id is not None:
+        container = session.scalar(select(Product).where(Product.id == container_product_id).with_for_update())
+        if unit != "scoop" or container is None or container.unit != "piece":
+            raise ValueError("Container must be an existing piece product.")
 
     product = Product(
         code=normalized_code,
@@ -70,6 +77,8 @@ def create_product(
         cost_minor=cost_minor,
         is_active=True,
         unit=unit,
+        servings_per_container=servings_per_container,
+        container_product_id=container_product_id,
         created_by=created_by,
     )
     session.add(product)
@@ -100,10 +109,33 @@ def update_product(
     price_minor: int | None = None,
     cost_minor: int | None = None,
     is_active: bool | None = None,
+    unit: str | None = None,
+    servings_per_container: int | None = None,
+    servings_provided: bool = False,
+    container_product_id: UUID | None = None,
+    container_provided: bool = False,
 ) -> Product:
-    product = session.get(Product, product_id)
+    product = session.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
         raise LookupError("product")
+
+    new_unit = unit if unit is not None else product.unit
+    new_servings = servings_per_container if servings_provided else product.servings_per_container
+    new_container_id = container_product_id if container_provided else product.container_product_id
+    if new_container_id is not None:
+        container = session.scalar(select(Product).where(Product.id == new_container_id).with_for_update())
+        if new_unit != "scoop" or container is None or container.unit != "piece" or container.id == product.id:
+            raise ValueError("Container must be an existing piece product.")
+    if new_unit != product.unit:
+        if session.scalar(select(StockInitialization.id).where(StockInitialization.product_id == product.id).limit(1)) is not None:
+            raise ValueError("Cannot change the unit of a product with inventory history.")
+        if session.scalar(select(Product.id).where(Product.container_product_id == product.id).limit(1)) is not None:
+            raise ValueError("Cannot change the unit of a linked container.")
+    if new_unit not in ("piece", "scoop") or (new_unit == "piece" and new_servings is not None) or (new_unit == "scoop" and (type(new_servings) is not int or not 1 <= new_servings <= 2**31 - 1)):
+        raise ValueError("Invalid product unit or servings per container.")
+    product.unit = new_unit
+    product.servings_per_container = new_servings
+    product.container_product_id = new_container_id
 
     if name is not None:
         product.name = normalize_product_name(name)
@@ -160,7 +192,7 @@ def get_on_hand_stock(session: Session, *, branch_id: UUID, product_id: UUID) ->
             select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
                 StockMovement.branch_id == branch_id,
                 StockMovement.product_id == product_id,
-                StockMovement.kind.in_(("restock", "return")),
+                StockMovement.kind.in_(("restock", "return", "open_in")),
             )
         )
         or 0
@@ -170,7 +202,7 @@ def get_on_hand_stock(session: Session, *, branch_id: UUID, product_id: UUID) ->
             select(func.coalesce(func.sum(StockMovement.quantity), 0)).where(
                 StockMovement.branch_id == branch_id,
                 StockMovement.product_id == product_id,
-                StockMovement.kind.in_(("waste", "sale")),
+                StockMovement.kind.in_(("waste", "sale", "open_out")),
             )
         )
         or 0
@@ -188,12 +220,12 @@ def list_branch_stock(session: Session, *, branch_id: UUID, offset: int, limit: 
         select(
             StockMovement.product_id,
             func.coalesce(
-                func.sum(case((StockMovement.kind.in_(("restock", "return")), StockMovement.quantity), else_=0)), 0
+                func.sum(case((StockMovement.kind.in_(("restock", "return", "open_in")), StockMovement.quantity), else_=0)), 0
             ).label("restocked"),
             func.coalesce(
                 func.sum(case((StockMovement.kind == "waste", StockMovement.quantity), else_=0)), 0
             ).label("waste"),
-            func.coalesce(func.sum(case((StockMovement.kind == "sale", StockMovement.quantity), else_=0)), 0).label("sold"),
+            func.coalesce(func.sum(case((StockMovement.kind.in_(("sale", "open_out")), StockMovement.quantity), else_=0)), 0).label("sold"),
         )
         .where(StockMovement.branch_id == branch_id)
         .group_by(StockMovement.product_id)
@@ -306,6 +338,47 @@ def record_stock_movement(
     return movement, new_on_hand, True
 
 
+def open_container(session: Session, *, branch_id: UUID, product_id: UUID, actor_id: UUID, idempotency_key: str) -> bool:
+    if session.get(Branch, branch_id) is None:
+        raise LookupError("branch")
+    scoop = session.get(Product, product_id)
+    if scoop is None:
+        raise LookupError("product")
+    if scoop.unit != "scoop" or scoop.container_product_id is None:
+        raise ValueError("A linked container is required.")
+    ids = sorted((scoop.id, scoop.container_product_id), key=str)
+    locked = session.scalars(select(Product).where(Product.id.in_(ids)).order_by(Product.id).with_for_update().execution_options(populate_existing=True)).all()
+    products = {product.id: product for product in locked}
+    scoop = products.get(product_id)
+    if scoop is None or scoop.unit != "scoop" or scoop.container_product_id not in products:
+        raise ValueError("The container configuration changed; retry.")
+    container = products[scoop.container_product_id]
+    if not scoop.is_active or not container.is_active or container.unit != "piece":
+        raise InactiveProductError("The scoop and container products must be active.")
+    key = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    out_key, in_key = f"open-out-{key}", f"open-in-{key}"
+    existing = session.scalars(select(StockMovement).where(StockMovement.branch_id == branch_id, StockMovement.idempotency_key.in_((out_key, in_key)))).all()
+    if existing:
+        if len(existing) != 2 or not any(m.idempotency_key == in_key and m.kind == "open_in" and m.product_id == scoop.id for m in existing) or not any(m.idempotency_key == out_key and m.kind == "open_out" and m.product_id == container.id for m in existing):
+            raise IdempotencyConflictError("Idempotency key already used with different parameters.")
+        return False
+    initializations = session.scalars(select(StockInitialization).where(StockInitialization.branch_id == branch_id, StockInitialization.product_id.in_(ids)).order_by(StockInitialization.product_id).with_for_update()).all()
+    by_product = {row.product_id: row for row in initializations}
+    if container.id not in by_product or get_on_hand_stock(session, branch_id=branch_id, product_id=container.id) < 1:
+        raise InsufficientStockError("No container is available to open.")
+    if scoop.id not in by_product:
+        session.add(StockInitialization(branch_id=branch_id, product_id=scoop.id, quantity=0, initialized_by=actor_id))
+        session.flush()
+    if get_on_hand_stock(session, branch_id=branch_id, product_id=scoop.id) > MAX_BIGINT - scoop.servings_per_container:
+        raise ValueError("Scoop stock exceeds the supported quantity.")
+    session.add_all([
+        StockMovement(branch_id=branch_id, product_id=container.id, kind="open_out", quantity=1, recorded_by=actor_id, idempotency_key=out_key),
+        StockMovement(branch_id=branch_id, product_id=scoop.id, kind="open_in", quantity=scoop.servings_per_container, recorded_by=actor_id, idempotency_key=in_key),
+    ])
+    session.flush()
+    return True
+
+
 def list_stock_movements(
     session: Session, *, branch_id: UUID, offset: int, limit: int
 ) -> tuple[list[StockMovement], int]:
@@ -338,8 +411,8 @@ def _read_current_inventory_rows(session: Session, branch_id: UUID):
             Product.unit,
             StockInitialization.id,
             (StockInitialization.quantity + select(func.coalesce(func.sum(case(
-                (StockMovement.kind.in_(("restock", "return")), StockMovement.quantity),
-                (StockMovement.kind.in_(("waste", "sale")), -StockMovement.quantity),
+                (StockMovement.kind.in_(("restock", "return", "open_in")), StockMovement.quantity),
+                (StockMovement.kind.in_(("waste", "sale", "open_out")), -StockMovement.quantity),
                 else_=0)), 0)).where(StockMovement.branch_id == branch_id,
                                      StockMovement.product_id == Product.id).correlate(Product).scalar_subquery()).label("quantity"),
             StockInitialization.initialized_by,

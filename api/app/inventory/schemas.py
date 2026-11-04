@@ -18,9 +18,17 @@ class ProductCreateDTO(BaseModel):
     category: str = Field(default="General", max_length=64)
     price_minor: int = Field(default=0, ge=0, le=2**63 - 1)
     cost_minor: int = Field(default=0, ge=0, le=2**63 - 1)
-    unit: str = Field(default="piece", pattern="^piece$")
+    unit: str = Field(default="piece", pattern="^(piece|scoop)$")
+    servings_per_container: int | None = Field(default=None, strict=True, ge=1, le=2**31 - 1)
+    container_product_id: UUID | None = None
     initial_quantity: int | None = Field(default=None, ge=0, le=2**63 - 1)
     initial_branch_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_servings(self) -> "ProductCreateDTO":
+        if (self.unit == "scoop") != (self.servings_per_container is not None):
+            raise ValueError("Scoop products require servings per container; piece products cannot have servings.")
+        return self
 
     @field_validator("code")
     @classmethod
@@ -47,6 +55,9 @@ class ProductUpdateDTO(BaseModel):
     price_minor: int | None = Field(default=None, ge=0, le=2**63 - 1)
     cost_minor: int | None = Field(default=None, ge=0, le=2**63 - 1)
     is_active: bool | None = None
+    unit: str | None = Field(default=None, pattern="^(piece|scoop)$")
+    servings_per_container: int | None = Field(default=None, strict=True, ge=1, le=2**31 - 1)
+    container_product_id: UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -74,6 +85,8 @@ class ProductDTO(BaseModel):
     cost_minor: int = 0
     is_active: bool = True
     unit: str = "piece"
+    servings_per_container: int | None = None
+    container_product_id: UUID | None = None
     created_by: UUID
     created_at: datetime
 
@@ -92,6 +105,8 @@ class StockRowDTO(BaseModel):
     cost_minor: int = 0
     is_active: bool = True
     unit: str = "piece"
+    servings_per_container: int | None = None
+    container_product_id: UUID | None = None
     initialized: bool
     opening_quantity: int | None = None
     restocked_quantity: int = 0
@@ -135,6 +150,11 @@ class StockMovementCreateDTO(BaseModel):
         elif self.reason:
             self.reason = self.reason.strip()
         return self
+
+
+class OpenContainerDTO(BaseModel):
+    product_id: UUID
+    idempotency_key: str = Field(min_length=1, max_length=128)
 
 
 class StockMovementDTO(BaseModel):

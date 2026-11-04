@@ -21,6 +21,7 @@ from app.inventory.queries import (
     list_branch_stock,
     list_products,
     list_stock_movements,
+    open_container,
     record_stock_movement,
     update_product,
 )
@@ -35,6 +36,7 @@ from app.inventory.schemas import (
     StockMovementCreateDTO,
     StockMovementDTO,
     StockMovementPageDTO,
+    OpenContainerDTO,
     StockPageDTO,
     StockRowDTO,
 )
@@ -124,6 +126,8 @@ def create_product_endpoint(payload: ProductCreateDTO, request: Request, actor_i
                 price_minor=payload.price_minor,
                 cost_minor=payload.cost_minor,
                 unit=payload.unit,
+                servings_per_container=payload.servings_per_container,
+                container_product_id=payload.container_product_id,
                 initial_quantity=payload.initial_quantity,
                 initial_branch_id=payload.initial_branch_id,
                 created_by=actor_id,
@@ -135,6 +139,8 @@ def create_product_endpoint(payload: ProductCreateDTO, request: Request, actor_i
         if "products.code" in msg or "uq_products_code" in msg:
             raise HTTPException(409, "A product with this code already exists.") from None
         raise
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.patch("/products/{product_id}", response_model=ProductDTO)
@@ -150,6 +156,11 @@ def update_product_endpoint(product_id: UUID, payload: ProductUpdateDTO, request
                 price_minor=payload.price_minor,
                 cost_minor=payload.cost_minor,
                 is_active=payload.is_active,
+                unit=payload.unit,
+                servings_per_container=payload.servings_per_container,
+                servings_provided="servings_per_container" in payload.model_fields_set,
+                container_product_id=payload.container_product_id,
+                container_provided="container_product_id" in payload.model_fields_set,
             )
             return ProductDTO.model_validate(product)
     except LookupError:
@@ -238,6 +249,8 @@ def list_stock_endpoint(
                         cost_minor=product.cost_minor,
                         is_active=product.is_active,
                         unit=product.unit,
+                        servings_per_container=product.servings_per_container,
+                        container_product_id=product.container_product_id,
                         initialized=initialized,
                         opening_quantity=opening_qty,
                         restocked_quantity=restocked,
@@ -249,6 +262,26 @@ def list_stock_endpoint(
             return StockPageDTO(items=items, total=total)
     except LookupError:
         raise HTTPException(404, "The requested branch was not found.") from None
+
+
+@router.post("/branches/{branch_id}/open-container", status_code=201)
+def open_container_endpoint(branch_id: UUID, payload: OpenContainerDTO, request: Request, response: Response, principal: InventoryActorPrincipal = Depends(_actor)):
+    if not principal.is_admin and principal.branch_id != branch_id:
+        raise HTTPException(403, "Access restricted to your assigned branch.")
+    if not payload.idempotency_key.strip():
+        raise HTTPException(422, "An idempotency key is required.")
+    try:
+        with _factory(request).begin() as session:
+            is_new = open_container(session, branch_id=branch_id, product_id=payload.product_id, actor_id=principal.staff_id, idempotency_key=payload.idempotency_key.strip())
+            if not is_new:
+                response.status_code = 200
+            return {"opened": True}
+    except LookupError as exc:
+        raise HTTPException(404, f"The requested {exc.args[0]} was not found.") from None
+    except (InactiveProductError, InsufficientStockError, IdempotencyConflictError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.post("/branches/{branch_id}/movements", response_model=StockMovementDTO, status_code=201)

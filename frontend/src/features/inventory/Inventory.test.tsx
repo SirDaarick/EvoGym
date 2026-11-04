@@ -11,6 +11,25 @@ function StateProbe() {
 }
 
 describe('Inventory catalog preview', () => {
+  it('opens a linked container and pre-fills scoop waste', async () => {
+    sessionStorage.clear();
+    const items = [{ product_id: 'scoop', code: 'scoop', name: 'Protein', category: 'Supplements', price_minor: 500, cost_minor: 100, is_active: true, unit: 'scoop', servings_per_container: 30, container_product_id: 'bottle', initialized: true, opening_quantity: 5, restocked_quantity: 0, waste_quantity: 0, quantity: 5, initialized_at: null }];
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', name: 'Central', code: 'central' }]));
+      if (path.endsWith('/open-container')) return new Response(JSON.stringify({ opened: true }), { status: 201 });
+      if (path.includes('/stock?')) return new Response(JSON.stringify({ items, total: 1 }));
+      throw new Error(path);
+    });
+    render(<Inventory role="RECEPTION" apiRequest={request} />);
+    expect(await screen.findByText('~5 scoops aprox.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '+1 bote (+30 scoops)' }));
+    expect(await screen.findByText('Bote abierto y porciones agregadas al inventario.')).toBeVisible();
+    expect(request.mock.calls.some(([path]) => path.endsWith('/open-container'))).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Merma' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Vaciar / ajustar resto' }));
+    expect(screen.getByLabelText('Motivo de merma *')).toHaveValue('Ajuste por fin de bote');
+    expect(screen.getByText('Cantidad seleccionada').parentElement).toHaveTextContent('5');
+  });
   it('searches products and keeps receiving actions unavailable without cost data', () => {
     render(<DemoProvider><Inventory role="RECEPTION" /></DemoProvider>);
     expect(screen.getByRole('heading', { name: 'Recepción de inventario' })).toBeVisible();

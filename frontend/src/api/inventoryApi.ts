@@ -22,6 +22,8 @@ export interface ProductItem {
   cost_minor: number;
   is_active: boolean;
   unit: string;
+  servings_per_container?: number | null;
+  container_product_id?: string | null;
   created_by: string;
   created_at: string;
 }
@@ -35,6 +37,8 @@ export interface StockItem {
   cost_minor: number;
   is_active: boolean;
   unit: string;
+  servings_per_container?: number | null;
+  container_product_id?: string | null;
   initialized: boolean;
   opening_quantity: number | null;
   restocked_quantity: number;
@@ -52,7 +56,7 @@ export interface StockMovementItem {
   id: string;
   branch_id: string;
   product_id: string;
-  kind: 'restock' | 'waste';
+  kind: 'restock' | 'waste' | 'sale' | 'return' | 'open_in' | 'open_out';
   quantity: number;
   reason: string | null;
   recorded_by: string;
@@ -75,6 +79,8 @@ export interface CreateProductPayload {
   initial_branch_id?: string;
   code?: string;
   unit?: string;
+  servings_per_container?: number | null;
+  container_product_id?: string | null;
 }
 
 export interface UpdateProductPayload {
@@ -83,6 +89,9 @@ export interface UpdateProductPayload {
   price_minor?: number;
   cost_minor?: number;
   is_active?: boolean;
+  unit?: string;
+  servings_per_container?: number | null;
+  container_product_id?: string | null;
 }
 
 export interface CreateMovementPayload {
@@ -166,6 +175,14 @@ export async function recordStockMovement(
     body: JSON.stringify(payload),
   });
   return handleResponse<StockMovementItem>(res);
+}
+
+export async function openContainer(request: AuthenticatedRequest, branchId: string, productId: string, key: string): Promise<void> {
+  const response = await request(`/api/v1/inventory/branches/${encodeURIComponent(branchId)}/open-container`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: productId, idempotency_key: key }),
+  });
+  await handleResponse(response);
 }
 
 export async function listStockMovements(

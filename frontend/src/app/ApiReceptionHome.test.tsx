@@ -8,6 +8,36 @@ describe('live reception cash checkout', () => {
     sessionStorage.clear();
   });
 
+  it.each(['cash', 'card'] as const)('sells scoop inventory through the supplement modal with %s', async method => {
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
+      if (path.endsWith('/product-sale-intent')) return new Response('{}');
+      if (path === '/api/v1/registers') return new Response(JSON.stringify([{ id: 'register', branch_id: 'branch', code: 'front', name: 'Front', status: 'active', has_open_shift: true }]));
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', name: 'Central' }]));
+      if (path.startsWith('/api/v1/inventory/branches/')) return new Response(JSON.stringify({ items: [
+        { product_id: 'bottle', name: 'Bottle', unit: 'piece', price_minor: 5000, quantity: 2, initialized: true, is_active: true },
+        { product_id: 'scoop', name: 'Protein scoop', unit: 'scoop', price_minor: 500, quantity: 30, initialized: true, is_active: true },
+      ], total: 2 }));
+      if (path.endsWith('/card-intent')) return new Response(JSON.stringify({ payment_intent_id: 'point', device_id: 'terminal', status: 'OPEN', amount_minor: 500 }));
+      if (path.endsWith('/card-intent/point')) return new Response(JSON.stringify({ payment_intent_id: 'point', status: 'PROCESSED', amount_minor: 500 }));
+      if (path.endsWith('/product-sales/card')) return new Response(JSON.stringify({ order: { id: 'order', total_minor: 500 }, items: [], payment: { id: 'payment', method: 'card', status: 'confirmed', amount_minor: 500 } }), { status: 201 });
+      if (path.endsWith('/product-sales/resolve')) return new Response(JSON.stringify({ status: 'completed', order_id: 'order', total_minor: 500 }));
+      if (path.endsWith('/product-sales')) return new Response(JSON.stringify({ order: { id: 'order', total_minor: 500 }, items: [], payment: { id: 'payment', method: 'cash', status: 'confirmed', amount_minor: 500 } }), { status: 201 });
+      throw new Error(path);
+    });
+    render(<ApiReceptionHome request={request} actorId="actor" />);
+    expect(await screen.findByRole('button', { name: 'Seleccionar Bottle' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Seleccionar Protein scoop' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Suplementos' }));
+    expect(await screen.findByText('~30 scoops disponibles')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Protein scoop' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
+    await userEvent.click(screen.getByRole('radio', { name: method === 'cash' ? 'Efectivo' : 'Tarjeta' }));
+    await userEvent.click(screen.getByRole('button', { name: method === 'cash' ? 'Realizar cobro' : 'Cobrar con Tarjeta' }));
+    expect(await screen.findByText(method === 'cash' ? 'Compra registrada.' : 'Compra con tarjeta registrada.')).toBeVisible();
+    expect(request.mock.calls.some(([path]) => path.endsWith(method === 'cash' ? '/product-sales' : '/product-sales/card'))).toBe(true);
+  }, 15000);
+
   it('opens live cash contributions for the selected register', async () => {
     const request = vi.fn(async (path: string) => {
       if (path === '/api/v1/registers/product-sale-intent') return new Response('null');

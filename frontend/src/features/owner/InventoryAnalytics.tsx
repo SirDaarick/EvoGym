@@ -95,6 +95,10 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
   const [newProductCost, setNewProductCost] = useState('');
   const [newProductStock, setNewProductStock] = useState('0');
   const [newProductError, setNewProductError] = useState('');
+  const [newUnit, setNewUnit] = useState<'piece' | 'scoop'>('piece');
+  const [newServings, setNewServings] = useState('');
+  const [newContainer, setNewContainer] = useState('');
+  const [newContainerCost, setNewContainerCost] = useState('');
 
   const [editingProduct, setEditingProduct] = useState<ProductAnalyticsRow | null>(null);
   const [editName, setEditName] = useState('');
@@ -102,6 +106,10 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
   const [editPrice, setEditPrice] = useState('');
   const [editCost, setEditCost] = useState('');
   const [editError, setEditError] = useState('');
+  const [editUnit, setEditUnit] = useState<'piece' | 'scoop'>('piece');
+  const [editServings, setEditServings] = useState('');
+  const [editContainer, setEditContainer] = useState('');
+  const [editContainerCost, setEditContainerCost] = useState('');
 
   const [confirmToggleProduct, setConfirmToggleProduct] = useState<ProductAnalyticsRow | null>(null);
 
@@ -158,11 +166,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
           illustrative: true,
         };
       }),
-      stockMovements: liveMovements.map(m => ({
+      stockMovements: liveMovements.filter(m => m.kind === 'restock' || m.kind === 'waste').map(m => ({
         id: m.id,
         productId: m.product_id,
         shiftId: '',
-        kind: m.kind,
+        kind: m.kind as 'restock' | 'waste',
         quantity: m.quantity,
         recordedAt: m.recorded_at,
       })),
@@ -322,7 +330,7 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
         ),
         cell: ({ row }) => (
           <div className="inventory-stock-badge-wrap">
-            <span>{row.original.currentStock}</span>
+            {(() => { const item = liveStock.find(stock => stock.product_id === row.original.id); return item?.unit === 'scoop' && item.servings_per_container ? <span>~{item.quantity ?? 0} scoops aprox. · {item.servings_per_container} scoops/bote (equiv. ~{((item.quantity ?? 0) / item.servings_per_container).toFixed(1)} botes)</span> : <span>{row.original.currentStock}</span>; })()}
             {row.original.active && row.original.isLowStock && (
               <span className="inventory-stock-warning" title="Bajo stock (≤ 5 unidades)">
                 Bajo stock
@@ -419,7 +427,7 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
         ),
       },
     ],
-    []
+    [liveStock]
   );
 
   const table = useReactTable({
@@ -439,6 +447,7 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
     setNewProductCost('');
     setNewProductStock('0');
     setNewProductError('');
+    setNewUnit('piece'); setNewServings(''); setNewContainer(''); setNewContainerCost('');
     setIsNewModalOpen(true);
   }
 
@@ -479,6 +488,9 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
           cost_minor: Math.round(costNum * 100),
           initial_quantity: stockNum,
           initial_branch_id: selectedBranchId || branches[0]?.id,
+          unit: newUnit,
+          servings_per_container: newUnit === 'scoop' ? Number(newServings) : null,
+          container_product_id: newUnit === 'scoop' ? newContainer || null : null,
         });
         setIsNewModalOpen(false);
         await loadData();
@@ -513,6 +525,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
     setEditPrice((prod.priceMinor / 100).toString());
     setEditCost((prod.costMinor / 100).toString());
     setEditError('');
+    const stock = liveStock.find(item => item.product_id === prod.id);
+    setEditUnit(stock?.unit === 'scoop' ? 'scoop' : 'piece');
+    setEditServings(stock?.servings_per_container?.toString() ?? '');
+    setEditContainer(stock?.container_product_id ?? '');
+    setEditContainerCost('');
   }
 
   async function handleSaveEditProduct(e: React.FormEvent) {
@@ -545,6 +562,9 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
           category: editCategory.trim() || 'General',
           price_minor: Math.round(priceNum * 100),
           cost_minor: Math.round(costNum * 100),
+          unit: editUnit,
+          servings_per_container: editUnit === 'scoop' ? Number(editServings) : null,
+          container_product_id: editUnit === 'scoop' ? editContainer || null : null,
         });
         setEditingProduct(null);
         await loadData();
@@ -968,6 +988,14 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
                   {newProductError}
                 </p>
               )}
+              {apiRequest && <>
+                <div className="field"><label htmlFor="new-unit">Unidad</label><select id="new-unit" value={newUnit} onChange={e => setNewUnit(e.target.value as 'piece' | 'scoop')}><option value="piece">Pieza / bote</option><option value="scoop">Scoop</option></select></div>
+                {newUnit === 'scoop' && <>
+                  <div className="field"><label htmlFor="new-servings">Porciones por bote</label><input id="new-servings" type="number" min="1" step="1" required value={newServings} onChange={e => { setNewServings(e.target.value); if (Number(e.target.value) > 0 && newContainerCost !== '') setNewProductCost((Math.round(Number(newContainerCost) * 100 / Number(e.target.value)) / 100).toFixed(2)); }} /></div>
+                  <div className="field"><label htmlFor="new-container">Bote vinculado</label><select id="new-container" required value={newContainer} onChange={e => setNewContainer(e.target.value)}><option value="">Selecciona un bote</option>{liveStock.filter(item => item.unit === 'piece' && item.is_active).map(item => <option key={item.product_id} value={item.product_id}>{item.name}</option>)}</select></div>
+                  <div className="field"><label htmlFor="new-container-cost">Costo por bote</label><input id="new-container-cost" type="number" min="0" step="0.01" value={newContainerCost} onChange={e => { setNewContainerCost(e.target.value); if (Number(newServings) > 0 && e.target.value !== '') setNewProductCost((Math.round(Number(e.target.value) * 100 / Number(newServings)) / 100).toFixed(2)); }} /></div>
+                </>}
+              </>}
 
               <div className="field">
                 <label htmlFor="new-product-name">Nombre del producto *</label>
@@ -995,11 +1023,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
 
               <div className="inventory-form-grid-2">
                 <div className="field">
-                  <label htmlFor="new-product-price">Precio de venta MXN ($) *</label>
+                  <label htmlFor="new-product-price">{newUnit === 'scoop' ? 'Precio por scoop MXN ($) *' : 'Precio de venta MXN ($) *'}</label>
                   <input
                     id="new-product-price"
                     type="number"
-                    step="0.5"
+                    step={newUnit === 'scoop' ? '0.01' : '0.5'}
                     min="0"
                     required
                     placeholder="0.00"
@@ -1009,11 +1037,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
                 </div>
 
                 <div className="field">
-                  <label htmlFor="new-product-cost">Costo unitario MXN ($)</label>
+                  <label htmlFor="new-product-cost">{newUnit === 'scoop' ? 'Costo por scoop MXN ($)' : 'Costo unitario MXN ($)'}</label>
                   <input
                     id="new-product-cost"
                     type="number"
-                    step="0.5"
+                    step={newUnit === 'scoop' ? '0.01' : '0.5'}
                     min="0"
                     placeholder="0.00"
                     value={newProductCost}
@@ -1083,6 +1111,14 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
                   {editError}
                 </p>
               )}
+              {apiRequest && <>
+                <div className="field"><label htmlFor="edit-unit">Unidad</label><select id="edit-unit" value={editUnit} onChange={e => setEditUnit(e.target.value as 'piece' | 'scoop')}><option value="piece">Pieza / bote</option><option value="scoop">Scoop</option></select></div>
+                {editUnit === 'scoop' && <>
+                  <div className="field"><label htmlFor="edit-servings">Porciones por bote</label><input id="edit-servings" type="number" min="1" step="1" required value={editServings} onChange={e => { setEditServings(e.target.value); if (Number(e.target.value) > 0 && editContainerCost !== '') setEditCost((Math.round(Number(editContainerCost) * 100 / Number(e.target.value)) / 100).toFixed(2)); }} /></div>
+                  <div className="field"><label htmlFor="edit-container">Bote vinculado</label><select id="edit-container" required value={editContainer} onChange={e => setEditContainer(e.target.value)}><option value="">Selecciona un bote</option>{liveStock.filter(item => item.unit === 'piece' && item.is_active && item.product_id !== editingProduct.id).map(item => <option key={item.product_id} value={item.product_id}>{item.name}</option>)}</select></div>
+                  <div className="field"><label htmlFor="edit-container-cost">Costo por bote</label><input id="edit-container-cost" type="number" min="0" step="0.01" value={editContainerCost} onChange={e => { setEditContainerCost(e.target.value); if (Number(editServings) > 0 && e.target.value !== '') setEditCost((Math.round(Number(e.target.value) * 100 / Number(editServings)) / 100).toFixed(2)); }} /></div>
+                </>}
+              </>}
 
               <div className="field">
                 <label htmlFor="edit-product-name">Nombre del producto *</label>
@@ -1108,11 +1144,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
 
               <div className="inventory-form-grid-2">
                 <div className="field">
-                  <label htmlFor="edit-product-price">Precio de venta MXN ($) *</label>
+                  <label htmlFor="edit-product-price">{editUnit === 'scoop' ? 'Precio por scoop MXN ($) *' : 'Precio de venta MXN ($) *'}</label>
                   <input
                     id="edit-product-price"
                     type="number"
-                    step="0.5"
+                    step={editUnit === 'scoop' ? '0.01' : '0.5'}
                     min="0"
                     required
                     value={editPrice}
@@ -1121,11 +1157,11 @@ export function InventoryAnalytics({ apiRequest }: { apiRequest?: AuthenticatedR
                 </div>
 
                 <div className="field">
-                  <label htmlFor="edit-product-cost">Costo unitario MXN ($)</label>
+                  <label htmlFor="edit-product-cost">{editUnit === 'scoop' ? 'Costo por scoop MXN ($)' : 'Costo unitario MXN ($)'}</label>
                   <input
                     id="edit-product-cost"
                     type="number"
-                    step="0.5"
+                    step={editUnit === 'scoop' ? '0.01' : '0.5'}
                     min="0"
                     value={editCost}
                     onChange={e => setEditCost(e.target.value)}

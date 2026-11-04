@@ -9,6 +9,7 @@ import {
   listBranches,
   listBranchInventory,
   recordStockMovement,
+  openContainer,
   type AuthenticatedRequest,
   type BranchItem,
   type StockItem,
@@ -32,6 +33,7 @@ function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedReque
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [movementError, setMovementError] = useState<string | null>(null);
   const [movementSuccess, setMovementSuccess] = useState<string | null>(null);
+  const openingIntent = useRef<{ branchId: string; productId: string; key: string } | null>(null);
 
   const loadStock = useCallback(async (branchId?: string) => {
     try {
@@ -78,6 +80,35 @@ function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedReque
 
   const selectedProduct = activeProducts.find(p => p.id === selectedProductId)
     ?? (activeProducts[0] ? activeProducts[0] : null);
+  const selectedStock = stockItems.find(item => item.product_id === selectedProduct?.id);
+
+  async function handleOpenContainer() {
+    if (!selectedStock || !selectedBranchId || isSubmitting) return;
+    const storageKey = 'evogym:container-opening';
+    if (!openingIntent.current) {
+      try { openingIntent.current = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch { setMovementError('No se puede recuperar la apertura pendiente.'); return; }
+    }
+    if (openingIntent.current && (openingIntent.current.branchId !== selectedBranchId || openingIntent.current.productId !== selectedStock.product_id)) {
+      setMovementError('Resuelve primero la apertura pendiente del otro producto.'); return;
+    }
+    if (!openingIntent.current) {
+      openingIntent.current = { branchId: selectedBranchId, productId: selectedStock.product_id, key: crypto.randomUUID() };
+      try { sessionStorage.setItem(storageKey, JSON.stringify(openingIntent.current)); } catch { openingIntent.current = null; setMovementError('No se puede guardar la apertura para recuperarla.'); return; }
+    }
+    setIsSubmitting(true);
+    setMovementError(null);
+    try {
+      await openContainer(apiRequest, selectedBranchId, selectedStock.product_id, openingIntent.current.key);
+      openingIntent.current = null;
+      sessionStorage.removeItem(storageKey);
+      setMovementSuccess('Bote abierto y porciones agregadas al inventario.');
+      await loadStock(selectedBranchId);
+    } catch (err) {
+      setMovementError(err instanceof Error ? err.message : 'Error al abrir el bote.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   function changeQuantity(id: string, qty: number) {
     if (!Number.isSafeInteger(qty) || qty < 0) return;
@@ -191,7 +222,7 @@ function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedReque
                   <dl className="inventory-receipt-facts">
                     <div>
                       <dt>Stock actual</dt>
-                      <dd>{selectedProduct.stock}</dd>
+                      <dd>{selectedStock?.unit === 'scoop' ? `~${selectedProduct.stock} scoops aprox.` : selectedProduct.stock}</dd>
                     </div>
                     <div>
                       <dt>Cantidad seleccionada</dt>
@@ -212,6 +243,9 @@ function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedReque
                       </dd>
                     </div>
                   </dl>
+                  {selectedStock?.unit === 'scoop' && selectedStock.servings_per_container && (
+                    <p>{selectedStock.servings_per_container} scoops/bote (equiv. ~{(selectedProduct.stock / selectedStock.servings_per_container).toFixed(1)} botes)</p>
+                  )}
                 </>
               ) : (
                 <p className="muted">Selecciona un producto para ver su contexto.</p>
@@ -235,6 +269,17 @@ function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedReque
                   Merma
                 </Button>
               </div>
+
+              {selectedStock?.unit === 'scoop' && movementKind === 'restock' && selectedStock.container_product_id && (
+                <Button type="button" disabled={isSubmitting} onClick={handleOpenContainer}>+1 bote (+{selectedStock.servings_per_container} scoops)</Button>
+              )}
+              {selectedStock?.unit === 'scoop' && movementKind === 'waste' && (
+                <Button type="button" disabled={isSubmitting || !selectedProduct?.stock} onClick={() => {
+                  if (!selectedProduct) return;
+                  changeQuantity(selectedProduct.id, selectedProduct.stock);
+                  setWasteReason('Ajuste por fin de bote');
+                }}>Vaciar / ajustar resto</Button>
+              )}
 
               {movementKind === 'waste' && (
                 <div className="field" style={{ marginBottom: '0.75rem' }}>

@@ -92,6 +92,70 @@ def test_direct_cross_branch_reads_authorize_only_active_receptionists(tmp_path)
         engine.dispose()
 
 
+def test_scoop_product_requires_servings_and_preserves_piece_defaults(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'scoops.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    seed_admin(factory)
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    try:
+        with TestClient(app) as client:
+            headers = approved_admin_headers(client, delivery)
+            invalid = client.post('/api/v1/inventory/products', headers=headers, json={'name': 'Protein scoop', 'unit': 'scoop'})
+            assert invalid.status_code == 422
+            response = client.post('/api/v1/inventory/products', headers=headers, json={'name': 'Protein scoop', 'unit': 'scoop', 'servings_per_container': 30})
+            assert response.status_code == 201
+            assert response.json()['servings_per_container'] == 30
+            product_id = response.json()['id']
+            changed = client.patch(f'/api/v1/inventory/products/{product_id}', headers=headers, json={'servings_per_container': 40})
+            assert changed.status_code == 200
+            assert changed.json()['servings_per_container'] == 40
+            invalid_update = client.patch(f'/api/v1/inventory/products/{product_id}', headers=headers, json={'servings_per_container': 0})
+            assert invalid_update.status_code == 422
+            assert client.get('/api/v1/inventory/products', headers=headers).json()['items'][0]['servings_per_container'] == 40
+            piece = client.post('/api/v1/inventory/products', headers=headers, json={'name': 'Bottle'})
+            assert piece.status_code == 201
+            assert piece.json()['unit'] == 'piece'
+            assert piece.json()['servings_per_container'] is None
+    finally:
+        engine.dispose()
+
+
+def test_open_container_moves_stock_atomically_and_replays(tmp_path):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'opening.db').as_posix()}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(engine)
+    seed_admin(factory)
+    with factory.begin() as session:
+        branch = Branch(code='opening', name='Opening')
+        session.add(branch)
+        session.flush()
+        branch_id = str(branch.id)
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    try:
+        with TestClient(app) as client:
+            headers = approved_admin_headers(client, delivery)
+            container = client.post('/api/v1/inventory/products', headers=headers, json={'name': 'Protein bottle', 'initial_quantity': 1, 'initial_branch_id': branch_id}).json()
+            scoop = client.post('/api/v1/inventory/products', headers=headers, json={'name': 'Protein serving', 'unit': 'scoop', 'servings_per_container': 30, 'container_product_id': container['id'], 'initial_quantity': 0, 'initial_branch_id': branch_id}).json()
+            url = f'/api/v1/inventory/branches/{branch_id}/open-container'
+            request = {'product_id': scoop['id'], 'idempotency_key': 'opening-test'}
+            opened = client.post(url, headers=headers, json=request)
+            assert opened.status_code == 201
+            assert client.post(url, headers=headers, json=request).status_code == 200
+            stock = {item['product_id']: item['quantity'] for item in client.get(f'/api/v1/inventory/branches/{branch_id}/stock', headers=headers).json()['items']}
+            assert stock[container['id']] == 0
+            assert stock[scoop['id']] == 30
+            assert client.post(url, headers=headers, json={**request, 'idempotency_key': 'second-opening'}).status_code == 409
+            after = {item['product_id']: item['quantity'] for item in client.get(f'/api/v1/inventory/branches/{branch_id}/stock', headers=headers).json()['items']}
+            assert after == stock
+    finally:
+        engine.dispose()
+
+
 def test_admin_can_create_piece_product_without_creating_stock(tmp_path):
     url = f"sqlite+pysqlite:///{(tmp_path / 'inventory.db').as_posix()}"
     engine = create_engine(url)

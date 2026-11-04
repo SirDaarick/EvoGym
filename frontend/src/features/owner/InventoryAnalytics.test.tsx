@@ -67,6 +67,31 @@ describe('InventoryAnalytics owner screen', () => {
     }
   });
 
+  it('configures a scoop product linked to a bottle and computes its unit cost', async () => {
+    const stock = [{ product_id: 'bottle', code: 'bottle', name: 'Protein bottle', category: 'Supplements', price_minor: 30000, cost_minor: 12000, unit: 'piece', is_active: true, initialized: true, opening_quantity: 2, restocked_quantity: 0, waste_quantity: 0, quantity: 2 }];
+    const request = vi.fn(async (path: string) => {
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', code: 'main', name: 'Main' }]));
+      if (path.includes('/stock?')) return new Response(JSON.stringify({ items: stock, total: 1 }));
+      if (path.includes('/movements?')) return new Response(JSON.stringify({ items: [], total: 0 }));
+      if (path === '/api/v1/inventory/products') return new Response('{}', { status: 201 });
+      throw new Error(path);
+    });
+    render(<MemoryRouter><InventoryAnalytics apiRequest={request} /></MemoryRouter>);
+    await screen.findByText('Protein bottle');
+    await userEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+    await userEvent.selectOptions(screen.getByLabelText('Unidad'), 'scoop');
+    await userEvent.type(screen.getByLabelText('Nombre del producto *'), 'Protein scoop');
+    await userEvent.type(screen.getByLabelText('Porciones por bote'), '30');
+    await userEvent.selectOptions(screen.getByLabelText('Bote vinculado'), 'bottle');
+    await userEvent.type(screen.getByLabelText('Costo por bote'), '100');
+    expect(screen.getByLabelText('Costo por scoop MXN ($)')).toHaveValue(3.33);
+    await userEvent.type(screen.getByLabelText('Precio por scoop MXN ($) *'), '10');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar producto' }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/v1/inventory/products', expect.objectContaining({ body: expect.stringContaining('"container_product_id":"bottle"') })));
+    const sent = request.mock.calls.find(([path]) => path === '/api/v1/inventory/products');
+    expect(sent).toBeTruthy();
+  }, 15000);
+
   it('renders header, title, and "Nuevo producto" button', async () => {
     await renderInventoryAnalytics();
 

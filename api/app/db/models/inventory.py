@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -36,7 +36,7 @@ class Product(Base):
     __table_args__ = (
         CheckConstraint("length(code) BETWEEN 1 AND 64 AND code = lower(trim(code))", name="ck_products_code_normalized"),
         CheckConstraint("length(name) BETWEEN 1 AND 160 AND name = trim(name)", name="ck_products_name_normalized"),
-        CheckConstraint("unit = 'piece'", name="ck_products_unit_piece"),
+        CheckConstraint("(unit = 'piece' AND servings_per_container IS NULL) OR (unit = 'scoop' AND servings_per_container IS NOT NULL AND servings_per_container > 0)", name="ck_products_unit_servings"),
         CheckConstraint("price_minor >= 0", name="ck_products_price_minor_nonnegative"),
         CheckConstraint("cost_minor >= 0", name="ck_products_cost_minor_nonnegative"),
     )
@@ -49,6 +49,8 @@ class Product(Base):
     cost_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="piece", server_default="piece")
+    servings_per_container: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    container_product_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), nullable=True)
     created_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -75,8 +77,8 @@ class StockMovement(Base):
 
     __tablename__ = "stock_movements"
     __table_args__ = (
-        CheckConstraint("kind IN ('restock', 'waste', 'sale', 'return')", name="ck_stock_movements_kind"),
-        CheckConstraint("(kind = 'sale' AND order_item_id IS NOT NULL) OR (kind IN ('restock', 'waste', 'return') AND order_item_id IS NULL)", name="ck_stock_movements_sale_link"),
+        CheckConstraint("kind IN ('restock', 'waste', 'sale', 'return', 'open_in', 'open_out')", name="ck_stock_movements_kind"),
+        CheckConstraint("(kind = 'sale' AND order_item_id IS NOT NULL) OR (kind IN ('restock', 'waste', 'return', 'open_in', 'open_out') AND order_item_id IS NULL)", name="ck_stock_movements_sale_link"),
         CheckConstraint("quantity > 0", name="ck_stock_movements_quantity_positive"),
         CheckConstraint(
             "kind != 'waste' OR (reason IS NOT NULL AND length(trim(reason)) > 0)",
