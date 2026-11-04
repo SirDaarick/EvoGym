@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.admin import validate_admin_session
 from app.auth.authorization import AuthorizationDenied
-from app.auth.enrollment import issue_enrollment_code, list_enrollment_codes, revoke_enrollment_code
+from app.auth.enrollment import issue_code as issue_enrollment, list_enrollment_codes, revoke_code as revoke_enrollment
 from app.observability.logging import request_id
 from app.api.deps import SessionFactoryDep
 
@@ -44,18 +44,15 @@ def issue_code(
 ):
     staff_id, _current_session = _principal(request, credentials)
     req_id = UUID(request_id())
-    try:
-        issued = issue_enrollment_code(
-            factory,
-            admin_id=staff_id,
-            login_identifier=payload.login_identifier,
-            role=payload.role,
-            branch_id=payload.branch_id,
-            ttl_seconds=payload.ttl_seconds,
-            request_id=req_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, detail=str(exc))
+    issued = issue_enrollment(
+        factory,
+        admin_id=staff_id,
+        login_identifier=payload.login_identifier,
+        role=payload.role,
+        branch_id=payload.branch_id,
+        ttl_seconds=payload.ttl_seconds,
+        request_id=req_id,
+    )
     return {
         "id": str(issued.id),
         "code": issued.raw_code,
@@ -103,7 +100,5 @@ def revoke_code(
 ):
     staff_id, _current_session = _principal(request, credentials)
     req_id = UUID(request_id())
-    success = revoke_enrollment_code(factory, staff_id, code_id, request_id=req_id)
-    if not success:
-        raise HTTPException(404, "The requested resource was not found.")
+    revoke_enrollment(factory, staff_id, code_id, request_id=req_id)
     return {"revoked": True}

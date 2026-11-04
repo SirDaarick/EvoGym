@@ -12,6 +12,7 @@ from app.auth.admin import _utc, utc_now
 from app.auth.authorization import AuthorizationDenied
 from app.auth.owner import require_owner_or_legacy_admin
 from app.db.models import AdminAuthEvent, Branch, RoleGrant, StaffEnrollmentCode, StaffUser
+from app.errors import HttpStatusError, http_errors
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,3 +211,14 @@ def revoke_enrollment_code(
                 )
             )
         return True
+
+
+def issue_code(factory: sessionmaker[Session], **kwargs) -> IssuedEnrollmentCode:
+    """Transport-facing issue: validation failures (ValueError) become a 400."""
+    with http_errors((ValueError, 400)):
+        return issue_enrollment_code(factory, **kwargs)
+
+
+def revoke_code(factory: sessionmaker[Session], admin_id: UUID, code_id: UUID, *, request_id: UUID) -> None:
+    if not revoke_enrollment_code(factory, admin_id, code_id, request_id=request_id):
+        raise HttpStatusError(404)
