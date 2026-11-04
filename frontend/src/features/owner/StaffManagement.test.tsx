@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
+import { renderWithQuery } from '@/test/renderWithQuery';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let mockAdminSession: any = null;
@@ -18,7 +19,7 @@ import { DemoProvider } from '../../demo/DemoProvider';
 import { resetStaff } from '../staff/staffStore';
 
 async function mount(path = '/owner/staff') {
-  render(
+  renderWithQuery(
     <MemoryRouter initialEntries={[path]}>
       <DemoProvider>
         <App />
@@ -220,7 +221,7 @@ describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
       return new Response('Not found', { status: 404 });
     });
     mockAdminSession = { status: 'authenticated', request };
-    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
     await screen.findByText(/Sucursal Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
     await screen.findByText('Pendiente $3,000.00 netos');
@@ -240,7 +241,7 @@ describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
       return new Response('Not found', { status: 404 });
     });
     mockAdminSession = { status: 'authenticated', request };
-    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
     await screen.findByText(/Sucursal Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
     await screen.findByText('$14,000.00');
@@ -325,7 +326,7 @@ describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
       request: mockRequest,
     };
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <ApiStaffManagement />
       </MemoryRouter>
@@ -406,7 +407,7 @@ describe('ApiStaffManagement (F08 — Schedule Series & Exceptions)', () => {
       request: mockRequest,
     };
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <ApiStaffManagement />
       </MemoryRouter>
@@ -470,7 +471,7 @@ it('requires an administrator to resolve a pending sale before disabling the acc
     return new Response(null, { status: 404 });
   });
   mockAdminSession = { status: 'authenticated', request };
-  render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+  renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
   await waitFor(() => expect(screen.getByText(/Branch/)).toBeInTheDocument());
   await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
   await user.click(await screen.findByRole('button', { name: 'Desactivar cuenta' }));
@@ -479,4 +480,69 @@ it('requires an administrator to resolve a pending sale before disabling the acc
   await user.click(screen.getByRole('button', { name: 'Resolver venta pendiente' }));
   await user.click(await screen.findByRole('button', { name: 'Confirmar desactivación de cuenta' }));
   await waitFor(() => expect(request).toHaveBeenCalledWith(expect.stringContaining('/deactivate/'), expect.objectContaining({ method: 'POST' })));
+});
+
+describe('ApiStaffManagement edit dialog (T3.3 / T3.4)', () => {
+  const branchId = '00000000-0000-4000-8000-000000000001';
+  const profileId = '11111111-1111-4111-8111-111111111111';
+
+  async function openEditor(salary = { value: 1400000 }, counters = { roster: 0 }) {
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/branches')) return new Response(JSON.stringify({ branches: [{ id: branchId, code: 'SUR', name: 'Sucursal Sur' }] }));
+      if (path.includes('/roster-profiles')) {
+        counters.roster += 1;
+        return new Response(JSON.stringify({ profiles: [{ id: profileId, full_name: 'Lucia Mendez', position: 'Recepcionista', is_active: true, staff_user_id: null, monthly_salary_minor: salary.value }] }));
+      }
+      if (path.includes('/admin/staff-accounts?')) return new Response(JSON.stringify({ accounts: [] }));
+      if (path === `/api/v1/staff-roster/${profileId}` && init?.method === 'PATCH') {
+        salary.value = JSON.parse(init.body as string).monthly_salary_minor;
+        return new Response('{}');
+      }
+      return new Response('Not found', { status: 404 });
+    });
+    mockAdminSession = { status: 'authenticated', request };
+    const user = userEvent.setup();
+    renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    await screen.findByText(/Sucursal Sur/);
+    await user.selectOptions(screen.getByLabelText('Sucursal'), branchId);
+    await screen.findByText('$14,000.00');
+    await user.click(screen.getByRole('button', { name: 'Editar' }));
+    return { user, request };
+  }
+
+  it('refetches the roster after saving a salary and closes the dialog', async () => {
+    const counters = { roster: 0 };
+    const { user } = await openEditor({ value: 1400000 }, counters);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    const before = counters.roster;
+    const input = screen.getByLabelText('Sueldo mensual (MXN) *');
+    await user.clear(input);
+    await user.type(input, '15000');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(counters.roster).toBeGreaterThan(before));
+    await screen.findByText('$15,000.00');
+    expect(screen.getByText('Sueldo actualizado correctamente.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows an inline accessible error for an invalid salary without calling the API', async () => {
+    const { user, request } = await openEditor();
+    const input = screen.getByLabelText('Sueldo mensual (MXN) *');
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    await user.clear(input);
+    await user.type(input, 'abc');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    const error = await screen.findByText('Ingresa un sueldo mensual válido.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription('Ingresa un sueldo mensual válido.');
+    expect(error).toHaveClass('field-error');
+    expect(request).not.toHaveBeenCalledWith(`/api/v1/staff-roster/${profileId}`, expect.anything());
+  });
+
+  it('closes the edit dialog with Escape', async () => {
+    const { user } = await openEditor();
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
 });

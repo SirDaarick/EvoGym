@@ -118,6 +118,13 @@ export async function listAdminStaffAccounts(request: AdminRequest, branchId: st
   return parseAccounts(await readJson(await request(`/api/v1/admin/staff-accounts?branch_id=${encodeURIComponent(branchId)}`)));
 }
 
+export async function updateStaffSalary(request: AdminRequest, profileId: string, monthlySalaryMinor: number): Promise<void> {
+  const response = await request(`/api/v1/staff-roster/${profileId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monthly_salary_minor: monthlySalaryMinor }),
+  });
+  if (!response.ok) throw new StaffCredentialsApiError(response.status);
+}
+
 export async function linkAdminStaffAccount(request: AdminRequest, profileId: string, staffUserId: string): Promise<void> {
   if (!validUuid(profileId) || !validUuid(staffUserId)) throw new StaffCredentialsApiError();
   const response = await request(`/api/v1/admin/staff-accounts/roster-profiles/${profileId}/link`, {

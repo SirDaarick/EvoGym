@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
+import { renderWithQuery } from '@/test/renderWithQuery';
 import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ weekday: 0, request: null as unknown, session: null as unknown }));
@@ -33,7 +34,7 @@ describe('payroll actions', () => {
       return new Response('', { status: 404 });
     });
     state.session = { status: 'authenticated', request: state.request };
-    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
     await screen.findByText(/Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
     await user.click(await screen.findByRole('button', { name: 'Adelantar' }));
@@ -58,7 +59,7 @@ describe('payroll actions', () => {
       return new Response('', { status: 404 });
     });
     state.session = { status: 'authenticated', request: state.request };
-    render(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
+    renderWithQuery(<MemoryRouter><ApiStaffManagement /></MemoryRouter>);
     await screen.findByText(/Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
     await user.click(await screen.findByRole('button', { name: 'Pagar $3,000.00' }));
