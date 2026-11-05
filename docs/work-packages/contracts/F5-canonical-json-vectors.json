@@ -1,0 +1,93 @@
+{
+  "spec": {
+    "description": "Canonical JSON for Fase 5 contingency payload_hash. Shared by api/app/sync/envelope.py and frontend/src/offline/canonicalJson.ts.",
+    "rules": [
+      "object keys sorted by Unicode code point (UTF-16 order is identical for BMP-only keys; keys MUST be ASCII)",
+      "no whitespace; separators ',' and ':'",
+      "non-ASCII characters emitted raw (Python ensure_ascii=False / JS JSON.stringify)",
+      "only integers allowed for numbers (amounts in *_minor); floats, NaN, Infinity are invalid",
+      "timestamps as ISO-8601 UTC strings with milliseconds and 'Z', e.g. 2026-11-05T18:04:05.123Z",
+      "payload_hash = lowercase hex SHA-256 of the UTF-8 bytes of the canonical string"
+    ]
+  },
+  "vectors": [
+    {
+      "name": "empty_object",
+      "input": {},
+      "canonical": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "check_in",
+      "input": {
+        "member_id": "6f1c2a9e-0b7d-4c1e-9a3f-2d5e8b7c4a10",
+        "period_id": "0a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d",
+        "branch_id": "11111111-2222-4333-8444-555555555555",
+        "local_access_decision": "valid"
+      },
+      "canonical": "{\"branch_id\":\"11111111-2222-4333-8444-555555555555\",\"local_access_decision\":\"valid\",\"member_id\":\"6f1c2a9e-0b7d-4c1e-9a3f-2d5e8b7c4a10\",\"period_id\":\"0a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d\"}",
+      "sha256": "d1ca64544df1b79a397583c924f93a51c896d3b8f8dec30147de56e4d11a9036"
+    },
+    {
+      "name": "cash_sale_unicode",
+      "input": {
+        "register_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "local_shift_ref": "REC-SUR1-00007",
+        "member_id": null,
+        "items": [
+          {
+            "product_id": "p-2",
+            "quantity": 1,
+            "unit_price_minor": 4500
+          },
+          {
+            "product_id": "p-1",
+            "quantity": 3,
+            "unit_price_minor": 2500
+          }
+        ],
+        "total_minor": 12000,
+        "note": "Proteína sabor plátano — ñandú"
+      },
+      "canonical": "{\"items\":[{\"product_id\":\"p-2\",\"quantity\":1,\"unit_price_minor\":4500},{\"product_id\":\"p-1\",\"quantity\":3,\"unit_price_minor\":2500}],\"local_shift_ref\":\"REC-SUR1-00007\",\"member_id\":null,\"note\":\"Proteína sabor plátano — ñandú\",\"register_id\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"total_minor\":12000}",
+      "sha256": "412f02a590ba2cecd5159e820838568a5ae3ec73b8a90633b2b60e4a5338492c"
+    },
+    {
+      "name": "arqueo_close",
+      "input": {
+        "shift_ref": "REC-SUR1-00001",
+        "denomination_counts": [
+          {
+            "denomination_minor": 50000,
+            "quantity": 2
+          },
+          {
+            "denomination_minor": 100,
+            "quantity": 15
+          }
+        ],
+        "voucher_count": 0,
+        "closing_notes": "Línea 1\nLínea \"2\"\t\\fin"
+      },
+      "canonical": "{\"closing_notes\":\"Línea 1\\nLínea \\\"2\\\"\\t\\\\fin\",\"denomination_counts\":[{\"denomination_minor\":50000,\"quantity\":2},{\"denomination_minor\":100,\"quantity\":15}],\"shift_ref\":\"REC-SUR1-00001\",\"voucher_count\":0}",
+      "sha256": "ecbf6bd7b24c45cf119869a482ed6282eac3586dc6b1eb64e6da3b8098de6a5b"
+    },
+    {
+      "name": "nested_bool_null",
+      "input": {
+        "z": [
+          true,
+          false,
+          null
+        ],
+        "a": {
+          "y": 0,
+          "b": -15,
+          "m": "\u0001"
+        }
+      },
+      "canonical": "{\"a\":{\"b\":-15,\"m\":\"\\u0001\",\"y\":0},\"z\":[true,false,null]}",
+      "sha256": "e865167cb040e4c2bdb5b631ab6835d4fae9c0898238167d962a061d68cf1d00"
+    }
+  ]
+}
