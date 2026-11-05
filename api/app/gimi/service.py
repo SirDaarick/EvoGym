@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from app.db.models.gimi import GimiKnowledgeChunk
 from app.db.models.notifications import NotificationOutbox, WhatsappInboxMessage
 from app.errors import HttpStatusError, session_factory
+from app.gimi.rag.document_ingest import ingest_document
 from app.gimi.rag.ingest import Rule, ingest_rules
 from app.gimi.schemas import DeliverBatchInput, KnowledgeRuleInput
 from app.notifications.delivery import FakeDeliveryAdapter, NotConfiguredDeliveryAdapter, deliver_batch
@@ -111,6 +112,27 @@ def create_knowledge_rule(factory, principal, payload: KnowledgeRuleInput) -> di
         stats = ingest_rules(session, [rule])
         session.commit()
         return stats
+
+
+def upload_knowledge_document(
+    factory,
+    principal,
+    file_bytes: bytes,
+    filename: str,
+    category: str = "regulations",
+    title: str | None = None,
+) -> dict:
+    _require_admin(principal)
+    with session_factory(factory)() as session:
+        result = ingest_document(
+            session=session,
+            file_bytes=file_bytes,
+            filename=filename,
+            category=category,
+            title_override=title,
+        )
+        session.commit()
+        return result
 
 
 def delete_knowledge_chunk(factory, principal, chunk_id: UUID) -> dict:

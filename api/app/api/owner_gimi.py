@@ -2,7 +2,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 
 from app.api.deps import FinancePrincipal, RawFactoryDep, SettingsDep, _bearer, _principal
 from app.gimi import service
@@ -39,6 +39,25 @@ def create_knowledge_rule(
     principal: Principal,
 ):
     return service.create_knowledge_rule(factory, principal, payload)
+
+
+@router.post("/knowledge/upload", status_code=201)
+async def upload_knowledge_document(
+    factory: RawFactoryDep,
+    principal: Principal,
+    file: UploadFile = File(...),
+    category: str = Form("regulations"),
+    title: str | None = Form(None),
+):
+    content = await file.read()
+    return service.upload_knowledge_document(
+        factory,
+        principal,
+        file_bytes=content,
+        filename=file.filename or "document.txt",
+        category=category,
+        title=title,
+    )
 
 
 @router.delete("/knowledge/{chunk_id}")
