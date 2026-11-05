@@ -14,7 +14,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | ✅ **Completado** |
 | **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟡 **En curso (T4.6 y `/owner/gimi` pendientes)** |
 | **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | ✅ **Completado** |
-| **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🟡 **En curso** |
+| **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | ✅ **Completado** |
 
 ---
 
