@@ -16,6 +16,8 @@ import {
   checkKnowledgeExpiry,
 } from './gimiStore';
 import { useDemo } from '../../demo/DemoProvider';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import { LiveGimiDashboard } from './LiveGimiDashboard';
 import { Badge, Button, EmptyState, Field, PageHeader, Panel } from '../../shared/ui';
 import './GimiDashboard.css';
 
@@ -33,7 +35,11 @@ const CONTACT_TYPE_LABELS: Record<ContactType, string> = {
   internal_ops: 'Operaciones Internas',
 };
 
-export function GimiDashboard() {
+export function GimiDashboard({ apiRequest }: { apiRequest?: AuthenticatedRequest } = {}) {
+  return apiRequest ? <LiveGimiDashboard apiRequest={apiRequest} /> : <DemoGimiDashboard />;
+}
+
+function DemoGimiDashboard() {
   const { state } = useDemo();
   const [activeTab, setActiveTab] = useState<'monitor' | 'vault'>('monitor');
 

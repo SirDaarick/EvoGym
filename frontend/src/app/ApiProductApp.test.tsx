@@ -539,4 +539,29 @@ describe('API product routes', () => {
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(await screen.findByText('Grace Hopper')).toBeInTheDocument();
   });
+
+  it('connects /owner/gimi to the live GimiDashboard for authenticated admin', async () => {
+    admin.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/owner/gimi/overview') {
+        return new Response(JSON.stringify({
+          kpis: { total_conversations: 5, whatsapp_count: 5, web_count: 0, pending_alerts: 0, autonomous_rate: 100, knowledge_chunks_count: 2 },
+          outcomes: { answered: 5 },
+          intents: {},
+          outbox: { total: 0, statuses: {} },
+          recent_messages: [],
+        }));
+      }
+      if (path.startsWith('/api/v1/owner/gimi/knowledge')) {
+        return new Response(JSON.stringify([]));
+      }
+      if (path.startsWith('/api/v1/owner/gimi/notifications')) {
+        return new Response(JSON.stringify([]));
+      }
+      return new Response(JSON.stringify({}));
+    });
+
+    render(<MemoryRouter initialEntries={['/owner/gimi']}><ProductRoutes /></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Monitor y Conocimiento de Gimi' })).toBeInTheDocument();
+    expect(screen.queryByText('Esta pantalla conserva su acceso, pero la operación todavía no está conectada a la API.')).not.toBeInTheDocument();
+  });
 });

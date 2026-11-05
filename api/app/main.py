@@ -313,6 +313,8 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(sync_router)
     from app.api.whatsapp_webhook import router as whatsapp_webhook_router
     application.include_router(whatsapp_webhook_router)
+    from app.api.owner_gimi import router as owner_gimi_router
+    application.include_router(owner_gimi_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
     application.add_middleware(_SecurityHeadersMiddleware)

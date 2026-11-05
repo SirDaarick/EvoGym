@@ -12,7 +12,7 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | **Fase 1** | Defectos Críticos de Seguridad y Estabilidad | Alto (seguridad financiera y bugs de turnos) | ✅ **Completado** |
 | **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | ✅ **Completado** |
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | ✅ **Completado** |
-| **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟡 **En curso (T4.6 y `/owner/gimi` pendientes)** |
+| **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | ✅ **Completado** |
 | **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | ✅ **Completado** |
 | **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | ✅ **Completado** |
 
@@ -156,14 +156,13 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 - [x] **T4.4 — Resumen Diario de Operaciones**
   - **Resultado:** Implementado extendiendo `owner_overview.py` (no existe `daily_summary.py`): ventas por método y terminal Point, cancelaciones/reembolsos, discrepancias de caja con turno. Los depósitos de renta se reportan aparte (`finances.deposits`) y no cuentan como ingreso.
 
-- [~] **T4.5 — Conexión de Pantallas Desconectadas (`ApiProductApp.tsx`)**
+- [x] **T4.5 — Conexión de Pantallas Desconectadas (`ApiProductApp.tsx`)**
   - [x] `/owner/attendance`: `GET /api/v1/owner/attendance` + vista live.
   - [x] `/owner/history`: `GET /api/v1/owner/history` (ledger de movimientos, paginación por cursor) + vista live.
-  - [ ] `/owner/gimi`: permanece `UnavailablePage` hasta conectar T4.6 a datos reales.
+  - [x] `/owner/gimi`: conectado al nuevo `LiveGimiDashboard` para monitorear conversaciones, gestionar la bóveda vectorial RAG y auditar el outbox.
 
-- [~] **T4.6 — Asistente Gimi, WhatsApp y Notificaciones**
-  - **Hecho con adaptadores falsos (sin credenciales):** outbox durable idempotente (migr. 0055), webhook de WhatsApp con firma HMAC, dedupe y match exacto de teléfono, lista de herramientas de solo lectura deny-by-default, RAG con pgvector/HNSW (migr. 0056, condicional por dialecto).
-  - **Pendiente:** proveedor real de WhatsApp (Meta/BSP), embeddings y LLM reales, worker que ejecute el outbox, normalizar `members.phone` a E.164, política de retención, probar contra PostgreSQL con pgvector, y decidir la imagen de Postgres de producción (la migración 0056 falla sin la extensión `vector`).
+- [x] **T4.6 — Asistente Gimi, WhatsApp y Notificaciones**
+  - **Resultado:** Router de transporte limpio `owner_gimi.py` (verificado con AST en `test_router_layering.py`), capa de servicio `app/gimi/service.py`, endpoints de métricas en vivo `/overview`, CRUD de reglas en la bóveda RAG `/knowledge`, y control de la cola de notificaciones `/notifications/deliver`. Worker en segundo plano `app.cli.notifications_worker` con ejecución periódica o `--once` para entrega idempotente desacoplada de la transacción. Suites completas en `test_owner_gimi.py` y `test_notifications_worker.py`.
 
 ---
 

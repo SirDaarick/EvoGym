@@ -16,6 +16,7 @@ import { AlertCenter } from '../features/owner/AlertCenter';
 import { Overview } from '../features/owner/Overview';
 import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
 import { History } from '../features/owner/History';
+import { GimiDashboard } from '../features/gimi/GimiDashboard';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { OfflineStatusBadge } from '../offline/OfflineStatusBadge';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
@@ -124,6 +125,8 @@ export function ApiProductApp() {
     content = <AlertCenter apiRequest={apiRequest} />;
   } else if (pathname === '/owner/plans' && isAdmin && admin.status === 'authenticated') {
     content = <PlanCatalog apiRequest={apiRequest} />;
+  } else if (pathname === '/owner/gimi' && isAdmin && admin.status === 'authenticated') {
+    content = <GimiDashboard apiRequest={apiRequest} />;
   } else if (pathname === '/owner/expenses' && isAdmin && admin.status === 'authenticated') {
     content = <ExpenseReport apiRequest={apiRequest} />;
   } else if (pathname === '/owner/staff' && canManageEmployees && admin.status === 'authenticated') {
