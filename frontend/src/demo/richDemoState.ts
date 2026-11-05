@@ -36,6 +36,9 @@ export function createRichDemoState(): DemoState {
     { id: 'demo-jump-rope', name: 'Cuerda de Salto Speed Rope', priceMinor: 16000, openingQuantity: 7, category: 'Accesorios Box', costMinor: 8000, active: true, illustrative: true },
     { id: 'demo-creatine-can', name: 'Creatina Monohidratada 300g', priceMinor: 48000, openingQuantity: 5, category: 'Suplementos', costMinor: 28000, active: true, illustrative: true },
     { id: 'demo-whey-can', name: 'Proteína Whey Isolate 2lb', priceMinor: 92000, openingQuantity: 4, category: 'Suplementos', costMinor: 60000, active: true, illustrative: true },
+    { id: 'demo-test-prod', name: 'Producto Prueba $1', priceMinor: 100, openingQuantity: 50, category: 'Bebidas', costMinor: 0, active: true, illustrative: true },
+    { id: 'demo-test-sup', name: 'Suplemento Prueba $1', priceMinor: 100, openingQuantity: 50, category: 'Suplementos', costMinor: 0, active: true, illustrative: true },
+    { id: 'demo-test-gloves', name: 'Guantes Box Venta $1', priceMinor: 100, openingQuantity: 20, category: 'Accesorios', costMinor: 0, active: true, illustrative: true },
   ];
 
   const members: Member[] = [
@@ -698,6 +701,7 @@ export function createRichDemoState(): DemoState {
     { id: 'glove-10', code: '#10', color: 'Negro', ounces: 12, priceMinor: 2500, status: 'available' },
     { id: 'glove-11', code: '#11', color: 'Azul', ounces: 16, priceMinor: 3000, status: 'available' },
     { id: 'glove-12', code: '#12', color: 'Morado', ounces: 10, priceMinor: 2500, status: 'available' },
+    { id: 'glove-test-01', code: '#99 (Prueba $1)', color: 'Rojo', ounces: 14, priceMinor: 100, status: 'available' },
   ];
 
   const gloveRentals: GloveRentalRecord[] = [
@@ -718,6 +722,7 @@ export function createRichDemoState(): DemoState {
     { id: 'sup-04', name: 'Pre-Entreno Nitro', flavor: 'Frutos Rojos', scoopPriceMinor: 3000, availableScoops: 15 },
     { id: 'sup-05', name: 'BCAA Aminoácidos', flavor: 'Limón', scoopPriceMinor: 2500, availableScoops: 30 },
     { id: 'sup-06', name: 'Colágeno Hidrolizado', flavor: 'Naranja', scoopPriceMinor: 2500, availableScoops: 22 },
+    { id: 'sup-test-01', name: 'Scoop Proteína Prueba $1', flavor: 'Vainilla', scoopPriceMinor: 100, availableScoops: 50 },
   ];
 
   const supplementSales: SupplementSale[] = [

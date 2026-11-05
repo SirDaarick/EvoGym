@@ -260,6 +260,13 @@ export function createSeedLockers() {
       });
     }
   }
+  lockers.push({
+    id: 'locker-99',
+    number: 99,
+    code: '#99 (Prueba $1)',
+    status: 'available' as const,
+    monthlyPriceMinor: 100,
+  });
   return lockers;
 }
 
@@ -296,6 +303,9 @@ function getInitialProducts(): Product[] {
     { id: 'demo-jump-rope', name: 'Cuerda de Salto Speed Rope', priceMinor: 16000, openingQuantity: 7, category: 'Accesorios Box', costMinor: 8000, active: true, illustrative: true },
     { id: 'demo-creatine-can', name: 'Creatina Monohidratada 300g', priceMinor: 48000, openingQuantity: 5, category: 'Suplementos', costMinor: 28000, active: true, illustrative: true },
     { id: 'demo-whey-can', name: 'Proteína Whey Isolate 2lb', priceMinor: 92000, openingQuantity: 4, category: 'Suplementos', costMinor: 60000, active: true, illustrative: true },
+    { id: 'demo-test-prod', name: 'Producto Prueba $1', priceMinor: 100, openingQuantity: 50, category: 'Bebidas', costMinor: 0, active: true, illustrative: true },
+    { id: 'demo-test-sup', name: 'Suplemento Prueba $1', priceMinor: 100, openingQuantity: 50, category: 'Suplementos', costMinor: 0, active: true, illustrative: true },
+    { id: 'demo-test-gloves', name: 'Guantes Box Venta $1', priceMinor: 100, openingQuantity: 20, category: 'Accesorios', costMinor: 0, active: true, illustrative: true },
   ];
 }
 
