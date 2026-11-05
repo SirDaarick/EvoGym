@@ -21,6 +21,7 @@ __pycache__/
 api/dev.db
 tmp/
 output/
+*.xlsx
 backend/*.xlsx
 backend/*.ipynb
 
