@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:18
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: evogym_test
           POSTGRES_PASSWORD: synthetic-test-only
@@ -61,13 +61,20 @@ jobs:
         run: python -m pytest -q api/tests/test_observability_postgres.py
       - name: Exercise current authorization on the migrated PostgreSQL database
         run: python -m pytest -q api/tests/test_authorization_postgres.py
-      - name: Verify current migrations, financial locking, and opening snapshots on isolated schemas
-        timeout-minutes: 15
+      - name: Verify PostgreSQL integration suites on isolated schemas
+        timeout-minutes: 20
         run: >-
           python -m pytest -q
           api/tests/test_migrations_postgres.py
           api/tests/test_sales_postgres.py
           api/tests/test_shifts_postgres.py
+          api/tests/test_card_sales_postgres.py
+          api/tests/test_expenses_postgres.py
+          api/tests/test_gimi_rag_postgres.py
+          api/tests/test_payroll_postgres.py
+          api/tests/test_product_returns_postgres.py
+          api/tests/test_product_sales_postgres.py
+          api/tests/test_rentals_postgres.py
       - name: Reset the synthetic test database for the legacy credential migration fixture
         run: |
           python - <<'PY'

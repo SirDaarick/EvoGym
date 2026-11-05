@@ -64,5 +64,12 @@ export default defineConfig({
       },
     },
   },
-  test: { pool: 'threads', environment: 'jsdom', setupFiles: ['./src/test/setup.ts'], css: true, testTimeout: 15000 },
+  test: {
+    pool: 'threads',
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    css: true,
+    testTimeout: 15000,
+    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', '**/.{idea,git,cache,output,temp}/**'],
+  },
 });

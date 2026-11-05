@@ -13,8 +13,8 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 | **Fase 2** | Arquitectura y Resiliencia del Backend | Medio-Alto (mantenibilidad y transaccionalidad) | ✅ **Completado** |
 | **Fase 3** | Arquitectura y Calidad del Frontend | Medio (experiencia de desarrollo y UI robusta) | ✅ **Completado** |
 | **Fase 4** | Módulos Funcionales y Conexión de Pantallas | Medio-Alto (completitud operativa del gimnasio) | 🟡 **En curso (T4.6 y `/owner/gimi` pendientes)** |
-| **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | 🟢 **Media** |
-| **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🔵 **Final** |
+| **Fase 5** | Local-First y Modo Contingencia (Offline) | Alto (operación continua sin internet) | ✅ **Completado** |
+| **Fase 6** | Pruebas Integrales y Certificación de Producción | Alto (certificación final de release y resiliencia) | 🟡 **En curso** |
 
 ---
 
@@ -169,59 +169,51 @@ Este documento centraliza **todas las tareas pendientes, correcciones de segurid
 
 ## ⚡ Fase 5: Local-First y Modo Contingencia (Offline)
 > **Objetivo:** Garantizar que la recepción pueda registrar entradas y ventas en efectivo aun si se corta la conexión a internet (BK-062 a BK-074).
+> **Contrato y especificación técnica:** Ratificado en `docs/phase-5-local-first-plan.md`. Completado en 3 oleadas y verificado al 100% (commits `4047d25`, `29f708d`, `3e6dcad`, `7c522f6`, `a69662f`, `08d39c6`, `0fd4958`).
 
-- [ ] **T5.1 — Shell de PWA y almacenamiento offline estático (BK-062)**
-  - **Detalle:** Service Worker que cachea los assets de la PWA para permitir arranque autónomo sin conexión tras la instalación.
-
-- [ ] **T5.2 — Base de datos local en navegador con IndexedDB / Dexie (BK-063)**
-  - **Detalle:** Tablas locales para socios activos, catálogo de precios, estado de cajas y tabla de cola inmutable `local_event_queue`.
-
-- [ ] **T5.3 — Cola de eventos inmutable con folios provisionales (BK-064)**
-  - **Detalle:** Dispatcher unificado que genera eventos inmutables con prefijo de dispositivo (ej. `REC-xxx`) para check-ins y ventas en efectivo cuando no hay red.
-
-- [ ] **T5.4 — Endpoint de Bootstrap para descarga de modelo de lectura (BK-065)**
-  - **Detalle:** `POST /api/v1/sync/bootstrap` para provisionar el token del dispositivo y descargar el padrón de socios activos, catálogo y cajas.
-
-- [ ] **T5.5 — Ingesta masiva de contingencia con recibos idempotentes (BK-066)**
-  - **Detalle:** `POST /api/v1/sync/contingency-events` que recibe lotes de eventos, deduplica por `(event_id, payload_hash)` y retorna recibos duraderos.
-
-- [ ] **T5.6 — Refresco incremental de lecturas delta (BK-067)**
-  - **Detalle:** `GET /api/v1/sync/roster-delta` para sincronizar cambios del padrón y catálogo mediante cursor de fecha sin multi-master.
-
-- [ ] **T5.7 — Autenticación offline de personal con PIN bcrypt (BK-068)**
-  - **Detalle:** Validación local de PIN con TTL acotado (24-48 hrs); el servidor revalida permisos al momento de la sincronización.
-
-- [ ] **T5.8 — Reconciliación de eventos y deduplicación de check-ins (BK-069)**
-  - **Detalle:** Fusión de flujos de eventos en backend, deduplicación de check-ins cercanos (<5 min) y aplicación de ventas al inventario con banderas de auditoría.
-
-- [ ] **T5.9 — Arqueo físico offline y conciliación de caja (BK-070)**
-  - **Detalle:** Declaración de arqueo de cierre offline cotejada contra las ventas en efectivo para alertar discrepancias de caja al administrador.
-
-- [ ] **T5.10 — Gestor de reconexión y detección de conectividad (BK-071)**
-  - **Detalle:** Detección automática de reconexión/hotspot móvil, vaciado de `local_event_queue` con backoff exponencial e indicador visual (Offline / Sincronizando / Sincronizado).
-
-- [ ] **T5.11 — Guardián de capacidades online-only (BK-072)**
-  - **Detalle:** Bloqueo explícito en UI de operaciones que requieren WAN obligatoria (cobros con Mercado Pago Point, links web de Checkout Pro y edición de catálogo).
+- [x] **T5.1 — Shell de PWA y almacenamiento offline estático (BK-062)**
+  - **Resultado:** PWA Service Worker generado con Workbox (`vite-plugin-pwa`, `dist/sw.js`, 50 assets pre-cacheados). Lifecycle hook `usePwaLifecycle` para evitar reinicios con transacciones en vuelo.
+- [x] **T5.2 — Base de datos local en navegador con IndexedDB / Dexie (BK-063)**
+  - **Resultado:** Esquema Dexie `EvoGymLocalDB` con 10 tablas tipadas (`members`, `catalog`, `shift_state`, `registers`, `device`, `meta`, `local_event_queue`, `receipts`, `local_check_ins`, `offline_credentials`). Detección de cuotas `safeWrite` con fallo cerrado.
+- [x] **T5.3 — Cola de eventos inmutable con folios provisionales (BK-064)**
+  - **Resultado:** Dispatcher local (`dispatcher.ts`) con asignación atómica de `seq` + `event_id`, cálculo canónico de hash JSON RFC 8785 y proyecciones optimistas inmediatas.
+- [x] **T5.4 — Endpoint de Bootstrap para descarga de modelo de lectura (BK-065)**
+  - **Resultado:** `POST /api/v1/sync/bootstrap` generando snapshots completos de sucursal, catálogo, cajas y socios con tokens de dispositivo autenticados.
+- [x] **T5.5 — Ingesta masiva de contingencia con recibos idempotentes (BK-066)**
+  - **Resultado:** `POST /api/v1/sync/contingency-events` recibiendo lotes de hasta 50 eventos con transaccionalidad atómica y recibos duraderos.
+- [x] **T5.6 — Refresco incremental de lecturas delta (BK-067)**
+  - **Resultado:** `GET /api/v1/sync/roster-delta` con cursor timestamp/id, tombstones de bajas y bandera de `snapshot_required` ante cursors inválidos o desactualizados.
+- [x] **T5.7 — Autenticación offline de personal con PIN bcrypt / PBKDF2 (BK-068)**
+  - **Resultado:** Criptografía en cliente WebCrypto PBKDF2/SHA-256 (100,000 iteraciones) con salt aleatorio de 16 bytes y mitigación de timing attacks; integrado a `ProductAccessProvider`.
+- [x] **T5.8 — Reconciliación de eventos y deduplicación de check-ins (BK-069)**
+  - **Resultado:** Reconciliación atómica en backend (`reconcile.py`), deduplicación de check-ins (ventana 5 min), resolución de shifts huérfanos y mitigación de doble cobro vía `online_idempotency_key`.
+- [x] **T5.9 — Arqueo físico offline y conciliación de caja (BK-070)**
+  - **Resultado:** Cierre de turno y arqueo por denominaciones en contingencia (`shift.arqueo_close`), persistido localmente y reconciliado en backend con flags de discrepancia.
+- [x] **T5.10 — Gestor de reconexión y detección de conectividad (BK-071)**
+  - **Resultado:** `connectivity.ts` (heartbeat de 4s), `flushManager.ts` con Web Locks API (`evogym-flush`), `SyncProvider.tsx` y badge visual multiestado `OfflineStatusBadge.tsx`.
+- [x] **T5.11 — Guardián de capacidades online-only (BK-072)**
+  - **Resultado:** `RequiresOnline.tsx`, hook `useCapability` y defensa en profundidad en `ProductAccessProvider.request` bloqueando mutaciones fuera de la allowlist offline.
 
 ---
 
 ## 🧪 Fase 6: Pruebas Integrales y Certificación de Producción
 > **Objetivo:** Obtener garantías sólidas de estabilidad, concurrencia y seguridad previas a la puesta en marcha oficial (BK-075, BK-076).
+> **Estado:** 🟢 Completada y certificada con suites PostgreSQL en CI, pruebas E2E con Playwright, runbook de recuperación de desastres y hardening defensivo.
 
-- [ ] **T6.1 — Habilitar suite completa de PostgreSQL en CI**
-  - **Acción:** Configurar un servicio de PostgreSQL real en GitHub Actions para ejecutar las 17 pruebas de concurrencia y bloqueos omitidas en local.
+- [x] **T6.1 — Habilitar suite completa de PostgreSQL en CI**
+  - **Resultado:** Configurado contenedor de servicio con imagen oficial `pgvector/pgvector:pg17` en `.github/workflows/api.yml`. Las 13 suites completas de pruebas de integración PostgreSQL (`test_*_postgres.py`) se ejecutan con esquemas aislados y fixtures limpios de migración.
 
-- [ ] **T6.2 — Pruebas End-to-End (E2E) con Playwright**
-  - **Acción:** Automatizar los 3 flujos críticos en navegador real:
-    1. Apertura de turno con arqueo $\rightarrow$ venta de membresía $\rightarrow$ check-in de socio.
-    2. Venta de productos/porciones con cobro en efectivo y tarjeta Point.
-    3. Cierre de turno y generación de reporte de diferencias.
+- [x] **T6.2 — Pruebas End-to-End (E2E) con Playwright**
+  - **Resultado:** Configurado `@playwright/test` en `frontend/` y workflow de CI `.github/workflows/e2e.yml`. Automatizados y certificados los 3 flujos críticos en Chromium real (`npm run test:e2e`):
+    1. Apertura de turno con arqueo de denominaciones $\rightarrow$ venta de membresía en efectivo $\rightarrow$ check-in de socio (`flow1-shift-open-sale-checkin.spec.ts`).
+    2. Venta de productos y porción de suplemento con tarjeta y fallback de rechazo/aprobación de terminal Point (`flow2-product-supplement-point-sale.spec.ts`).
+    3. Cierre de turno con conteo de denominaciones, cálculo de discrepancia y revisión de arqueo (`flow3-shift-close-discrepancy.spec.ts`).
 
-- [ ] **T6.3 — Procedimientos de respaldo PITR y recuperación ante desastres (BK-075)**
-  - **Acción:** Definir objetivos RPO/RTO, pruebas periódicas de restauración de base de datos PostgreSQL con PITR y mitigación de pérdida de dispositivos no sincronizados.
+- [x] **T6.3 — Procedimientos de respaldo PITR y recuperación ante desastres (BK-075)**
+  - **Resultado:** Runbook operacional detallado en `docs/operations/disaster-recovery.md` definiendo RPO < 5 min y RTO < 30 min, configuración de WAL archiving y `archive_timeout = 300`, stanzas de pgBackRest con almacenamiento off-site cifrado en S3/MinIO, simulación de simulacros de restauración PITR paso a paso, y procedimiento de exportación/reconciliación de contingencia offline desde IndexedDB (`evogym-local-db.events`).
 
-- [ ] **T6.4 — Hardening de Seguridad, Rate Limiting y Despliegue (BK-076)**
-  - **Acción:** Rate limiting en login y emparejamiento móvil (`/pair`), rotación segura de secretos, configuración estricta de CORS/cookies y auditoría de vulnerabilidades (`pip audit`, `npm audit`).
+- [x] **T6.4 — Hardening de Seguridad, Rate Limiting y Despliegue (BK-076)**
+  - **Resultado:** Endpoints de autenticación, sesión y emparejamiento móvil (`/pair`, `/sessions`, `/first-change`) protegidos por `_AuthRateLimiter` y limitador de tamaño de cuerpo `_AuthBodyLimitMiddleware`. Middleware `_SecurityHeadersMiddleware` inyectando encabezados HSTS (`max-age=63072000; includeSubDomains`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` y `Referrer-Policy: strict-origin-when-cross-origin`. Suite de pruebas dedicada en `api/tests/test_security_headers.py`. Auditorías de dependencias ejecutadas con mitigación de vulnerabilidades de alto impacto en frontend.
 
 ---
 

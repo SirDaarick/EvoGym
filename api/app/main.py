@@ -142,6 +142,34 @@ class _AllowlistedCredentialCORSMiddleware(CORSMiddleware):
         await super().__call__(scope, receive, strip_untrusted_credentials)
 
 
+class _SecurityHeadersMiddleware:
+    """Inject defense-in-depth security headers (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy)."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                header_names = {k.lower() for k, _ in headers}
+                if b"x-content-type-options" not in header_names:
+                    headers.append((b"x-content-type-options", b"nosniff"))
+                if b"x-frame-options" not in header_names:
+                    headers.append((b"x-frame-options", b"DENY"))
+                if b"referrer-policy" not in header_names:
+                    headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+                if b"strict-transport-security" not in header_names:
+                    headers.append((b"strict-transport-security", b"max-age=63072000; includeSubDomains"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 def _readiness_probe(engine: Engine | None) -> bool:
     if engine is None:
         return False
@@ -287,6 +315,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(whatsapp_webhook_router)
     install_error_handlers(application)
     application.add_middleware(RequestIdMiddleware)
+    application.add_middleware(_SecurityHeadersMiddleware)
     application.add_middleware(_AuthBodyLimitMiddleware, maximum=configuration.auth_request_max_bytes or 4096)
     if configuration.cors_origin_allowlist:
         application.add_middleware(
