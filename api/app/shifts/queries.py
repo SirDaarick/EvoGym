@@ -621,7 +621,14 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
     activities = list(families.values()) if confirmed_minor else []
     expense_amounts = list(session.scalars(select(Expense.amount_minor).where(Expense.shift_id == shift.id, Expense.voided_at.is_(None))))
     extra_amounts = list(session.scalars(select(ShiftCashContribution.amount_minor).where(ShiftCashContribution.shift_id == shift.id)))
-    return {"shift_id": shift.id, "confirmed_minor": confirmed_minor, "confirmed_cash_minor": cash_minor,
+    from app.db.models.sync import SyncAuditFlag
+    flags_count = session.scalar(
+        select(func.count(SyncAuditFlag.id)).where(
+            SyncAuditFlag.shift_id == shift.id,
+            SyncAuditFlag.resolved_at.is_(None),
+        )
+    ) or 0
+    return {"shift_id": shift.id, "contingency_flags_count": flags_count, "confirmed_minor": confirmed_minor, "confirmed_cash_minor": cash_minor,
             "expense_minor": sum(expense_amounts), "expense_count": len(expense_amounts), "extra_minor": sum(extra_amounts),
             "pending_transfer_minor": pending_transfer_minor,
             "payment_methods": sorted(methods.values(), key=lambda item: str(item["method"])),

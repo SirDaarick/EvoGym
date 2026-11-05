@@ -252,6 +252,7 @@ class ShiftSummaryDTO(BaseModel):
     expense_minor: int
     expense_count: int
     extra_minor: int
+    contingency_flags_count: int = 0
 
     @field_validator("shift_id", mode="before")
     @classmethod

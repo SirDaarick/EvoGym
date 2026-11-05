@@ -8,6 +8,8 @@ import {
 } from '../../api/profileAccessApi';
 import { AdminSessionProvider, useAdminSession } from './AdminSessionProvider';
 import { getReceptionConfig } from '../../api/receptionApi';
+import { openLocalDb } from '../../offline/db';
+import { registerOfflinePin, verifyOfflinePin } from '../../offline/offlinePin';
 
 export type OperatingPrincipal =
   | { kind: 'admin'; identity: ProfileIdentityChoice }
@@ -207,9 +209,42 @@ function ProductAccessState({ children, apiOrigin, fetchImpl, queryClient }: { c
         }
         return;
       }
+      registerOfflinePin(openLocalDb(), identity.id, pin).catch(() => {});
       setPrincipal({ kind: 'employee', identity, branch, session: outcome });
       return outcome;
     } catch (reason) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        try {
+          const offlineRes = await verifyOfflinePin(openLocalDb(), identity.id, pin);
+          if (offlineRes.success) {
+            const offlineSession: ProfileEntrySession = {
+              accessToken: `offline-session-${identity.id}`,
+              expiresAt: Date.now() + 24 * 3600 * 1000,
+              purpose: 'employee_profile',
+              identityId: identity.id,
+              profileId: branch.profile_id,
+              branchId: branch.branch_id,
+            };
+            if (mounted.current && generation.current === current) {
+              setPrincipal({ kind: 'employee', identity, branch, session: offlineSession });
+            }
+            return offlineSession;
+          } else {
+            const msg = offlineRes.error === 'locked'
+              ? 'PIN bloqueado por demasiados intentos fallidos.'
+              : offlineRes.error === 'expired'
+              ? 'Credenciales sin conexión expiradas.'
+              : offlineRes.error === 'not_enrolled'
+              ? 'No hay credenciales sin conexión registradas.'
+              : `PIN incorrecto (${offlineRes.remainingAttempts} intentos restantes).`;
+            if (mounted.current && generation.current === current) setError(msg);
+            throw new Error(msg);
+          }
+        } catch (offlineErr) {
+          if (mounted.current && generation.current === current) setError((offlineErr as Error).message || safeMessage(reason));
+          throw offlineErr;
+        }
+      }
       if (mounted.current && generation.current === current) setError(safeMessage(reason));
       throw reason;
     } finally {
