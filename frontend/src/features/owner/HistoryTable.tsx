@@ -20,6 +20,8 @@ export interface HistoryTableRecord {
   amountMinor: number | null;
   method: PaymentMethod | null;
   memberId?: string;
+  memberName?: string;
+  actorName?: string;
 }
 
 /** Sortable history table shared by the demo and live views. `paginated=false` shows every row (server paging). */
@@ -48,7 +50,12 @@ export function HistoryTable({ records, caption, timezone = 'America/Mexico_City
         header: 'Registro y referencia',
         cell: ({ row }) => (
           <div>
-            <span>{row.original.description}</span>
+            <strong style={{ display: 'block', color: 'var(--color-ink)' }}>{row.original.description}</strong>
+            {row.original.memberName && (
+              <p className="muted" style={{ fontSize: '12px', margin: '2px 0 0' }}>
+                Socio: {row.original.memberName}
+              </p>
+            )}
             <details>
               <summary>Ver detalle</summary>
               <p className="mt-2">{row.original.detail}</p>
@@ -61,8 +68,23 @@ export function HistoryTable({ records, caption, timezone = 'America/Mexico_City
       },
       {
         accessorKey: 'shiftId',
-        header: 'Turno',
-        cell: ({ getValue }) => String(getValue() || '—'),
+        header: 'Turno / Atendido por',
+        cell: ({ row, getValue }) => {
+          const actor = row.original.actorName;
+          const shift = String(getValue() || '');
+          if (actor) {
+            return (
+              <div>
+                <strong>{actor}</strong>
+                <p className="muted" style={{ fontSize: '11px', margin: 0 }}>
+                  {shift && shift.length > 20 ? 'Turno en caja' : (shift || 'Turno activo')}
+                </p>
+              </div>
+            );
+          }
+          if (!shift) return '—';
+          return shift.length > 20 ? 'Turno en caja' : shift;
+        },
       },
       {
         accessorKey: 'amountMinor',

@@ -169,6 +169,7 @@ export function AttendanceAnalyticsView({ analytics, period, setPeriod, live = f
             </span>
             <div className="att-occupant-meta">
               <span className="att-occupant-name">{row.original.memberName}</span>
+              <span className="att-occupant-id">'Socio activo'</span>
             </div>
           </div>
         ),

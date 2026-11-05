@@ -270,7 +270,7 @@ export function DevicePairingModal({
             </h2>
             <div className="device-pairing-staff-badge">
               <span className="device-pairing-staff-avatar">{staffInitials}</span>
-              <span><strong>{staffName}</strong>{staff && !serverIdentity ? ` (${staff.shift})` : ''}</span>
+              <span><strong>{staffName}</strong> · {serverIdentity?.staffLogin ? `Usuario: ${serverIdentity.staffLogin}` : (staff ? `${staff.role} · Turno ${staff.shift}` : 'Personal de recepción')}</span>
             </div>
           </div>
           <button
