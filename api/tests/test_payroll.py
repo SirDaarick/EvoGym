@@ -108,7 +108,7 @@ def test_payroll_history_matches_expenses_without_double_counting(tmp_path):
             # Salary change after payment must not rewrite the paid snapshot in the history.
             client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'monthly_salary_minor': 2000000})
 
-            query = f'from=2026-10-28&to=2026-11-04&branch_id={branch}'
+            query = f'from=2026-10-26&to=2026-11-08&branch_id={branch}'
             history = client.get(f'/api/v1/admin/payroll/history?{query}', headers=admin)
             assert history.status_code == 200, history.text
             data = history.json()
