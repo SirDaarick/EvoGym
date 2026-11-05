@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     evidence_s3_bucket: str | None = None
     evidence_s3_access_key: SecretStr | None = None
     evidence_s3_secret_key: SecretStr | None = None
+    sync_device_token_ttl_days: int = Field(default=30, ge=1, le=365)
+    sync_offline_grant_ttl_hours: int = Field(default=24, ge=1, le=168)
+    sync_batch_max_events: int = Field(default=100, ge=1, le=1000)
+    sync_batch_max_bytes: int = Field(default=262144, ge=1024, le=4194304)
+    sync_delta_page_size: int = Field(default=500, ge=1, le=5000)
+    sync_delta_max_age_days: int = Field(default=7, ge=1, le=90)
+    sync_clock_skew_tolerance_seconds: int = Field(default=300, ge=0, le=3600)
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":

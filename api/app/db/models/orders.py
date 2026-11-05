@@ -43,6 +43,8 @@ class Order(Base):
         UniqueConstraint("seller_id", "branch_id", "idempotency_key", name="uq_orders_seller_branch_idempotency"),
         Index("ix_orders_member_created", "member_id", "created_at"),
         Index("ix_orders_financial_shift_id", "financial_shift_id"),
+        UniqueConstraint("offline_receipt_number", name="uq_orders_offline_receipt_number"),
+        CheckConstraint("origin IN ('online', 'contingency')", name="ck_orders_origin"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -63,6 +65,8 @@ class Order(Base):
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="MXN", server_default="MXN")
     total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    offline_receipt_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="online", server_default="online")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan", lazy="selectin", order_by="OrderItem.line_number")

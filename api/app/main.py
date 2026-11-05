@@ -43,6 +43,7 @@ from app.api.member_reads import router as member_reads_router
 from app.api.rentals import router as rentals_router
 from app.api.expenses import router as expenses_router
 from app.api.payroll import router as payroll_router
+from app.api.sync import router as sync_router
 
 
 class _AuthRateLimiter:
@@ -281,6 +282,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(rentals_router)
     application.include_router(expenses_router)
     application.include_router(payroll_router)
+    application.include_router(sync_router)
     from app.api.whatsapp_webhook import router as whatsapp_webhook_router
     application.include_router(whatsapp_webhook_router)
     install_error_handlers(application)

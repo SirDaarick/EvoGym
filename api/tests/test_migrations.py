@@ -22,7 +22,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 def test_migration_graph_has_one_head_with_distinct_admin_and_staff_revision_ids():
     scripts = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
 
-    assert scripts.get_heads() == ["0056_gimi_knowledge"]
+    assert scripts.get_heads() == ["0057_contingency_sync"]
     assert scripts.get_revision("0031_admin_session_policy").revision == "0031_admin_session_policy"
     assert scripts.get_revision("0038_staff_occurrence_attendance").revision == "0038_staff_occurrence_attendance"
     assert scripts.get_revision("0039_shift_inv_obs_reason").down_revision == "0038_staff_occurrence_attendance"
@@ -443,6 +443,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "product_sale_cancellations", "product_sale_intents", "product_sale_resolutions",
                 "product_refunds", "rental_assets", "rentals", "rental_charges", "rental_deposit_movements",
                 "notification_outbox", "whatsapp_inbox_messages", "gimi_knowledge_chunks",
+                "sync_devices", "contingency_events", "sync_audit_flags",
                 "rental_receipts", "rental_cancellations", "rental_card_attempts",
                 "expenses", "shift_cash_contributions", "payroll_advances", "payroll_payments",
                 "staff_schedule_series", "staff_schedule_exceptions",
@@ -451,7 +452,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "member_check_in_visits",
                 "class_sample_entitlements", "class_sample_check_ins",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
             checkin_triggers = {
                 row[0]
                 for row in connection.execute(
@@ -613,7 +614,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
     finally:
         engine.dispose()
 
@@ -702,7 +703,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
     finally:
         engine.dispose()
 
@@ -728,7 +729,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
     finally:
         engine.dispose()
 
@@ -812,7 +813,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -845,7 +846,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -917,7 +918,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -1008,7 +1009,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -1092,7 +1093,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0056_gimi_knowledge"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:
@@ -1336,5 +1337,43 @@ def test_staff_occurrence_attendance_migration_creates_columns_and_refuses_histo
 
         with engine.connect() as connection:
             assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0038_staff_occurrence_attendance"
+    finally:
+        engine.dispose()
+
+
+def test_contingency_sync_migration_upgrade_downgrade_upgrade(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    url = f"sqlite+pysqlite:///{(tmp_path / 'contingency-sync.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0056_gimi_knowledge")
+    engine = create_engine(url)
+    try:
+        command.upgrade(config, "0057_contingency_sync")
+        inspector = inspect(engine)
+        assert {"sync_devices", "contingency_events", "sync_audit_flags"} <= set(inspector.get_table_names())
+        assert {"offline_receipt_number", "origin"} <= {c["name"] for c in inspector.get_columns("orders")}
+        assert "updated_at" in {c["name"] for c in inspector.get_columns("products")}
+        branch, staff = uuid4().hex, uuid4().hex
+        with engine.begin() as connection:
+            connection.execute(text("INSERT INTO audit_events (id, actor_id, branch_id, action, request_id) "
+                                    "VALUES (:id, :a, :b, 'sync_ingest', :r)"),
+                               {"id": uuid4().hex, "a": staff, "b": branch, "r": uuid4().hex})
+            connection.execute(text("DELETE FROM audit_events"))
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(text("INSERT INTO audit_events (id, actor_id, branch_id, action, request_id) "
+                                        "VALUES (:id, :a, :b, 'bogus', :r)"),
+                                   {"id": uuid4().hex, "a": staff, "b": branch, "r": uuid4().hex})
+        command.downgrade(config, "0056_gimi_knowledge")
+        inspector = inspect(engine)
+        assert "sync_devices" not in inspector.get_table_names()
+        assert "origin" not in {c["name"] for c in inspector.get_columns("orders")}
+        assert "updated_at" not in {c["name"] for c in inspector.get_columns("products")}
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0057_contingency_sync"
     finally:
         engine.dispose()

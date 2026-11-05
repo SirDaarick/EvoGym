@@ -13,6 +13,7 @@ from app.observability.logging import request_id
 DomainCode = Literal[
     "membership_access_denied", "class_sample_already_used", "class_sample_payment_unavailable",
     "class_sample_payment_not_received", "wrong_branch",
+    "sync_device_revoked", "sync_device_expired", "sync_snapshot_required", "sync_batch_too_large",
 ]
 
 
@@ -101,6 +102,7 @@ class PublicDomainError(AppError):
 
     def __init__(self, code: str, *, metadata: dict | None = None):
         self.payload = PublicDomainPayload.model_validate({"code": code, "metadata": metadata})
+        self.status = _STATUS_OVERRIDES.get(self.payload.code, 409)
         super().__init__(self.payload.code)
 
     @property
@@ -152,12 +154,17 @@ class ValidationErrorResponse(BaseModel):
     error: ValidationErrorBody
 
 
+_STATUS_OVERRIDES = {"sync_device_revoked": 401, "sync_device_expired": 401, "sync_batch_too_large": 413}
 _PUBLIC_MESSAGES = {
     "membership_access_denied": "Membership access was denied.",
     "class_sample_already_used": "The class sample has already been used.",
     "class_sample_payment_unavailable": "The class sample payment is unavailable.",
     "class_sample_payment_not_received": "The class sample payment has not been received.",
     "wrong_branch": "The entitlement belongs to another branch.",
+    "sync_device_revoked": "El dispositivo fue revocado; vuelva a sincronizar desde una sesión con internet.",
+    "sync_device_expired": "La autorización del dispositivo expiró; vuelva a sincronizar con internet.",
+    "sync_snapshot_required": "Se requiere una descarga completa de datos (bootstrap) antes de continuar.",
+    "sync_batch_too_large": "El lote de eventos excede el tamaño permitido.",
 }
 _VALIDATION_TYPES = set(get_args(ValidationIssue.model_fields["type"].annotation))
 _VALIDATION_SOURCES = {"body", "query", "path", "header", "cookie"}

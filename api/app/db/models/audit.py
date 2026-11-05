@@ -12,7 +12,7 @@ class AuditEvent(Base):
 
     __tablename__ = "audit_events"
     __table_args__ = (
-        CheckConstraint("action IN ('member_read', 'member_write', 'finance_read', 'shift_post', 'staff_authorization_changed')", name="ck_audit_events_action"),
+        CheckConstraint("action IN ('member_read', 'member_write', 'finance_read', 'shift_post', 'staff_authorization_changed', 'sync_ingest')", name="ck_audit_events_action"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)

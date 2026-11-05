@@ -46,6 +46,7 @@ from app.db.models.expenses import Expense, ShiftCashContribution
 from app.db.models.payroll import PayrollAdvance, PayrollPayment
 from app.db.models.member_access_decisions import MemberAccessDecision
 from app.db.models.member_check_ins import MemberCheckIn
+from app.db.models.sync import ContingencyEvent, SyncAuditFlag, SyncDevice
 from app.db.models.class_samples import ClassSampleCheckIn, ClassSampleEntitlement
 
 # Update AdminAuthEvent check constraint for enrollment and device actions

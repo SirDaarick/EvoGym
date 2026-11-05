@@ -179,6 +179,7 @@ def test_checkin_openapi_declares_domain_conflicts_and_safe_validation_responses
     assert set(definitions["PublicDomainErrorBody"]["properties"]["code"]["enum"]) == {
         "membership_access_denied", "class_sample_already_used", "class_sample_payment_unavailable",
         "class_sample_payment_not_received", "wrong_branch",
+        "sync_device_revoked", "sync_device_expired", "sync_snapshot_required", "sync_batch_too_large",
     }
     assert definitions["ValidationIssue"]["properties"]["location"]["maxItems"] == 1
 
