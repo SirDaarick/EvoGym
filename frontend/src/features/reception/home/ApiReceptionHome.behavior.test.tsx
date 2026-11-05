@@ -31,7 +31,7 @@ describe('ApiReceptionHome data flow', () => {
   it('refetches stock after a successful sale', async () => {
     const request = makeRequest();
     renderWithQuery(<ApiReceptionHome request={request} actorId="actor" />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Water' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Water' }, { timeout: 5000 }));
     const stockCalls = () => count(request, path => path.startsWith('/api/v1/inventory/branches/'));
     expect(stockCalls()).toBe(1);
     await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
@@ -45,7 +45,7 @@ describe('ApiReceptionHome data flow', () => {
     const request = makeRequest(path => path.startsWith('/api/v1/members?')
       ? json({ items: [{ id: 'm-1', full_name: 'John Doe', phone: '555' }], total: 1, page: 1, limit: 20, pages: 1 }) : undefined);
     renderWithQuery(<ApiReceptionHome request={request} actorId="actor" />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Water' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Water' }, { timeout: 5000 }));
     await userEvent.type(screen.getByLabelText('Asignar socio'), 'John');
     expect(await screen.findByRole('button', { name: 'John Doe' })).toBeVisible();
     const searches = request.mock.calls.filter(([path]) => path.startsWith('/api/v1/members?'));

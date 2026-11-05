@@ -12,15 +12,47 @@ export interface DeviceRow {
   branchId?: string;
   next_seq?: number;
 }
+
+export interface LocalActivePeriod {
+  period_id: string;
+  starts_on: string;
+  ends_on: string;
+  access: 'valid' | 'valid_with_outstanding_balance' | 'denied';
+}
+
 export interface MemberRow {
   member_id: string;
   member_number?: string | number | null;
+  full_name?: string;
+  phone_last4?: string;
+  photo_hash?: string | null;
+  status?: string;
+  active_periods?: LocalActivePeriod[];
+  has_debt?: boolean;
+  changed_at?: string;
   nameTokens?: string[];
   [k: string]: unknown;
 }
-export interface CatalogRow { product_id: string; unit?: string; [k: string]: unknown }
+export interface CatalogRow {
+  product_id: string;
+  code?: string;
+  name?: string;
+  unit?: string;
+  price_minor?: number;
+  is_active?: boolean;
+  on_hand?: number;
+  [k: string]: unknown;
+}
 export interface RegisterRow { register_id: string; [k: string]: unknown }
-export interface ShiftStateRow { register_id: string; [k: string]: unknown }
+export interface ShiftStateRow {
+  register_id: string;
+  shift_id?: string;
+  opening_cash_minor?: number;
+  opened_at?: string;
+  status?: string;
+  closed_at?: string;
+  [k: string]: unknown;
+}
 export interface OfflineCredentialRow {
   staff_id: string;
   salt: string;
@@ -91,7 +123,7 @@ export class OfflineStorageError extends Error {
 
 export async function requestPersistentStorage(): Promise<boolean> {
   try {
-    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
+    if (typeof navigator !== 'undefined' && !navigator.storage?.persist) return false;
     return await navigator.storage.persist();
   } catch {
     return false;

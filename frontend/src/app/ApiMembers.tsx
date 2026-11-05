@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { MemberReloadResponse, MemberSummary } from '../api/memberReadsApi';
+import type { MemberReloadResponse, MemberStatus, MemberSummary } from '../api/memberReadsApi';
 import type { Member, Role } from '../domain/models';
 import { Members, MemberDetail } from '../features/members/Members';
 import { rolePath } from './navigation';
@@ -15,6 +15,9 @@ import {
   type MemberNoteDTO,
   type UpdateMemberPayload,
 } from '../api/membersApi';
+import { openLocalDb } from '../offline/db';
+import { dispatch } from '../offline/dispatcher';
+import { isOnlineHint } from '../offline/connectivity';
 
 interface ApiMember {
   id: string;
@@ -90,6 +93,9 @@ export function ApiMembers({ role, request }: { role: Role; request: Authenticat
     setLoading(true);
     setError('');
     try {
+      if (!isOnlineHint()) {
+        throw new Error('offline');
+      }
       const firstPage = await readResponse<ApiMemberPage>(request, '/api/v1/members?page=1&limit=100');
       const items = [...firstPage.items];
       for (let pageNumber = 2; pageNumber <= firstPage.pages; pageNumber += 1) {
@@ -98,8 +104,30 @@ export function ApiMembers({ role, request }: { role: Role; request: Authenticat
       }
       setPage({ ...firstPage, items });
     } catch (reason) {
+      try {
+        const db = openLocalDb();
+        const localMembers = await db.members.toArray();
+        if (localMembers.length > 0) {
+          const items: ApiMember[] = localMembers.map(m => ({
+            id: m.member_id,
+            member_number: m.member_number != null ? String(m.member_number) : '',
+            full_name: typeof m.full_name === 'string' ? m.full_name : m.member_id,
+            preferred_name: null,
+            phone: typeof m.phone_last4 === 'string' ? `***${m.phone_last4}` : '',
+            status: typeof m.status === 'string' ? m.status : 'active',
+            joined_on: m.changed_at ? String(m.changed_at).split('T')[0] : '',
+            credit_balance_minor: 0,
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            photo_url: null,
+          }));
+          setPage({ items, total: items.length, page: 1, limit: items.length, pages: 1 });
+          setError('');
+          return;
+        }
+      } catch { /* proceed with error */ }
       setPage(null);
-      setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los socios desde la API.');
+      setError(reason instanceof Error && reason.message !== 'offline' ? reason.message : 'No se pudieron cargar los socios desde la API.');
     } finally {
       setLoading(false);
     }
@@ -223,6 +251,9 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
     setLoading(true);
     setError('');
     try {
+      if (!isOnlineHint()) {
+        throw new Error('offline');
+      }
       const [profile, state, notesData, summaryData] = await Promise.all([
         readResponse<ApiMemberDetail>(request, `/api/v1/members/${encodeURIComponent(memberId)}`),
         readResponse<MemberReloadResponse>(request, `/api/v1/members/${encodeURIComponent(memberId)}/reload?visit_limit=12`),
@@ -236,9 +267,81 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
         setNotesList(notesData);
       }
     } catch (reason) {
+      try {
+        const db = openLocalDb();
+        const local = await db.members.get(memberId);
+        if (local) {
+          const profileStatus: MemberStatus = local.status === 'active' || local.status === 'inactive' || local.status === 'expired' || local.status === 'suspended' || local.status === 'pending'
+            ? local.status
+            : 'active';
+
+          const profile: ApiMemberDetail = {
+            id: local.member_id,
+            member_number: local.member_number != null ? String(local.member_number) : '',
+            full_name: typeof local.full_name === 'string' ? local.full_name : local.member_id,
+            preferred_name: null,
+            phone: typeof local.phone_last4 === 'string' ? `***${local.phone_last4}` : '',
+            email: null,
+            birth_date: null,
+            status: profileStatus,
+            joined_on: local.changed_at ? String(local.changed_at).split('T')[0] : '',
+            credit_balance_minor: 0,
+            notes: null,
+            pending_balance_minor: local.has_debt ? 1 : 0,
+            has_pending_balance: Boolean(local.has_debt),
+            emergency_contact_name: null,
+            emergency_contact_phone: null,
+            photo_url: null,
+          };
+          const period = Array.isArray(local.active_periods) && local.active_periods.length > 0 ? local.active_periods[0] : null;
+          const reloadFallback: MemberReloadResponse = {
+            profile: {
+              id: local.member_id,
+              organization_id: '',
+              home_branch_id: '',
+              member_number: local.member_number != null ? String(local.member_number) : '',
+              full_name: typeof local.full_name === 'string' ? local.full_name : local.member_id,
+              preferred_name: null,
+              phone: typeof local.phone_last4 === 'string' ? `***${local.phone_last4}` : '',
+              email: null,
+              birth_date: null,
+              joined_on: local.changed_at ? String(local.changed_at).split('T')[0] : '',
+              status: profileStatus,
+              photo_url: null,
+              emergency_contact_name: null,
+              emergency_contact_phone: null,
+            },
+            active_periods: period ? [{
+              id: period.period_id,
+              order_item_id: 'offline-order-item',
+              plan_version_id: 'offline-plan-version',
+              plan_name: 'Membresía activa',
+              starts_on: period.starts_on,
+              ends_on: period.ends_on,
+              branch_id: null,
+              is_current: true,
+              access_status: period.access === 'valid' ? 'eligible' : period.access === 'valid_with_outstanding_balance' ? 'restricted_unpaid' : 'expired',
+            }] : [],
+            class_samples: [],
+            financial: {
+              currency: 'MXN',
+              credit_balance_minor: 0,
+              total_pending_balance_minor: local.has_debt ? 1 : 0,
+              has_pending_balance: Boolean(local.has_debt),
+              debts: [],
+            },
+            recent_visits: [],
+            server_time: new Date().toISOString(),
+          };
+          setMember(profile);
+          setReload(reloadFallback);
+          setError('');
+          return;
+        }
+      } catch { /* proceed with error */ }
       setMember(null);
       setReload(null);
-      setError(reason instanceof Error ? reason.message : 'No se pudo cargar el expediente desde la API.');
+      setError(reason instanceof Error && reason.message !== 'offline' ? reason.message : 'No se pudo cargar el expediente desde la API.');
     } finally {
       setLoading(false);
     }
@@ -265,7 +368,49 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
     await load();
   }
 
+  async function recordOfflineCheckIn(): Promise<{ ok: boolean; message: string }> {
+    const db = openLocalDb();
+    const local = await db.members.get(memberId);
+    if (!local || local.status !== 'active') {
+      return { ok: false, message: 'La membresía debe estar activa para registrar entrada.' };
+    }
+    const period = Array.isArray(local.active_periods) && local.active_periods.length > 0
+      ? local.active_periods[0]
+      : null;
+    if (!period || period.access === 'denied') {
+      return { ok: false, message: 'La membresía debe estar activa para registrar entrada.' };
+    }
+    const localDecision = period.access;
+    const actorStaffId = access?.principal ? access.principal.identity.id : 'offline-staff';
+    const branchMeta = await db.meta.get('branch');
+    const branchVal = branchMeta?.value as { id?: string } | undefined;
+    const branchId = employeeBranchId || branchVal?.id || 'branch-default';
+
+    try {
+      await dispatch(
+        db,
+        {
+          type: 'attendance.check_in',
+          payload: {
+            member_id: memberId,
+            period_id: period.period_id,
+            branch_id: branchId,
+            local_access_decision: localDecision,
+          },
+        },
+        actorStaffId,
+      );
+      pendingKeyRef.current = null;
+      return { ok: true, message: 'Entrada registrada en contingencia.' };
+    } catch {
+      return { ok: false, message: 'No se pudo registrar la entrada en contingencia.' };
+    }
+  }
+
   async function recordCheckIn(): Promise<{ ok: boolean; message: string }> {
+    if (!isOnlineHint()) {
+      return await recordOfflineCheckIn();
+    }
     if (!reload) return { ok: false, message: 'El expediente solicitado no está disponible.' };
     const period = reload.active_periods.find(p => p.is_current) ?? reload.active_periods[0];
     const branchId = employeeBranchId ?? period?.branch_id ?? reload.profile.home_branch_id;
@@ -295,7 +440,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
       await load();
       return { ok: true, message: 'Entrada registrada.' };
     } catch {
-      return { ok: false, message: 'No se pudo registrar la entrada.' };
+      return await recordOfflineCheckIn();
     }
   }
 

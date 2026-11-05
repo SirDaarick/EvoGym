@@ -275,8 +275,10 @@ describe('live StaffProfileSelection', () => {
       throw new Error(`Unexpected request: ${path} ${init?.method ?? 'GET'}`);
     });
     renderSelector(fetchImpl);
-    fireEvent.click(await screen.findByRole('button', { name: /Ana Perez/ }));
-    fireEvent.change(screen.getByLabelText(/PIN de seis dígitos para Ana Perez/), { target: { value: '123456' } });
+    const employee = await screen.findByRole('button', { name: /Ana Perez/ });
+    await waitFor(() => expect(screen.queryByText('Verificando acceso…')).not.toBeInTheDocument());
+    fireEvent.click(employee);
+    fireEvent.change(await screen.findByLabelText(/PIN de seis dígitos para Ana Perez/), { target: { value: '123456' } });
     fireEvent.change(await screen.findByLabelText('Nuevo PIN de seis dígitos'), { target: { value: '654321' } });
     fireEvent.change(screen.getByLabelText('Confirma el nuevo PIN de seis dígitos'), { target: { value: '654321' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar nuevo PIN' }));

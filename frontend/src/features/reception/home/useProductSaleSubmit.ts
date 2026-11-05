@@ -19,6 +19,7 @@ interface Params {
   registerId: string;
   saleIntent: ProductSaleIntentApi;
   cart: SaleCart;
+  actorId?: string;
   setMessage(message: string): void;
   setError(error: boolean): void;
   setPending(pending: boolean): void;
@@ -29,7 +30,7 @@ interface Params {
 const NOT_RESOLVED = 'No se pudo confirmar el resultado. Intenta resolver la compra nuevamente.';
 
 export function useProductSaleSubmit(p: Params) {
-  const { request, registerId, saleIntent, cart, setMessage, setError, setPending } = p;
+  const { request, registerId, saleIntent, cart, actorId, setMessage, setError, setPending } = p;
   const { intent, intentLoaded } = saleIntent;
   const queryClient = useQueryClient();
   const submitting = useRef(false);
@@ -51,7 +52,7 @@ export function useProductSaleSubmit(p: Params) {
     submitting.current = true;
     setPending(true); setError(false);
     const ctx: SaleContext = {
-      request, submitted, total: cart.total, intents: saleIntent,
+      request, submitted, total: cart.total, intents: saleIntent, actorId,
       ui: { setMessage, setError, setActiveCardIntentId, resetCart: p.resetCart, backToStart: p.backToStart, invalidateStock },
     };
     try {

@@ -1,6 +1,7 @@
 import { AdminAccessApp } from '../features/auth/AdminAccessApp';
 import { FirstPinChangePage } from '../features/auth/FirstPinChangePage';
 import { ProductAccessProvider } from '../features/auth/ProductAccessProvider';
+import { SyncProvider } from '../offline/SyncProvider';
 import { ProductRoutes } from './ProductRoutes';
 import { useLocation } from 'react-router';
 
@@ -15,7 +16,11 @@ export function RootApp() {
   if (location.pathname.startsWith('/admin') && isAdminEmailAction(location.search)) return <AdminAccessApp />;
   if (location.pathname === '/admin/recovery') return <AdminAccessApp />;
 
-  return <ProductAccessProvider>
-    <ProductRoutes />
-  </ProductAccessProvider>;
+  return (
+    <ProductAccessProvider>
+      <SyncProvider>
+        <ProductRoutes />
+      </SyncProvider>
+    </ProductAccessProvider>
+  );
 }

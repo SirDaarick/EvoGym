@@ -5,6 +5,9 @@ import type { CashDenominationCount } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { Button, Notice } from '../../shared/ui';
 import { closeShift as closeApiShift, getShift } from '../../api/shiftsApi';
+import { openLocalDb } from '../../offline/db';
+import { dispatch } from '../../offline/dispatcher';
+import { isOnlineHint } from '../../offline/connectivity';
 import type { ApiRequest } from '../../api/shiftsApi';
 import './ShiftCloseDialog.css';
 
@@ -198,6 +201,27 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
   async function confirmClose() {
     if (!review) return;
     const notes = draft.closingNotes?.trim() ?? '';
+    if (!isOnlineHint()) {
+      const db = openLocalDb();
+      await dispatch(
+        db,
+        {
+          type: 'shift.arqueo_close',
+          payload: {
+            shift_ref: shiftId,
+            denomination_counts: review.denominations
+              ? review.denominations.map(row => ({ denomination_minor: row.valueMinor, quantity: row.quantity }))
+              : [{ denomination_minor: review.countedCashMinor, quantity: 1 }],
+            voucher_count: 0,
+            closing_notes: notes || null,
+          },
+        },
+        'offline-staff',
+      );
+      if (dialogRef.current?.open) dialogRef.current.close();
+      await onSuccess();
+      return;
+    }
     try {
       const closed = await closeApiShift(apiRequest, shiftId, {
         ...(review.denominations ? { denomination_counts: review.denominations.map(row => ({ denomination_minor: row.valueMinor, quantity: row.quantity })) } : { counted_cash_minor: review.countedCashMinor }),

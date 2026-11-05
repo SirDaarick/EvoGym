@@ -29,6 +29,9 @@ import {
   type StockMovementItem,
 } from '../../api/inventoryApi';
 import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
+import { openLocalDb } from '../../offline/db';
+import { dispatch } from '../../offline/dispatcher';
+import { isOnlineHint } from '../../offline/connectivity';
 import './ShiftDashboard.css';
 
 interface ApiShiftsProps { role: Role; apiRequest: ApiRequest; actorId: string; actorName: string; }
@@ -428,6 +431,31 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
         && (!openingIntent.shiftId || item.id === openingIntent.shiftId));
     }
     try {
+      if (!isOnlineHint()) {
+        const db = openLocalDb();
+        const res = await dispatch(
+          db,
+          {
+            type: 'shift.open',
+            payload: {
+              register_id: payload.cash_register_id,
+              opening_cash_minor: data.openingCashMinor ?? 0,
+              denomination_counts: (data.cashDenominations ?? []).map(d => ({
+                denomination_minor: d.valueMinor,
+                quantity: d.quantity,
+              })),
+            },
+          },
+          actorId || 'offline-staff',
+        );
+        setSelectedId(res.eventId);
+        setOpenModalOpen(false);
+        setInventorySnapshot(null);
+        openIntent.current = null;
+        setMessage(`Turno en contingencia abierto (Folio: ${res.eventId}).`);
+        setError(false);
+        return;
+      }
       let opened: ShiftDTO | undefined;
       if (intent.shiftId) {
         opened = await findCommittedOpening();

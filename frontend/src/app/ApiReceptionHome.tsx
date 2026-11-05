@@ -63,7 +63,7 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
   }
 
   const sale = useProductSaleSubmit({
-    request, registerId, saleIntent, setMessage, setError, setPending,
+    request, registerId, saleIntent, setMessage, setError, setPending, actorId,
     cart: { total, memberId: member?.id ?? null, items: selected.map(item => ({ product_id: item.product_id, quantity: quantities[item.product_id] })) },
     resetCart: () => { setQuantities({}); setMember(null); search.setQuery(''); setStep(1); },
     backToStart: () => setStep(1),

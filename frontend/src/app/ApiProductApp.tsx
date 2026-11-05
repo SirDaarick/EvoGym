@@ -17,6 +17,7 @@ import { Overview } from '../features/owner/Overview';
 import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
 import { History } from '../features/owner/History';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
+import { OfflineStatusBadge } from '../offline/OfflineStatusBadge';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
 import type { Role } from '../domain/models';
@@ -156,7 +157,10 @@ export function ApiProductApp() {
         <span>Nuevo</span>
       </Link>
     </>}
-    headerActionsBeforeTheme={<Button variant="secondary" onClick={() => navigate(rolePath(role, 'shifts'))}>Turno</Button>}
+    headerActionsBeforeTheme={<>
+      <OfflineStatusBadge />
+      <Button variant="secondary" onClick={() => navigate(rolePath(role, 'shifts'))}>Turno</Button>
+    </>}
     headerActionsAfterTheme={isPhoneEmployee ? <>
       <Button variant="secondary" disabled={access.loading} onClick={() => void unlinkDevice()}>Desvincular este dispositivo</Button>
       {access.error && <span role="alert">{access.error}</span>}

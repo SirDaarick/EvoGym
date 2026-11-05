@@ -10,6 +10,7 @@ import { AdminSessionProvider, useAdminSession } from './AdminSessionProvider';
 import { getReceptionConfig } from '../../api/receptionApi';
 import { openLocalDb } from '../../offline/db';
 import { registerOfflinePin, verifyOfflinePin } from '../../offline/offlinePin';
+import { classifyRequest, isAllowedOffline, OnlineOnlyError } from '../../offline/capabilities';
 
 export type OperatingPrincipal =
   | { kind: 'admin'; identity: ProfileIdentityChoice }
@@ -123,6 +124,10 @@ function ProductAccessState({ children, apiOrigin, fetchImpl, queryClient }: { c
 
   const request = useCallback(async (path: string, init?: RequestInit) => {
     if (!principal) throw new Error('An operating profile is required for this request.');
+    const cmd = classifyRequest(init?.method || 'GET', path);
+    if (cmd && !isAllowedOffline(cmd) && typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new OnlineOnlyError(cmd);
+    }
     if (principal.kind === 'admin') return admin.request(path, init);
     const { apiOrigin: origin } = getReceptionConfig();
     try {

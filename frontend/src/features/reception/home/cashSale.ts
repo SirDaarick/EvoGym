@@ -3,6 +3,9 @@ import {
   ProductSaleError, prepareProductSale, resolveCashProductSale, submitCashProductSale, type PendingProductSale,
 } from '@/api/productSalesApi';
 import type { ProductSaleIntentApi } from './useProductSaleIntent';
+import { openLocalDb } from '@/offline/db';
+import { dispatch, type CashSaleItemPayload } from '@/offline/dispatcher';
+import { isOnlineHint } from '@/offline/connectivity';
 
 export interface SaleUi {
   setMessage(message: string): void;
@@ -17,15 +20,74 @@ export interface SaleContext {
   request: AuthenticatedRequest;
   submitted: PendingProductSale;
   total: number;
-  intents: Pick<ProductSaleIntentApi, 'refreshResolvedIntent' | 'adoptOtherServerIntent'>;
+  intents: Pick<ProductSaleIntentApi, 'refreshResolvedIntent' | 'adoptOtherServerIntent'> & { clearIntent?: () => void };
   ui: SaleUi;
+  actorId?: string;
 }
 
 export const NOT_CONFIRMED = 'No se pudo confirmar el resultado. Verifica la compra antes de hacer otra.';
 export const MORE_PENDING = 'Hay otra compra pendiente de confirmar.';
 
+export async function executeOfflineCashSale(ctx: SaleContext, onlineIdempotencyKey?: string) {
+  const { submitted, intents, ui, actorId } = ctx;
+  const db = openLocalDb();
+  const shift = await db.shift_state.get(submitted.registerId);
+  const localShiftRef = (typeof shift?.shift_id === 'string' ? shift.shift_id : '') || 'contingency-shift';
+
+  const items: CashSaleItemPayload[] = await Promise.all(
+    submitted.payload.items.map(async line => {
+      const prod = await db.catalog.get(line.product_id);
+      return {
+        product_id: line.product_id,
+        quantity: line.quantity,
+        unit_price_minor: typeof prod?.price_minor === 'number' ? prod.price_minor : 0,
+      };
+    })
+  );
+
+  const res = await dispatch(
+    db,
+    {
+      type: 'pos.cash_sale',
+      payload: {
+        register_id: submitted.registerId,
+        local_shift_ref: localShiftRef,
+        member_id: submitted.payload.member_id,
+        items,
+        total_minor: submitted.payload.expected_total_minor,
+        online_idempotency_key: onlineIdempotencyKey,
+      },
+    },
+    actorId || 'offline-staff',
+  );
+
+  if (typeof intents.clearIntent === 'function') {
+    intents.clearIntent();
+  } else {
+    await intents.refreshResolvedIntent().catch(() => false);
+  }
+  ui.resetCart();
+  ui.invalidateStock();
+  ui.setError(false);
+  ui.setMessage(`Venta en contingencia registrada. Folio: ${res.eventId}`);
+  return res;
+}
+
 export async function runCashSale(ctx: SaleContext) {
   const { request, submitted, intents, ui } = ctx;
+  const isOnline = isOnlineHint();
+
+  if (!isOnline) {
+    try {
+      await executeOfflineCashSale(ctx);
+      return;
+    } catch {
+      ui.setError(true);
+      ui.setMessage('No se pudo registrar la venta en contingencia.');
+      return;
+    }
+  }
+
   ui.setMessage('Registrando compra…');
   try {
     await prepareProductSale(request, submitted);
@@ -35,7 +97,16 @@ export async function runCashSale(ctx: SaleContext) {
     ui.resetCart(); ui.invalidateStock();
     ui.setMessage(morePending ? MORE_PENDING : 'Compra registrada.');
   } catch (failure) {
-    await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
+    if (failure instanceof ProductSaleError && failure.definitelyRejected) {
+      await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
+    } else {
+      // Network error or uncertain response: fallback to offline dispatch with online_idempotency_key
+      try {
+        await executeOfflineCashSale(ctx, submitted.key);
+      } catch {
+        await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
+      }
+    }
   }
 }
 
