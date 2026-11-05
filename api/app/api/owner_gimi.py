@@ -102,7 +102,7 @@ def chat_with_gimi(
     orchestrator = GimiOrchestrator(settings=settings)
     actor = GimiActor(
         role=GimiRole.OWNER,
-        staff_user_id=principal.staff_user_id,
+        staff_user_id=principal.staff_id,
         branch_id=principal.branch_id,
     )
     with factory() as session:

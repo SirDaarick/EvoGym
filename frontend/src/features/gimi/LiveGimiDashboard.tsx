@@ -138,12 +138,12 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
       )}
 
       {/* Tabs */}
-      <div className="tab-buttons" role="tablist" aria-label="Secciones de Gimi">
+      <div className="gimi-header-nav-tabs tab-buttons mb-4" role="tablist" aria-label="Secciones de Gimi">
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'chat'}
-          className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+          className={`gimi-tab-btn tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
           onClick={() => setActiveTab('chat')}
         >
           💬 Chat con Gimi
@@ -152,7 +152,7 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
           type="button"
           role="tab"
           aria-selected={activeTab === 'monitor'}
-          className={`tab-btn ${activeTab === 'monitor' ? 'active' : ''}`}
+          className={`gimi-tab-btn tab-btn ${activeTab === 'monitor' ? 'active' : ''}`}
           onClick={() => setActiveTab('monitor')}
         >
           Monitor de Operaciones
@@ -161,7 +161,7 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
           type="button"
           role="tab"
           aria-selected={activeTab === 'vault'}
-          className={`tab-btn ${activeTab === 'vault' ? 'active' : ''}`}
+          className={`gimi-tab-btn tab-btn ${activeTab === 'vault' ? 'active' : ''}`}
           onClick={() => setActiveTab('vault')}
         >
           Bóveda RAG ({chunks.length})
@@ -170,7 +170,7 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
           type="button"
           role="tab"
           aria-selected={activeTab === 'outbox'}
-          className={`tab-btn ${activeTab === 'outbox' ? 'active' : ''}`}
+          className={`gimi-tab-btn tab-btn ${activeTab === 'outbox' ? 'active' : ''}`}
           onClick={() => setActiveTab('outbox')}
         >
           Cola de Notificaciones ({notifications.length})
