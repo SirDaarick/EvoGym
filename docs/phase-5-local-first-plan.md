@@ -1,6 +1,7 @@
 # Fase 5 — Plan de Implementación: Local-First y Modo Contingencia
 
 > **Estado:** Plan aprobado para ejecución. No hay código de Fase 5 implementado todavía.
+> **Nota:** la exploración se hizo antes de integrar los commits de Fase 4 (`7908b68`, `34ea63c`). Antes de la Oleada 1, un agente debe revalidar las rutas `archivo:línea` citadas (sobre todo en `ApiReceptionHome.tsx`, `ApplicationShell`, `src/test/setup.ts` y `app/main.py`).
 > **Fuente:** `docs/ROADMAP.md` (T5.1–T5.11). Cubre BK-062 a BK-072. BK-073 (multi-pestaña y actualización de esquema) y BK-074 (suite de pruebas) se integran como criterios transversales.
 > **Diseño de referencia:** `docs/backend-plan/08-local-first-and-sync.md` y las decisiones D-026, D-027 y D-033 en `docs/backend-plan/02-business-rules-and-decisions.md`.
 > **Ejecución:** exploración hecha con agentes Sonnet. La implementación y la verificación también se hacen con agentes Sonnet, en oleadas (sección 7).
@@ -48,7 +49,7 @@ D-027 los permite, pero se difieren a una fase posterior.
 ## 2. Estado actual (resultado de la exploración)
 
 ### Backend (`api/`)
-- **No existe código de sincronización** (ni routers, ni modelos, ni migraciones). La última migración es `0053_scoop_products`, así que la siguiente es **`0054_contingency_sync`**.
+- **No existe código de sincronización** (ni routers, ni modelos, ni migraciones). La última migración es `0056_gimi_knowledge`, así que la siguiente es **`0057_contingency_sync`**.
 - **Piezas reutilizables:**
   - `app/auth/hashing.py` (bcrypt) y `app/auth/credentials.py:41` (bloqueo tras 5 intentos).
   - `ReceptionStation` (`app/db/models/reception_stations.py`, con `credential_digest` sha256).
@@ -89,7 +90,7 @@ D-027 los permite, pero se difieren a una fase posterior.
 
 ## 3. Diseño del backend
 
-### 3.1 Migración `0054_contingency_sync`
+### 3.1 Migración `0057_contingency_sync`
 Debe usar `op.batch_alter_table` para que funcione en SQLite.
 
 **`sync_devices`**
@@ -489,7 +490,7 @@ Todos los agentes de implementación y de verificación usan `model: sonnet`. La
 
 | Agente | Tareas | Archivos propios |
 |---|---|---|
-| **B1: backend-modelo** | Migración 0054, modelos, settings, `app/sync/envelope.py`, `devices.py`, `clock.py`, códigos de error, `app/api/sync/__init__.py` con sub-routers vacíos registrados en `main.py`, vectores JSON canónicos | `api/migrations/versions/0054_*`, `api/app/db/models/sync.py`, `models/__init__.py`, `settings.py`, `errors.py`, `main.py`, `app/sync/{envelope,devices,clock}.py`, `app/api/sync/*`, `docs/work-packages/contracts/F5-canonical-json-vectors.json`, tests `test_sync_models.py`, `test_migrations.py` |
+| **B1: backend-modelo** | Migración 0057, modelos, settings, `app/sync/envelope.py`, `devices.py`, `clock.py`, códigos de error, `app/api/sync/__init__.py` con sub-routers vacíos registrados en `main.py`, vectores JSON canónicos | `api/migrations/versions/0057_*`, `api/app/db/models/sync.py`, `models/__init__.py`, `settings.py`, `errors.py`, `main.py`, `app/sync/{envelope,devices,clock}.py`, `app/api/sync/*`, `docs/work-packages/contracts/F5-canonical-json-vectors.json`, tests `test_sync_models.py`, `test_migrations.py` |
 | **B2: backend-refactor** | Extraer `record_check_in` a `app/attendance/service.py`; agregar `SalePolicy` a `post_cash_product_sale` (sin cambiar el comportamiento online); agregar `occurred_at` y `now` a `open_shift` y `close_shift` si hace falta | `api/app/api/member_check_ins.py`, `api/app/attendance/service.py`, `api/app/sales/queries.py`, `api/app/shifts/queries.py`, tests nuevos `test_contingency_policies.py` |
 | **F1: frontend-base** | T5.1 (PWA), T5.2 (Dexie), `canonicalJson.ts`, `sequence.ts`, `capabilities.ts` | `vite.config.ts`, `main.tsx`, `tsconfig.app.json`, `package.json`, `src/test/setup.ts`, `src/offline/{db,canonicalJson,sequence,capabilities}.ts` y sus tests |
 
