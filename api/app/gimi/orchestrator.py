@@ -178,6 +178,15 @@ class GimiOrchestrator:
         elif tool_name == "gym_faq_and_rules":
             params["query"] = text
 
+        elif tool_name == "member_request_human_support":
+            params["reason"] = text[:250]
+
+        elif tool_name == "member_generate_payment_link":
+            if any(w in lowered for w in ("adeudo", "deuda", "saldo", "debo")):
+                params["purpose"] = "debt"
+            else:
+                params["purpose"] = "renewal"
+
         return params
 
     def _extract_parameters(self, tool_name: str, text: str) -> dict[str, Any]:

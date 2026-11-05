@@ -26,8 +26,10 @@ from app.db.models import (
     Shift,
     StockMovement,
 )
+from app.db.models.catalog import Plan, PlanVersion
 from app.db.models.expenses import Expense
 from app.db.models.member_check_ins import MemberCheckInVisit
+from app.db.models.notifications import NotificationOutbox
 from app.gimi import domain_tools
 from app.gimi.jev_router import JevRouteDecision
 from app.gimi.rag.search import search as rag_search
@@ -37,6 +39,8 @@ from app.gimi.tool_definitions import (
     ToolKind,
     validate_tool_params,
 )
+from app.payments.checkout_pro import MercadoPagoCheckoutClient
+from app.settings import get_settings
 
 
 class DispatchStatus(str, Enum):
@@ -277,6 +281,136 @@ class GimiDispatcher:
             data={"hits": [{"title": h.title, "content": h.content, "score": h.score} for h in hits]},
         )
 
+    def _handle_member_request_human_support(self, session: Session, actor: GimiActor, params) -> DispatchResult:
+        ticket_code = uuid4().hex[:8].upper()
+        reason = getattr(params, "reason", None) or "Atención personalizada solicitada en chat"
+
+        if actor.member_id:
+            member = session.get(Member, actor.member_id)
+            member_desc = f"{member.full_name} (#{member.member_number}, tel: {member.phone})" if member else str(actor.member_id)
+        else:
+            member_desc = "Usuario o prospecto no registrado"
+
+        outbox_entry = NotificationOutbox(
+            id=uuid4(),
+            idempotency_key=f"handoff_{ticket_code}",
+            channel="whatsapp",
+            kind="staff_human_handoff",
+            recipient="reception_desk",
+            body=f"SOLICITUD DE ATENCIÓN HUMANA (Ticket #{ticket_code})\nSocio: {member_desc}\nMotivo: {reason}",
+            status="pending",
+        )
+        session.add(outbox_entry)
+        session.flush()
+
+        summary = (
+            f"Solicitud transferida exitosamente al equipo de recepción (Ticket #{ticket_code}). "
+            "Un recepcionista tomará el control de este chat a la brevedad para atenderte personalmente."
+        )
+
+        return DispatchResult(
+            status=DispatchStatus.SUCCESS,
+            tool_name="member_request_human_support",
+            summary_for_llm=summary,
+            data={"ticket_code": ticket_code, "escalated": True, "reason": reason},
+        )
+
+    def _handle_member_generate_payment_link(self, session: Session, actor: GimiActor, params) -> DispatchResult:
+        if not actor.member_id:
+            return DispatchResult(
+                status=DispatchStatus.SUCCESS,
+                tool_name="member_generate_payment_link",
+                summary_for_llm=(
+                    "Para generar tu link de pago seguro de renovación, por favor escribe desde el número de "
+                    "WhatsApp registrado en tu membresía o acércate al mostrador de recepción."
+                ),
+                data={"link_generated": False},
+            )
+
+        member = session.get(Member, actor.member_id)
+        if not member:
+            return DispatchResult(
+                status=DispatchStatus.EXECUTION_ERROR,
+                tool_name="member_generate_payment_link",
+                summary_for_llm="No se localizó el registro del socio en la base de datos.",
+            )
+
+        purpose = getattr(params, "purpose", "renewal")
+        if purpose == "debt":
+            from app.finance import queries as fq
+            from app.rentals.payments import charge_collectable_minor, charges_for_rental
+
+            branch_ids = [b.id for b in fq.active_branches(session)]
+            total_debt = 0
+            if branch_ids:
+                total_debt += sum(p.amount_minor for p, _o, m in fq.pending_order_transfers(session, branch_ids) if m.id == actor.member_id)
+                total_debt += sum(d.initial_outstanding_minor - paid for d, _o, m, paid in fq.open_debts(session, branch_ids) if m.id == actor.member_id)
+                for rental, m in fq.billable_rentals(session, branch_ids):
+                    if m.id == actor.member_id:
+                        total_debt += sum(charge_collectable_minor(session, c) for c in charges_for_rental(session, rental.id))
+                total_debt += sum(p.amount_minor for p, _r, m in fq.pending_rental_transfers(session, branch_ids) if m.id == actor.member_id)
+
+            if total_debt <= 0:
+                return DispatchResult(
+                    status=DispatchStatus.SUCCESS,
+                    tool_name="member_generate_payment_link",
+                    summary_for_llm=f"Hola {member.full_name}, no tienes ningún saldo pendiente por liquidar. ¡Tu cuenta está al corriente!",
+                    data={"total_debt_minor": 0},
+                )
+            amount_minor = total_debt
+            item_title = f"Liquidación de saldo pendiente - {member.full_name}"
+        else:
+            # Renewal
+            last_period = session.scalar(
+                select(MembershipPeriod)
+                .where(MembershipPeriod.member_id == member.id)
+                .order_by(MembershipPeriod.ends_on.desc())
+                .limit(1)
+            )
+            plan_ver = session.get(PlanVersion, last_period.plan_version_id) if last_period else None
+            plan = session.get(Plan, plan_ver.plan_id) if plan_ver else None
+
+            if plan and plan_ver:
+                plan_name = plan.name
+                amount_minor = plan_ver.price_minor
+            else:
+                default_pv = session.scalar(select(PlanVersion).where(PlanVersion.is_active == True).limit(1))
+                plan_name = default_pv.name if default_pv else "Membresía Mensual"
+                amount_minor = default_pv.price_minor if default_pv else 65000
+
+            item_title = f"Renovación {plan_name} - {member.full_name}"
+
+        settings = get_settings()
+        token = settings.mercado_pago_access_token.get_secret_value() if settings.mercado_pago_access_token else None
+        client = MercadoPagoCheckoutClient(access_token=token)
+        ext_ref = f"renew_{member.id}_{uuid4().hex[:8]}"
+
+        pref = client.create_preference(
+            title=item_title,
+            amount_minor=amount_minor,
+            external_reference=ext_ref,
+            payer_name=member.full_name,
+        )
+
+        summary = (
+            f"Link de pago seguro de Mercado Pago generado por {_format_money(amount_minor)} para {item_title}. "
+            f"Enlace de pago único (válido 24h): {pref.init_point}. "
+            "Acepta tarjeta de crédito, débito y transferencia SPEI con conciliación y renovación automática."
+        )
+
+        return DispatchResult(
+            status=DispatchStatus.SUCCESS,
+            tool_name="member_generate_payment_link",
+            summary_for_llm=summary,
+            data={
+                "payment_url": pref.init_point,
+                "amount_minor": amount_minor,
+                "preference_id": pref.preference_id,
+                "external_reference": ext_ref,
+                "expires_at": pref.expires_at.isoformat(),
+            },
+        )
+
     # -----------------------------------------------------------------------
     # Staff Handlers
     # -----------------------------------------------------------------------
@@ -405,7 +539,7 @@ class GimiDispatcher:
             occurred_at=now_utc,
         )
         session.add(checkin)
-        session.commit()
+        session.flush()
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,
@@ -435,7 +569,7 @@ class GimiDispatcher:
             request_fingerprint=_sha256(f"{branch_id}\n{params.amount_minor}\n{params.concept}"),
         )
         session.add(expense)
-        session.commit()
+        session.flush()
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,
@@ -474,7 +608,7 @@ class GimiDispatcher:
             recorded_at=datetime.now(timezone.utc),
         )
         session.add(mv)
-        session.commit()
+        session.flush()
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,
@@ -513,7 +647,7 @@ class GimiDispatcher:
             recorded_at=datetime.now(timezone.utc),
         )
         session.add(mv)
-        session.commit()
+        session.flush()
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,

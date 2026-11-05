@@ -106,6 +106,17 @@ class OwnerCreateTicketParams(BaseModel):
     priority: Literal["low", "medium", "high", "urgent"] = Field(default="medium")
 
 
+class HumanSupportRequestParams(BaseModel):
+    """Request escalation or transfer to a human receptionist / staff member."""
+    reason: str | None = Field(default="Atención personalizada solicitada en recepción", max_length=255)
+
+
+class GeneratePaymentLinkParams(BaseModel):
+    """Generate a secure, single-use Mercado Pago payment link for renewal or debt."""
+    purpose: Literal["renewal", "debt", "general"] = Field(default="renewal", description="Purpose of payment.")
+    plan_code: str | None = Field(default=None, max_length=50, description="Specific plan code.")
+
+
 # ---------------------------------------------------------------------------
 # Tool Definition Metadata
 # ---------------------------------------------------------------------------
@@ -156,6 +167,22 @@ ALL_TOOLS: list[ToolDefinition] = [
         allowed_roles={GimiRole.MEMBER, GimiRole.STAFF, GimiRole.OWNER},
         requires_confirmation=False,
         params_schema=GymFaqRulesParams,
+    ),
+    ToolDefinition(
+        name="member_request_human_support",
+        description="Transferir la conversación a recepción para hablar con una persona del staff ante dudas complejas o quejas.",
+        kind=ToolKind.COMMAND,
+        allowed_roles={GimiRole.MEMBER, GimiRole.STAFF, GimiRole.OWNER},
+        requires_confirmation=False,
+        params_schema=HumanSupportRequestParams,
+    ),
+    ToolDefinition(
+        name="member_generate_payment_link",
+        description="Generar un link de pago seguro y único de Mercado Pago (Checkout Pro) para renovar membresía o pagar adeudos.",
+        kind=ToolKind.COMMAND,
+        allowed_roles={GimiRole.MEMBER, GimiRole.STAFF, GimiRole.OWNER},
+        requires_confirmation=False,
+        params_schema=GeneratePaymentLinkParams,
     ),
 
     # --- STAFF TOOLS ---

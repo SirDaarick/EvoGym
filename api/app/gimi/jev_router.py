@@ -216,6 +216,20 @@ class JevRouter:
             req_thresh = self.get_threshold_for_tool(choice)
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
+        # Human Support Escalation (All roles) - Command
+        if any(w in text for w in ("humano", "persona", "asesor", "recepcionista", "recepcion", "recepción", "hablar con alguien", "comunicame", "comunícame", "queja", "reclamo", "gerente")):
+            choice = "member_request_human_support"
+            conf = 0.95 if choice in allowed_values else 0.0
+            req_thresh = self.get_threshold_for_tool(choice)
+            return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
+
+        # Payment Link Generation (All roles) - Command
+        if any(w in text for w in ("link de pago", "link para pagar", "pagar en linea", "pagar en línea", "renovar en linea", "renovar en línea", "mandame el link", "mándame el link", "enlace de pago", "pagar membresia", "pagar membresía", "link spei", "link tarjeta")):
+            choice = "member_generate_payment_link"
+            conf = 0.94 if choice in allowed_values else 0.0
+            req_thresh = self.get_threshold_for_tool(choice)
+            return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
+
         # OpenRouter fallback classification if API key is present
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
         if openrouter_key and allowed_values:
