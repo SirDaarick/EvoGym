@@ -1,6 +1,7 @@
 """Transactional, server-priced membership cash-sale posting."""
 from calendar import monthrange
 from dataclasses import dataclass
+from enum import StrEnum
 from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -58,7 +59,50 @@ def prepare_product_sale(session, *, register_id, actor_id, member_id, items, ex
     return intent
 
 
+class SalePolicy(StrEnum):
+    ONLINE = "online"
+    CONTINGENCY = "contingency"
+
+
+@dataclass(frozen=True)
+class ContingencySaleResult:
+    order: Order
+    replayed: bool
+    # [{product_id, on_hand_before, quantity, on_hand_after}] for every line whose resulting stock is < 0.
+    variances: list[dict]
+    # [{product_id, device_unit_price_minor, server_unit_price_minor}] where the device price differed.
+    price_drifts: list[dict]
+
+
 def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+    """Online sale: server-priced, rejects insufficient or uninitialized stock."""
+    order, replayed, _, _ = _post_cash_sale(
+        session, register_id=register_id, actor_id=actor_id, member_id=member_id, items=items,
+        expected_total_minor=expected_total_minor, idempotency_key=idempotency_key, policy=SalePolicy.ONLINE)
+    return order, replayed
+
+
+def post_contingency_cash_sale(
+    session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
+    occurred_at: datetime | None = None, unit_prices: dict[UUID, int] | None = None,
+    offline_receipt_number: str | None = None, shift_id: UUID | None = None,
+) -> ContingencySaleResult:
+    """Offline-replayed cash sale: device prices, no sale intent, negative stock allowed (reported as variances).
+
+    `shift_id` pins the sale to a specific (open) shift of the register instead of the register's current one.
+    """
+    order, replayed, variances, drifts = _post_cash_sale(
+        session, register_id=register_id, actor_id=actor_id, member_id=member_id, items=items,
+        expected_total_minor=expected_total_minor, idempotency_key=idempotency_key,
+        policy=SalePolicy.CONTINGENCY, occurred_at=occurred_at, unit_prices=unit_prices,
+        offline_receipt_number=offline_receipt_number, shift_id=shift_id)
+    return ContingencySaleResult(order, replayed, variances, drifts)
+
+
+def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
+                    policy, occurred_at=None, unit_prices=None, offline_receipt_number=None, shift_id=None):
+    contingency = policy is SalePolicy.CONTINGENCY
+    unit_prices = unit_prices or {}
     # Keep seller serialization compatible with shift-close foreign key checks.
     session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
@@ -73,13 +117,16 @@ def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, 
     if existing:
         if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
             raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
-        return existing, True
+        return existing, True, [], []
     if register.status != "active":
         raise ProductSaleRejected("Cash register is not active.")
     branch = session.get(Branch, register.branch_id)
     if branch is None or not branch.is_active:
         raise ProductSaleRejected("Branch is not active.")
-    shift = session.scalar(select(Shift).where(Shift.cash_register_id == register_id, Shift.status == "open").with_for_update())
+    shift_filter = [Shift.cash_register_id == register_id, Shift.status == "open"]
+    if shift_id is not None:
+        shift_filter.append(Shift.id == shift_id)
+    shift = session.scalar(select(Shift).where(*shift_filter).with_for_update())
     is_overtime = shift is None
     if is_overtime:
         shift = session.scalar(select(Shift).where(
@@ -92,43 +139,69 @@ def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, 
     if len({item.product_id for item in items}) != len(items):
         raise ProductSaleRejected("Each product may occur only once.")
     rows = []
+    variances = []
+    price_drifts = []
     total = 0
     for item in sorted(items, key=lambda line: str(line.product_id)):
         product = session.scalar(select(Product).where(Product.id == item.product_id).with_for_update())
-        if product is None or not product.is_active:
+        if product is None or not (product.is_active or contingency):
             raise CashSaleNotFoundError("Active product not found.")
+        unit_price = product.price_minor
+        if contingency:
+            on_hand = get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id)
+            if item.product_id in unit_prices and unit_prices[item.product_id] != product.price_minor:
+                unit_price = unit_prices[item.product_id]
+                price_drifts.append({"product_id": product.id, "device_unit_price_minor": unit_price,
+                                     "server_unit_price_minor": product.price_minor})
+            if on_hand - item.quantity < 0:
+                variances.append({"product_id": product.id, "on_hand_before": on_hand,
+                                  "quantity": item.quantity, "on_hand_after": on_hand - item.quantity})
         initialization = session.scalar(select(StockInitialization).where(
             StockInitialization.branch_id == register.branch_id, StockInitialization.product_id == product.id
         ).with_for_update())
-        if initialization is None or get_on_hand_stock(session, branch_id=register.branch_id, product_id=product.id) < item.quantity:
+        if not contingency and (initialization is None or get_on_hand_stock(
+                session, branch_id=register.branch_id, product_id=product.id) < item.quantity):
             raise ProductSaleRejected("Product stock is not initialized or insufficient.")
-        line_total = product.price_minor * item.quantity
+        line_total = unit_price * item.quantity
         total += line_total
         if total > MAX_MINOR:
             raise ValueError("Sale total exceeds supported minor units.")
-        rows.append((product, item.quantity, line_total))
+        rows.append((product, item.quantity, line_total, unit_price))
     if total != expected_total_minor:
         raise ProductSaleRejected("Product prices changed; review the total.")
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
                   request_fingerprint=fingerprint, total_minor=total)
+    if occurred_at is not None:
+        order.created_at = occurred_at
+    # Columns added by Phase 5 (B1); guarded so this works before and after the model change lands.
+    if contingency and hasattr(Order, "origin"):
+        order.origin = "contingency"
+    if offline_receipt_number is not None and hasattr(Order, "offline_receipt_number"):
+        order.offline_receipt_number = offline_receipt_number
     session.add(order)
     session.flush()
-    for number, (product, quantity, line_total) in enumerate(rows, 1):
+    for number, (product, quantity, line_total, unit_price) in enumerate(rows, 1):
         line = OrderItem(order_id=order.id, product_id=product.id, plan_version_id=None,
                          item_kind="product", entitlement_mode=null(), line_number=number,
                          description_snapshot=product.name, quantity=quantity,
-                         unit_amount_minor=product.price_minor, line_total_minor=line_total)
+                         unit_amount_minor=unit_price, line_total_minor=line_total)
         session.add(line)
         session.flush()
-        session.add(StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
-                                  quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
-                                  idempotency_key=f"sale:{line.id}"))
-    session.add(Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total, received_by=actor_id))
+        movement = StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
+                                 quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
+                                 idempotency_key=f"sale:{line.id}")
+        if occurred_at is not None:
+            movement.recorded_at = occurred_at
+        session.add(movement)
+    payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total, received_by=actor_id)
+    if occurred_at is not None and hasattr(Payment, "created_at"):
+        payment.created_at = occurred_at
+    session.add(payment)
     session.flush()
     session.refresh(order, ["items", "payment"])
-    return order, False
+    return order, False, variances, price_drifts
 
 
 def post_card_product_sale(

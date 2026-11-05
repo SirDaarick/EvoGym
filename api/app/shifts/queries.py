@@ -172,6 +172,7 @@ def open_shift(
     inventory_snapshot_id: UUID,
     inventory_observations: list[dict[str, object]] | None = None,
     opening_cash_minor: int | None = None,
+    now: datetime | None = None,
 ) -> Shift:
     """Open a new shift for a cash register with pessimistic locking and uniqueness guard."""
     maximum = 2**63 - 1
@@ -276,6 +277,8 @@ def open_shift(
         opening_cash_minor=opening_cash_minor,
         status="open",
     )
+    if now is not None:
+        shift.opened_at = now
     shift.denomination_counts = [
         ShiftDenominationCount(denomination_minor=denomination, quantity=quantity)
         for denomination, quantity in validated_counts

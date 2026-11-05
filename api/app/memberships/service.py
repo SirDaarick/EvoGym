@@ -5,6 +5,7 @@ SQL lives in `app.memberships.queries`; HTTP transport lives in `app.api.members
 """
 from datetime import datetime, timezone
 from hashlib import sha256
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -13,9 +14,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.db.models import ClassSampleCheckIn, MemberCheckIn
+from app.db.models.member_check_ins import MemberCheckInVisit
 from app.errors import HttpStatusError, PublicDomainError
 from app.memberships import queries as q
-from app.memberships.eligibility import evaluate_membership_access
+from app.memberships.eligibility import MembershipAccessDecision, evaluate_membership_access
 from app.memberships.schemas import ClassSampleCheckInResponse, MemberCheckInResponse
 
 
@@ -199,6 +201,80 @@ def record_class_sample_check_in(factory, principal: Principal, branch_id: UUID,
         return _sample_response(event, replayed=False)
 
 
+VISIT_WINDOW_SECONDS = 300
+
+
+@dataclass(frozen=True)
+class CheckInApplyResult:
+    check_in: MemberCheckIn
+    visit: MemberCheckInVisit
+    replayed: bool
+    access_decision: MembershipAccessDecision | None  # None on an idempotent replay
+    linked_to_existing_visit: bool
+
+
+def apply_member_check_in(session, *, branch_id: UUID, period_id: UUID, actor_id: UUID, occurred_at: datetime,
+                          idempotency_key: str, request_fingerprint: str,
+                          enforce_access: bool = True) -> CheckInApplyResult:
+    """Session-level check-in shared by the online endpoint and offline reconciliation.
+
+    Visits are fixed 5-minute windows anchored to `visit.started_at` (>= 300 s starts a new one), looked
+    up from `occurred_at`, so late-arriving events join the right visit. With `enforce_access=False` a
+    denial is recorded (reason + `access_denied:<status>` warning) and reported instead of raised.
+    """
+    occurred_at = _aware_utc(occurred_at)
+    existing = q.find_check_in_by_key(session, actor_id, branch_id, idempotency_key)
+    if existing is not None:
+        if existing.request_fingerprint != request_fingerprint:
+            raise HttpStatusError(409)
+        visit = session.get(MemberCheckInVisit, existing.visit_id)
+        return CheckInApplyResult(existing, visit, True, None, True)
+
+    period = q.get_period(session, period_id)
+    if period is None:
+        raise HttpStatusError(404)
+    branch = q.get_branch(session, branch_id)
+    on_date = occurred_at.astimezone(ZoneInfo(branch.timezone)).date()
+    access = evaluate_membership_access(session, period.id, on_date, branch_id)
+    warnings = list(access.warnings)
+    if not access.allowed:
+        if enforce_access:
+            raise PublicDomainError("membership_access_denied", metadata={
+                "status": access.status.value,
+                "reason": access.reason,
+            })
+        warnings.append(f"access_denied:{access.status.value}")
+
+    # Visits within 5 minutes of the visit that covers `occurred_at` share it; the member row is locked first.
+    visit = q.visit_at_or_before(session, period.member_id, occurred_at)
+    linked = visit is not None and (occurred_at - _aware_utc(visit.started_at)).total_seconds() < VISIT_WINDOW_SECONDS
+    if not linked:
+        visit = q.add_visit(session, period.member_id, occurred_at)
+
+    event = MemberCheckIn(
+        visit_id=visit.id,
+        member_id=period.member_id,
+        period_id=period.id,
+        branch_id=branch_id,
+        recorded_by=actor_id,
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint,
+        access_reason=access.reason,
+        access_warnings=warnings,
+        occurred_at=occurred_at,
+    )
+    try:
+        q.insert_flushed(session, event)
+    except IntegrityError:
+        existing = q.find_check_in_by_key(session, actor_id, branch_id, idempotency_key)
+        if existing is None:
+            raise
+        if existing.request_fingerprint != request_fingerprint:
+            raise HttpStatusError(409) from None
+        return CheckInApplyResult(existing, session.get(MemberCheckInVisit, existing.visit_id), True, None, True)
+    return CheckInApplyResult(event, visit, False, access, linked)
+
+
 def record_member_check_in(factory, principal: Principal, branch_id: UUID, period_id: UUID,
                            idempotency_key: str) -> MemberCheckInResponse:
     """Replays carry `replayed=True` (the router answers 200 for those)."""
@@ -206,50 +282,15 @@ def record_member_check_in(factory, principal: Principal, branch_id: UUID, perio
         raise HttpStatusError(503)
     fingerprint = sha256(f"{branch_id}\n{period_id}\n{principal.staff_id}".encode()).hexdigest()
     with factory.begin() as session:
-        branch = _open_branch(session, principal, branch_id)
-
+        _open_branch(session, principal, branch_id)
+        # Replays must not read the clock (keeps the online time source untouched for them).
         existing = q.find_check_in_by_key(session, principal.staff_id, branch_id, idempotency_key)
         if existing is not None:
             if existing.request_fingerprint != fingerprint:
                 raise HttpStatusError(409)
             return _response(existing, replayed=True)
-
-        period = q.get_period(session, period_id)
-        if period is None:
-            raise HttpStatusError(404)
-        occurred_at = utc_now()
-        on_date = occurred_at.astimezone(ZoneInfo(branch.timezone)).date()
-        access = evaluate_membership_access(session, period.id, on_date, branch_id)
-        if not access.allowed:
-            raise PublicDomainError("membership_access_denied", metadata={
-                "status": access.status.value,
-                "reason": access.reason,
-            })
-
-        # Visits within 5 minutes of the member's latest visit share it; the member row is locked first.
-        visit = q.latest_visit(session, period.member_id)
-        if visit is None or (occurred_at - _aware_utc(visit.started_at)).total_seconds() >= 300:
-            visit = q.add_visit(session, period.member_id, occurred_at)
-
-        event = MemberCheckIn(
-            visit_id=visit.id,
-            member_id=period.member_id,
-            period_id=period.id,
-            branch_id=branch_id,
-            recorded_by=principal.staff_id,
-            idempotency_key=idempotency_key,
-            request_fingerprint=fingerprint,
-            access_reason=access.reason,
-            access_warnings=list(access.warnings),
-            occurred_at=occurred_at,
+        result = apply_member_check_in(
+            session, branch_id=branch_id, period_id=period_id, actor_id=principal.staff_id,
+            occurred_at=utc_now(), idempotency_key=idempotency_key, request_fingerprint=fingerprint,
         )
-        try:
-            q.insert_flushed(session, event)
-        except IntegrityError:
-            existing = q.find_check_in_by_key(session, principal.staff_id, branch_id, idempotency_key)
-            if existing is None:
-                raise
-            if existing.request_fingerprint != fingerprint:
-                raise HttpStatusError(409) from None
-            return _response(existing, replayed=True)
-        return _response(event, replayed=False)
+        return _response(result.check_in, replayed=result.replayed)

@@ -140,6 +140,17 @@ def latest_visit(session: Session, member_id: UUID):
     )
 
 
+def visit_at_or_before(session: Session, member_id: UUID, occurred_at):
+    """Lock the member row, then read the latest visit that started at or before `occurred_at`."""
+    session.scalar(select(Member.id).where(Member.id == member_id).with_for_update())
+    return session.scalar(
+        select(MemberCheckInVisit)
+        .where(MemberCheckInVisit.member_id == member_id, MemberCheckInVisit.started_at <= occurred_at)
+        .order_by(MemberCheckInVisit.started_at.desc())
+        .limit(1)
+    )
+
+
 def add_visit(session: Session, member_id: UUID, started_at) -> MemberCheckInVisit:
     visit = MemberCheckInVisit(member_id=member_id, started_at=started_at)
     session.add(visit)
