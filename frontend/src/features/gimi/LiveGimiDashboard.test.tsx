@@ -1,8 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { LiveGimiDashboard } from './LiveGimiDashboard';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+
+// Mock scrollIntoView for jsdom
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 const mockOverview = {
   kpis: {
@@ -81,6 +86,47 @@ describe('LiveGimiDashboard', () => {
       if (url.includes('/api/v1/owner/gimi/overview')) {
         return { ok: true, json: async () => mockOverview } as Response;
       }
+      if (url.includes('/api/v1/owner/gimi/chat') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}'));
+        if (body.confirmed) {
+          return {
+            ok: true,
+            json: async () => ({
+              reply_text: 'Gasto de $350.00 MXN registrado exitosamente en caja.',
+              tool_called: 'staff_record_expense',
+              status: 'executed',
+              confidence: 0.95,
+              needs_confirmation: false,
+              data: { expense_id: 'exp_01', amount: 35000 },
+            }),
+          } as Response;
+        }
+        if (body.message?.includes('gasto')) {
+          return {
+            ok: true,
+            json: async () => ({
+              reply_text: 'He preparado el borrador para registrar el gasto de mantenimiento.',
+              tool_called: 'staff_record_expense',
+              status: 'needs_confirmation',
+              confidence: 0.92,
+              needs_confirmation: true,
+              draft_action: { concept: 'Reparación polea', amount_mxn: 350, category: 'Mantenimiento' },
+              data: {},
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            reply_text: 'Los ingresos de este mes son $45,200.00 MXN con 38 transacciones.',
+            tool_called: 'owner_financial_overview',
+            status: 'executed',
+            confidence: 0.94,
+            needs_confirmation: false,
+            data: { total_income_mxn: 45200 },
+          }),
+        } as Response;
+      }
       if (url.includes('/api/v1/owner/gimi/knowledge') && init?.method === 'POST') {
         return { ok: true, json: async () => ({ inserted: 1, re_embedded: 0, unchanged: 0 }) } as Response;
       }
@@ -100,9 +146,64 @@ describe('LiveGimiDashboard', () => {
     }) as unknown as AuthenticatedRequest;
   }
 
-  it('renders live KPIs and WhatsApp inbound messages', async () => {
+  it('renders live chat tab by default, sends message and displays Gimi reply with Jev tool badge', async () => {
     const apiRequest = createMockApiRequest();
     render(<LiveGimiDashboard apiRequest={apiRequest} />);
+
+    // Default tab is chat
+    expect(await screen.findByText(/Gimi Operativo & Financiero/)).toBeVisible();
+    expect(screen.getByText(/tu copiloto operativo y financiero en EvoGym/)).toBeVisible();
+
+    const input = screen.getByLabelText('Mensaje para Gimi');
+    const sendBtn = screen.getByRole('button', { name: 'Enviar' });
+
+    await userEvent.type(input, '¿Cómo van los ingresos de hoy?');
+    await userEvent.click(sendBtn);
+
+    expect(await screen.findByText('¿Cómo van los ingresos de hoy?')).toBeVisible();
+    expect(await screen.findByText(/Los ingresos de este mes son \$45,200.00 MXN/)).toBeVisible();
+    expect(screen.getByText(/owner_financial_overview/)).toBeVisible();
+    expect(screen.getByText(/Confianza Jev: 94%/)).toBeVisible();
+  });
+
+  it('handles quick suggestion chip click to send prompt immediately', async () => {
+    const apiRequest = createMockApiRequest();
+    render(<LiveGimiDashboard apiRequest={apiRequest} />);
+
+    const chip = await screen.findByRole('button', { name: '¿Cómo van los ingresos y el corte de este mes?' });
+    await userEvent.click(chip);
+
+    expect(await screen.findByText(/Los ingresos de este mes son \$45,200.00 MXN/)).toBeVisible();
+    expect(screen.getAllByText('¿Cómo van los ingresos y el corte de este mes?').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('handles Draft & Confirm gate for mutating actions', async () => {
+    const apiRequest = createMockApiRequest();
+    render(<LiveGimiDashboard apiRequest={apiRequest} />);
+
+    const input = await screen.findByLabelText('Mensaje para Gimi');
+    const sendBtn = screen.getByRole('button', { name: 'Enviar' });
+
+    await userEvent.type(input, 'Registra un gasto de 350 por reparar polea');
+    await userEvent.click(sendBtn);
+
+    expect(await screen.findByText(/He preparado el borrador para registrar el gasto/)).toBeVisible();
+    expect(screen.getByText(/Autorización Requerida/i)).toBeVisible();
+    expect(screen.getByText('Reparación polea')).toBeVisible();
+
+    const confirmBtn = screen.getByRole('button', { name: /Confirmar y Ejecutar/i });
+    await userEvent.click(confirmBtn);
+
+    expect(await screen.findByText(/Gasto de \$350\.00 MXN registrado exitosamente en caja/)).toBeVisible();
+    expect(screen.getByText(/Operación Ejecutada/i)).toBeVisible();
+  });
+
+  it('switches to Monitor tab and displays live KPIs and WhatsApp inbound messages', async () => {
+    const apiRequest = createMockApiRequest();
+    render(<LiveGimiDashboard apiRequest={apiRequest} />);
+
+    const monitorTab = await screen.findByRole('tab', { name: /Monitor de Operaciones/ });
+    await userEvent.click(monitorTab);
 
     expect(await screen.findByText('42')).toBeVisible();
     expect(screen.getByText('85%')).toBeVisible();

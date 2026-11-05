@@ -14,6 +14,7 @@ import {
 } from '../../api/ownerGimiApi';
 import { Badge, Button, EmptyState, Notice, PageHeader, Panel } from '../../shared/ui';
 import { Dialog } from '../../shared/components/ui/Dialog';
+import { LiveGimiChatPane } from './LiveGimiChatPane';
 import './GimiDashboard.css';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -24,7 +25,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedRequest }) {
-  const [activeTab, setActiveTab] = useState<'monitor' | 'vault' | 'outbox'>('monitor');
+  const [activeTab, setActiveTab] = useState<'chat' | 'monitor' | 'vault' | 'outbox'>('chat');
   const [overview, setOverview] = useState<GimiOverviewResponse | null>(null);
   const [chunks, setChunks] = useState<KnowledgeChunk[]>([]);
   const [notifications, setNotifications] = useState<NotificationOutboxItem[]>([]);
@@ -141,6 +142,15 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === 'chat'}
+          className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+          onClick={() => setActiveTab('chat')}
+        >
+          💬 Chat con Gimi
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === 'monitor'}
           className={`tab-btn ${activeTab === 'monitor' ? 'active' : ''}`}
           onClick={() => setActiveTab('monitor')}
@@ -167,7 +177,9 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
         </button>
       </div>
 
-      {loading && !overview ? (
+      {activeTab === 'chat' ? (
+        <LiveGimiChatPane apiRequest={apiRequest} />
+      ) : loading && !overview ? (
         <Panel>
           <div className="p-8 text-center text-muted">Cargando datos de Gimi y notificaciones...</div>
         </Panel>

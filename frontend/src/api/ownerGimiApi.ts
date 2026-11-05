@@ -127,3 +127,33 @@ export async function deliverOutboxBatch(
   if (!response.ok) throw new Error('No se pudo ejecutar el despacho de notificaciones.');
   return response.json();
 }
+
+export interface GimiChatRequestPayload {
+  message: string;
+  confirmed?: boolean;
+  cached_draft?: Record<string, unknown> | null;
+  cached_tool?: string | null;
+}
+
+export interface GimiChatResponsePayload {
+  reply_text: string;
+  tool_called: string;
+  status: string;
+  confidence: number;
+  needs_confirmation: boolean;
+  draft_action?: Record<string, unknown> | null;
+  data: Record<string, unknown>;
+}
+
+export async function chatWithGimi(
+  request: AuthenticatedRequest,
+  payload: GimiChatRequestPayload
+): Promise<GimiChatResponsePayload> {
+  const response = await request('/api/v1/owner/gimi/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('No se pudo comunicar con Gimi.');
+  return response.json();
+}
