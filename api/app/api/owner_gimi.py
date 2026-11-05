@@ -123,3 +123,15 @@ def chat_with_gimi(
             draft_action=res.draft_action,
             data=res.data,
         )
+
+
+from app.gimi.schemas import WhatsappSimulateInput, WhatsappSimulateResponse
+
+@router.post("/whatsapp/simulate", response_model=WhatsappSimulateResponse)
+def simulate_whatsapp(
+    payload: WhatsappSimulateInput,
+    factory: RawFactoryDep,
+    principal: Principal,
+    settings: SettingsDep,
+):
+    return service.simulate_whatsapp_inbound(factory, principal, payload, settings=settings)

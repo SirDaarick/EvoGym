@@ -48,5 +48,8 @@ def insert_ignore(session: Session, model, values: dict, conflict_column: str) -
         from sqlalchemy.dialects.sqlite import insert
     else:  # pragma: no cover
         raise RuntimeError("unsupported database dialect")
-    statement = insert(model).values(**values).on_conflict_do_nothing(index_elements=[conflict_column])
-    return session.execute(statement).rowcount == 1
+    col = getattr(model, conflict_column, None)
+    if col is None:
+        col = model.__table__.c[conflict_column]
+    statement = insert(model).values(**values).on_conflict_do_nothing(index_elements=[conflict_column]).returning(col)
+    return session.scalar(statement) is not None

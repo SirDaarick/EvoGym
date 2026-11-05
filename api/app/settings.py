@@ -10,7 +10,7 @@ from sqlalchemy.exc import ArgumentError
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "api/.env"),
         env_file_encoding="utf-8",
         env_prefix="EVOGYM_",
         extra="ignore",
@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     @property
     def admin_recovery_configured(self) -> bool:
         return self.admin_auth_configured and self.admin_recovery_ttl_seconds is not None and self.admin_recovery_base_url is not None
+
+    @property
+    def openrouter_api_key_configured(self) -> bool:
+        return (
+            self.openrouter_api_key is not None
+            and len(self.openrouter_api_key.get_secret_value().strip()) > 0
+        )
 
     @property
     def mercado_pago_configured(self) -> bool:

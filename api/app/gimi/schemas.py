@@ -28,3 +28,20 @@ class GimiChatResponse(BaseModel):
     needs_confirmation: bool
     draft_action: dict[str, object] | None = None
     data: dict[str, object] = Field(default_factory=dict)
+
+
+class WhatsappSimulateInput(BaseModel):
+    phone: str = Field(min_length=8, max_length=24)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class WhatsappSimulateResponse(BaseModel):
+    phone: str
+    message: str
+    member_found: bool
+    member_name: str | None = None
+    member_number: str | None = None
+    outcome: str
+    tool_called: str | None = None
+    reply_text: str
+    outbox_id: str | None = None

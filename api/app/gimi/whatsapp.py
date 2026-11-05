@@ -76,7 +76,7 @@ def _messages(payload: object):
                     yield message
 
 
-def _process(factory, message: dict) -> None:
+def _process(factory, message: dict, settings: object = None) -> None:
     message_id = message.get("id")
     e164 = normalize_e164(message.get("from"))
     if not isinstance(message_id, str) or not _ID_OK.match(message_id) or e164 is None:
@@ -95,14 +95,39 @@ def _process(factory, message: dict) -> None:
             return
         member = match_member(session, e164)
         tool, reply, outcome = None, GENERIC_UNVERIFIED, "unverified"
-        if member is not None:
-            outcome = "answered"
-            tool = choose_tool(((message.get("text") or {}).get("body")) if isinstance(message.get("text"), dict) else None)
-            try:
-                reply = domain_tools.invoke(tool, session, member.id) if tool else HELP_TEXT
-            except ToolDenied:
-                reply, tool = HELP_TEXT, None
-            inbox.member_id = member.id
+        text_body = ((message.get("text") or {}).get("body")) if isinstance(message.get("text"), dict) else None
+
+        if settings is not None and getattr(settings, "openrouter_api_key_configured", False):
+            from app.gimi.orchestrator import GimiOrchestrator
+            from app.gimi.dispatcher import GimiActor
+            from app.gimi.tool_definitions import GimiRole
+            orchestrator = GimiOrchestrator(settings=settings)
+            actor = GimiActor(role=GimiRole.MEMBER, member_id=member.id if member else None)
+            res = orchestrator.interact(session=session, actor=actor, message=text_body or "")
+            if member is not None:
+                outcome = "answered"
+                tool = res.tool_called
+                reply = res.reply_text
+                inbox.member_id = member.id
+            else:
+                if res.tool_called == "gym_faq_and_rules":
+                    outcome = "answered"
+                    tool = res.tool_called
+                    reply = res.reply_text
+                else:
+                    outcome = "unverified"
+                    tool = None
+                    reply = GENERIC_UNVERIFIED
+        else:
+            if member is not None:
+                outcome = "answered"
+                tool = choose_tool(text_body)
+                try:
+                    reply = domain_tools.invoke(tool, session, member.id) if tool else HELP_TEXT
+                except ToolDenied:
+                    reply, tool = HELP_TEXT, None
+                inbox.member_id = member.id
+
         inbox.outcome, inbox.tool = outcome, tool
         inbox.reply_outbox_id = enqueue(
             session, idempotency_key=f"wa-reply:{message_id}", channel="whatsapp", kind="gimi_reply",
@@ -122,5 +147,5 @@ def handle_webhook(settings, factory, raw_body: bytes, signature_header: str | N
     except (ValueError, UnicodeDecodeError):
         raise HttpStatusError(400) from None
     for message in _messages(payload):
-        _process(factory, message)
+        _process(factory, message, settings=settings)
     return {"status": "ok"}

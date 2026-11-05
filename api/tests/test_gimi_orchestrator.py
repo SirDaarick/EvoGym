@@ -148,7 +148,7 @@ def test_orchestrator_member_query_deterministic_fallback(db_session):
 
 
 def test_orchestrator_ambiguity_handles_clarification(db_session):
-    orchestrator = GimiOrchestrator(settings=Settings(environment="test"))
+    orchestrator = GimiOrchestrator(settings=Settings(environment="test", openrouter_api_key=None))
     actor = GimiActor(role=GimiRole.MEMBER)
 
     res = orchestrator.interact(db_session, actor, "hola como estas el clima de hoy")
@@ -157,7 +157,7 @@ def test_orchestrator_ambiguity_handles_clarification(db_session):
 
 
 def test_orchestrator_draft_and_confirm_flow(db_session):
-    orchestrator = GimiOrchestrator(settings=Settings(environment="test"))
+    orchestrator = GimiOrchestrator(settings=Settings(environment="test", openrouter_api_key=None))
     actor = GimiActor(role=GimiRole.STAFF)
 
     # 1. First prompt triggers draft

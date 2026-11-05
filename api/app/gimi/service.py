@@ -181,3 +181,47 @@ def trigger_outbox_delivery(factory, principal, payload: DeliverBatchInput, sett
     adapter = NotConfiguredDeliveryAdapter() if is_prod else FakeDeliveryAdapter()
     attempted = deliver_batch(factory, adapter, batch_size=payload.batch_size)
     return {"attempted": attempted}
+
+
+def simulate_whatsapp_inbound(factory, principal, payload: "WhatsappSimulateInput", settings=None) -> "WhatsappSimulateResponse":
+    _require_admin(principal)
+    from uuid import uuid4
+    from app.db.models import Member
+    from app.gimi import whatsapp
+    from app.gimi.schemas import WhatsappSimulateResponse
+
+    clean_phone = whatsapp.normalize_e164(payload.phone)
+    if not clean_phone:
+        raise HttpStatusError(400, "Formato de teléfono inválido (debe ser E.164, ej. +525500005606)")
+
+    sim_id = f"wamid.sim_{uuid4().hex[:12]}"
+    raw_digits = clean_phone.replace("+", "")
+    message_payload = {
+        "id": sim_id,
+        "from": raw_digits,
+        "type": "text",
+        "text": {"body": payload.message},
+    }
+
+    whatsapp._process(factory, message_payload, settings=settings)
+
+    with session_factory(factory)() as session:
+        inbox = session.scalar(
+            select(WhatsappInboxMessage).where(WhatsappInboxMessage.provider_message_id == sim_id)
+        )
+        outbox = session.scalar(
+            select(NotificationOutbox).where(NotificationOutbox.idempotency_key == f"wa-reply:{sim_id}")
+        )
+        member = session.get(Member, inbox.member_id) if inbox and inbox.member_id else None
+
+        return WhatsappSimulateResponse(
+            phone=clean_phone,
+            message=payload.message,
+            member_found=member is not None,
+            member_name=member.full_name if member else None,
+            member_number=member.member_number if member else None,
+            outcome=inbox.outcome if inbox else "ignored",
+            tool_called=inbox.tool if inbox else None,
+            reply_text=outbox.body if outbox else "No se generó respuesta.",
+            outbox_id=str(outbox.id) if outbox else None,
+        )
