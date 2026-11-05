@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         engine = get_engine(args.database_url)
-        Base.metadata.create_all(engine)
+        if engine.dialect.name != "postgresql":
+            Base.metadata.create_all(engine)
     except Exception as exc:
         print(f"ERROR: Failed to initialize database engine: {exc}", file=sys.stderr)
         return 1
