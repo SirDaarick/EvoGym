@@ -270,3 +270,66 @@ def test_dispatcher_owner_financial_overview(db_session):
     res = dispatcher.dispatch(db_session, decision, actor)
     assert res.status == DispatchStatus.SUCCESS
     assert "Resumen financiero" in res.summary_for_llm
+
+
+def test_dispatcher_owner_financial_overview_date_filtering(db_session):
+    dispatcher = GimiDispatcher()
+    decision = JevRouteDecision(tool_name="owner_financial_overview", confidence=0.94, is_ambiguous=False, required_threshold=0.68)
+    actor = GimiActor(role=GimiRole.OWNER)
+
+    order = db_session.query(Order).first()
+    staff = db_session.query(StaffUser).first()
+    now_utc = datetime.now(timezone.utc)
+
+    # Seed confirmed payment today
+    payment = Payment(
+        order_id=order.id,
+        register_id=order.register_id,
+        shift_id=order.shift_id,
+        method="cash",
+        status="confirmed",
+        amount_minor=65000,
+        received_by=staff.id,
+        received_at=now_utc,
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    # All-time
+    res_all = dispatcher.dispatch(db_session, decision, actor, raw_params={})
+    assert res_all.status == DispatchStatus.SUCCESS
+    assert res_all.data["total_sales_minor"] == 65000
+
+    # Today filter includes it
+    res_today = dispatcher.dispatch(
+        db_session,
+        decision,
+        actor,
+        raw_params={"from_date": now_utc.date().isoformat(), "to_date": now_utc.date().isoformat()},
+    )
+    assert res_today.status == DispatchStatus.SUCCESS
+    assert res_today.data["total_sales_minor"] == 65000
+
+    # Past date range where no payments exist
+    res_past = dispatcher.dispatch(
+        db_session,
+        decision,
+        actor,
+        raw_params={"from_date": "2020-01-01", "to_date": "2020-01-31"},
+    )
+    assert res_past.status == DispatchStatus.SUCCESS
+    assert res_past.data["total_sales_minor"] == 0
+    assert "del 2020-01-01 al 2020-01-31" in res_past.summary_for_llm
+
+
+def test_dispatcher_slot_filling_needs_parameters(db_session):
+    dispatcher = GimiDispatcher()
+    decision = JevRouteDecision(tool_name="staff_record_expense", confidence=0.95, is_ambiguous=False, required_threshold=0.85)
+    actor = GimiActor(role=GimiRole.STAFF)
+
+    # Missing amount_minor and concept
+    res = dispatcher.dispatch(db_session, decision, actor, raw_params={})
+    assert res.status == DispatchStatus.NEEDS_PARAMETERS
+    assert "monto" in res.summary_for_llm.lower()
+    assert "amount_minor" in res.data["missing_fields"]
+

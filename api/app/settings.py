@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     sync_clock_skew_tolerance_seconds: int = Field(default=300, ge=0, le=3600)
     openrouter_api_key: SecretStr | None = None
     openrouter_base_url: str = 'https://openrouter.ai/api/v1'
-    openrouter_chat_model: str = 'google/gemini-2.0-flash-001'
+    openrouter_chat_model: str = "google/gemini-2.5-flash"
 
     @model_validator(mode="after")
     def reject_debug_outside_local_environments(self) -> "Settings":

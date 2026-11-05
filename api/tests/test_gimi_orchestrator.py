@@ -213,4 +213,15 @@ def test_orchestrator_with_openrouter_mock(db_session):
         # Verify call headers and payload
         args, kwargs = mock_post.call_args
         assert kwargs["headers"]["Authorization"] == "Bearer sk-or-v1-fake-test-key"
-        assert kwargs["json"]["model"] == "google/gemini-2.0-flash-001"
+        assert kwargs["json"]["model"] == "google/gemini-2.5-flash"
+
+
+def test_orchestrator_slot_filling_for_missing_expense_amount(db_session):
+    orchestrator = GimiOrchestrator(settings=Settings(environment="test", openrouter_api_key=None))
+    actor = GimiActor(role=GimiRole.STAFF)
+
+    # Prompt with missing amount
+    res = orchestrator.interact(db_session, actor, "Registra un gasto de cloro")
+    assert res.status == DispatchStatus.NEEDS_PARAMETERS
+    assert "monto" in res.reply_text.lower()
+

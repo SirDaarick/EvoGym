@@ -168,21 +168,21 @@ class JevRouter:
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
         # Financial Overview (Owner only) - Query
-        if any(w in text for w in ("corte", "finanzas", "ingresos", "ventas del mes", "resumen financiero")):
+        if any(w in text for w in ("corte", "finanzas", "ingreso", "ingresos", "venta", "ventas", "vendio", "vendió", "vendimos", "cobro", "cobros", "facturacion", "resumen financiero", "ganancia", "cuanto dinero")):
             choice = "owner_financial_overview"
             conf = 0.94 if choice in allowed_values else 0.0
             req_thresh = self.get_threshold_for_tool(choice)
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
         # Attendance Analytics (Owner only) - Query
-        if any(w in text for w in ("hora pico", "aforo", "ocupacion", "visitas del mes", "afluencia")):
+        if any(w in text for w in ("hora pico", "aforo", "ocupacion", "ocupación", "visita", "visitas", "asistencia", "afluencia", "gente", "personas en sala")):
             choice = "owner_attendance_analytics"
             conf = 0.92 if choice in allowed_values else 0.0
             req_thresh = self.get_threshold_for_tool(choice)
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
         # Alerts (Owner only) - Query
-        if any(w in text for w in ("alertas", "discrepancias", "pendientes criticos")):
+        if any(w in text for w in ("alerta", "alertas", "discrepancia", "discrepancias", "urgente", "pendientes criticos", "problemas")):
             choice = "owner_active_alerts"
             conf = 0.90 if choice in allowed_values else 0.0
             req_thresh = self.get_threshold_for_tool(choice)
@@ -216,6 +216,20 @@ class JevRouter:
             req_thresh = self.get_threshold_for_tool(choice)
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
+        # OpenRouter fallback classification if API key is present
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if openrouter_key and allowed_values:
+            or_choice = self._classify_with_openrouter(message, allowed_values, openrouter_key)
+            if or_choice and or_choice in allowed_values and or_choice != "unrecognized_intent":
+                req_thresh = self.get_threshold_for_tool(or_choice)
+                return JevRouteDecision(
+                    tool_name=or_choice,
+                    confidence=0.88,
+                    is_ambiguous=False,
+                    required_threshold=req_thresh,
+                    explanation="Classified via OpenRouter fallback model.",
+                )
+
         # Low confidence fallback
         req_thresh = self.query_threshold
         return JevRouteDecision(
@@ -225,3 +239,36 @@ class JevRouter:
             required_threshold=req_thresh,
             explanation="No matching intent detected with high confidence.",
         )
+
+    def _classify_with_openrouter(self, message: str, allowed_values: list[str], api_key: str) -> str | None:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://evogym.app",
+            "X-Title": "EvoGym Jev Classifier",
+            "Content-Type": "application/json",
+        }
+        prompt = (
+            f"Classify the following user message for a gym management app into EXACTLY ONE of the allowed tools:\n"
+            f"{allowed_values}\n\n"
+            f"If it doesn't match any tool, respond with 'unrecognized_intent'.\n"
+            f"Respond with ONLY the exact tool name, nothing else."
+        )
+        payload = {
+            "model": "google/gemini-2.5-flash",
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": message},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 30,
+        }
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                res = client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+                if res.status_code == 200:
+                    tool = res.json()["choices"][0]["message"]["content"].strip().strip("\"'`")
+                    if tool in allowed_values:
+                        return tool
+        except Exception:
+            return None
+        return None

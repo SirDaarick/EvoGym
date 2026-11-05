@@ -10,6 +10,7 @@ import hashlib
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
@@ -42,6 +43,7 @@ class DispatchStatus(str, Enum):
     SUCCESS = "success"
     AMBIGUOUS = "ambiguous"
     NEEDS_CONFIRMATION = "needs_confirmation"
+    NEEDS_PARAMETERS = "needs_parameters"
     PERMISSION_DENIED = "permission_denied"
     EXECUTION_ERROR = "execution_error"
 
@@ -116,6 +118,15 @@ class GimiDispatcher:
         # 3. Pydantic Parameter Validation
         try:
             validated_params = validate_tool_params(tool.name, params_dict)
+        except ValidationError as exc:
+            missing_fields = [err["loc"][0] for err in exc.errors() if err.get("type") in ("missing", "value_error")]
+            clarification_msg = self._build_parameter_clarification(tool.name, missing_fields)
+            return DispatchResult(
+                status=DispatchStatus.NEEDS_PARAMETERS,
+                tool_name=tool.name,
+                summary_for_llm=clarification_msg,
+                data={"missing_fields": [str(f) for f in missing_fields], "raw_params": params_dict},
+            )
         except Exception as exc:
             return DispatchResult(
                 status=DispatchStatus.EXECUTION_ERROR,
@@ -155,6 +166,26 @@ class GimiDispatcher:
                 tool_name=tool.name,
                 summary_for_llm=f"Error durante la ejecución de {tool.name}: {exc}",
             )
+
+    @staticmethod
+    def _build_parameter_clarification(tool_name: str, missing_fields: list[Any]) -> str:
+        fields_set = set(str(f) for f in missing_fields)
+        if tool_name == "staff_record_expense":
+            if "amount_minor" in fields_set and "concept" in fields_set:
+                return "Para registrar el gasto necesito saber el monto (en pesos) y el concepto del gasto."
+            if "amount_minor" in fields_set:
+                return "¿De cuánto fue el gasto (monto en pesos) para poder registrarlo?"
+            if "concept" in fields_set:
+                return "¿Cuál es el concepto o motivo del gasto para registrarlo?"
+        elif tool_name == "staff_record_shrinkage":
+            return "Para reportar la merma necesito el nombre o código del producto y la cantidad de piezas dañadas o perdidas."
+        elif tool_name == "staff_restock_product":
+            return "Para registrar el reabastecimiento necesito el nombre del producto y cuántas unidades ingresaron."
+        elif tool_name == "staff_record_checkin":
+            return "Para registrar la entrada indica el nombre, número de socio o teléfono de la persona."
+        elif tool_name == "owner_create_ticket":
+            return "Para crear el ticket se requiere un título y una descripción del problema."
+        return f"Faltan datos requeridos para completar la acción: {', '.join(str(f) for f in missing_fields)}."
 
     # -----------------------------------------------------------------------
     # Member Handlers
@@ -496,24 +527,47 @@ class GimiDispatcher:
     # -----------------------------------------------------------------------
 
     def _handle_owner_financial_overview(self, session: Session, actor: GimiActor, params) -> DispatchResult:
-        # Aggregated stats
+        # Aggregated stats with optional date range
         from app.db.models import Order, Payment
 
-        total_sales = session.scalar(select(func.sum(Payment.amount_minor)).where(Payment.status == "confirmed")) or 0
-        total_orders = session.scalar(select(func.count(Order.id))) or 0
+        base_filter = [Payment.status == "confirmed"]
+        date_label = "acumulado histórico"
+
+        from_date = getattr(params, "from_date", None)
+        to_date = getattr(params, "to_date", None)
+
+        if from_date:
+            start_dt = datetime.combine(from_date, time.min, tzinfo=timezone.utc)
+            base_filter.append(Payment.received_at >= start_dt)
+        if to_date:
+            end_dt = datetime.combine(to_date, time.max, tzinfo=timezone.utc)
+            base_filter.append(Payment.received_at <= end_dt)
+
+        if from_date and to_date:
+            if from_date == to_date:
+                date_label = f"del {from_date.isoformat()}"
+            else:
+                date_label = f"del {from_date.isoformat()} al {to_date.isoformat()}"
+        elif from_date:
+            date_label = f"desde el {from_date.isoformat()}"
+        elif to_date:
+            date_label = f"hasta el {to_date.isoformat()}"
+
+        total_sales = session.scalar(select(func.sum(Payment.amount_minor)).where(*base_filter)) or 0
+        total_payments = session.scalar(select(func.count(Payment.id)).where(*base_filter)) or 0
 
         cash_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(Payment.status == "confirmed", Payment.method == "cash")
+            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "cash")
         ) or 0
         card_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(Payment.status == "confirmed", Payment.method == "card")
+            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "card")
         ) or 0
         transfer_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(Payment.status == "confirmed", Payment.method == "transfer")
+            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "transfer")
         ) or 0
 
         summary = (
-            f"Resumen financiero acumulado: {_format_money(total_sales)} confirmados ({total_orders} operaciones). "
+            f"Resumen financiero ({date_label}): {_format_money(total_sales)} confirmados ({total_payments} operaciones). "
             f"Efectivo: {_format_money(cash_sum)}, Tarjeta: {_format_money(card_sum)}, Transferencia: {_format_money(transfer_sum)}."
         )
 
@@ -522,8 +576,10 @@ class GimiDispatcher:
             tool_name="owner_financial_overview",
             summary_for_llm=summary,
             data={
+                "from_date": from_date.isoformat() if from_date else None,
+                "to_date": to_date.isoformat() if to_date else None,
                 "total_sales_minor": total_sales,
-                "total_orders": total_orders,
+                "total_orders": total_payments,
                 "cash_minor": cash_sum,
                 "card_minor": card_sum,
                 "transfer_minor": transfer_sum,
@@ -531,10 +587,29 @@ class GimiDispatcher:
         )
 
     def _handle_owner_attendance_analytics(self, session: Session, actor: GimiActor, params) -> DispatchResult:
-        checkins_count = session.scalar(select(func.count(MemberCheckIn.id))) or 0
+        now_utc = datetime.now(timezone.utc)
+        period = getattr(params, "period", "today")
+
+        if period == "today":
+            today_start = datetime.combine(now_utc.date(), time.min, tzinfo=timezone.utc)
+            period_label = "hoy"
+            period_filter = MemberCheckIn.occurred_at >= today_start
+        elif period == "7d":
+            period_label = "últimos 7 días"
+            period_filter = MemberCheckIn.occurred_at >= (now_utc - timedelta(days=7))
+        elif period == "30d":
+            period_label = "últimos 30 días"
+            period_filter = MemberCheckIn.occurred_at >= (now_utc - timedelta(days=30))
+        else:
+            period_label = "histórico"
+            period_filter = True
+
+        visits_in_period = session.scalar(select(func.count(MemberCheckIn.id)).where(period_filter)) or 0
+        all_time_visits = session.scalar(select(func.count(MemberCheckIn.id))) or 0
+
         recent_checkins = session.scalar(
             select(func.count(MemberCheckIn.id)).where(
-                MemberCheckIn.occurred_at >= datetime.now(timezone.utc) - timedelta(hours=2)
+                MemberCheckIn.occurred_at >= now_utc - timedelta(hours=2)
             )
         ) or 0
 
@@ -542,15 +617,21 @@ class GimiDispatcher:
         occupancy_pct = round((recent_checkins / capacity) * 100)
 
         summary = (
-            f"Aforo actual estimado en sala: {recent_checkins}/{capacity} socios ({occupancy_pct}% de capacidad). "
-            f"Total histórico registrado: {checkins_count} visitas."
+            f"Aforo actual en sala (últimas 2h): {recent_checkins}/{capacity} socios ({occupancy_pct}% de capacidad). "
+            f"Visitas registradas ({period_label}): {visits_in_period}. Total histórico acumulado: {all_time_visits} visitas."
         )
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,
             tool_name="owner_attendance_analytics",
             summary_for_llm=summary,
-            data={"current_occupancy": recent_checkins, "capacity": capacity, "total_visits": checkins_count},
+            data={
+                "period": period,
+                "visits_in_period": visits_in_period,
+                "current_occupancy": recent_checkins,
+                "capacity": capacity,
+                "total_visits": all_time_visits,
+            },
         )
 
     def _handle_owner_active_alerts(self, session: Session, actor: GimiActor, params) -> DispatchResult:
