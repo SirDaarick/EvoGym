@@ -67,8 +67,9 @@ def _sha256(val: str) -> str:
     return hashlib.sha256(val.encode("utf-8")).hexdigest()
 
 
-def _format_money(minor: int) -> str:
-    return f"${minor // 100:,}.{minor % 100:02d} MXN"
+def _format_money(minor: Any) -> str:
+    cents = int(minor or 0)
+    return f"${cents // 100:,}.{cents % 100:02d} MXN"
 
 
 class GimiDispatcher:
