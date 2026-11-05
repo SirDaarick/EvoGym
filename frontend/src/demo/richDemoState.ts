@@ -180,9 +180,10 @@ export function createRichDemoState(): DemoState {
       status: 'closed',
       openingCashMinor: 30000,
       closedAt: '2026-10-07T22:00:00-06:00',
-      countedCashMinor: 45000,
+      countedCashMinor: 43500,
       expectedCashAtCloseMinor: 45000,
-      cashDifferenceMinor: 0,
+      cashDifferenceMinor: -15000,
+      closingNotes: 'Faltante de  MXN en arqueo de caja al cierre de turno',
     },
     {
       id: 'demo-shift-2026-10-07-m',
@@ -281,6 +282,21 @@ export function createRichDemoState(): DemoState {
 
   const sales: Sale[] = [
     // Today sales (demo-shift-01)
+    {
+      id: 'sale-transfer-pending-01',
+      kind: 'product',
+      productId: 'demo-whey-can',
+      description: 'Proteína Whey Isolate 2lb',
+      quantity: 1,
+      unitPriceMinor: 92000,
+      amountMinor: 92000,
+      method: 'transfer',
+      status: 'pending',
+      shiftId: 'demo-shift-01',
+      recordedAt: '2026-10-08T11:00:00-06:00',
+      memberId: 'demo-001',
+      memberName: 'Mariana López',
+    },
     {
       id: 'sale-today-01',
       kind: 'product',
@@ -496,6 +512,8 @@ export function createRichDemoState(): DemoState {
   ];
 
   const stockMovements: StockMovement[] = [
+    { id: 'mov-waste-01', productId: 'demo-electrolit', shiftId: 'demo-shift-01', kind: 'waste', quantity: 2, recordedAt: '2026-10-08T08:30:00-06:00', reason: 'Botellas fisuradas en recepción' },
+    { id: 'mov-waste-02', productId: 'demo-cookie', shiftId: 'demo-shift-previous', kind: 'waste', quantity: 1, recordedAt: '2026-10-07T17:20:00-06:00', reason: 'Empaque perforado' },
     { id: 'mov-sale-01', productId: 'demo-water', shiftId: 'demo-shift-01', kind: 'sale', quantity: 2, recordedAt: '2026-10-08T07:30:00-06:00' },
     { id: 'mov-sale-02', productId: 'demo-electrolit', shiftId: 'demo-shift-01', kind: 'sale', quantity: 1, recordedAt: '2026-10-08T08:15:00-06:00' },
     { id: 'mov-sale-03', productId: 'demo-protein-bar', shiftId: 'demo-shift-01', kind: 'sale', quantity: 1, recordedAt: '2026-10-08T09:45:00-06:00' },
@@ -735,6 +753,7 @@ export function createRichDemoState(): DemoState {
 
   const expenses: ExpenseRecord[] = [
     { id: 'expense-seed-01', concept: 'Agua purificada para garrafón de recepción', payeeName: 'Agua Cristalina', amountMinor: 7000, shiftId: 'demo-shift-01', recordedAt: '2026-10-08T09:00:00-06:00' },
+    { id: 'expense-seed-03', concept: 'Reparación de cerrajería y chapa en acceso principal', payeeName: 'Cerrajería El Candado', amountMinor: 35000, shiftId: 'demo-shift-01', recordedAt: '2026-10-08T10:45:00-06:00' },
     { id: 'expense-seed-02', concept: 'Artículos de limpieza e higiene', payeeName: 'Comercializadora Sanitaria', amountMinor: 14500, shiftId: 'demo-shift-previous', recordedAt: '2026-10-07T16:30:00-06:00' },
   ];
 

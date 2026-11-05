@@ -28,9 +28,13 @@ export function createEmptyDemoState(): DemoState {
     ledger: [],
     shifts: [],
     products: [],
-    stockMovements: [],
+    stockMovements: [
+      { id: 'mov-waste-01', productId: 'demo-water', shiftId: 'demo-shift-01', kind: 'waste', quantity: 2, recordedAt: '2026-10-08T08:30:00-06:00', reason: 'Botellas fisuradas en recepción' },
+    ],
     counts: [],
-    sales: [],
+    sales: [
+      { id: 'sale-transfer-01', kind: 'product', productId: 'demo-bar', description: 'Caja de barras energéticas', quantity: 1, unitPriceMinor: 28000, amountMinor: 28000, method: 'transfer', status: 'pending', shiftId: 'demo-shift-01', recordedAt: '2026-10-08T11:00:00-06:00', memberId: 'demo-001', memberName: 'Mariana López' },
+    ],
     gloves: [],
     gloveRentals: [],
     lockers: [],
@@ -70,7 +74,7 @@ export function createBaselineDemoState(): DemoState {
     shifts: [
       { id: 'demo-shift-01', window: '06:00–14:00', openedAt: '2026-10-08T06:00:00-06:00', status: 'open', openingCashMinor: 50000 },
       { id: 'demo-shift-previous', window: '14:00–22:00', openedAt: '2026-10-07T14:00:00-06:00', status: 'closed', openingCashMinor: 30000,
-        closedAt: '2026-10-07T22:00:00-06:00', countedCashMinor: 30000, expectedCashAtCloseMinor: 30000, cashDifferenceMinor: 0 },
+        closedAt: '2026-10-07T22:00:00-06:00', countedCashMinor: 28500, expectedCashAtCloseMinor: 30000, cashDifferenceMinor: -1500, closingNotes: 'Faltante de .00 MXN en arqueo de caja' },
     ],
     products: getInitialProducts(),
     stockMovements: [],
@@ -135,6 +139,7 @@ export function createBaselineDemoState(): DemoState {
     supplementSales: [],
     expenses: [
       { id: 'expense-seed-01', concept: 'Agua purificada para garrafón de recepción', payeeName: 'Agua Cristalina', amountMinor: 7000, shiftId: 'demo-shift-01', recordedAt: '2026-10-08T09:00:00-06:00' },
+      { id: 'expense-seed-02', concept: 'Reparación de cerrajería en puerta de acceso', payeeName: 'Cerrajería El Candado', amountMinor: 35000, shiftId: 'demo-shift-previous', recordedAt: '2026-10-07T16:45:00-06:00' },
     ],
     extras: [
       { id: 'extra-seed-01', concept: 'Cambio de billete $500 para cliente', staffName: 'Mariana López', amountMinor: 5000, shiftId: 'demo-shift-01', recordedAt: '2026-10-08T10:15:00-06:00' },
