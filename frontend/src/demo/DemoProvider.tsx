@@ -241,3 +241,7 @@ export function useDemo() {
   if (!context) throw new Error('useDemo requires DemoProvider');
   return context;
 }
+
+export function useOptionalDemo() {
+  return useContext(DemoContext);
+}

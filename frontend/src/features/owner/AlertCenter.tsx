@@ -744,7 +744,6 @@ export function AlertCenter({ apiRequest: explicitRequest, branchId: explicitBra
                       <td>
                         <div className="alert-detail-cell">
                           <span className="alert-detail-title">{alert.login_identifier}</span>
-                          <span style={{ fontSize: '12px', color: 'var(--color-muted)' }}>ID: {alert.staff_id}</span>
                         </div>
                       </td>
                       <td>

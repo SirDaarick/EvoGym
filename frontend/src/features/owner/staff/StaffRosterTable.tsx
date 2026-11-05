@@ -65,7 +65,7 @@ export function StaffRosterTable(props: StaffRosterTableProps) {
                     <div className="staff-avatar staff-avatar-recep" aria-hidden="true">{profileInitials(profile.full_name)}</div>
                     <div className="staff-info">
                       <strong>{profile.full_name}</strong>
-                      <span className="muted">{profile.position} · ID: {profile.id}</span>
+                      <span className="muted">{profile.position}</span>
                       {account && <span className="muted">Cuenta: {account.login_identifier} · {account.is_active ? 'Activa' : 'Inactiva'}</span>}
                     </div>
                   </div>

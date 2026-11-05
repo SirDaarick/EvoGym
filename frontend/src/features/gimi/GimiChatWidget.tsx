@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Role } from '../../domain/models';
 import type { GimiChatMessage } from '../../domain/gimi';
-import { useDemo } from '../../demo/DemoProvider';
+import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
+import { chatWithGimi } from '../../api/ownerGimiApi';
+import { useOptionalDemo } from '../../demo/DemoProvider';
 import {
   answerGimiQuery,
   getStoredChatHistory,
@@ -12,6 +14,7 @@ import './GimiChatWidget.css';
 
 interface GimiChatWidgetProps {
   role: Role;
+  request?: AuthenticatedRequest;
 }
 
 const INITIAL_SUGGESTIONS_BY_ROLE: Record<Role, string[]> = {
@@ -29,8 +32,9 @@ const INITIAL_SUGGESTIONS_BY_ROLE: Record<Role, string[]> = {
   ],
 };
 
-export function GimiChatWidget({ role }: GimiChatWidgetProps) {
-  const { state } = useDemo();
+export function GimiChatWidget({ role, request }: GimiChatWidgetProps) {
+  const demo = useOptionalDemo();
+  const state = demo?.state;
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -175,20 +179,46 @@ export function GimiChatWidget({ role }: GimiChatWidgetProps) {
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate intelligent thinking delay
-    responseTimerRef.current = setTimeout(() => {
-      responseTimerRef.current = null;
-      const response = answerGimiQuery(text, role, state);
-      const assistantMsg: GimiChatMessage = {
-        id: `gimi-${crypto.randomUUID()}`,
-        role: 'assistant',
-        content: response.content,
-        timestamp: new Intl.DateTimeFormat('es-MX', { timeStyle: 'short' }).format(new Date()),
-        suggestions: response.suggestions,
-      };
-      setMessages(prev => [...prev, assistantMsg]);
-      setIsTyping(false);
-    }, 450);
+    if (request) {
+      chatWithGimi(request, { message: text })
+        .then(res => {
+          const assistantMsg: GimiChatMessage = {
+            id: `gimi-${crypto.randomUUID()}`,
+            role: 'assistant',
+            content: res.reply_text,
+            timestamp: new Intl.DateTimeFormat('es-MX', { timeStyle: 'short' }).format(new Date()),
+            suggestions: INITIAL_SUGGESTIONS_BY_ROLE[role],
+          };
+          setMessages(prev => [...prev, assistantMsg]);
+        })
+        .catch(() => {
+          const errorMsg: GimiChatMessage = {
+            id: `gimi-err-${crypto.randomUUID()}`,
+            role: 'assistant',
+            content: 'No pude conectar con el servicio de Gimi en este momento. Por favor intenta de nuevo.',
+            timestamp: new Intl.DateTimeFormat('es-MX', { timeStyle: 'short' }).format(new Date()),
+          };
+          setMessages(prev => [...prev, errorMsg]);
+        })
+        .finally(() => {
+          setIsTyping(false);
+        });
+    } else {
+      // Simulate intelligent thinking delay
+      responseTimerRef.current = setTimeout(() => {
+        responseTimerRef.current = null;
+        const response = answerGimiQuery(text, role, state);
+        const assistantMsg: GimiChatMessage = {
+          id: `gimi-${crypto.randomUUID()}`,
+          role: 'assistant',
+          content: response.content,
+          timestamp: new Intl.DateTimeFormat('es-MX', { timeStyle: 'short' }).format(new Date()),
+          suggestions: response.suggestions,
+        };
+        setMessages(prev => [...prev, assistantMsg]);
+        setIsTyping(false);
+      }, 450);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

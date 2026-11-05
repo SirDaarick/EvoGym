@@ -515,7 +515,6 @@ export function LiveMembershipCheckout({
                     <div className="membership-member-avatar">{getInitials(selectedMember.name)}</div>
                     <div style={{ flex: 1 }}>
                       <strong>{selectedMember.name}</strong>
-                      <span className="muted" style={{ display: 'block', fontSize: '12px' }}>ID: {selectedMember.id}</span>
                     </div>
                     <Button
                       variant="secondary"

@@ -167,6 +167,20 @@ class JevRouter:
             req_thresh = self.get_threshold_for_tool(choice)
             return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
 
+        # Members Summary (Owner & Staff) - Query
+        if any(w in text for w in ("socio", "socios", "miembro", "miembros", "clientes", "cuantos socios", "cuántos socios", "base de socios", "retencion", "retención", "activos y vencidos")):
+            choice = "owner_members_summary"
+            conf = 0.93 if choice in allowed_values else 0.0
+            req_thresh = self.get_threshold_for_tool(choice)
+            return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
+
+        # Inventory Stock (Staff & Owner) - Query
+        if any(w in text for w in ("inventario", "stock", "existencias", "cuanto queda", "cuántas aguas", "cuantas aguas", "bebidas", "suplementos")):
+            choice = "staff_inventory_stock"
+            conf = 0.93 if choice in allowed_values else 0.0
+            req_thresh = self.get_threshold_for_tool(choice)
+            return JevRouteDecision(choice, conf, conf < req_thresh, req_thresh)
+
         # Financial Overview (Owner only) - Query
         if any(w in text for w in ("corte", "finanzas", "ingreso", "ingresos", "venta", "ventas", "vendio", "vendió", "vendimos", "cobro", "cobros", "facturacion", "resumen financiero", "ganancia", "cuanto dinero")):
             choice = "owner_financial_overview"

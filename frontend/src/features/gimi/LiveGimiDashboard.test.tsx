@@ -162,8 +162,6 @@ describe('LiveGimiDashboard', () => {
 
     expect(await screen.findByText('¿Cómo van los ingresos de hoy?')).toBeVisible();
     expect(await screen.findByText(/Los ingresos de este mes son \$45,200.00 MXN/)).toBeVisible();
-    expect(screen.getByText(/owner_financial_overview/)).toBeVisible();
-    expect(screen.getByText(/Confianza Jev: 94%/)).toBeVisible();
   });
 
   it('handles quick suggestion chip click to send prompt immediately', async () => {

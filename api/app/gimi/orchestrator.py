@@ -146,9 +146,16 @@ class GimiOrchestrator:
             params["reason"] = "Merma por bot" if tool_name == "staff_record_shrinkage" else "Reabastecimiento regular"
 
         elif tool_name == "staff_inventory_stock":
-            cleaned = re.sub(r"\b(inventario|stock|cuanto|hay|de|tenemos|disponible)\b", "", text, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(
+                r"\b(inventario|stock|cuanto|cuánto|queda|quedan|hay|de|tenemos|disponible|disponibilidad|cómo|como|está|esta|ver|revisar|el|la|los|las|productos|mostrador)\b|[¿?.,!¡]",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            ).strip()
             if len(cleaned) >= 2:
                 params["product_query"] = cleaned
+            else:
+                params["product_query"] = None
 
         elif tool_name == "staff_lookup_member":
             cleaned = re.sub(r"\b(busca|buscar|socio|socia|cliente|datos|de|el|la)\b", "", text, flags=re.IGNORECASE).strip()

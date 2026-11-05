@@ -42,7 +42,7 @@ function buildColumns(a: StaffTableActions): ColumnDef<ManagedStaffProfile>[] {
       cell: ({ row }) => (
         <div className="staff-cell">
           <div className="staff-avatar staff-avatar-recep" aria-hidden="true">{row.original.avatarInitials}</div>
-          <div className="staff-info"><strong>{row.original.name}</strong><span className="muted">ID: {row.original.id}</span></div>
+          <div className="staff-info"><strong>{row.original.name}</strong><span className="muted">{row.original.role ?? 'Recepción'}</span></div>
         </div>
       ),
     },

@@ -199,7 +199,7 @@ export function LiveGimiChatPane({ apiRequest }: { apiRequest: AuthenticatedRequ
             <h3 className="text-base font-bold text-ink">Gimi Operativo & Financiero</h3>
             <div className="flex items-center gap-2 text-xs text-muted">
               <span className="inline-block w-2 h-2 rounded-full bg-success animate-pulse" />
-              <span>Jev System 1 + Gemini 2.0 Flash</span>
+              <span>Asistente en vivo</span>
             </div>
           </div>
         </div>
@@ -236,17 +236,9 @@ export function LiveGimiChatPane({ apiRequest }: { apiRequest: AuthenticatedRequ
                 {renderFormattedText(msg.text)}
               </div>
 
-              {/* Tool Badge & Confidence Meta */}
-              {msg.sender === 'gimi' && msg.tool && (
+              {/* Message Timestamp */}
+              {msg.sender === 'gimi' && (
                 <div className="gimi-bubble-meta">
-                  <Badge tone="neutral">
-                    ⚙️ {msg.tool}
-                  </Badge>
-                  {typeof msg.confidence === 'number' && (
-                    <span className="text-xs text-muted">
-                      Confianza Jev: {Math.round(msg.confidence * 100)}%
-                    </span>
-                  )}
                   <span className="text-xs text-muted ml-auto">{msg.timestamp}</span>
                 </div>
               )}

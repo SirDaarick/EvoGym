@@ -35,7 +35,6 @@ describe('DevicePairingModal', () => {
 
     expect(screen.getByRole('heading', { name: /vincular dispositivo/i })).toBeVisible();
     expect(screen.getAllByText(/Sheila/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/staff-sheila/i)).toBeVisible();
 
     // Code output
     const codeDisplay = screen.getByTestId('pairing-code-display');

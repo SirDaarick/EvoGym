@@ -17,6 +17,7 @@ import { Overview } from '../features/owner/Overview';
 import { AttendanceAnalytics } from '../features/owner/AttendanceAnalytics';
 import { History } from '../features/owner/History';
 import { GimiDashboard } from '../features/gimi/GimiDashboard';
+import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { OfflineStatusBadge } from '../offline/OfflineStatusBadge';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
@@ -169,5 +170,6 @@ export function ApiProductApp() {
       {access.error && <span role="alert">{access.error}</span>}
     </> : undefined}
     sidebarBottomItems={appSidebarItems}
+    afterMain={<GimiChatWidget role={role} request={apiRequest} />}
   >{content}</ApplicationShell>;
 }

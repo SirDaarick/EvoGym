@@ -49,7 +49,6 @@ export function HistoryTable({ records, caption, timezone = 'America/Mexico_City
         cell: ({ row }) => (
           <div>
             <span>{row.original.description}</span>
-            <p className="muted break-words">{row.original.id}</p>
             <details>
               <summary>Ver detalle</summary>
               <p className="mt-2">{row.original.detail}</p>

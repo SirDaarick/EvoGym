@@ -317,13 +317,13 @@ export function LiveGimiDashboard({ apiRequest }: { apiRequest: AuthenticatedReq
                           <span className="text-xs font-semibold uppercase tracking-wider text-primary">
                             {chunk.source_kind === 'plan' ? 'Plan Publicado' : (CATEGORY_LABELS[chunk.source_ref.split('/')[0]] || chunk.source_ref)}
                           </span>
-                          <span className="text-xs font-mono text-muted">{chunk.embedding_model}</span>
+                          <span className="text-xs text-muted">Bóveda activa</span>
                         </div>
                         <h3 className="text-lg font-bold mb-2">{chunk.title}</h3>
                         <p className="text-sm text-muted whitespace-pre-line line-clamp-4">{chunk.content}</p>
                       </div>
                       <div className="mt-4 pt-3 border-t flex items-center justify-between">
-                        <span className="text-xs text-muted font-mono">hash: {chunk.content_hash.slice(0, 10)}...</span>
+                        <span className="text-xs text-muted">Disponible para respuestas</span>
                         {chunk.source_kind === 'rule' && (
                           <button
                             type="button"

@@ -117,6 +117,12 @@ class GeneratePaymentLinkParams(BaseModel):
     plan_code: str | None = Field(default=None, max_length=50, description="Specific plan code.")
 
 
+class OwnerMembersSummaryParams(BaseModel):
+    """Query overall gym membership numbers: active, expired, retention and member base count."""
+    status_filter: Literal["all", "active", "expired", "inactive"] = Field(default="all", description="Optional status filter.")
+
+
+
 # ---------------------------------------------------------------------------
 # Tool Definition Metadata
 # ---------------------------------------------------------------------------
@@ -244,6 +250,14 @@ ALL_TOOLS: list[ToolDefinition] = [
     ),
 
     # --- OWNER TOOLS ---
+    ToolDefinition(
+        name="owner_members_summary",
+        description="Consultar estadísticas y métricas generales de socios: total de socios registrados, activos, vencidos, inactivos y retención.",
+        kind=ToolKind.QUERY,
+        allowed_roles={GimiRole.OWNER, GimiRole.STAFF},
+        requires_confirmation=False,
+        params_schema=OwnerMembersSummaryParams,
+    ),
     ToolDefinition(
         name="owner_financial_overview",
         description="Consultar el resumen ejecutivo del negocio: ingresos confirmados por método, cobros de mostrador y nómina.",
