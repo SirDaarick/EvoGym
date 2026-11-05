@@ -563,3 +563,43 @@ Después se hace commit con `feat(offline): sync manager, status badge and onlin
 - **D-029** (RPO/RTO): pertenece a la Fase 6.
 - **Tipos D-027 diferidos:** `membership.cash_renewal`, `member.fast_registration` y asistencia de personal offline. Requieren una ampliación de la matriz y de los payloads en una fase posterior.
 - **Concurrencia real de la ingesta en PostgreSQL:** las pruebas se escriben ahora y se ejecutan en CI con T6.1.
+
+---
+
+## 9. Bitácora de ejecución
+
+### Oleada 0 y Oleada 1: completadas
+- **Línea base:** se registró en `docs/phase-5-baseline.md`.
+- **Commits de la Oleada 1:**
+  - `4047d25`: F1 (PWA, Dexie, JSON canónico, secuencia, matriz de capacidades)
+  - `29f708d`: B2 (`apply_member_check_in`, `post_contingency_cash_sale`, `open_shift(now=)`)
+  - `3e6dcad`: B1 (migración `0057`, modelos de sincronización, tokens de dispositivo, envelope, reloj)
+  - commit de limpieza posterior a V1
+- **Verificación V1:**
+  - backend: 799 pasan, 44 omitidas y 1 falla preexistente;
+  - frontend: 1030 de 1030;
+  - `tsc` y el build: OK;
+  - JSON canónico Python ↔ TypeScript: 302 payloads aleatorios sin diferencias;
+  - migración `0057`: sube, baja y vuelve a subir en SQLite y en PostgreSQL 16.
+- **Nombres reales de las funciones**, que difieren del plan:
+  - `app/memberships/service.py::apply_member_check_in` en lugar de `record_check_in`;
+  - `app/sales/queries.py::post_contingency_cash_sale` (función hermana) en lugar del parámetro `policy=`.
+
+### Hallazgos de V1 que heredan B3 y B4 (Oleada 2)
+1. **`post_contingency_cash_sale` todavía rechaza** estos casos:
+   - caja inexistente o inactiva;
+   - sucursal inactiva;
+   - que no exista ningún turno (FirstShiftRequired);
+   - socio inexistente;
+   - líneas duplicadas;
+   - producto inexistente;
+   - total distinto de `expected_total_minor`;
+   - total mayor que MAX_MINOR;
+   - cancelación previa.
+
+   Según F5-D5, B3 debe **normalizar antes de aplicar**: si el socio no existe, usar `member_id=None` con bandera; fusionar las líneas duplicadas; enviar `unit_prices` para todas las líneas y recalcular el total esperado con esos precios. Si persiste algún caso, debe agregar un modo no estricto que acepte la venta y la marque con bandera. Solo puede quedar `rejected` lo que sea de integridad.
+2. **`shift_id` apuntando a un turno ya cerrado:** hoy la venta cae como overtime en silencio. B3 debe detectarlo y agregar la bandera `orphan_shift_reference`.
+3. **Check-in tardío con hora anterior a la visita más antigua:** crearía una visita nueva a menos de 300 s de otra. B3 procesa los eventos de cada socio en orden de `client_recorded_at`, y además debe vincular el evento a la visita que empiece dentro de los 300 s siguientes (visita "posterior cercana").
+4. **Si el periodo no existe (404)** o falta la sucursal, el evento debe salir `rejected/invalid_reference`, nunca como un 500.
+5. **B3 debe validar en la ingesta** que el `payload_hash` recalculado coincida con el enviado, que el sufijo del `event_id` corresponda al `seq` (ya validado en el envelope) y que el prefijo pertenezca al dispositivo. Los saltos de `seq` están permitidos.
+6. **B4:** el bootstrap siembra `next_seq = last_ingested_seq + 1`, calculado sobre todos los dispositivos históricos con ese prefijo.
