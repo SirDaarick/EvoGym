@@ -22,7 +22,9 @@ api/dev.db
 tmp/
 output/
 *.xlsx
+*.dump
 backend/*.xlsx
+*.dump
 backend/*.ipynb
 
 .claude/
