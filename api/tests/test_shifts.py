@@ -460,6 +460,7 @@ def test_shift_summary_uses_supported_financial_read_model_and_branch_protection
                 "pending_transfer_minor": 0, "payment_methods": [], "activities": [], "payments": [],
                 "expected_cash_minor": 2000,
                 "expense_minor": 0, "expense_count": 0, "extra_minor": 0,
+                "contingency_flags_count": 0,
             }
             other_branch = _seed_branch(factory, "summary-other", "Other Branch")
             with factory.begin() as session:
