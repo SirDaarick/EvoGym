@@ -11,3 +11,20 @@ class KnowledgeRuleInput(BaseModel):
 
 class DeliverBatchInput(BaseModel):
     batch_size: int = Field(default=10, ge=1, le=50)
+
+
+class GimiChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    confirmed: bool = False
+    cached_draft: dict[str, object] | None = None
+    cached_tool: str | None = None
+
+
+class GimiChatResponse(BaseModel):
+    reply_text: str
+    tool_called: str
+    status: str
+    confidence: float
+    needs_confirmation: bool
+    draft_action: dict[str, object] | None = None
+    data: dict[str, object] = Field(default_factory=dict)

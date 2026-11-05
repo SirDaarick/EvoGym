@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 
 from app.api.deps import FinancePrincipal, RawFactoryDep, SettingsDep, _bearer, _principal
 from app.gimi import service
-from app.gimi.schemas import DeliverBatchInput, KnowledgeRuleInput
+from app.gimi.dispatcher import GimiActor
+from app.gimi.orchestrator import GimiOrchestrator
+from app.gimi.schemas import DeliverBatchInput, GimiChatRequest, GimiChatResponse, KnowledgeRuleInput
+from app.gimi.tool_definitions import GimiRole
 
 router = APIRouter(prefix="/api/v1/owner/gimi", tags=["owner-gimi"])
 
@@ -87,3 +90,36 @@ def deliver_notifications(
     settings: SettingsDep,
 ):
     return service.trigger_outbox_delivery(factory, principal, payload, settings=settings)
+
+
+@router.post("/chat", response_model=GimiChatResponse)
+def chat_with_gimi(
+    payload: GimiChatRequest,
+    factory: RawFactoryDep,
+    principal: Principal,
+    settings: SettingsDep,
+):
+    orchestrator = GimiOrchestrator(settings=settings)
+    actor = GimiActor(
+        role=GimiRole.OWNER,
+        staff_user_id=principal.staff_user_id,
+        branch_id=principal.branch_id,
+    )
+    with factory() as session:
+        res = orchestrator.interact(
+            session=session,
+            actor=actor,
+            message=payload.message,
+            confirmed=payload.confirmed,
+            cached_draft=payload.cached_draft,
+            cached_tool=payload.cached_tool,
+        )
+        return GimiChatResponse(
+            reply_text=res.reply_text,
+            tool_called=res.tool_called,
+            status=res.status.value,
+            confidence=res.confidence,
+            needs_confirmation=res.needs_confirmation,
+            draft_action=res.draft_action,
+            data=res.data,
+        )
