@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 
 from app.api.deps import FinancePrincipal, RawFactoryDep, SettingsDep, _bearer, _principal
 from app.gimi import service
-from app.gimi.dispatcher import GimiActor
+from app.gimi.dispatcher import DispatchStatus, GimiActor
 from app.gimi.orchestrator import GimiOrchestrator
 from app.gimi.schemas import DeliverBatchInput, GimiChatRequest, GimiChatResponse, KnowledgeRuleInput
 from app.gimi.tool_definitions import GimiRole
@@ -114,6 +114,8 @@ def chat_with_gimi(
             cached_draft=payload.cached_draft,
             cached_tool=payload.cached_tool,
         )
+        if res.status == DispatchStatus.SUCCESS:
+            session.commit()
         return GimiChatResponse(
             reply_text=res.reply_text,
             tool_called=res.tool_called,
