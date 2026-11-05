@@ -12,9 +12,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+from app.audit import AuditAction, append_sync_audit_event
 from app.db.base import Base
 from app.db.models import (
-    Branch, ContingencyEvent, Order, Product, StaffUser, SyncAuditFlag, SyncDevice,
+    AuditEvent, Branch, ContingencyEvent, Order, Product, StaffUser, SyncAuditFlag, SyncDevice,
 )
 from app.errors import PublicDomainError, install_error_handlers
 from app.sync.clock import classify_clock
@@ -81,11 +82,23 @@ def test_envelope_accepts_valid_and_requires_aware_timestamps():
 @pytest.mark.parametrize("over", [
     {"event_id": "rec-sur1-00123"}, {"event_id": "REC-SUR1-123"}, {"event_id": "REC-S-00123"},
     {"event_id": "REC-SUR1-00123; DROP"}, {"seq": 0}, {"event_type": "membership.cash_renewal"},
+    {"event_id": "REC-SUR1-٠٠١٢٣"}, {"event_id": "REC-SUR1-00124"}, {"seq": 124},
     {"payload_hash": "A" * 64}, {"payload_hash": "a" * 63}, {"extra": 1},
 ])
 def test_envelope_rejects_invalid_fields(over):
     with pytest.raises(ValidationError):
         ContingencyEventIn.model_validate(_envelope(**over))
+
+
+def test_canonical_json_rejects_unsafe_integers():
+    assert canonical_json({"a": 2**53 - 1}) == '{"a":9007199254740991}'
+    for bad in (2**53, -(2**53), {"a": [2**60]}):
+        with pytest.raises(ValueError):
+            canonical_json(bad)
+
+
+def test_envelope_accepts_matching_suffix_with_leading_zeros_and_long_seq():
+    ContingencyEventIn.model_validate(_envelope(event_id="REC-SUR1-123456", seq=123456))
 
 
 def _sale(**over):
@@ -181,6 +194,48 @@ def test_provision_stores_only_digest_and_rotation_revokes_and_keeps_sequence(tm
                                  provisioned_by=staff_id, ttl_days=1, rotate=False)
     finally:
         engine.dispose()
+
+
+def test_sequence_continues_when_prefix_revoked_in_one_branch_and_provisioned_in_another(tmp_path):
+    engine, factory = _db(tmp_path)
+    try:
+        branch_id, staff_id = _seed(factory)
+        with factory.begin() as session:
+            other = Branch(code="b2", name="B2")
+            session.add(other)
+            session.flush()
+            other_id = other.id
+            device, _ = provision_device(session, branch_id=branch_id, station_code="SUR1", reception_station_id=None,
+                                         provisioned_by=staff_id, ttl_days=1, rotate=False, now=NOW)
+            device.last_ingested_seq = 77
+            revoke_device(session, device.id, now=NOW)
+        with factory.begin() as session:
+            moved, _ = provision_device(session, branch_id=other_id, station_code="SUR1", reception_station_id=None,
+                                        provisioned_by=staff_id, ttl_days=1, rotate=False, now=NOW)
+            assert moved.last_ingested_seq == 77
+    finally:
+        engine.dispose()
+
+
+def test_append_sync_audit_event_needs_no_principal_and_stores_no_payload(tmp_path):
+    engine, factory = _db(tmp_path)
+    try:
+        branch_id, staff_id = _seed(factory)
+        with factory.begin() as session:
+            append_sync_audit_event(session, device_id=uuid4(), actor_staff_id=staff_id, branch_id=branch_id,
+                                    event_id="REC-SUR1-00001", event_type="pos.cash_sale", status="accepted")
+        with factory() as session:
+            rows = session.scalars(select(AuditEvent)).all()
+            assert len(rows) == 1
+            assert rows[0].action == AuditAction.SYNC_INGEST.value == "sync_ingest"
+            assert rows[0].actor_id == staff_id and rows[0].branch_id == branch_id and rows[0].request_id
+    finally:
+        engine.dispose()
+
+
+def test_sync_public_messages_are_english():
+    for code in ("sync_device_revoked", "sync_device_expired", "sync_snapshot_required", "sync_batch_too_large"):
+        assert PublicDomainError(code).message.isascii()
 
 
 def test_station_code_cannot_cross_branches(tmp_path):

@@ -161,10 +161,10 @@ _PUBLIC_MESSAGES = {
     "class_sample_payment_unavailable": "The class sample payment is unavailable.",
     "class_sample_payment_not_received": "The class sample payment has not been received.",
     "wrong_branch": "The entitlement belongs to another branch.",
-    "sync_device_revoked": "El dispositivo fue revocado; vuelva a sincronizar desde una sesión con internet.",
-    "sync_device_expired": "La autorización del dispositivo expiró; vuelva a sincronizar con internet.",
-    "sync_snapshot_required": "Se requiere una descarga completa de datos (bootstrap) antes de continuar.",
-    "sync_batch_too_large": "El lote de eventos excede el tamaño permitido.",
+    "sync_device_revoked": "The device was revoked; sync again from a session with internet access.",
+    "sync_device_expired": "The device authorization expired; sync again with internet access.",
+    "sync_snapshot_required": "A full data download (bootstrap) is required before continuing.",
+    "sync_batch_too_large": "The event batch exceeds the allowed size.",
 }
 _VALIDATION_TYPES = set(get_args(ValidationIssue.model_fields["type"].annotation))
 _VALIDATION_SOURCES = {"body", "query", "path", "header", "cookie"}

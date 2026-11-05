@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import StrEnum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ class AuditAction(StrEnum):
     FINANCE_READ = "finance_read"
     SHIFT_POST = "shift_post"
     STAFF_AUTHORIZATION_CHANGED = "staff_authorization_changed"
+    SYNC_INGEST = "sync_ingest"
 
 
 _PERMISSIONS = {
@@ -44,6 +45,35 @@ def append_audit_event(
         branch_id=branch_id,
         action=action.value,
         request_id=request_id,
+        occurred_at=datetime.now(timezone.utc),
+    )
+    session.add(event)
+    return event
+
+
+def append_sync_audit_event(
+    session: Session,
+    *,
+    device_id: UUID,
+    actor_staff_id: UUID,
+    branch_id: UUID,
+    event_id: str,
+    event_type: str,
+    status: str,
+    request_id: UUID | None = None,
+) -> AuditEvent:
+    """Append a sync_ingest audit event for an already device-authenticated caller (no principal/permission check).
+
+    AuditEvent stores only actor/branch/action/request_id; device_id, event_id, event_type and status are accepted
+    for the caller's contract but deliberately not persisted (no payloads or tokens are ever written).
+    """
+    if not isinstance(branch_id, UUID) or not isinstance(actor_staff_id, UUID):
+        raise AuthorizationDenied("Audit authority denied")
+    event = AuditEvent(
+        actor_id=actor_staff_id,
+        branch_id=branch_id,
+        action=AuditAction.SYNC_INGEST.value,
+        request_id=request_id or uuid4(),
         occurred_at=datetime.now(timezone.utc),
     )
     session.add(event)

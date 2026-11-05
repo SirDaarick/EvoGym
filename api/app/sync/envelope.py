@@ -7,16 +7,21 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-EVENT_ID_PATTERN = r"^[A-Z]+-[A-Z0-9]{2,8}-\d{5,}$"
+EVENT_ID_PATTERN = r"^[A-Z]+-[A-Z0-9]{2,8}-[0-9]{5,}$"
+MAX_SAFE_INTEGER = 2**53 - 1  # JS Number.MAX_SAFE_INTEGER; both canonicalizers must agree on this bound
 IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9._:-]+$"
 
 EventType = Literal["attendance.check_in", "pos.cash_sale", "shift.arqueo_close", "shift.open"]
 
 
 def _check(value: Any, path: str = "$") -> None:
-    if isinstance(value, bool) or value is None or isinstance(value, (int, str)):
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return
+    if isinstance(value, int):
+        if abs(value) > MAX_SAFE_INTEGER:
+            raise ValueError(f"integers beyond 2**53-1 are not allowed in canonical JSON ({path})")
         return
     if isinstance(value, float):
         raise ValueError(f"floats are not allowed in canonical JSON ({path})")
@@ -125,6 +130,12 @@ class ContingencyEventIn(_Strict):
     @classmethod
     def _require_aware(cls, value):
         return _aware(value)
+
+    @model_validator(mode="after")
+    def _seq_matches_event_id(self):
+        if int(self.event_id.rsplit("-", 1)[1]) != self.seq:
+            raise ValueError("event_id numeric suffix must equal seq")
+        return self
 
     @property
     def device_prefix(self) -> str:

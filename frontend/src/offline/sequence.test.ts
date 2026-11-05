@@ -21,6 +21,14 @@ describe('allocateEventId', () => {
     expect((await allocateEventId(db, 'REC-SUR1')).event_id).toBe('REC-SUR1-00123');
     expect(formatEventId('REC-SUR1', 123456)).toBe('REC-SUR1-123456');
   });
+  it('never allocates below the existing meta counter when device.next_seq is re-seeded lower', async () => {
+    const db = open(uniq());
+    await db.meta.put({ key: 'next_seq', value: 10 });
+    await db.device.put({ id: 'current', next_seq: 3 });
+    expect((await allocateEventId(db, 'REC-SUR1')).seq).toBe(10);
+    await db.device.put({ id: 'current', next_seq: 50 });
+    expect((await allocateEventId(db, 'REC-SUR1')).seq).toBe(50);
+  });
   it('has no duplicates under concurrency', async () => {
     const db = open(uniq());
     const r = await Promise.all(Array.from({ length: 50 }, () => allocateEventId(db, 'REC-SUR1')));

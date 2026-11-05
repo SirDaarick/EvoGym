@@ -64,9 +64,9 @@ def provision_device(
         last_seq = max(last_seq, device.last_ingested_seq)
     if active:
         session.flush()  # free the partial-unique prefix slot before inserting the replacement
-    # Sequence continuity also covers earlier revoked devices of this prefix.
+    # Sequence continuity covers earlier revoked devices of this prefix in ANY branch (event_id is globally unique).
     previous = session.scalars(
-        select(SyncDevice.last_ingested_seq).where(SyncDevice.device_prefix == prefix, SyncDevice.branch_id == branch_id)
+        select(SyncDevice.last_ingested_seq).where(SyncDevice.device_prefix == prefix)
     ).all()
     last_seq = max([last_seq, *previous])
     raw_token = secrets.token_urlsafe(32)
@@ -114,6 +114,7 @@ def get_sync_device(
 ) -> SyncDevice:
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise HTTPException(401, "Authentication failed.")
+    # last_seen_at is intentionally not updated here: this is a read path and a write would need its own transaction.
     return authenticate_device_token(session, credentials.credentials)
 
 

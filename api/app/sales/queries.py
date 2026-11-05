@@ -175,10 +175,9 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
                   request_fingerprint=fingerprint, total_minor=total)
     if occurred_at is not None:
         order.created_at = occurred_at
-    # Columns added by Phase 5 (B1); guarded so this works before and after the model change lands.
-    if contingency and hasattr(Order, "origin"):
+    if contingency:
         order.origin = "contingency"
-    if offline_receipt_number is not None and hasattr(Order, "offline_receipt_number"):
+    if offline_receipt_number is not None:
         order.offline_receipt_number = offline_receipt_number
     session.add(order)
     session.flush()
@@ -196,7 +195,7 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
             movement.recorded_at = occurred_at
         session.add(movement)
     payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total, received_by=actor_id)
-    if occurred_at is not None and hasattr(Payment, "created_at"):
+    if occurred_at is not None:
         payment.created_at = occurred_at
     session.add(payment)
     session.flush()
