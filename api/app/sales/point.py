@@ -179,11 +179,12 @@ class MercadoPagoPointHttpClient:
             err_body = exc.read().decode("utf-8")
             raise RuntimeError(f"Mercado Pago API error ({exc.code}): {err_body}") from exc
 
+        raw_state = str(result.get("state") or result.get("status") or "OPEN").upper()
         return PointPaymentIntentDTO(
             id=str(result.get("id")),
             device_id=device_id,
             amount_minor=amount_minor,
-            status=str(result.get("status", "OPEN")),
+            status="PROCESSED" if raw_state == "FINISHED" else ("CANCELED" if raw_state in ("CANCELED", "CANCELLED", "ABANDONED") else "ON_TERMINAL"),
         )
 
     def get_payment_intent_status(
@@ -198,13 +199,23 @@ class MercadoPagoPointHttpClient:
             err_body = exc.read().decode("utf-8")
             raise RuntimeError(f"Mercado Pago API error ({exc.code}): {err_body}") from exc
 
-        status = str(result.get("status", "OPEN"))
+        raw_state = str(result.get("state") or result.get("status") or "OPEN").upper()
         payment_info = result.get("payment") or {}
         card_info = payment_info.get("card") or {}
 
-        # Parse amount back to minor units
+        # Parse amount: Mercado Pago returns integer centavos in "amount"
         raw_amount = result.get("amount") or 0
-        amount_minor = round(float(raw_amount) * 100)
+        amount_minor = int(raw_amount)
+
+        payment_state = str(payment_info.get("state") or payment_info.get("status") or "").lower()
+        if raw_state == "FINISHED" or payment_state == "approved":
+            status = "PROCESSED"
+        elif raw_state in ("CANCELED", "CANCELLED", "ABANDONED") or payment_state in ("cancelled", "canceled", "rejected"):
+            status = "CANCELED"
+        elif raw_state in ("ERROR", "REJECTED"):
+            status = "CANCELED"
+        else:
+            status = "ON_TERMINAL"
 
         return PointPaymentIntentDTO(
             id=str(result.get("id", payment_intent_id)),

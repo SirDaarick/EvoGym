@@ -4,8 +4,8 @@ import {
 } from '@/api/productSalesApi';
 import { handleSaleFailure, MORE_PENDING, type SaleContext } from './cashSale';
 
-const POLL_DELAY_MS = 600;
-const MAX_RETRIES = 30;
+const POLL_DELAY_MS = 1000;
+const MAX_RETRIES = 120;
 const FINAL_STATUSES = ['PROCESSED', 'CANCELED', 'ABANDONED'];
 
 /** Card sale against the Point terminal. Polling stays imperative on purpose. */
