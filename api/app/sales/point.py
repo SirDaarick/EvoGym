@@ -164,7 +164,7 @@ class MercadoPagoPointHttpClient:
         # In Mercado Pago Point API, amount is represented in major currency decimal units (e.g. 10.50)
         # or integer if exact. Here amount_minor / 100.0 is used.
         payload = {
-            "amount": round(amount_minor / 100.0, 2),
+            "amount": int(amount_minor),
             "additional_info": {
                 "external_reference": external_reference,
                 "print_on_terminal": True,
