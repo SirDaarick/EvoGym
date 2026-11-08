@@ -1,6 +1,6 @@
 import { memberStatus, membershipRenewalStreak } from '@/domain/membership';
 import { openAttendance } from '@/domain/attendance';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
   flexRender,
@@ -530,13 +530,19 @@ function LiveMemberDetail({
       }));
   }, [safeRentals, member.id, member.name]);
 
-  // A preferred name made only of words from the legal name (e.g. "Elena") is not a nickname: keep the legal name as title and just tag it.
+  // A preferred name made only of words from the legal name (e.g. "Elena") is highlighted inside the legal name; any other one is a nickname and becomes the title.
   const alias = preferredName?.trim() ?? '';
   const legalName = legalFullName?.trim();
-  const words = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
-  const isLegalPart = Boolean(alias && legalName) && words(alias).every(word => words(legalName!).includes(word));
+  const fold = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const aliasWords = fold(alias).split(/\s+/).filter(Boolean);
+  const legalWords = legalName ? legalName.split(/\s+/) : [];
+  const isLegalPart = aliasWords.length > 0 && aliasWords.every(word => legalWords.some(legal => fold(legal) === word));
   const nickname = alias && !isLegalPart ? alias : '';
-  const sameNameAlias = alias && isLegalPart ? alias : '';
+  const heroTitle = nickname
+    ? <span className="member-preferred-name">{nickname}</span>
+    : isLegalPart
+      ? legalWords.map((word, index) => <Fragment key={index}>{index > 0 && ' '}{aliasWords.includes(fold(word)) ? <strong className="member-preferred-part">{word}</strong> : word}</Fragment>)
+      : (legalName ?? member.name);
 
   function handleOpenEdit() {
     setEditFullName(legalFullName ?? member.name);
@@ -574,12 +580,11 @@ function LiveMemberDetail({
       <div className="member-hero-avatar-wrap"><div className="member-hero-avatar" aria-hidden="true">{getMemberInitials(member.name)}</div></div>
       <div className="member-hero-details">
         <PageHeader
-          eyebrow={nickname ? 'Socio · así le gusta que le digan' : 'Socio'}
-          title={nickname ? <span className="member-preferred-name">{nickname}</span> : (legalName ?? member.name)}
+          eyebrow="Socio"
+          title={heroTitle}
           description={[nickname ? legalName : null, member.phone || 'Teléfono no capturado'].filter(Boolean).join(' · ')}
           action={
             <div className="member-hero-actions">
-              {sameNameAlias && <span className="member-preferred-chip">Le dicen: {sameNameAlias}</span>}
               <Badge tone={statusTone}>
                 {currentPeriod ? (currentPeriod.access_status === 'eligible' ? 'Elegible' : currentPeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : currentPeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : currentPeriod.access_status) : ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
               </Badge>

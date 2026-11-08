@@ -118,15 +118,9 @@
   font-weight: 900;
 }
 
-.member-preferred-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: var(--color-primary);
-  color: var(--color-primary-text);
-  font-size: 13px;
-  font-weight: 800;
+.member-hero-details .page-header h1 .member-preferred-part {
+  color: var(--color-primary);
+  font-weight: 900;
 }
 
 .member-hero-details .page-header .muted {

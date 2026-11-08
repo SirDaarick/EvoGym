@@ -622,7 +622,6 @@ describe('member workflow', () => {
       expect(await screen.findByRole('button', { name: 'Editar datos' })).toBeVisible();
       // A nickname ("Ele" is not a word of the legal name) becomes the big title; the legal name goes small below it
       expect(screen.getByRole('heading', { level: 1, name: 'Ele' })).toBeVisible();
-      expect(screen.getByText('Socio · así le gusta que le digan')).toBeVisible();
       expect(screen.getByText(/Elena Morales · /)).toBeVisible();
       await userEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
 
@@ -653,8 +652,8 @@ describe('member workflow', () => {
       });
     });
 
-    it('keeps the legal name as title and shows an orange tag when the preferred name is part of it', async () => {
-      const aliasMember = { ...fixtureMember, preferred_name: 'Elena' };
+    it('keeps the full legal name as title and highlights only the preferred words inside it', async () => {
+      const aliasMember = { ...fixtureMember, full_name: 'Elena Aurora Morales', preferred_name: 'elena' };
       const aliasRequest = vi.fn(async (path: string) =>
         new Response(JSON.stringify(path.includes('/reload') ? fixtureReload : aliasMember)));
       render(
@@ -662,8 +661,9 @@ describe('member workflow', () => {
           <ApiMemberDetail role="RECEPTION" request={aliasRequest} isAdmin={false} />
         </MemoryRouter>
       );
-      expect(await screen.findByRole('heading', { level: 1, name: 'Elena Morales' })).toBeVisible();
-      expect(screen.getByText('Le dicen: Elena')).toBeVisible();
+      const heading = await screen.findByRole('heading', { level: 1, name: 'Elena Aurora Morales' });
+      expect(heading.querySelectorAll('strong.member-preferred-part')).toHaveLength(1);
+      expect(heading.querySelector('strong.member-preferred-part')).toHaveTextContent('Elena');
     });
 
     it('surfaces alert on 422/409/500, preserves typed form values, and never fabricates saved state', async () => {
