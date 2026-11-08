@@ -41,50 +41,38 @@ export interface CasillerosModalProps {
   registerId?: string;
   branchId: string;
   isAdmin?: boolean;
+  hasOpenShift?: boolean;
 }
 
 export type EffectiveLockerStatus = 'available' | 'assigned' | 'expired' | 'evict' | 'employee' | 'out_of_service';
 
-export function getLockerEffectiveStatus(locker: LockerItem, nowIso: string) {
+/** Locker plus the server-derived lifecycle (branch-local day); the client never reads its own clock. */
+export type LockerView = LockerItem & { lifecycle?: 'active' | 'expired' | 'evicted' | null; overdueDays?: number };
+
+/** `ends_on` is a branch-local calendar date: parse it as one, never as a UTC instant. */
+export function formatLocalDate(isoDate: string, options?: Intl.DateTimeFormatOptions): string {
+  const [year, month, day] = isoDate.slice(0, 10).split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('es-MX', options);
+}
+
+export function getLockerEffectiveStatus(locker: LockerView) {
   if (locker.status === 'out_of_service') {
     return { status: 'out_of_service' as const, label: 'Fuera de servicio', badgeClass: 'casillero-badge-service' };
   }
   if (locker.status === 'employee') {
     return { status: 'employee' as const, label: 'Empleado', badgeClass: 'casillero-badge-employee' };
   }
-  if (locker.status === 'evicted') {
-    return { status: 'evict' as const, label: 'Desalojar', badgeClass: 'casillero-badge-evicted' };
+  if (locker.status === 'evicted' || locker.lifecycle === 'evicted') {
+    return { status: 'evict' as const, label: 'Desalojar', badgeClass: 'casillero-badge-evicted', overdueDays: locker.overdueDays };
   }
   if (locker.status === 'available' || (!locker.assignedMemberId && !locker.expiresAt)) {
     return { status: 'available' as const, label: 'Disponible', badgeClass: 'casillero-badge-available' };
   }
-
-  // Active assignment: calculate 1 month and overdue
-  const nowMs = new Date(nowIso).getTime();
-  const expiryMs = locker.expiresAt ? new Date(locker.expiresAt).getTime() : nowMs;
-
-  if (nowMs <= expiryMs) {
-    return { status: 'assigned' as const, label: 'Ocupado', badgeClass: 'casillero-badge-assigned' };
+  if (locker.lifecycle === 'expired') {
+    return { status: 'expired' as const, label: 'Vencido', badgeClass: 'casillero-badge-expired', overdueDays: locker.overdueDays };
   }
-
-  const overdueDays = Math.max(1, Math.floor((nowMs - expiryMs) / (1000 * 60 * 60 * 24)));
-  if (overdueDays <= 14) {
-    return {
-      status: 'expired' as const,
-      label: 'Vencido',
-      badgeClass: 'casillero-badge-expired',
-      overdueDays,
-    };
-  }
-
-  return {
-    status: 'evict' as const,
-    label: 'Desalojar',
-    badgeClass: 'casillero-badge-evicted',
-    overdueDays,
-  };
+  return { status: 'assigned' as const, label: 'Ocupado', badgeClass: 'casillero-badge-assigned' };
 }
-
 interface MemberSearchResult {
   id: string;
   full_name: string;
@@ -98,6 +86,7 @@ export function CasillerosModal({
   registerId,
   branchId,
   isAdmin = false,
+  hasOpenShift,
 }: CasillerosModalProps) {
 
   // Live state
@@ -288,7 +277,7 @@ export function CasillerosModal({
   if (!isOpen) return null;
 
   // Build unified lockers array from the server catalog
-  const lockers: LockerItem[] = liveAssets.map((asset, index) => {
+  const lockers: LockerView[] = liveAssets.map((asset, index) => {
     const activeRental = liveRentals.find(r => r.asset_id === asset.id && r.status === 'active');
     const lockerStatus: LockerStatus = activeRental
       ? 'assigned'
@@ -306,14 +295,16 @@ export function CasillerosModal({
       assignedMemberId: activeRental?.member_id ?? null,
       assignedMemberName: activeRental?.member_name ?? null,
       assignedAt: activeRental?.created_at ?? null,
-      expiresAt: activeRental?.ends_on ? `${activeRental.ends_on}T23:59:59.000Z` : null,
+      expiresAt: activeRental?.ends_on ?? null,
+      lifecycle: activeRental?.lifecycle_status ?? (activeRental ? 'active' : null),
+      overdueDays: activeRental?.overdue_days ?? 0,
       rentalId: activeRental?.id ?? null,
       paymentStatus: activeRental && activeRental.outstanding_minor > 0 ? 'pending' : 'paid',
       paymentMethod: 'cash',
     };
   });
 
-  const selectedLocker: LockerItem | undefined =
+  const selectedLocker: LockerView | undefined =
     lockers.find(l => l.id === selectedLockerId) ??
     lockers.find(l => l.status === 'available') ??
     lockers[0];
@@ -702,7 +693,6 @@ export function CasillerosModal({
   }
 
   const projectedExpiry = calculateNextMonthExpiry(new Date());
-  const nowIso = new Date().toISOString();
 
   return (
     <div
@@ -748,7 +738,7 @@ export function CasillerosModal({
           <div className="casilleros-grid-container" role="group" aria-label="Casilleros del gimnasio">
             {lockers.map(locker => {
               const isSelected = selectedLocker?.id === locker.id;
-              const eff = getLockerEffectiveStatus(locker, nowIso);
+              const eff = getLockerEffectiveStatus(locker);
 
               return (
                 <button
@@ -777,7 +767,7 @@ export function CasillerosModal({
                   </span>
                   <span className="casillero-card-price">
                     {locker.expiresAt && (eff.status === 'assigned' || eff.status === 'expired')
-                      ? `Vence: ${new Date(locker.expiresAt).toLocaleDateString('es-MX', { month: 'short', day: 'numeric' })}`
+                      ? `Vence: ${formatLocalDate(locker.expiresAt, { month: 'short', day: 'numeric' })}`
                       : eff.status === 'evict'
                       ? 'Desalojo requerido'
                       : `${formatMoney(locker.monthlyPriceMinor)}/mes`}
@@ -789,7 +779,7 @@ export function CasillerosModal({
 
           {/* Right Sidebar: Dynamic Status & Management */}
           {selectedLocker && (() => {
-            const effSelected = getLockerEffectiveStatus(selectedLocker, nowIso);
+            const effSelected = getLockerEffectiveStatus(selectedLocker);
 
             return (
               <div className="guantes-sidebar-column">
@@ -929,6 +919,7 @@ export function CasillerosModal({
                     step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedLocker.monthlyPriceMinor)} MXN →`}
                     step1ActionDisabled={!assignedMemberId}
                     useLiveCardIntent
+                    hasOpenShift={hasOpenShift}
                     statusMessage={depositNotice(depositMinor)}
                     statusType="warning"
                     allowCredit
@@ -1079,7 +1070,7 @@ export function CasillerosModal({
                           <span className="muted">Vencimiento:</span>
                           <strong>
                             {selectedLocker.expiresAt
-                              ? new Date(selectedLocker.expiresAt).toLocaleDateString('es-MX', {
+                              ? formatLocalDate(selectedLocker.expiresAt, {
                                   year: 'numeric',
                                   month: 'long',
                                   day: 'numeric',
@@ -1133,7 +1124,7 @@ export function CasillerosModal({
                           <span className="muted">Vencimiento:</span>
                           <strong>
                             {selectedLocker.expiresAt
-                              ? new Date(selectedLocker.expiresAt).toLocaleDateString('es-MX', {
+                              ? formatLocalDate(selectedLocker.expiresAt, {
                                   year: 'numeric',
                                   month: 'long',
                                   day: 'numeric',

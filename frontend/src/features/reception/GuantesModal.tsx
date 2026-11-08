@@ -36,6 +36,7 @@ export interface GuantesModalProps {
   branchId: string;
   registerId?: string;
   isAdmin?: boolean;
+  hasOpenShift?: boolean;
 }
 
 interface MemberSearchResult {
@@ -51,6 +52,7 @@ export function GuantesModal({
   registerId,
   branchId,
   isAdmin = false,
+  hasOpenShift,
 }: GuantesModalProps) {
 
   // Live state
@@ -563,6 +565,9 @@ export function GuantesModal({
                   <span className="guante-card-client">
                     {isAvailable ? 'Disponible' : glove.assignedMemberName || 'Prestado'}
                   </span>
+                  {glove.rentalId && liveRentals.find(r => r.id === glove.rentalId)?.overdue && (
+                    <span className="guante-card-overdue">Sin devolver (de otro día)</span>
+                  )}
                   <span className="guante-card-price">{formatMoney(glove.priceMinor)} MXN</span>
                 </button>
               );
@@ -719,6 +724,7 @@ export function GuantesModal({
                   step1ActionLabel={`Proceder al cobro · ${formatMoney(selectedGlove.priceMinor)} MXN →`}
                   step1ActionDisabled={!assignedMemberId}
                   useLiveCardIntent
+                  hasOpenShift={hasOpenShift}
                   statusMessage={depositNotice(depositMinor)}
                   statusType="warning"
                   allowCredit

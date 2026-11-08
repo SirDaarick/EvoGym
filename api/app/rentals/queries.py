@@ -25,6 +25,9 @@ from app.rentals.schemas import (
 )
 
 
+LOCKER_GRACE_DAYS = 14  # expired -> 2-week grace -> evicted
+
+
 def _charge_dto(session: Session, charge: RentalCharge) -> RentalChargeDTO:
     return RentalChargeDTO(
         id=charge.id, charge_kind=charge.charge_kind, amount_minor=charge.amount_minor,
@@ -40,6 +43,15 @@ def rental_dto(session: Session, rental: Rental) -> RentalDTO:
     asset = session.get(RentalAsset, rental.asset_id)
     if member is None or asset is None:
         raise RentalNotFoundError("Rental identity is unavailable.")
+    lifecycle_status, overdue_days, overdue = None, 0, False
+    if rental.status == "active":
+        today = cancellation_facts_today(session.get(Branch, rental.branch_id))
+        if rental.kind == "locker" and rental.ends_on is not None:
+            overdue_days = max(0, (today - rental.ends_on).days)
+            lifecycle_status = ("active" if overdue_days == 0
+                                else "expired" if overdue_days <= LOCKER_GRACE_DAYS else "evicted")
+        elif rental.kind == "glove" and charges:
+            overdue = min(charge.starts_on for charge in charges) < today
     return RentalDTO(
         id=rental.id, branch_id=rental.branch_id, asset_id=rental.asset_id,
         asset_code=asset.code,
@@ -47,6 +59,7 @@ def rental_dto(session: Session, rental: Rental) -> RentalDTO:
         member_name=member.full_name,
         member_number=member.member_number,
         kind=rental.kind, status=rental.status, starts_on=rental.starts_on, ends_on=rental.ends_on,
+        lifecycle_status=lifecycle_status, overdue_days=overdue_days, overdue=overdue,
         paid_minor=rental_paid_minor(session, rental),
         outstanding_minor=rental_outstanding_minor(session, rental),
         cancelled_debt_minor=cancellation.cancelled_debt_minor if cancellation else 0,
@@ -217,20 +230,22 @@ def renew_rental(
     branch = _rental_branch(session, rental, authorized_branch_id)
     if rental.kind != "locker":
         raise RentalConflictError("Only locker rentals can be renewed.")
-    if rental.status != "active":
-        raise RentalConflictError("Only active locker rentals can be renewed.")
-    register = lock_register(session, register_id, rental.branch_id)
-    shift = open_shift(session, register_id)
     contents = _component_fingerprint(register_id, components)
     request_fingerprint = fingerprint(str(rental.id), str(register_id), contents,
                                       *([f"credit:{credit_minor}"] if credit_minor else []))
     existing = session.scalar(select(RentalCharge).where(
         RentalCharge.rental_id == rental.id, RentalCharge.idempotency_key == idempotency_key,
     ).with_for_update())
-    if existing is not None:
+    if existing is not None:  # replay wins over the status check: a released rental still answers the original
         if existing.request_fingerprint != request_fingerprint:
             raise RentalConflictError("Idempotency key was already used for a different renewal.")
         return rental, True
+    if rental.status != "active":
+        raise RentalConflictError("Only active locker rentals can be renewed.")
+    # Rental first (its row lock serializes renewals), then create's order: register -> member -> asset.
+    register = lock_register(session, register_id, rental.branch_id)
+    shift = open_shift(session, register_id)
+    member = lock_member(session, rental.member_id)
     asset = lock_asset(session, rental.asset_id, rental.branch_id, rental.kind)
     _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components, credit_minor)
     period_start = rental.ends_on
@@ -248,7 +263,7 @@ def renew_rental(
     record_components(session, rental=rental, charge=charge, register=register, shift=shift,
                       actor_id=actor_id, components=components)
     if credit_minor:
-        _pay_with_credit(session, member=lock_member(session, rental.member_id), charge=charge,
+        _pay_with_credit(session, member=member, charge=charge,
                          register=register, shift=shift, actor_id=actor_id, credit_minor=credit_minor)
     if starts_on > period_start:
         rental.starts_on = starts_on

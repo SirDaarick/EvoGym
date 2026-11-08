@@ -329,7 +329,7 @@ describe('CasillerosModal deposits and card (live)', () => {
   });
   const lockerRental = (over: Record<string, unknown> = {}) => ({
     id: 'rental-lock-1', asset_id: 'asset-lock-1', asset_code: '#01', member_id: 'member-1', member_name: 'Ana Karen',
-    status: 'active', kind: 'locker', paid_minor: 18000, outstanding_minor: 0, ends_on: '2026-01-01',
+    status: 'active', kind: 'locker', paid_minor: 18000, outstanding_minor: 0, ends_on: '2026-01-01', lifecycle_status: 'evicted',
     deposit_minor: 5000, deposit_status: 'held', deposit_held_minor: 5000, deposit_refunded_minor: 0,
     deposit_retained_minor: 0, deposit_reason: null, charges: [], ...over,
   });
@@ -367,6 +367,15 @@ describe('CasillerosModal deposits and card (live)', () => {
     expect(body(request, '/api/v1/rentals/lockers')).toMatchObject({ expected_deposit_minor: 5000, expected_total_minor: 18000 });
   });
 
+  it.each([[true, 0], [false, 1]])('hasOpenShift=%s shows %i overtime banners at checkout', async (hasOpenShift, banners) => {
+    open(makeRequest([asset()], []), { hasOpenShift });
+    await screen.findAllByText('#01');
+    await userEvent.type(screen.getByRole('combobox', { name: 'Buscar socio activo' }), 'Mariana');
+    await userEvent.click(await screen.findByText('Mariana López'));
+    await userEvent.click(screen.getByRole('button', { name: /revisar cobro|proceder al cobro/i }));
+    expect(screen.queryAllByTestId('overtime-sale-banner')).toHaveLength(banners);
+  });
+
   it('evicts an overdue locker returning the deposit with a retention reason', async () => {
     const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })], [lockerRental()], (url, init) =>
       url.endsWith('/rental-lock-1/release') && init?.method === 'POST'
@@ -387,10 +396,32 @@ describe('CasillerosModal deposits and card (live)', () => {
   });
 
   it('explains that cancelling an active locker returns the full deposit', async () => {
-    const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })], [lockerRental({ ends_on: '2099-12-31' })]);
+    const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })], [lockerRental({ ends_on: '2099-12-31', lifecycle_status: 'active' })]);
     open(request);
     expect(await screen.findByText(/el depósito se devuelve completo en efectivo/)).toBeVisible();
     expect(screen.queryByLabelText(/Monto a devolver en efectivo/)).not.toBeInTheDocument();
+  });
+
+  it('shows ends_on as the branch-local calendar day even when the browser is ahead of UTC', async () => {
+    const previous = process.env.TZ;
+    process.env.TZ = 'Pacific/Auckland'; // UTC+12/13: '2026-11-30T23:59:59Z' would read as Dec 1
+    try {
+      const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })],
+        [lockerRental({ ends_on: '2026-11-30', lifecycle_status: 'active' })]);
+      open(request);
+      expect(await screen.findByText(/Vence: .*30.*nov/i)).toBeVisible();
+      expect(screen.queryByText(/Vence: .*1.*dic/i)).not.toBeInTheDocument();
+    } finally {
+      if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;
+    }
+  });
+
+  it('uses the server lifecycle_status instead of the browser clock', async () => {
+    // ends_on far in the future, yet the server says expired: the badge follows the server.
+    const request = makeRequest([asset({ active_rental_id: 'rental-lock-1' })],
+      [lockerRental({ ends_on: '2099-12-31', lifecycle_status: 'expired', overdue_days: 3 })]);
+    open(request);
+    expect(await screen.findByText(/Ana Karen \(Vencido\)/)).toBeVisible();
   });
 
   it('collects the card portion through a terminal attempt', async () => {

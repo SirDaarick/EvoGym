@@ -106,6 +106,11 @@ export interface RentalDTO {
   status: RentalStatus;
   starts_on: string | null;
   ends_on: string | null;
+  /** Server-derived (branch-local day); "expired" covers the 14-day grace. Lockers only. */
+  lifecycle_status?: 'active' | 'expired' | 'evicted' | null;
+  overdue_days?: number;
+  /** Active glove rental that started before the branch-local today. */
+  overdue?: boolean;
   paid_minor: number;
   outstanding_minor: number;
   cancelled_debt_minor: number;

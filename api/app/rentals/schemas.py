@@ -170,6 +170,11 @@ class RentalDTO(BaseModel):
     status: Literal["active", "returned", "released", "cancelled"]
     starts_on: date | None = None
     ends_on: date | None = None
+    # Server-derived, branch-local: lockers only (null once the rental ended). "expired" covers the 14-day grace.
+    lifecycle_status: Literal["active", "expired", "evicted"] | None = None
+    overdue_days: int = 0
+    # Active glove rental that started before the branch-local today (gloves are a same-day rental).
+    overdue: bool = False
     paid_minor: int
     outstanding_minor: int
     cancelled_debt_minor: int = 0

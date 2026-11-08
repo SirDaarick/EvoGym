@@ -67,6 +67,19 @@ describe('GuantesModal (live only)', () => {
     expect(screen.getAllByRole('button').filter(b => b.classList.contains('guante-card'))).toHaveLength(2);
   });
 
+  it('flags only the glove rentals the server marks overdue', async () => {
+    const request = makeRequest(
+      [glove(), glove({ id: 'asset-2', code: '#02', active_rental_id: 'rental-1' }),
+        glove({ id: 'asset-3', code: '#03', active_rental_id: 'rental-3' })],
+      [rental({ overdue: true }), rental({ id: 'rental-3', asset_id: 'asset-3', overdue: false })]
+    );
+    renderModal(request);
+
+    await screen.findByText('#01 · Rojo · 12 oz');
+    expect(screen.getAllByText('Sin devolver (de otro día)')).toHaveLength(1);
+    expect(screen.getByText('#02 · Rojo · 12 oz').closest('button')).toHaveTextContent('Sin devolver');
+  });
+
   it('does not render when closed and closes with button and Escape', async () => {
     const onClose = vi.fn();
     const request = makeRequest([glove()], []);
