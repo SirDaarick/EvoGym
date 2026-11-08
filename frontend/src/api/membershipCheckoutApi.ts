@@ -47,17 +47,22 @@ export interface MembershipSaleRequest {
   plan_version_id: string;
   source_shift_id?: string;
   cash_amount_minor?: number;
+  /** Part of the price paid from the member's saldo a favor. */
+  credit_minor?: number;
 }
 
 export interface MembershipTransferSaleRequest {
   member_id: string;
   plan_version_id: string;
+  /** A transfer cannot be fully covered by credit (backend 409). */
+  credit_minor?: number;
 }
 
 export interface MembershipSaleResponse {
   order: Record<string, unknown>;
   item: Record<string, unknown>;
   payment: Record<string, unknown>;
+  credit_applied_minor?: number;
   membership: Record<string, unknown> | null;
   sample_entitlement?: Record<string, unknown> | null;
 }
@@ -78,6 +83,8 @@ export interface RegisterMemberOpenDebt {
 export interface MembershipDebtPaymentInput {
   order_id: string;
   amount_minor: number;
+  /** Part of `amount_minor` paid from saldo a favor (<= amount_minor). */
+  credit_minor?: number;
 }
 
 export interface MembershipDebtPaymentReceipt {
@@ -89,6 +96,7 @@ export interface MembershipDebtPaymentReceipt {
   register_id: string;
   shift_id: string;
   amount_minor: number;
+  credit_minor?: number;
   remaining_balance_minor: number;
   received_by: string;
   received_at: string;

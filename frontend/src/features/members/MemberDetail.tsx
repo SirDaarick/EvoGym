@@ -369,7 +369,7 @@ export function MemberDetailSections({
       header: 'Método',
       cell: info => {
         const method = info.getValue() as PaymentMethod | null;
-        const labels: Record<PaymentMethod, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
+        const labels: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Saldo a favor' };
         return (
           <span className={`member-method-badge method-${method}`}>
               {method ? labels[method] ?? method : '—'}

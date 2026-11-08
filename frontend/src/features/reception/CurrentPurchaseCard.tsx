@@ -22,10 +22,16 @@ export interface CheckoutPaymentBreakdown {
   mixedAmount2Minor?: number;
   isOvertime?: boolean;
   cardVoucher?: PointVoucher;
+  /** Part of the total paid from the member's saldo a favor. */
+  creditAppliedMinor?: number;
+  /** Cash tendered above what is due that the member leaves as saldo a favor instead of change. */
+  changeToCreditMinor?: number;
 }
 
 export interface CurrentPurchaseCardProps {
   totalMinor: number;
+  /** Shows the "usar saldo a favor" tick; only for flows whose backend accepts credit. */
+  allowCredit?: boolean;
   title?: string;
   step1Title?: string;
   step2Title?: string;
@@ -83,7 +89,8 @@ const paymentIcons = {
 };
 
 export function CurrentPurchaseCard({
-  totalMinor,
+  totalMinor: grossTotalMinor,
+  allowCredit = false,
   title = 'Compra actual',
   step1Title = 'Carrito',
   step2Title = 'Cobro',
@@ -136,6 +143,15 @@ export function CurrentPurchaseCard({
   // Automatic Overtime classification: obligatory when selling during shift cut or transition
   const isOvertime = isShiftTransitionOrOvertime(shiftWindow, currentTime);
   const [internalError, setInternalError] = useState<string | null>(null);
+  const [useCredit, setUseCredit] = useState(false);
+  const [leaveAsCredit, setLeaveAsCredit] = useState(false);
+
+  const creditBalanceMinor = allowCredit && assignedMember ? Math.max(0, assignedMember.creditMinor ?? 0) : 0;
+  const creditAppliedMinor = useCredit ? Math.min(creditBalanceMinor, grossTotalMinor) : 0;
+  // Amount still due after credit; every step-2 computation below works on this value.
+  const totalMinor = grossTotalMinor - creditAppliedMinor;
+  const fullyCoveredByCredit = creditAppliedMinor > 0 && totalMinor === 0;
+  const canLeaveCredit = allowCredit && Boolean(assignedMember?.id);
 
   const holdTimerRef = useRef<{ [key in PaymentMethod]?: number }>({});
   const didLongPressRef = useRef<{ [key in PaymentMethod]?: boolean }>({});
@@ -228,8 +244,20 @@ export function CurrentPurchaseCard({
     setMixedAmount1('');
     setMixedAmount2('');
     setTenderedAmount('');
+    setUseCredit(false);
+    setLeaveAsCredit(false);
     setInternalError(null);
     setStep(2);
+  };
+
+  const resetPaymentInputs = () => {
+    setSelectedMethods([]);
+    setMixedSubStep(1);
+    setMixedAmount1('');
+    setMixedAmount2('');
+    setTenderedAmount('');
+    setLeaveAsCredit(false);
+    setInternalError(null);
   };
 
   const handleBackToStep1 = () => {
@@ -255,6 +283,13 @@ export function CurrentPurchaseCard({
 
   const handleConfirmCheckout = (forcePendingShortfall = false) => {
     setInternalError(null);
+    if (fullyCoveredByCredit) {
+      onConfirmPayment?.(
+        { mode: 'single', method: 'cash', tenderedMinor: 0, shortfallMinor: 0, isOvertime, creditAppliedMinor, changeToCreditMinor: 0 },
+        false
+      );
+      return;
+    }
     if (selectedMethods.length === 0) return;
     if (cashOnly && (selectedMethods.length !== 1 || selectedMethods[0] !== 'cash' || calculateShortfall() > 0)) {
       setInternalError('Por ahora solo está disponible el pago completo en efectivo.');
@@ -289,6 +324,8 @@ export function CurrentPurchaseCard({
           mixedAmount2Minor: a2,
           shortfallMinor: shortfall,
           isOvertime,
+          creditAppliedMinor,
+          changeToCreditMinor: 0,
         },
         forcePendingShortfall
       );
@@ -319,6 +356,8 @@ export function CurrentPurchaseCard({
           tenderedMinor: tendered,
           shortfallMinor: shortfall,
           isOvertime,
+          creditAppliedMinor,
+          changeToCreditMinor: canLeaveCredit && leaveAsCredit ? Math.max(0, tendered - totalMinor) : 0,
         },
         forcePendingShortfall
       );
@@ -333,6 +372,8 @@ export function CurrentPurchaseCard({
             method: 'card',
             shortfallMinor: 0,
             isOvertime,
+            creditAppliedMinor,
+            changeToCreditMinor: 0,
           },
           forcePendingShortfall
         );
@@ -348,6 +389,8 @@ export function CurrentPurchaseCard({
         method: singleMethod,
         shortfallMinor: 0,
         isOvertime,
+        creditAppliedMinor,
+        changeToCreditMinor: 0,
       },
       forcePendingShortfall
     );
@@ -364,7 +407,7 @@ export function CurrentPurchaseCard({
       <div className="cart-header-top">
         <div className="cart-heading-row">
           <h2>{title}</h2>
-          <output className="cart-total-badge" aria-label="Total de compra">{`${formatMoney(totalMinor)} MXN`}</output>
+          <output className="cart-total-badge" aria-label="Total de compra">{`${formatMoney(grossTotalMinor)} MXN`}</output>
         </div>
         <div className="cart-stepper-container">
           <Stepper
@@ -372,7 +415,7 @@ export function CurrentPurchaseCard({
             onStepChange={next => {
               if (next === 1) {
                 handleBackToStep1();
-              } else if (next === 2 && !step1ActionDisabled && totalMinor > 0) {
+              } else if (next === 2 && !step1ActionDisabled && grossTotalMinor > 0) {
                 handleProceedToStep2();
               }
             }}
@@ -446,8 +489,39 @@ export function CurrentPurchaseCard({
               />
             </div>}
 
-            <label id="payment-methods-label" className="cart-payment-methods-heading">Método de cobro</label>
-            <div className="cart-payment-methods-grid" role="radiogroup" aria-labelledby="payment-methods-label">
+            {creditBalanceMinor > 0 && (
+              <div className="cart-credit-box">
+                <span>Saldo a favor: <strong>{formatMoney(creditBalanceMinor)}</strong></span>
+                <label className="cart-credit-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useCredit}
+                    disabled={disabled}
+                    onChange={e => {
+                      setUseCredit(e.target.checked);
+                      resetPaymentInputs();
+                    }}
+                  />
+                  Usar saldo a favor
+                </label>
+                {useCredit && (
+                  <span className="cart-credit-summary">
+                    Se aplican {formatMoney(creditAppliedMinor)} · Por cobrar: {formatMoney(totalMinor)} MXN
+                  </span>
+                )}
+              </div>
+            )}
+
+            {fullyCoveredByCredit && (
+              <div className="cart-payment-context">
+                <Notice tone="success">
+                  El saldo a favor cubre el total ({formatMoney(creditAppliedMinor)}). No hay nada que cobrar.
+                </Notice>
+              </div>
+            )}
+
+            {!fullyCoveredByCredit && <label id="payment-methods-label" className="cart-payment-methods-heading">Método de cobro</label>}
+            {!fullyCoveredByCredit && <div className="cart-payment-methods-grid" role="radiogroup" aria-labelledby="payment-methods-label">
               {(['cash', 'card', 'transfer'] as PaymentMethod[]).map(m => {
                 const isSelected = selectedMethods.includes(m);
                 const isHolding = holdingMethod === m;
@@ -510,7 +584,7 @@ export function CurrentPurchaseCard({
                   </button>
                 );
               })}
-            </div>
+            </div>}
 
             {selectedMethods.length === 1 && (
               <p className="cart-payment-methods-hint">
@@ -519,7 +593,7 @@ export function CurrentPurchaseCard({
             )}
 
             {/* Contextual breakdown */}
-            {selectedMethods.length === 0 && (
+            {selectedMethods.length === 0 && !fullyCoveredByCredit && (
               <div className="cart-payment-context" style={{ marginTop: '12px' }}>
                 <Notice tone="neutral">
                   Selecciona un método de cobro arriba para continuar. Mantén presionado un segundo método para combinar en pago mixto.
@@ -538,6 +612,18 @@ export function CurrentPurchaseCard({
                       <>Faltan <strong>{formatMoney(totalMinor - tenderedMinor)} MXN</strong>. Asigna un socio en el Paso 1 para poder registrar saldo pendiente.</>
                     )}
                   </Notice>
+                )}
+                {canLeaveCredit && tenderedMinor !== null && tenderedMinor > totalMinor && (
+                  <div className="cart-credit-box" role="radiogroup" aria-label="Qué hacer con el excedente">
+                    <label className="cart-credit-toggle">
+                      <input type="radio" name="overpay-choice" checked={!leaveAsCredit} onChange={() => setLeaveAsCredit(false)} />
+                      Dar cambio de {formatMoney(tenderedMinor - totalMinor)}
+                    </label>
+                    <label className="cart-credit-toggle">
+                      <input type="radio" name="overpay-choice" checked={leaveAsCredit} onChange={() => setLeaveAsCredit(true)} />
+                      Dejar {formatMoney(tenderedMinor - totalMinor)} como saldo a favor
+                    </label>
+                  </div>
                 )}
                 <Notice tone="warning">
                   Confirma solo después de recibir el efectivo. El registro local no procesa pagos ni calcula cambio bancario.
@@ -668,10 +754,10 @@ export function CurrentPurchaseCard({
               <Button
                 className="cart-proceed-btn cart-primary-action-btn"
                 aria-label="Revisar cobro"
-                disabled={disabled || step1ActionDisabled || totalMinor <= 0}
+                disabled={disabled || step1ActionDisabled || grossTotalMinor <= 0}
                 onClick={handleProceedToStep2}
               >
-                {step1ActionLabel ?? `Proceder al cobro · ${formatMoney(totalMinor)} MXN →`}
+                {step1ActionLabel ?? `Proceder al cobro · ${formatMoney(grossTotalMinor)} MXN →`}
               </Button>
               <div role={statusType === 'error' ? 'alert' : 'status'} aria-label="Resultado de compra">
                 {statusMessage && (
@@ -688,12 +774,14 @@ export function CurrentPurchaseCard({
               className="confirm-checkout-btn"
               disabled={
                 disabled ||
-                selectedMethods.length === 0 ||
+                (selectedMethods.length === 0 && !fullyCoveredByCredit) ||
                 (selectedMethods.length === 2 && mixedSubStep === 1)
               }
               onClick={() => handleConfirmCheckout(false)}
             >
-              {selectedMethods.length === 0
+              {fullyCoveredByCredit
+                ? confirmActionLabel ?? 'Pagar con saldo a favor'
+                : selectedMethods.length === 0
                 ? 'Selecciona un método de cobro'
                 : selectedMethods.length === 1
                 ? selectedMethods[0] === 'transfer'
@@ -768,6 +856,8 @@ export function CurrentPurchaseCard({
                 shortfallMinor: 0,
                 isOvertime,
                 cardVoucher: voucher,
+                creditAppliedMinor,
+                changeToCreditMinor: 0,
               },
               false
             );

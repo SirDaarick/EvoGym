@@ -17,6 +17,7 @@ class CashProductSaleRequest(BaseModel):
     member_id: UUID | None = None
     items: list[ProductCartLineRequest] = Field(min_length=1, max_length=100)
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    credit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1, description="Part of the total paid from saldo a favor.")
 
 
 class CardProductSaleRequest(BaseModel):
@@ -24,6 +25,7 @@ class CardProductSaleRequest(BaseModel):
     member_id: UUID | None = None
     items: list[ProductCartLineRequest] = Field(min_length=1, max_length=100)
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    credit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1, description="Part of the total paid from saldo a favor.")
     card_intent_id: str = Field(min_length=1, max_length=64)
 
 
@@ -86,6 +88,7 @@ class CashProductSaleDTO(BaseModel):
     order: ProductSaleOrderDTO
     items: list[ProductSaleItemDTO]
     payment: ProductSalePaymentDTO
+    credit_applied_minor: int = 0
 
 
 class CashMembershipSaleRequest(BaseModel):
@@ -95,6 +98,7 @@ class CashMembershipSaleRequest(BaseModel):
     plan_version_id: UUID
     source_shift_id: UUID | None = None
     cash_amount_minor: StrictInt | None = Field(default=None, gt=0)
+    credit_minor: StrictInt = Field(default=0, ge=0, description="Part of the price paid from saldo a favor.")
 
 
 class TransferReviewRequest(BaseModel):
@@ -201,6 +205,7 @@ class CashMembershipSaleDTO(BaseModel):
     payment: CashSalePaymentDTO
     membership: MembershipPeriodDTO | None
     sample_entitlement: ClassSampleEntitlementDTO | None = None
+    credit_applied_minor: int = 0
 
 
 class EligibleProductReturnDTO(BaseModel):

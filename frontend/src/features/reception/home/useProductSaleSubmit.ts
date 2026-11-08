@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AuthenticatedRequest } from '@/api/inventoryApi';
 import { queryKeys } from '@/api/queryKeys';
+import { depositMemberCredit } from '@/api/memberCreditApi';
 import { resolveCashProductSale } from '@/api/productSalesApi';
 import type { CheckoutPaymentBreakdown } from '../CurrentPurchaseCard';
 import { cancelCardSale, runCardSale } from './cardSale';
@@ -35,14 +36,32 @@ export function useProductSaleSubmit(p: Params) {
   const queryClient = useQueryClient();
   const submitting = useRef(false);
   const [activeCardIntentId, setActiveCardIntentId] = useState<string | null>(null);
-  const invalidateStock = () => { void queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all }); };
+  const invalidateStock = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    // The member's saldo a favor changes with every sale that uses or receives credit.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.members.all });
+  };
+
+  /** The sale is already recorded; a failed deposit must not look like a failed sale. */
+  async function depositChange(memberId: string, amountMinor: number): Promise<string | null> {
+    try {
+      await depositMemberCredit(request, registerId, { member_id: memberId, amount_minor: amountMinor }, crypto.randomUUID());
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.all });
+      return null;
+    } catch {
+      return 'La compra sí se registró, pero no se pudo depositar el saldo a favor. Puedes agregarlo desde el perfil del socio.';
+    }
+  }
 
   async function submit(breakdown?: CheckoutPaymentBreakdown) {
     if (!intentLoaded || submitting.current || intent || !registerId || !cart.items.length) return;
     if (breakdown && (breakdown.mode !== 'single' || (breakdown.method !== 'cash' && breakdown.method !== 'card') || breakdown.shortfallMinor > 0)) return;
     if (!Number.isSafeInteger(cart.total)) { setError(true); setMessage('El total excede el límite seguro de esta pantalla.'); return; }
+    const creditMinor = cart.memberId ? breakdown?.creditAppliedMinor ?? 0 : 0;
+    const changeToCreditMinor = cart.memberId ? breakdown?.changeToCreditMinor ?? 0 : 0;
     const submitted: Intent = { key: crypto.randomUUID(), registerId, payload: {
       member_id: cart.memberId, items: cart.items, expected_total_minor: cart.total,
+      ...(creditMinor > 0 ? { credit_minor: creditMinor } : {}),
     } };
     try {
       saleIntent.persistIntent(submitted);
@@ -53,6 +72,7 @@ export function useProductSaleSubmit(p: Params) {
     setPending(true); setError(false);
     const ctx: SaleContext = {
       request, submitted, total: cart.total, intents: saleIntent, actorId,
+      afterSale: changeToCreditMinor > 0 && cart.memberId ? () => depositChange(cart.memberId as string, changeToCreditMinor) : undefined,
       ui: { setMessage, setError, setActiveCardIntentId, resetCart: p.resetCart, backToStart: p.backToStart, invalidateStock },
     };
     try {

@@ -55,7 +55,7 @@ interface ShiftDashboardViewProps {
     expenseDescription?: string;
     expectedCashMinor?: number;
     dataLoaded: boolean;
-    paymentMethods: { method: 'cash' | 'card' | 'transfer'; count: number; amountMinor: number }[];
+    paymentMethods: { method: 'cash' | 'card' | 'transfer' | 'credit'; count: number; amountMinor: number }[];
     activities: { family: string; count: number; amountMinor: number }[];
     rows: (Omit<ShiftActivityRow, 'family'> & { family: string })[];
     inventoryRows: ShiftInventoryRow[] | null;
@@ -163,15 +163,15 @@ function ShiftDashboardView({ role, shift, isCurrentOpenShift, hasClosedCurrentS
   </>;
 }
 
-function ShiftPaymentMethods({ paymentMethods, pendingTransferMinor }: { paymentMethods: { method: 'cash' | 'card' | 'transfer'; count: number; amountMinor: number }[]; pendingTransferMinor: number }) {
-  const labels = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
-  const [activeMethod, setActiveMethod] = useState<'cash' | 'card' | 'transfer' | null>(null);
+function ShiftPaymentMethods({ paymentMethods, pendingTransferMinor }: { paymentMethods: { method: 'cash' | 'card' | 'transfer' | 'credit'; count: number; amountMinor: number }[]; pendingTransferMinor: number }) {
+  const labels = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Saldo a favor' };
+  const [activeMethod, setActiveMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | null>(null);
   const confirmedOperationCount = paymentMethods.reduce((total, item) => total + item.count, 0);
   const slices = paymentMethods.map(item => ({ ...item, label: labels[item.method], percent: confirmedOperationCount ? item.count / confirmedOperationCount * 100 : 0 }));
   const donut = defineChart({ marks: [polar({ inset: 8, radiusRatio: 0.92, marks: [radialArc(pie(slices, { value: 'count' }), {
     innerRadius: ({ radius }) => radius * 0.66, cornerRadius: 5, color: 'method', key: 'method',
   })], scales: { angle: null, radius: null } })], scales: { x: null, y: null },
-    color: { domain: ['cash', 'card', 'transfer'], range: ['#FC6C06', '#2455A4', '#2455A4'] }, keyboard: true });
+    color: { domain: ['cash', 'card', 'transfer', 'credit'], range: ['#FC6C06', '#2455A4', '#2455A4', '#2E8B57'] }, keyboard: true });
   return <div className="shift-payment-methods">
     <div className="shift-donut-wrap" aria-label={`Total de cobros confirmados ${confirmedOperationCount} operaciones`}>
       {slices.length ? <Chart definition={donut} height={210} ariaLabel="Operaciones confirmadas por método de pago" /> : <div className="shift-donut-empty" role="img" aria-label="Sin cobros confirmados" />}
@@ -187,7 +187,7 @@ function ShiftPaymentMethods({ paymentMethods, pendingTransferMinor }: { payment
 }
 
 function ShiftCharts({ activities }: { activities: { family: string; count: number; amountMinor: number }[] }) {
-  const labels: Record<string, string> = { membership: 'Membresías', product: 'Productos', visit: 'Visitas', supplement: 'Suplementos', glove: 'Guantes', locker: 'Casilleros' };
+  const labels: Record<string, string> = { membership: 'Membresías', product: 'Productos', visit: 'Visitas', supplement: 'Suplementos', glove: 'Guantes', locker: 'Casilleros', credit: 'Saldo a favor recibido' };
   const rows = activities.map(item => ({ family: labels[item.family] ?? item.family, count: item.count, amountMinor: item.amountMinor })).filter(item => item.count > 0);
   if (!rows.length) return <p className="shift-chart-empty">Sin operaciones confirmadas en este turno.</p>;
   const countChart = defineChart({ marks: [barX(rows, { x: 'count', y: 'family', fill: '#FC6C06', inset: 3, radius: 4 }),
@@ -241,7 +241,7 @@ function ShiftActivityTable({ rows }: { rows: ShiftActivityViewRow[] }) {
       ),
     },
     { accessorKey: 'actor', header: 'Comprador / persona', cell: ({ getValue }) => getValue<string | undefined>() ?? '—' },
-    { accessorKey: 'method', header: 'Método de pago', cell: ({ row }) => <>{({ cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' }[row.original.method ?? ''] ?? '—')}{row.original.status === 'pending' && <Badge tone="warning">Pendiente</Badge>}</> },
+    { accessorKey: 'method', header: 'Método de pago', cell: ({ row }) => <>{({ cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Saldo a favor' }[row.original.method ?? ''] ?? '—')}{row.original.status === 'pending' && <Badge tone="warning">Pendiente</Badge>}</> },
     { accessorKey: 'amountMinor', header: 'Monto', cell: ({ getValue }) => { const amount = getValue<number | undefined>(); return amount === undefined ? '—' : formatMoney(amount); } },
   ], []);
   const table = useReactTable({ data: filtered, columns, state: { sorting }, onSortingChange: setSorting,

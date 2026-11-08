@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
-from app.credit.queries import CreditConflictError
+from app.credit.queries import CreditConflictError, credit_applied_for_order, ensure_credit_available
 from app.db.models import ProductSaleIntent, ProductSaleResolution
 from app.errors import AppError, HttpStatusError, http_errors
 from app.sales import queries as q
@@ -38,7 +38,7 @@ _SALE_ERRORS = (
     (CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403), (CashSaleConflictError, 409),
     (CreditConflictError, 409), (InvalidBranchTimezoneError, 409), (ValueError, 422),
 )
-_PRODUCT_ERRORS = ((CashSaleNotFoundError, 404), (AppError, None), (ValueError, 422))
+_PRODUCT_ERRORS = ((CashSaleNotFoundError, 404), (AppError, None), (CreditConflictError, 409), (ValueError, 422))
 _RETURN_ERRORS = ((ProductReturnNotFoundError, 404), (InvalidBranchTimezoneError, 409))
 
 
@@ -71,11 +71,12 @@ def _intent_response(intent):
 
 # --- DTO assembly ----------------------------------------------------------------------------
 
-def _product_sale_dto(order) -> CashProductSaleDTO:
+def _product_sale_dto(order, session) -> CashProductSaleDTO:
     return CashProductSaleDTO(
         order=ProductSaleOrderDTO.model_validate(order),
         items=[ProductSaleItemDTO.model_validate(item) for item in order.items],
         payment=ProductSalePaymentDTO.model_validate(order.payment),
+        credit_applied_minor=credit_applied_for_order(session, order.id),
     )
 
 
@@ -110,6 +111,7 @@ def _sale_dto(result) -> CashMembershipSaleDTO:
             order_item_id=sample_entitlement.order_item_id, plan_version_id=sample_entitlement.plan_version_id,
             created_at=sample_entitlement.created_at,
         ) if sample_entitlement is not None else None,
+        credit_applied_minor=result.credit_applied_minor,
     )
 
 
@@ -170,14 +172,15 @@ def prepare_product_sale(factory, principal: Principal, register_id: UUID, paylo
             intent = q.prepare_product_sale(
                 session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                 items=payload.items, expected_total_minor=payload.expected_total_minor,
-                idempotency_key=idempotency_key)
+                idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
             result = _intent_response(intent)
             session.commit()
             return result
 
 
 def _fingerprint_of(register_id, payload):
-    return q.product_sale_fingerprint(register_id, payload.member_id, payload.items, payload.expected_total_minor)
+    return q.product_sale_fingerprint(
+        register_id, payload.member_id, payload.items, payload.expected_total_minor, payload.credit_minor)
 
 
 def post_cash_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
@@ -197,14 +200,14 @@ def post_cash_product_sale(factory, principal: Principal, register_id: UUID, pay
                 order, replayed = q.post_cash_product_sale(
                     session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                     items=payload.items, expected_total_minor=payload.expected_total_minor,
-                    idempotency_key=idempotency_key)
+                    idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
                 session.commit()
-                return _product_sale_dto(order), replayed
+                return _product_sale_dto(order, session), replayed
     except IntegrityError:
-        def build(_session, order):
+        def build(session, order):
             if order.order_kind != "product":
                 raise HttpStatusError(409) from None
-            return _product_sale_dto(order)
+            return _product_sale_dto(order, session)
         return _replay_winner(factory, register_id, _find_order(principal, idempotency_key),
                               _fingerprint_of(register_id, payload), build)
 
@@ -216,7 +219,7 @@ def resolve_product_sale(factory, principal: Principal, register_id: UUID, paylo
             order = q.resolve_product_sale(
                 session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                 items=payload.items, expected_total_minor=payload.expected_total_minor,
-                idempotency_key=idempotency_key)
+                idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
             intent = session.get(ProductSaleIntent, principal.staff_id)
             if (intent is not None and intent.register_id == register_id
                     and intent.idempotency_key == idempotency_key
@@ -234,7 +237,7 @@ def resolve_intent_as_admin(session, admin_id: UUID, seller_id: UUID, intent: Pr
     order = q.resolve_product_sale(
         session, register_id=intent.register_id, actor_id=seller_id, member_id=payload.member_id,
         items=payload.items, expected_total_minor=payload.expected_total_minor,
-        idempotency_key=intent.idempotency_key)
+        idempotency_key=intent.idempotency_key, credit_minor=payload.credit_minor)
     result = "completed" if order is not None else "cancelled"
     session.add(ProductSaleResolution(actor_id=admin_id, seller_id=seller_id, register_id=intent.register_id,
                                       idempotency_key=intent.idempotency_key, result=result))
@@ -326,12 +329,17 @@ def post_card_product_sale(factory, settings, principal: Principal, register_id:
         existing = q.find_order_by_key(session, branch_id=register.branch_id, seller_id=principal.staff_id,
                                        idempotency_key=idempotency_key)
         if existing is None:
+            if payload.credit_minor:  # fail before the card is charged, not after
+                ensure_credit_available(session, payload.member_id, payload.credit_minor)
             return None
         if existing.request_fingerprint != _fingerprint_of(register_id, payload) or existing.order_kind != "product":
             raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
-        return _product_sale_dto(existing)
+        return _product_sale_dto(existing, session)
 
     with http_errors(*_PRODUCT_ERRORS):
+        if payload.credit_minor >= payload.expected_total_minor > 0 or (
+                payload.credit_minor and payload.expected_total_minor == 0):
+            raise HttpStatusError(409)  # credit covering the whole total needs no card charge
         # Phase A: short session, closed before any Mercado Pago call.
         context = _load_card_context(factory, settings, principal, register_id, replay_check)
         if context.replay is not None:
@@ -345,7 +353,8 @@ def post_card_product_sale(factory, settings, principal: Principal, register_id:
             raise HttpStatusError(404) from exc
         except Exception as exc:
             raise HttpStatusError(502) from exc
-        if intent_dto.status != "PROCESSED" or intent_dto.amount_minor != payload.expected_total_minor:
+        if (intent_dto.status != "PROCESSED"
+                or intent_dto.amount_minor != payload.expected_total_minor - payload.credit_minor):
             raise HttpStatusError(409)
 
         # Phase B: fresh atomic session; re-authorize and post the sale.
@@ -356,12 +365,13 @@ def post_card_product_sale(factory, settings, principal: Principal, register_id:
                 items=payload.items, expected_total_minor=payload.expected_total_minor,
                 idempotency_key=idempotency_key, card_intent_id=payload.card_intent_id,
                 terminal_id=context.terminal_id, card_brand=intent_dto.card_brand,
-                card_last_four=intent_dto.last_four_digits, authorization_code=intent_dto.authorization_code)
+                card_last_four=intent_dto.last_four_digits, authorization_code=intent_dto.authorization_code,
+                credit_minor=payload.credit_minor)
             seller_intent = session.get(ProductSaleIntent, principal.staff_id)
             if seller_intent is not None and seller_intent.idempotency_key == idempotency_key:
                 session.delete(seller_intent)
             session.commit()
-            return _product_sale_dto(order), replayed
+            return _product_sale_dto(order, session), replayed
 
 
 # --- product returns ----------------------------------------------------------------------------
@@ -412,7 +422,7 @@ def post_cash_membership_sale(factory, principal: Principal, register_id: UUID, 
                     authorized_branch_id=_authorized_branch(principal), member_id=payload.member_id,
                     plan_version_id=payload.plan_version_id, idempotency_key=idempotency_key,
                     source_shift_id=payload.source_shift_id, cash_amount_minor=payload.cash_amount_minor,
-                    cash_amount_provided=cash_amount_provided)
+                    cash_amount_provided=cash_amount_provided, credit_minor=payload.credit_minor)
                 session.commit()
                 return _sale_dto(result), result.replayed
     except IntegrityError:
@@ -422,7 +432,8 @@ def post_cash_membership_sale(factory, principal: Principal, register_id: UUID, 
             factory, register_id, _find_order(principal, idempotency_key),
             q.membership_sale_fingerprint(
                 register_id, payload.member_id, payload.plan_version_id, payload.source_shift_id,
-                cash_amount_minor=payload.cash_amount_minor, cash_amount_provided=cash_amount_provided),
+                cash_amount_minor=payload.cash_amount_minor, cash_amount_provided=cash_amount_provided,
+                credit_minor=payload.credit_minor),
             lambda session, existing: _sale_dto(q.load_sale_result(session, existing, replayed=True)))
 
 
@@ -438,7 +449,7 @@ def post_membership_transfer(factory, principal: Principal, register_id: UUID, p
                     session, register_id=register_id, actor_id=principal.staff_id,
                     authorized_branch_id=_authorized_branch(principal), member_id=payload.member_id,
                     plan_version_id=payload.plan_version_id, idempotency_key=idempotency_key,
-                    payment_method="transfer")
+                    payment_method="transfer", credit_minor=payload.credit_minor)
                 session.commit()
                 return _sale_dto(result), result.replayed
     except IntegrityError:
@@ -450,7 +461,7 @@ def post_membership_transfer(factory, principal: Principal, register_id: UUID, p
         return _replay_winner(
             factory, register_id, _find_order(principal, idempotency_key),
             q.membership_sale_fingerprint(register_id, payload.member_id, payload.plan_version_id,
-                                          payment_method="transfer"), build)
+                                          payment_method="transfer", credit_minor=payload.credit_minor), build)
 
 
 def review_membership_transfer(session, principal: Principal, payment_id: UUID, payload, idempotency_key: str):

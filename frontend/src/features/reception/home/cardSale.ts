@@ -15,7 +15,8 @@ export async function runCardSale(ctx: SaleContext) {
   try {
     await prepareProductSale(request, submitted);
     const externalRef = `cart-${submitted.key.slice(0, 8)}`;
-    const cardIntent = await createCardIntent(request, submitted.registerId, total, externalRef);
+    // The terminal only charges what saldo a favor does not cover.
+    const cardIntent = await createCardIntent(request, submitted.registerId, total - (submitted.payload.credit_minor ?? 0), externalRef);
     ui.setActiveCardIntentId(cardIntent.payment_intent_id);
     ui.setMessage(`Esperando tarjeta en la terminal Point (${cardIntent.device_id})...`);
 

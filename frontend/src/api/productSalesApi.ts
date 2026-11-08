@@ -4,7 +4,12 @@ export interface ProductSaleInput {
   member_id: string | null;
   items: { product_id: string; quantity: number }[];
   expected_total_minor: number;
+  /** Part of the total paid from the member's saldo a favor; sent identically on every call of one sale. */
+  credit_minor?: number;
 }
+
+/** What the payment itself must carry once the credit part is deducted. */
+const dueMinor = (payload: ProductSaleInput) => payload.expected_total_minor - (payload.credit_minor ?? 0);
 
 export interface ProductSaleResult {
   order: { id: string; total_minor: number; register_id: string };
@@ -46,7 +51,7 @@ export async function submitCashProductSale(request: AuthenticatedRequest, regis
       || result.order.total_minor !== payload.expected_total_minor || !result.payment
       || typeof result.payment !== 'object' || !('status' in result.payment) || result.payment.status !== 'confirmed'
       || !('method' in result.payment) || result.payment.method !== 'cash'
-      || !('amount_minor' in result.payment) || result.payment.amount_minor !== payload.expected_total_minor) {
+      || !('amount_minor' in result.payment) || result.payment.amount_minor !== dueMinor(payload)) {
     throw new Error('No se pudo confirmar el resultado. Reintenta sin cambiar la compra.');
   }
   return result as ProductSaleResult;
@@ -194,7 +199,7 @@ export async function submitCardProductSale(
     !('method' in result.payment) ||
     result.payment.method !== 'card' ||
     !('amount_minor' in result.payment) ||
-    result.payment.amount_minor !== payload.expected_total_minor
+    result.payment.amount_minor !== dueMinor(payload)
   ) {
     throw new Error('No se pudo confirmar el resultado del cobro con tarjeta.');
   }

@@ -23,6 +23,8 @@ export interface SaleContext {
   intents: Pick<ProductSaleIntentApi, 'refreshResolvedIntent' | 'adoptOtherServerIntent'> & { clearIntent?: () => void };
   ui: SaleUi;
   actorId?: string;
+  /** Runs after the sale is recorded; returns a warning when a follow-up step (change-to-credit deposit) failed. */
+  afterSale?: () => Promise<string | null>;
 }
 
 export const NOT_CONFIRMED = 'No se pudo confirmar el resultado. Verifica la compra antes de hacer otra.';
@@ -76,8 +78,16 @@ export async function executeOfflineCashSale(ctx: SaleContext, onlineIdempotency
 export async function runCashSale(ctx: SaleContext) {
   const { request, submitted, intents, ui } = ctx;
   const isOnline = isOnlineHint();
+  // Contingency sales cannot spend saldo a favor, so a sale with credit never goes offline.
+  const usesCredit = (submitted.payload.credit_minor ?? 0) > 0;
 
   if (!isOnline) {
+    if (usesCredit) {
+      ui.setError(true);
+      ui.setMessage('Sin conexión no se puede usar saldo a favor. Desmarca el saldo a favor o espera a recuperar la conexión.');
+      intents.clearIntent?.();
+      return;
+    }
     try {
       await executeOfflineCashSale(ctx);
       return;
@@ -95,9 +105,13 @@ export async function runCashSale(ctx: SaleContext) {
     await resolveCashProductSale(request, submitted.registerId, submitted.payload, submitted.key);
     const morePending = await intents.refreshResolvedIntent();
     ui.resetCart(); ui.invalidateStock();
+    const warning = await ctx.afterSale?.();
+    if (warning) { ui.setError(true); ui.setMessage(warning); return; }
     ui.setMessage(morePending ? MORE_PENDING : 'Compra registrada.');
   } catch (failure) {
     if (failure instanceof ProductSaleError && failure.definitelyRejected) {
+      await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
+    } else if (usesCredit) {
       await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
     } else {
       // Network error or uncertain response: fallback to offline dispatch with online_idempotency_key

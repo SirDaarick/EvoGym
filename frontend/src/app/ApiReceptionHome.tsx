@@ -71,10 +71,10 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
 
   const purchaseContent = <>
     <CurrentPurchaseCard totalMinor={total} disabled={locked} step={step} onStepChange={setStep}
-      useLiveCardIntent
+      useLiveCardIntent allowCredit
       step1ActionDisabled={!selected.length || !registerId || locked} onConfirmPayment={(value: CheckoutPaymentBreakdown) => void sale.submit(value)}
       statusMessage={message} statusType={error ? 'error' : pending ? 'warning' : 'success'}
-      assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone } : null}
+      assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone, creditMinor: member.credit_balance_minor ?? 0 } : null}
       memberAssignment={<MemberAssignmentField member={member} query={search.query} results={search.members} locked={locked}
         onQueryChange={search.setQuery} onSelect={setMember} onClear={() => { setMember(null); search.setQuery(''); }} />}>
       <PurchaseSummary intent={intent} recoveredMemberName={recoveredMemberName} selected={selected} quantities={quantities}

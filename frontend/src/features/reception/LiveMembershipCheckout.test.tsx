@@ -10,7 +10,11 @@ const api = vi.hoisted(() => ({
   transfer: vi.fn(),
   openDebts: vi.fn(),
   debtPayment: vi.fn(),
+  getMember: vi.fn(),
+  deposit: vi.fn(),
 }));
+vi.mock('../../api/membersApi', () => ({ getMember: api.getMember }));
+vi.mock('../../api/memberCreditApi', () => ({ depositMemberCredit: api.deposit }));
 vi.mock('../../api/membershipCheckoutApi', () => ({
   getActiveMembershipPlans: api.plans,
   getRegisters: api.registers,
@@ -46,6 +50,8 @@ beforeEach(() => {
   api.cash.mockResolvedValue({ order: { id: 'order-1' }, item: {}, payment: { status: 'confirmed' }, membership: null });
   api.transfer.mockResolvedValue({ order: { id: 'order-2' }, item: {}, payment: { status: 'under_review' }, membership: null });
   api.openDebts.mockResolvedValue([sampleDebt]);
+  api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 0 });
+  api.deposit.mockResolvedValue({});
   api.debtPayment.mockResolvedValue({
     id: 'receipt-live-1',
     debt_id: sampleDebt.debt_id,
@@ -297,6 +303,104 @@ describe('LiveMembershipCheckout', () => {
     const secondKey = api.debtPayment.mock.calls[1][2];
     expect(secondKey).not.toBe(firstKey);
     expect(api.debtPayment.mock.calls[1][1]).toEqual({ order_id: sampleDebt.order_id, amount_minor: 25000 });
+  });
+
+  async function proceedToPayment() {
+    fireEvent.change(await screen.findByLabelText('Plan de membresía'), { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(api.shift).toHaveBeenCalledWith(register.id));
+    await waitFor(() => expect(api.getMember).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
+  }
+  const confirmCard = () => fireEvent.click(document.querySelector('.confirm-checkout-btn') as HTMLElement);
+
+  it('sends credit_minor and only the remaining cash when the member uses saldo a favor', async () => {
+    api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 20000 });
+    api.cash.mockResolvedValueOnce({ order: { id: 'o' }, item: {}, payment: { status: 'confirmed' }, membership: null, credit_applied_minor: 20000 });
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await proceedToPayment();
+    fireEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    confirmCard();
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.cash.mock.calls[0][1]).toEqual({
+      member_id: member.id, plan_version_id: 'version-live-id', credit_minor: 20000, cash_amount_minor: 30000,
+    });
+    expect(await screen.findByText(/Saldo a favor aplicado: \$200\.00/)).toBeInTheDocument();
+  });
+
+  it('pays the whole membership from credit without a cash amount', async () => {
+    api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 90000 });
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await proceedToPayment();
+    fireEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    confirmCard();
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.cash.mock.calls[0][1]).toEqual({ member_id: member.id, plan_version_id: 'version-live-id', credit_minor: 50000 });
+  });
+
+  it('sends credit_minor on a partly credit-paid transfer and none once the tick is cleared', async () => {
+    api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 20000 });
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await proceedToPayment();
+    fireEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Transferencia' }));
+    confirmCard();
+    await waitFor(() => expect(api.transfer).toHaveBeenCalledTimes(1));
+    expect(api.transfer.mock.calls[0][1]).toEqual({ member_id: member.id, plan_version_id: 'version-live-id', credit_minor: 20000 });
+  });
+
+  it('does not send credit_minor on a transfer when the tick is cleared', async () => {
+    api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 90000 });
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await proceedToPayment();
+    fireEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    fireEvent.click(screen.getByLabelText('Usar saldo a favor'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Transferencia' }));
+    confirmCard();
+    await waitFor(() => expect(api.transfer).toHaveBeenCalledTimes(1));
+    expect(api.transfer.mock.calls[0][1]).toEqual({ member_id: member.id, plan_version_id: 'version-live-id' });
+  });
+
+  it('deposits the excess as saldo a favor after the sale and warns if the deposit fails', async () => {
+    api.deposit.mockRejectedValueOnce(new Error('boom'));
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    await proceedToPayment();
+    fireEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    fireEvent.change(screen.getByLabelText('Monto recibido'), { target: { value: '600' } });
+    fireEvent.click(screen.getByLabelText('Dejar $100.00 como saldo a favor'));
+    confirmCard();
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.cash.mock.calls[0][1]).toEqual({ member_id: member.id, plan_version_id: 'version-live-id', cash_amount_minor: 50000 });
+    await waitFor(() => expect(api.deposit).toHaveBeenCalledTimes(1));
+    const [, registerId, body, key] = api.deposit.mock.calls[0];
+    expect(registerId).toBe(register.id);
+    expect(body).toEqual({ member_id: member.id, amount_minor: 10000 });
+    expect(typeof key).toBe('string');
+    expect(await screen.findByText(/sí se registró, pero no se pudo depositar el saldo a favor/)).toBeInTheDocument();
+  });
+
+  it('sends credit_minor on a debt abono and includes it in the receipt text', async () => {
+    api.getMember.mockResolvedValue({ id: member.id, credit_balance_minor: 10000 });
+    api.debtPayment.mockResolvedValueOnce({
+      id: 'receipt-credit', debt_id: sampleDebt.debt_id, order_id: sampleDebt.order_id, member_id: member.id,
+      branch_id: sampleDebt.branch_id, register_id: register.id, shift_id: shift.id,
+      amount_minor: 25000, credit_minor: 10000, remaining_balance_minor: 0, received_by: 's', received_at: 'x',
+    });
+    render(<LiveMembershipCheckout member={member} initialOperation="debt_payment" onClose={vi.fn()} />);
+    await screen.findByLabelText('Adeudo pendiente');
+    await waitFor(() => expect(api.getMember).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
+    fireEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    confirmCard();
+
+    await waitFor(() => expect(api.debtPayment).toHaveBeenCalledTimes(1));
+    expect(api.debtPayment.mock.calls[0][1]).toEqual({ order_id: sampleDebt.order_id, amount_minor: 25000, credit_minor: 10000 });
+    expect(await screen.findByText(/\$100\.00 con saldo a favor/)).toBeInTheDocument();
   });
 
   it('disables "Liquidar adeudo" button in modal header when selected member has no open debts', async () => {

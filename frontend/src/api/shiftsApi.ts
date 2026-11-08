@@ -39,9 +39,9 @@ export interface ShiftSummaryDTO {
   confirmed_minor: number;
   confirmed_cash_minor: number;
   pending_transfer_minor: number;
-  payment_methods: { method: 'cash' | 'transfer'; count: number; amount_minor: number }[];
+  payment_methods: { method: 'cash' | 'transfer' | 'credit'; count: number; amount_minor: number }[];
   activities: { family: string; count: number; amount_minor: number }[];
-  payments: { id: string; description: string; method: 'cash' | 'transfer'; status: 'confirmed' | 'pending' | 'under_review'; amount_minor: number; recorded_at: string }[];
+  payments: { id: string; description: string; method: 'cash' | 'transfer' | 'credit'; status: 'confirmed' | 'pending' | 'under_review'; amount_minor: number; recorded_at: string }[];
   expected_cash_minor: number;
   expense_minor: number;
   expense_count: number;

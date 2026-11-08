@@ -84,6 +84,14 @@ describe('live overview finance detail', () => {
     expect(screen.getByTestId('deposits-line')).toHaveTextContent(/recibidos.*5\.00.*devueltos.*2\.50.*retenidos.*0\.50/);
   });
 
+  it('labels the credit method as Saldo a favor', async () => {
+    const withCredit = { ...rich, finances: { ...rich.finances, by_method: [
+      ...rich.finances.by_method, { method: 'credit', label: 'credit', count: 1, gross_minor: 700, refunds_minor: 0, amount_minor: 700 }] } };
+    const request = vi.fn(async (_path: string) => new Response(JSON.stringify(withCredit), { status: 200 }));
+    render(<MemoryRouter><Overview apiRequest={request} /></MemoryRouter>);
+    expect(await screen.findByText('Saldo a favor')).toBeVisible();
+  });
+
   it('degrades to the cash/card rows when an older API omits the new fields', async () => {
     const request = vi.fn(async (_path: string) => new Response(JSON.stringify(data), { status: 200 }));
     render(<MemoryRouter><Overview apiRequest={request} /></MemoryRouter>);

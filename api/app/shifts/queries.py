@@ -545,7 +545,12 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
     pending_transfer_minor = 0
     methods: dict[str, dict[str, int | str]] = {}
     families: dict[str, dict[str, int | str]] = {}
+    credited_orders = set(session.scalars(select(MemberCreditMovement.order_id).where(
+        MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "apply",
+        MemberCreditMovement.order_id.is_not(None))))
     for payment, order in payment_rows:
+        if payment.amount_minor == 0 and order.id in credited_orders:
+            continue  # paid entirely from saldo a favor: reported from its ledger row
         description = order_descriptions.get(order.id) or "Membresía"
         payments.append({"id": payment.id, "description": description, "method": payment.method,
                          "status": payment.status, "amount_minor": payment.amount_minor,

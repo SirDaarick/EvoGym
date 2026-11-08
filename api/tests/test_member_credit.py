@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -178,6 +180,255 @@ def test_debt_repayment_can_draw_part_or_all_from_credit(tmp_path):
             assert all(row["description"] == "Abono de membresía (saldo a favor)" for row in credit_rows)
             applies = session.query(MemberCreditMovement).filter_by(kind="apply").all()
             assert {m.debt_id for m in applies} == {session.query(MembershipDebtPayment).first().debt_id}
+    finally:
+        engine.dispose()
+
+
+def test_membership_sale_can_draw_credit_with_cash_debt_or_transfer(tmp_path):
+    from app.db.models import MembershipDebt, MembershipPeriod, Order, Payment, Plan, PlanVersion
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            plan = Plan(code="credit-sale", name="Credit Sale", kind="membership", status="active")
+            session.add(plan)
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Credit Sale v1", price_minor=10000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            version_id = version.id
+        base = f"/api/v1/registers/{ctx['register_id']}"
+        sale = {"member_id": str(ctx["member_id"]), "plan_version_id": str(version_id)}
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f"{base}/member-credit-deposits", headers=_headers(ctx["token"], "s-dep"), json={
+                "member_id": str(ctx["member_id"]), "amount_minor": 20000}).status_code == 201
+
+            too_much = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-over"),
+                                   json={**sale, "credit_minor": 10001})
+            assert too_much.status_code == 422
+            transfer_full = client.post(f"{base}/membership-transfer-sales", headers=_headers(ctx["token"], "s-tfull"),
+                                        json={**sale, "credit_minor": 10000})
+            assert transfer_full.status_code == 409
+            assert _balance(factory, ctx["member_id"]) == 20000
+
+            mixed = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-mixed"),
+                                json={**sale, "credit_minor": 3000})
+            assert mixed.status_code == 201, mixed.text
+            assert mixed.json()["credit_applied_minor"] == 3000
+            assert mixed.json()["payment"]["amount_minor"] == 7000  # cash covers the rest
+            replay = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-mixed"),
+                                 json={**sale, "credit_minor": 3000})
+            assert replay.status_code == 200
+            assert replay.json()["credit_applied_minor"] == 3000
+            conflict = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-mixed"),
+                                   json={**sale, "credit_minor": 4000})
+            assert conflict.status_code == 409
+            assert _balance(factory, ctx["member_id"]) == 17000
+
+            partial = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-partial"),
+                                  json={**sale, "credit_minor": 3000, "cash_amount_minor": 4000})
+            assert partial.status_code == 201, partial.text
+            assert partial.json()["payment"]["amount_minor"] == 4000  # 10000 - 3000 credit - 4000 cash = 3000 debt
+            partial_order = partial.json()["order"]["id"]
+
+            full_credit = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "s-full"),
+                                      json={**sale, "credit_minor": 10000})
+            assert full_credit.status_code == 201, full_credit.text
+            assert full_credit.json()["payment"]["amount_minor"] == 0
+            assert full_credit.json()["membership"] is not None
+            full_order = full_credit.json()["order"]["id"]
+
+            transfer = client.post(f"{base}/membership-transfer-sales", headers=_headers(ctx["token"], "s-transfer"),
+                                   json={**sale, "credit_minor": 2000})
+            assert transfer.status_code == 201, transfer.text
+            assert transfer.json()["payment"]["amount_minor"] == 8000
+            assert transfer.json()["payment"]["status"] == "under_review"
+        assert _balance(factory, ctx["member_id"]) == 17000 - 3000 - 10000 - 2000
+
+        with factory() as session:
+            debt = session.query(MembershipDebt).one()
+            assert str(debt.order_id) == partial_order and debt.initial_outstanding_minor == 3000
+            assert session.query(MembershipPeriod).count() == 4
+            shift = session.get(Shift, ctx["shift_id"])
+            # opening + 20000 deposit + cash parts 7000 + 4000 + 0 (transfer is not cash)
+            assert expected_cash_for_shift(session, shift) == shift.opening_cash_minor + 20000 + 7000 + 4000
+            summary = shift_financial_summary(session, shift)
+            by_method = {item["method"]: item["amount_minor"] for item in summary["payment_methods"]}
+            assert by_method["credit"] == 3000 + 3000 + 10000 + 2000
+            assert by_method["cash"] == 20000 + 7000 + 4000
+            assert not [row for row in summary["payments"] if row["amount_minor"] == 0]
+            assert session.get(Order, UUID(full_order)).payment.amount_minor == 0
+    finally:
+        engine.dispose()
+
+
+def test_product_sale_can_draw_credit_and_credit_orders_are_not_returnable(tmp_path):
+    from app.db.models import Order, Product, StockInitialization
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            product = Product(code="water-credit", name="Water", price_minor=1200, created_by=ctx["staff_id"])
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=session.get(CashRegister, ctx["register_id"]).branch_id,
+                                            product_id=product.id, quantity=20, initialized_by=ctx["staff_id"]))
+            product_id = str(product.id)
+        base = f"/api/v1/registers/{ctx['register_id']}"
+
+        def sell(client, key, **extra):
+            payload = {"member_id": str(ctx["member_id"]), "expected_total_minor": 3600,
+                       "items": [{"product_id": product_id, "quantity": 3}], **extra}
+            headers = _headers(ctx["token"], key)
+            assert client.post(f"{base}/product-sale-intent", headers=headers, json=payload).status_code == 200
+            return client.post(f"{base}/product-sales", headers=headers, json=payload), payload, headers
+
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f"{base}/member-credit-deposits", headers=_headers(ctx["token"], "p-dep"), json={
+                "member_id": str(ctx["member_id"]), "amount_minor": 5000}).status_code == 201
+
+            over, payload, headers = sell(client, "p-over", credit_minor=5001)
+            assert over.status_code == 409
+            assert client.post(f"{base}/product-sales/resolve", headers=headers, json=payload).status_code == 200
+            above_total, payload, headers = sell(client, "p-above", credit_minor=3601)
+            assert above_total.status_code == 409
+            assert client.post(f"{base}/product-sales/resolve", headers=headers, json=payload).status_code == 200
+            assert _balance(factory, ctx["member_id"]) == 5000
+
+            partial, payload, headers = sell(client, "p-partial", credit_minor=1000)
+            assert partial.status_code == 201, partial.text
+            assert partial.json()["credit_applied_minor"] == 1000
+            assert partial.json()["payment"]["amount_minor"] == 2600
+            replay = client.post(f"{base}/product-sales", headers=headers, json=payload)
+            assert replay.status_code == 200 and replay.json() == partial.json()
+            resolved = client.post(f"{base}/product-sales/resolve", headers=headers, json=payload)
+            assert resolved.json()["status"] == "completed"  # clears the seller's intent, as the UI does
+
+            full, payload, headers = sell(client, "p-full", credit_minor=3600)
+            assert full.status_code == 201, full.text
+            assert full.json()["payment"]["amount_minor"] == 0
+            assert full.json()["credit_applied_minor"] == 3600
+            full_item = full.json()["items"][0]["id"]
+            assert _balance(factory, ctx["member_id"]) == 400
+
+            eligible = client.get(f"{base}/members/{ctx['member_id']}/eligible-product-returns",
+                                  headers={"Authorization": f"Bearer {ctx['token']}"})
+            assert eligible.status_code == 200
+            assert eligible.json() == []  # both same-day orders used credit, so neither is offered for return
+            refund = client.post(f"{base}/product-returns", headers=_headers(ctx["token"], "p-return"), json={
+                "order_item_id": full_item, "reason": "changed mind", "disposition": "restock", "payout_method": "cash"})
+            assert refund.status_code == 409
+
+        with factory() as session:
+            shift = session.get(Shift, ctx["shift_id"])
+            assert expected_cash_for_shift(session, shift) == shift.opening_cash_minor + 5000 + 2600
+            summary = shift_financial_summary(session, shift)
+            by_method = {item["method"]: item["amount_minor"] for item in summary["payment_methods"]}
+            assert by_method["credit"] == 4600 and by_method["cash"] == 5000 + 2600
+            assert {item["family"]: item["amount_minor"] for item in summary["activities"]} == {
+                "credit": 5000, "product": 2600 + 4600}
+            assert session.query(Order).count() == 2
+    finally:
+        engine.dispose()
+
+
+def test_card_product_sale_charges_only_the_remainder_after_credit(tmp_path):
+    from app.db.models import Product, StockInitialization
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            product = Product(code="towel-credit", name="Towel", price_minor=2000, created_by=ctx["staff_id"])
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=session.get(CashRegister, ctx["register_id"]).branch_id,
+                                            product_id=product.id, quantity=10, initialized_by=ctx["staff_id"]))
+            product_id = str(product.id)
+        base = f"/api/v1/registers/{ctx['register_id']}"
+        member = str(ctx["member_id"])
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f"{base}/member-credit-deposits", headers=_headers(ctx["token"], "c-dep"), json={
+                "member_id": member, "amount_minor": 1500}).status_code == 201
+
+            def card_sale(key, charged_minor, credit_minor):
+                intent = client.post(f"{base}/card-intent", headers=_headers(ctx["token"], key), json={
+                    "amount_minor": charged_minor, "external_reference": key})
+                assert intent.status_code == 201, intent.text
+                return client.post(f"{base}/product-sales/card", headers=_headers(ctx["token"], key), json={
+                    "member_id": member, "items": [{"product_id": product_id, "quantity": 2}],
+                    "expected_total_minor": 4000, "credit_minor": credit_minor,
+                    "card_intent_id": intent.json()["payment_intent_id"]})
+
+            # The terminal must have charged exactly total - credit.
+            assert card_sale("c-wrong", 4000, 1000).status_code == 409
+            # More credit than the balance fails before posting anything.
+            assert card_sale("c-over", 2000, 2000).status_code == 409
+            assert _balance(factory, ctx["member_id"]) == 1500
+
+            sale = card_sale("c-ok", 3000, 1000)
+            assert sale.status_code == 201, sale.text
+            assert sale.json()["payment"]["method"] == "card"
+            assert sale.json()["payment"]["amount_minor"] == 3000
+            assert sale.json()["credit_applied_minor"] == 1000
+        assert _balance(factory, ctx["member_id"]) == 500
+        with factory() as session:
+            summary = shift_financial_summary(session, session.get(Shift, ctx["shift_id"]))
+            by_method = {item["method"]: item["amount_minor"] for item in summary["payment_methods"]}
+            assert by_method["card"] == 3000 and by_method["credit"] == 1000
+            assert summary["confirmed_cash_minor"] == 1500  # only the credit deposit; card and credit move no cash
+    finally:
+        engine.dispose()
+
+
+def test_product_sale_credit_requires_a_member(tmp_path):
+    from app.db.models import Product, StockInitialization
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            product = Product(code="bar-credit", name="Bar", price_minor=800, created_by=ctx["staff_id"])
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=session.get(CashRegister, ctx["register_id"]).branch_id,
+                                            product_id=product.id, quantity=5, initialized_by=ctx["staff_id"]))
+            product_id = str(product.id)
+        base = f"/api/v1/registers/{ctx['register_id']}"
+        payload = {"expected_total_minor": 800, "credit_minor": 100, "items": [{"product_id": product_id, "quantity": 1}]}
+        headers = _headers(ctx["token"], "anon-credit")
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f"{base}/product-sale-intent", headers=headers, json=payload).status_code == 200
+            rejected = client.post(f"{base}/product-sales", headers=headers, json=payload)
+            assert rejected.status_code == 409
+    finally:
+        engine.dispose()
+
+
+def test_overdrawing_credit_on_a_sale_rolls_everything_back(tmp_path):
+    from app.db.models import MembershipPeriod, Order, Plan, PlanVersion
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            plan = Plan(code="credit-roll", name="Credit Roll", kind="membership", status="active")
+            session.add(plan)
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Credit Roll v1", price_minor=10000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            version_id = version.id
+        base = f"/api/v1/registers/{ctx['register_id']}"
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f"{base}/member-credit-deposits", headers=_headers(ctx["token"], "r-dep"), json={
+                "member_id": str(ctx["member_id"]), "amount_minor": 1000}).status_code == 201
+            rejected = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "r-sale"), json={
+                "member_id": str(ctx["member_id"]), "plan_version_id": str(version_id), "credit_minor": 1001})
+            assert rejected.status_code == 409
+        assert _balance(factory, ctx["member_id"]) == 1000
+        with factory() as session:
+            assert session.query(Order).count() == 0
+            assert session.query(MembershipPeriod).count() == 0
     finally:
         engine.dispose()
 

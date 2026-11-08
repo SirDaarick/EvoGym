@@ -16,7 +16,7 @@ from app.db.models import (
     Product, StockInitialization, StockMovement, ProductRefund, ProductSaleCancellation, ProductSaleIntent, StaffUser,
     PaymentTerminal, RoleGrant,
 )
-from app.credit.queries import apply_credit
+from app.credit.queries import apply_credit, credit_applied_for_order, lock_member
 from app.errors import AppError
 from app.inventory.queries import get_on_hand_stock
 from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, RegisterMemberOpenDebtDTO
@@ -24,23 +24,34 @@ from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, 
 MAX_MINOR = 2**63 - 1
 
 
-def product_sale_fingerprint(register_id, member_id, items, expected_total_minor):
+def product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor=0):
     lines = sorted((str(item.product_id), item.quantity) for item in items)
-    return sha256(repr((str(register_id), str(member_id), lines, expected_total_minor)).encode()).hexdigest()
+    parts = (str(register_id), str(member_id), lines, expected_total_minor)
+    # Credit-free requests keep the original canonical form so earlier idempotency keys still match.
+    return sha256(repr(parts + (credit_minor,) if credit_minor else parts).encode()).hexdigest()
+
+
+def _validate_sale_credit(credit_minor, total, member_id) -> None:
+    """Credit pays part of a product sale: it needs a member and cannot exceed the total."""
+    if type(credit_minor) is not int or not 0 <= credit_minor <= total:
+        raise ProductSaleRejected("Credit amount must be between zero and the sale total.")
+    if credit_minor and member_id is None:
+        raise ProductSaleRejected("Saldo a favor requires an assigned member.")
 
 
 def get_product_sale_intent(session, *, actor_id):
     return session.get(ProductSaleIntent, actor_id)
 
 
-def prepare_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+def prepare_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
+                         credit_minor=0):
     seller = session.scalar(select(StaffUser).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     if seller is None or not seller.is_active:
         raise CashSaleConflictError("Staff account is inactive.")
     register = session.get(CashRegister, register_id)
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
     existing = session.get(ProductSaleIntent, actor_id)
     if existing:
         if existing.register_id != register_id or existing.idempotency_key != idempotency_key or existing.request_fingerprint != fingerprint:
@@ -54,7 +65,7 @@ def prepare_product_sale(session, *, register_id, actor_id, member_id, items, ex
     intent = ProductSaleIntent(seller_id=actor_id, register_id=register_id, idempotency_key=idempotency_key,
         request_fingerprint=fingerprint, payload={"member_id": str(member_id) if member_id else None,
         "items": [{"product_id": str(item.product_id), "quantity": item.quantity} for item in items],
-        "expected_total_minor": expected_total_minor})
+        "expected_total_minor": expected_total_minor, **({"credit_minor": credit_minor} if credit_minor else {})})
     session.add(intent)
     session.flush()
     return intent
@@ -75,11 +86,16 @@ class ContingencySaleResult:
     price_drifts: list[dict]
 
 
-def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
-    """Online sale: server-priced, rejects insufficient or uninitialized stock."""
+def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
+                           credit_minor=0):
+    """Online sale: server-priced, rejects insufficient or uninitialized stock.
+
+    `credit_minor` of the total is drawn from the member's saldo a favor; cash covers the rest.
+    """
     order, replayed, _, _ = _post_cash_sale(
         session, register_id=register_id, actor_id=actor_id, member_id=member_id, items=items,
-        expected_total_minor=expected_total_minor, idempotency_key=idempotency_key, policy=SalePolicy.ONLINE)
+        expected_total_minor=expected_total_minor, idempotency_key=idempotency_key, policy=SalePolicy.ONLINE,
+        credit_minor=credit_minor)
     return order, replayed
 
 
@@ -101,7 +117,8 @@ def post_contingency_cash_sale(
 
 
 def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
-                    policy, occurred_at=None, unit_prices=None, offline_receipt_number=None, shift_id=None):
+                    policy, occurred_at=None, unit_prices=None, offline_receipt_number=None, shift_id=None,
+                    credit_minor=0):
     contingency = policy is SalePolicy.CONTINGENCY
     unit_prices = unit_prices or {}
     # Keep seller serialization compatible with shift-close foreign key checks.
@@ -109,7 +126,9 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    if contingency and credit_minor:
+        raise ProductSaleRejected("Saldo a favor cannot be used in offline sales.")
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
         raise ProductSaleRejected("Product sale intent was cancelled.")
@@ -170,6 +189,7 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
         rows.append((product, item.quantity, line_total, unit_price))
     if total != expected_total_minor:
         raise ProductSaleRejected("Product prices changed; review the total.")
+    _validate_sale_credit(credit_minor, total, member_id)
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
@@ -195,11 +215,15 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
         if occurred_at is not None:
             movement.recorded_at = occurred_at
         session.add(movement)
-    payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total, received_by=actor_id)
+    payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total - credit_minor,
+                      received_by=actor_id)
     if occurred_at is not None:
         payment.created_at = occurred_at
     session.add(payment)
     session.flush()
+    if credit_minor:
+        apply_credit(session, member=lock_member(session, member_id), register=register, shift=shift,
+                     actor_id=actor_id, amount_minor=credit_minor, order_id=order.id)
     session.refresh(order, ["items", "payment"])
     return order, False, variances, price_drifts
 
@@ -219,13 +243,16 @@ def post_card_product_sale(
     card_last_four: str | None = None,
     authorization_code: str | None = None,
     mp_payment_id: str | None = None,
+    credit_minor: int = 0,
 ) -> tuple[Order, bool]:
+    """Post a Point card product sale; `credit_minor` of the total is drawn from saldo a favor (the card
+    was charged only the remainder)."""
     # Keep seller serialization compatible with shift-close foreign key checks.
     session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
         raise ProductSaleRejected("Product sale intent was cancelled.")
@@ -270,6 +297,9 @@ def post_card_product_sale(
         rows.append((product, item.quantity, line_total))
     if total != expected_total_minor:
         raise ProductSaleRejected("Product prices changed; review the total.")
+    _validate_sale_credit(credit_minor, total, member_id)
+    if credit_minor == total:
+        raise ProductSaleRejected("A sale fully covered by credit does not use the card terminal.")
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
@@ -290,7 +320,7 @@ def post_card_product_sale(
         order_id=order.id,
         method="card",
         status="confirmed",
-        amount_minor=total,
+        amount_minor=total - credit_minor,
         received_by=actor_id,
         terminal_id=terminal_id,
         mp_payment_intent_id=card_intent_id,
@@ -301,17 +331,21 @@ def post_card_product_sale(
     )
     session.add(payment)
     session.flush()
+    if credit_minor:
+        apply_credit(session, member=lock_member(session, member_id), register=register, shift=shift,
+                     actor_id=actor_id, amount_minor=credit_minor, order_id=order.id)
     session.refresh(order, ["items", "payment"])
     return order, False
 
 
-def resolve_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key):
+def resolve_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
+                         credit_minor=0):
     # Both operations lock the seller first so cancellation cannot race a delayed POST.
     session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor)
+    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
     order = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
                                                Order.idempotency_key == idempotency_key))
     if order is not None:
@@ -345,6 +379,7 @@ _PUBLIC_RETURN_MESSAGES = frozenset({
     "Only orders with confirmed payment can be returned.",
     "Only product order items can be returned.",
     "Only product orders can be returned.",
+    "Orders paid with saldo a favor cannot be returned yet.",
     "Open the first shift before recording a return.",
     "Returns are only allowed on the same calendar day of purchase.",
     "Staff account is inactive.",
@@ -404,6 +439,8 @@ def list_eligible_product_returns(
     for order in orders:
         if not order.payment or order.payment.status != "confirmed":
             continue
+        if credit_applied_for_order(session, order.id):
+            continue  # a refund would pay out cash for money the member paid from saldo a favor
         order_created = order.created_at if order.created_at.tzinfo is not None else order.created_at.replace(tzinfo=timezone.utc)
         if order_created.astimezone(branch_zone).date() != today:
             continue
@@ -509,6 +546,8 @@ def post_product_return(
         raise ProductReturnConflictError("Cross-branch returns are not allowed.")
     if order.payment is None or order.payment.status != "confirmed":
         raise ProductReturnConflictError("Only orders with confirmed payment can be returned.")
+    if credit_applied_for_order(session, order.id):
+        raise ProductReturnConflictError("Orders paid with saldo a favor cannot be returned yet.")
 
     try:
         branch_zone = ZoneInfo(branch.timezone)
@@ -620,6 +659,7 @@ class CashMembershipSaleResult:
     membership: MembershipPeriod | None
     sample_entitlement: ClassSampleEntitlement | None
     replayed: bool
+    credit_applied_minor: int = 0
 
 
 @dataclass(frozen=True)
@@ -663,6 +703,7 @@ def membership_sale_fingerprint(
     payment_method: str = "cash",
     cash_amount_minor: int | None = None,
     cash_amount_provided: bool = False,
+    credit_minor: int = 0,
 ) -> str:
     canonical = f"{register_id}\n{member_id}\n{plan_version_id}"
     if source_shift_id is not None:
@@ -671,6 +712,8 @@ def membership_sale_fingerprint(
         canonical += f"\n{payment_method}"
     if cash_amount_provided:
         canonical += f"\ncash_amount_minor:{cash_amount_minor}"
+    if credit_minor:
+        canonical += f"\ncredit_minor:{credit_minor}"
     payload = canonical.encode("ascii")
     return sha256(payload).hexdigest()
 
@@ -688,7 +731,8 @@ def load_sale_result(session: Session, order: Order, replayed: bool) -> CashMemb
         raise RuntimeError("Voucher-backed membership transfer has no membership period.")
     if item.entitlement_mode == "single_entry" and sample_entitlement is None:
         raise RuntimeError("Persisted class sample sale has no retained entitlement.")
-    return CashMembershipSaleResult(order, item, order.payment, membership, sample_entitlement, replayed)
+    return CashMembershipSaleResult(order, item, order.payment, membership, sample_entitlement, replayed,
+                                    credit_applied_for_order(session, order.id))
 
 
 def post_membership_cash_sale(
@@ -705,8 +749,12 @@ def post_membership_cash_sale(
     payment_method: str = "cash",
     cash_amount_minor: int | None = None,
     cash_amount_provided: bool = False,
+    credit_minor: int = 0,
 ) -> CashMembershipSaleResult:
     """Persist a cash membership sale or an unsettled transfer atomically.
+
+    `credit_minor` of the price is drawn from the member's saldo a favor; cash (or the transfer)
+    covers the rest and any cash shortfall becomes the membership debt.
 
     The caller owns commit/rollback. Register and member row locks serialize same-drawer
     posting and concurrent renewals; the function never performs external payment I/O.
@@ -719,6 +767,8 @@ def post_membership_cash_sale(
         raise ValueError("Cash amount must be a positive integer number of minor units.")
     if not cash_amount_provided and cash_amount_minor is not None:
         raise ValueError("Cash amount must be explicitly marked as provided.")
+    if type(credit_minor) is not int or not 0 <= credit_minor <= MAX_MINOR:
+        raise ValueError("Credit amount must be a non-negative signed 64-bit integer.")
     if payment_method == "transfer" and source_shift_id is not None:
         raise CashSaleConflictError("Pending transfers require the current open shift.")
     if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
@@ -735,7 +785,7 @@ def post_membership_cash_sale(
 
     fingerprint = membership_sale_fingerprint(
         register_id, member_id, plan_version_id, source_shift_id, payment_method,
-        cash_amount_minor, cash_amount_provided,
+        cash_amount_minor, cash_amount_provided, credit_minor,
     )
     existing = session.scalar(
         select(Order).where(
@@ -808,8 +858,13 @@ def post_membership_cash_sale(
         raise CashSaleConflictError("Only MXN membership plans can be sold for cash.")
     if type(version.price_minor) is not int or not 0 <= version.price_minor <= MAX_MINOR:
         raise ValueError("Published membership price is outside signed 64-bit minor units.")
-    received_minor = version.price_minor if not cash_amount_provided else cash_amount_minor
-    if type(received_minor) is not int or received_minor < 0 or received_minor > version.price_minor:
+    if credit_minor > version.price_minor:
+        raise ValueError("Credit amount must not exceed the published membership price.")
+    payable_minor = version.price_minor - credit_minor  # what cash (or the transfer) must cover
+    if payment_method == "transfer" and payable_minor == 0:
+        raise CashSaleConflictError("A price fully covered by credit must be sold as a cash sale.")
+    received_minor = payable_minor if not cash_amount_provided else cash_amount_minor
+    if type(received_minor) is not int or received_minor < 0 or received_minor > payable_minor:
         raise ValueError("Cash amount must not exceed the published membership price.")
     if version.entitlement_mode == "single_entry" and session.scalar(
         select(ClassSampleEntitlement.id).where(ClassSampleEntitlement.member_id == member_id).with_for_update()
@@ -887,13 +942,19 @@ def post_membership_cash_sale(
             idempotency_key=None, request_fingerprint=review_fingerprint, created_at=datetime.now(timezone.utc),
         ))
         session.flush()
-    elif payment_method == "cash" and received_minor < version.price_minor:
+    elif payment_method == "cash" and received_minor < payable_minor:
         session.add(MembershipDebt(
             id=uuid4(), order_id=order.id, member_id=member.id,
-            initial_outstanding_minor=version.price_minor - received_minor,
+            initial_outstanding_minor=payable_minor - received_minor,
         ))
         session.flush()
-    return CashMembershipSaleResult(order, item, payment, membership, sample_entitlement, replayed=False)
+    if credit_minor:
+        # An overtime sale is counted in the successor shift, like its cash.
+        credit_shift = successor if is_overtime and successor is not None else source_shift
+        apply_credit(session, member=member, register=register, shift=credit_shift, actor_id=actor_id,
+                     amount_minor=credit_minor, order_id=order.id)
+    return CashMembershipSaleResult(order, item, payment, membership, sample_entitlement, replayed=False,
+                                    credit_applied_minor=credit_minor)
 
 
 @dataclass(frozen=True)
@@ -904,6 +965,7 @@ class TransferReviewResult:
     membership: MembershipPeriod | None
     sample_entitlement: ClassSampleEntitlement | None
     replayed: bool
+    credit_applied_minor: int = 0
 
 
 def review_membership_transfer(
@@ -979,7 +1041,8 @@ def review_membership_transfer(
     if prior is not None:
         if prior.request_fingerprint != fingerprint:
             raise CashSaleConflictError("Review idempotency key was already used for a different decision.")
-        return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=True)
+        return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=True,
+                                    credit_applied_minor=credit_applied_for_order(session, order.id))
 
     if payment.status not in {"under_review", "pending", "confirmed"}:
         raise CashSaleConflictError("Transfer payment cannot be reviewed from its current state.")
@@ -989,7 +1052,8 @@ def review_membership_transfer(
     ))
     payment.status = status
     session.flush()
-    return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=False)
+    return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=False,
+                                credit_applied_minor=credit_applied_for_order(session, order.id))
 
 
 def debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int, credit_minor: int = 0) -> str:

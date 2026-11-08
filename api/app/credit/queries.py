@@ -86,6 +86,23 @@ def apply_credit(session: Session, *, member: Member, register: CashRegister, sh
                    actor_id=actor_id, amount_minor=amount_minor, **refs)
 
 
+def ensure_credit_available(session: Session, member_id: UUID | None, amount_minor: int) -> None:
+    """Fail fast before an irreversible step (a card charge) when the balance cannot cover `amount_minor`."""
+    member = session.get(Member, member_id) if member_id is not None else None
+    if member is None:
+        raise CreditNotFoundError("Member not found.")
+    if amount_minor > member.credit_balance_minor:
+        raise CreditConflictError("Credit amount exceeds the member's available balance.")
+
+
+def credit_applied_for_order(session: Session, order_id: UUID) -> int:
+    """Total member credit drawn to pay one order (zero when it was paid without credit)."""
+    return session.scalar(
+        select(func.coalesce(func.sum(MemberCreditMovement.amount_minor), 0)).where(
+            MemberCreditMovement.order_id == order_id, MemberCreditMovement.kind == "apply")
+    ) or 0
+
+
 def find_deposit_by_key(session: Session, *, branch_id: UUID, received_by: UUID, idempotency_key: str):
     return session.scalar(
         select(MemberCreditMovement).where(

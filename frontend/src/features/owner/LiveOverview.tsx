@@ -37,7 +37,7 @@ export function LiveOverview({ apiRequest }: { apiRequest: AuthenticatedRequest 
     cashMinor: finances.cash_minor, cardMinor: finances.card_minor, transferPendingMinor: finances.pending_transfer_minor,
     shiftDiscrepancies: finances.shift_discrepancies.map(row => ({ id: row.shift_id, registerName: row.register_name ?? undefined,
       window: formatShiftWindow(row.opened_at, row.closed_at, data.period.timezone), cashDifferenceMinor: row.difference_minor })),
-    byMethod: finances.by_method?.map(row => ({ method: row.method, label: row.label, count: row.count, grossMinor: row.gross_minor,
+    byMethod: finances.by_method?.map(row => ({ method: row.method, label: row.method === 'credit' ? 'Saldo a favor' : row.label, count: row.count, grossMinor: row.gross_minor,
       refundsMinor: row.refunds_minor, amountMinor: row.amount_minor, terminals: row.terminals?.map(t => ({
         id: t.terminal_id ?? 'sin-terminal', name: t.terminal_name ?? 'Sin terminal asignada', count: t.count, amountMinor: t.amount_minor })) })),
     cancellations: data.cancellations && { totalCount: data.cancellations.total_count, productSales: data.cancellations.product_sales.count,

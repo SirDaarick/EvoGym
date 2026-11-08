@@ -25,6 +25,7 @@ import { getMemberReload, type MemberReloadResponse } from '../../api/memberRead
 import type { MemberNoteDTO } from '../../api/membersApi';
 import { getReceptionConfig, readOperationalToken } from '../../api/receptionApi';
 import { LiveMembershipCheckout } from '../reception/LiveMembershipCheckout';
+import { MemberCreditPanel } from './MemberCreditPanel';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import { listRentals, type RentalDTO } from '../../api/rentalsApi';
 import type { MemberSummary } from '../../api/memberReadsApi';
@@ -656,6 +657,17 @@ function LiveMemberDetail({
           </div>
         </form>
       </Panel>
+    )}
+    {apiRequest && (
+      <MemberCreditPanel
+        memberId={member.id}
+        memberName={member.name}
+        creditMinor={reload.financial.credit_balance_minor}
+        pendingMinor={isAdmin ? reload.financial.total_pending_balance_minor : null}
+        hasPendingBalance={hasPendingDebt}
+        apiRequest={apiRequest}
+        onRefresh={onRefresh}
+      />
     )}
     <div className="member-tabs-container">
       <div className="member-tabs-nav" role="tablist" aria-label="Secciones del socio">

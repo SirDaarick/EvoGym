@@ -17,6 +17,8 @@ import {
   type MembershipTransferSaleRequest,
   type RegisterMemberOpenDebt,
 } from '../../api/membershipCheckoutApi';
+import { depositMemberCredit } from '../../api/memberCreditApi';
+import { getMember } from '../../api/membersApi';
 import { browserRequest } from '../../api/http';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList, { type AnimatedListEntry } from '../catalog/react-bits/AnimatedList';
@@ -36,13 +38,18 @@ interface SaleIntent {
   registerId: string;
   body: MembershipSaleRequest | MembershipTransferSaleRequest;
   idempotencyKey: string;
+  /** Cash tendered above what was due that the member left as saldo a favor. */
+  changeToCreditMinor?: number;
 }
 
 interface DebtPaymentIntent {
   registerId: string;
   body: MembershipDebtPaymentInput;
   idempotencyKey: string;
+  changeToCreditMinor?: number;
 }
+
+const CREDIT_DEPOSIT_FAILED = 'El pago sí se registró, pero no se pudo depositar el saldo a favor. Puedes agregarlo desde el perfil del socio.';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -101,8 +108,11 @@ export function LiveMembershipCheckout({
     payment: Record<string, unknown>;
     membership: Record<string, unknown> | null;
     sample_entitlement?: Record<string, unknown> | null;
+    credit_applied_minor?: number;
     method: PaymentMethod;
   } | null>(null);
+  const [memberCreditMinor, setMemberCreditMinor] = useState(0);
+  const [creditWarning, setCreditWarning] = useState('');
 
   const [openDebts, setOpenDebts] = useState<RegisterMemberOpenDebt[]>([]);
   const [debtsLoading, setDebtsLoading] = useState(false);
@@ -145,6 +155,35 @@ export function LiveMembershipCheckout({
       return () => { active = false; };
     }
   }, [selectedMember, apiRequest]);
+
+  // Saldo a favor of the selected member; unknown balance simply hides the tick.
+  const selectedMemberId = selectedMember?.id;
+  async function loadMemberCredit(memberId: string | undefined, isActive: () => boolean = () => true) {
+    let balance = 0;
+    if (memberId) {
+      try {
+        const detail = await getMember(apiRequest ?? browserRequest, memberId);
+        if (typeof detail?.credit_balance_minor === 'number') balance = detail.credit_balance_minor;
+      } catch { /* non-fatal: no saldo a favor offered */ }
+    }
+    if (isActive()) setMemberCreditMinor(balance);
+  }
+
+  useEffect(() => {
+    let active = true;
+    void loadMemberCredit(selectedMemberId, () => active);
+    return () => { active = false; };
+  }, [selectedMemberId, apiRequest]);
+
+  /** The payment is already recorded; a failed deposit must not look like a failed payment. */
+  async function depositChange(registerIdValue: string, memberId: string, amountMinor: number | undefined) {
+    if (!amountMinor || amountMinor <= 0) return;
+    try {
+      await depositMemberCredit(apiRequest ?? browserRequest, registerIdValue, { member_id: memberId, amount_minor: amountMinor }, crypto.randomUUID());
+    } catch {
+      setCreditWarning(CREDIT_DEPOSIT_FAILED);
+    }
+  }
 
   // Theme observer for AnimatedList
   const [dark, setDark] = useState(() => {
@@ -253,8 +292,8 @@ export function LiveMembershipCheckout({
     parsedDebtMinor <= 0 ||
     (selectedDebt !== null && parsedDebtMinor > selectedDebt.remaining_balance_minor);
 
-  function getStableDebtIdempotencyKey(regId: string, orderId: string, minor: number): string {
-    const fingerprint = `${regId}:${orderId}:${minor}`;
+  function getStableDebtIdempotencyKey(regId: string, orderId: string, minor: number, creditMinor = 0): string {
+    const fingerprint = `${regId}:${orderId}:${minor}:${creditMinor}`;
     if (!debtIdempotencyMapRef.current[fingerprint]) {
       debtIdempotencyMapRef.current[fingerprint] = crypto.randomUUID();
     }
@@ -271,6 +310,8 @@ export function LiveMembershipCheckout({
         ? submitMembershipDebtPayment(intent.registerId, intent.body, intent.idempotencyKey, apiRequest)
         : submitMembershipDebtPayment(intent.registerId, intent.body, intent.idempotencyKey));
       setUnknownDebtIntent(null);
+      await depositChange(intent.registerId, receipt.member_id, intent.changeToCreditMinor);
+      void loadMemberCredit(selectedMemberId);
       setDebtReceipt(receipt);
       notifyCompleted();
     } catch (reason) {
@@ -311,10 +352,13 @@ export function LiveMembershipCheckout({
             ? submitMembershipTransferSale(intent.registerId, intent.body as MembershipTransferSaleRequest, intent.idempotencyKey, apiRequest)
             : submitMembershipTransferSale(intent.registerId, intent.body as MembershipTransferSaleRequest, intent.idempotencyKey));
       setUnknownIntent(null);
+      await depositChange(intent.registerId, intent.body.member_id, intent.changeToCreditMinor);
+      void loadMemberCredit(selectedMemberId);
       setResult({
         payment: response.payment,
         membership: response.membership,
         sample_entitlement: response.sample_entitlement,
+        credit_applied_minor: response.credit_applied_minor,
         method: intent.method,
       });
       notifyCompleted();
@@ -332,18 +376,27 @@ export function LiveMembershipCheckout({
     }
   }
 
-  function submit(method: PaymentMethod, overrideCashAmountMinor?: number) {
+  function submit(method: PaymentMethod, overrideCashAmountMinor?: number, creditMinor = 0, changeToCreditMinor = 0) {
     if (!selectedMember || !version || !registerId || !shift || amountInvalid || submittingRef.current) return;
-    const finalAmountMinor = overrideCashAmountMinor !== undefined ? overrideCashAmountMinor : amountMinor;
+    let finalAmountMinor = overrideCashAmountMinor !== undefined ? overrideCashAmountMinor : amountMinor;
+    if (price !== null && finalAmountMinor !== undefined) {
+      // Cash only covers what credit leaves (tender above it is change); the backend rejects a cash part of zero or above that.
+      finalAmountMinor = Math.min(finalAmountMinor, price - creditMinor);
+      if (creditMinor > 0 && finalAmountMinor <= 0) finalAmountMinor = undefined;
+    }
     if (method === 'cash' && finalAmountMinor !== undefined && !Number.isSafeInteger(finalAmountMinor)) {
       setError('Ingresá un monto válido en pesos.');
       return;
     }
-    const common = { member_id: selectedMember.id, plan_version_id: version.id };
+    const common = {
+      member_id: selectedMember.id,
+      plan_version_id: version.id,
+      ...(creditMinor > 0 ? { credit_minor: creditMinor } : {}),
+    };
     const body: MembershipSaleRequest | MembershipTransferSaleRequest = method === 'cash'
       ? { ...common, ...(finalAmountMinor !== undefined ? { cash_amount_minor: finalAmountMinor } : {}) }
       : common;
-    void send({ method, registerId, body, idempotencyKey: crypto.randomUUID() });
+    void send({ method, registerId, body, idempotencyKey: crypto.randomUUID(), changeToCreditMinor });
   }
 
   const paymentStatus = result?.payment.status;
@@ -397,8 +450,11 @@ export function LiveMembershipCheckout({
           </div>
           <h3 id="checkout-title" style={{ margin: '8px 0', fontSize: '20px' }}>Abono registrado</h3>
           <p role="status">
-            Abono en efectivo confirmado por {formatMoney(debtReceipt.amount_minor)}.
+            {(debtReceipt.credit_minor ?? 0) > 0
+              ? `Abono confirmado por ${formatMoney(debtReceipt.amount_minor)}, de los cuales ${formatMoney(debtReceipt.credit_minor ?? 0)} con saldo a favor.`
+              : `Abono en efectivo confirmado por ${formatMoney(debtReceipt.amount_minor)}.`}
           </p>
+          {creditWarning && <p role="alert">{creditWarning}</p>}
           <p>
             Saldo restante del pedido: {formatMoney(debtReceipt.remaining_balance_minor)} MXN
             {debtReceipt.remaining_balance_minor === 0 ? ' · Adeudo liquidado en su totalidad.' : ''}
@@ -441,6 +497,10 @@ export function LiveMembershipCheckout({
           ) : (
             <p>Sin periodo de membresía devuelto; no se informa activación.</p>
           )}
+          {(result.credit_applied_minor ?? 0) > 0 && (
+            <p>Saldo a favor aplicado: {formatMoney(result.credit_applied_minor ?? 0)}.</p>
+          )}
+          {creditWarning && <p role="alert">{creditWarning}</p>}
           <Button onClick={onClose} style={{ marginTop: '16px' }}>Cerrar</Button>
         </div>
       </div>
@@ -661,7 +721,8 @@ export function LiveMembershipCheckout({
                 step1Title="Adeudo"
                 step2Title="Cobro"
                 totalMinor={selectedDebt ? (parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : selectedDebt.remaining_balance_minor) : 0}
-                assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name } : null}
+                allowCredit
+                assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name, creditMinor: memberCreditMinor } : null}
                 step1ActionDisabled={!selectedMember || !selectedDebt || !registerId || !shift || debtAmountInvalid || debtsLoading || shiftLoading || submitting}
                 step1ActionLabel={
                   !selectedMember
@@ -674,16 +735,19 @@ export function LiveMembershipCheckout({
                 statusMessage={error}
                 statusType={error ? 'error' : 'success'}
                 onConfirmPayment={breakdown => {
-                  if (breakdown.tenderedMinor && breakdown.tenderedMinor > 0 && selectedDebt) {
-                    if (breakdown.tenderedMinor <= selectedDebt.remaining_balance_minor) {
-                      const idempotencyKey = getStableDebtIdempotencyKey(registerId, selectedDebt.order_id, breakdown.tenderedMinor);
-                      void sendDebtPayment({
-                        registerId,
-                        body: { order_id: selectedDebt.order_id, amount_minor: breakdown.tenderedMinor },
-                        idempotencyKey,
-                      });
-                      return;
-                    }
+                  const credit = breakdown.creditAppliedMinor ?? 0;
+                  const changeToCredit = breakdown.changeToCreditMinor ?? 0;
+                  // The abono is the credit part plus the cash that stays on the debt (change left as credit does not).
+                  const paid = credit + (breakdown.tenderedMinor ?? 0) - changeToCredit;
+                  if (paid > 0 && selectedDebt && paid <= selectedDebt.remaining_balance_minor) {
+                    const idempotencyKey = getStableDebtIdempotencyKey(registerId, selectedDebt.order_id, paid, credit);
+                    void sendDebtPayment({
+                      registerId,
+                      body: { order_id: selectedDebt.order_id, amount_minor: paid, ...(credit > 0 ? { credit_minor: credit } : {}) },
+                      idempotencyKey,
+                      changeToCreditMinor: changeToCredit,
+                    });
+                    return;
                   }
                   submitDebtPayment();
                 }}
@@ -875,7 +939,8 @@ export function LiveMembershipCheckout({
                   step1Title="Membresía"
                   step2Title="Cobro"
                   totalMinor={price ?? 0}
-                  assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name } : null}
+                  allowCredit
+                  assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name, creditMinor: memberCreditMinor } : null}
                   step1ActionDisabled={!selectedMember || !version || !registerId || !shift || amountInvalid || submitting}
                   step1ActionLabel={
                     !selectedMember
@@ -890,10 +955,11 @@ export function LiveMembershipCheckout({
                   statusMessage={error}
                   statusType={error ? 'error' : 'success'}
                   onConfirmPayment={breakdown => {
+                    const credit = breakdown.creditAppliedMinor ?? 0;
                     if (breakdown.method === 'transfer') {
-                      submit('transfer');
+                      submit('transfer', undefined, credit);
                     } else {
-                      submit('cash', breakdown.tenderedMinor);
+                      submit('cash', breakdown.tenderedMinor, credit, breakdown.changeToCreditMinor ?? 0);
                     }
                   }}
                 >

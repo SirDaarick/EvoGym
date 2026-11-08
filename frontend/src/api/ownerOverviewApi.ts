@@ -1,7 +1,7 @@
 import type { AuthenticatedRequest } from './membershipCheckoutApi';
 
 export interface OverviewTerminalRow { terminal_id: string | null; terminal_name: string | null; count: number; amount_minor: number }
-export interface OverviewMethodRow { method: 'cash' | 'transfer' | 'card'; label: string; count: number; gross_minor: number;
+export interface OverviewMethodRow { method: 'cash' | 'transfer' | 'card' | 'credit'; label: string; count: number; gross_minor: number;
   refunds_minor: number; amount_minor: number; terminals?: OverviewTerminalRow[] }
 export interface OverviewShiftDiscrepancy { shift_id: string; difference_minor: number; register_id?: string;
   register_name?: string | null; opened_at?: string | null; closed_at?: string | null }

@@ -5,7 +5,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { openLocalDb } from '@/offline/db';
 import { isOnlineHint } from '@/offline/connectivity';
 
-export type SearchMember = { id: string; full_name: string; phone: string };
+export type SearchMember = { id: string; full_name: string; phone: string; credit_balance_minor?: number };
 const NO_MEMBERS: SearchMember[] = [];
 const DEBOUNCE_MS = 250;
 const MIN_LENGTH = 2;
