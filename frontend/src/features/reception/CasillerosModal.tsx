@@ -145,6 +145,22 @@ export function CasillerosModal({
     return () => { active = false; };
   }, [assignedMemberId, apiRequest]);
 
+  // Renewal: saldo a favor of the member who holds the selected locker (hidden when zero).
+  const renewMemberId = liveRentals.find(r => r.asset_id === selectedLockerId && r.status === 'active')?.member_id ?? null;
+  const [renewCreditMinor, setRenewCreditMinor] = useState(0);
+  const [useRenewCredit, setUseRenewCredit] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setRenewCreditMinor(0);
+    setUseRenewCredit(false);
+    if (renewMemberId) {
+      getMember(apiRequest, renewMemberId)
+        .then(detail => { if (active && typeof detail?.credit_balance_minor === 'number') setRenewCreditMinor(detail.credit_balance_minor); })
+        .catch(() => { /* non-fatal: no saldo a favor offered */ });
+    }
+    return () => { active = false; };
+  }, [renewMemberId, apiRequest]);
+
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [selectedMemberIndex, setSelectedMemberIndex] = useState(-1);
@@ -309,6 +325,23 @@ export function CasillerosModal({
   const refundPesosValue = depositRefundPesos ?? (heldDeposit / 100).toFixed(2);
 
   const assignedMember = selectedLiveMember;
+
+  const renewPrice = selectedLocker?.monthlyPriceMinor ?? 0;
+  const renewCreditApplied = useRenewCredit ? Math.min(renewCreditMinor, renewPrice) : 0;
+  const renewCreditControl = renewCreditMinor > 0 ? (
+    <label className="locker-renew-credit" style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+      <input type="checkbox" checked={useRenewCredit} onChange={event => setUseRenewCredit(event.target.checked)} />
+      <span>
+        Usar saldo a favor (disponible: <strong>{formatMoney(renewCreditMinor)} MXN</strong>)
+        {useRenewCredit && (
+          <>
+            <br />
+            Se aplicarán {formatMoney(renewCreditApplied)} MXN · Resto en efectivo: {formatMoney(renewPrice - renewCreditApplied)} MXN
+          </>
+        )}
+      </span>
+    </label>
+  ) : null;
 
 
   const flatActiveMembers = liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }));
@@ -526,18 +559,24 @@ export function CasillerosModal({
   async function handleRenewLocker() {
     if (!selectedLocker || !registerId || !selectedLocker.rentalId) return;
     const code = selectedLocker.code;
+    const price = selectedLocker.monthlyPriceMinor;
+    const creditMinor = useRenewCredit ? Math.min(renewCreditMinor, price) : 0;
+    const cashMinor = price - creditMinor;
     try {
       await apiRenewLocker(
         apiRequest,
         selectedLocker.rentalId,
         {
           register_id: registerId,
-          components: [{ method: 'cash', amount_minor: selectedLocker.monthlyPriceMinor }],
-          expected_total_minor: selectedLocker.monthlyPriceMinor,
+          components: cashMinor > 0 ? [{ method: 'cash', amount_minor: cashMinor }] : [],
+          expected_total_minor: price,
           accepted_shortfall_minor: 0,
+          ...(creditMinor > 0 ? { credit_minor: creditMinor } : {}),
         },
         crypto.randomUUID()
       );
+      setUseRenewCredit(false);
+      setRenewCreditMinor(current => current - creditMinor);
       await refreshLive();
       setToast({
         open: true,
@@ -1134,6 +1173,7 @@ export function CasillerosModal({
                               </strong>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {renewCreditControl}
                               <Button variant="secondary" onClick={() => void handleRenewLocker()}>
                                 Renovar mensualidad (+1 mes)
                               </Button>
@@ -1149,6 +1189,7 @@ export function CasillerosModal({
                             <Notice tone="warning">
                               Suscripción vencida hace {effSelected.overdueDays} día(s). En período de gracia (hasta 14 días para renovar antes de desalojo).
                             </Notice>
+                            {renewCreditControl}
                             <Button onClick={() => void handleRenewLocker()}>
                               Renovar casillero (+1 mes)
                             </Button>
