@@ -84,12 +84,14 @@ def list_notifications(
 
 @router.post("/notifications/deliver")
 def deliver_notifications(
+    request: Request,
     payload: DeliverBatchInput,
     factory: RawFactoryDep,
     principal: Principal,
-    settings: SettingsDep,
 ):
-    return service.trigger_outbox_delivery(factory, principal, payload, settings=settings)
+    # No provider is wired yet: rows are only sent when a real/test adapter is placed on app.state.
+    adapter = getattr(request.app.state, "notification_adapter", None)
+    return service.trigger_outbox_delivery(factory, principal, payload, adapter=adapter)
 
 
 @router.post("/chat", response_model=GimiChatResponse)
@@ -99,6 +101,7 @@ def chat_with_gimi(
     principal: Principal,
     settings: SettingsDep,
 ):
+    service._require_admin(principal)
     orchestrator = GimiOrchestrator(settings=settings)
     actor = GimiActor(
         role=GimiRole.OWNER,
@@ -137,3 +140,4 @@ def simulate_whatsapp(
     settings: SettingsDep,
 ):
     return service.simulate_whatsapp_inbound(factory, principal, payload, settings=settings)
+

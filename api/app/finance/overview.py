@@ -17,7 +17,7 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-_METHOD_LABELS = (("cash", "Efectivo"), ("transfer", "Transferencia confirmada"), ("card", "Tarjeta"))
+_METHOD_LABELS = (("cash", "Efectivo"), ("transfer", "Transferencia confirmada"), ("card", "Tarjeta"), ("credit", "Saldo a favor"))
 
 
 def _by_method(session, payments, refunds):
@@ -31,6 +31,8 @@ def _by_method(session, payments, refunds):
         refunded = -sum(row["amount_minor"] for row in rows if row["amount_minor"] < 0)
         refunded += sum(row.amount_minor for row in refunds if row.payout_method == method)
         charges = [row for row in rows if row["amount_minor"] >= 0]
+        if method == "credit" and not rows:
+            continue  # the credit row only appears when saldo a favor was applied
         gross = sum(row["amount_minor"] for row in charges)
         entry = {"method": method, "label": label, "count": len(charges), "gross_minor": gross,
                  "refunds_minor": refunded, "amount_minor": gross - refunded}
@@ -58,6 +60,29 @@ def _cancellations(session, branch_id, start, end, refunds):
                 "unreviewed_count": sum(1 for r in rentals if r.reviewed_at is None)}}
 
 
+def branch_money(session, branch, start, end):
+    """Branch-local confirmed-money inputs shared by the owner overview and the Gimi chat financial summary."""
+    in_window = lambda value: start <= _utc(value) < end
+    shifts = q.branch_shifts(session, branch.id)
+    payments = []
+    for shift in shifts:
+        payments.extend(row for row in shift_financial_summary(session, shift)["payments"] if in_window(row["recorded_at"]))
+    # Rental deposits are custody liabilities: shift_financial_summary counts them for the cash count,
+    # but they are not revenue, so they are removed here and reported separately.
+    deposit_rows = q.deposit_movements(session, branch.id, start, end)
+    # Member credit deposits are likewise liabilities: counted for the cash count, never as income.
+    deposit_ids = {row.id for row in deposit_rows} | q.credit_deposit_ids(session, branch.id, start, end)
+    payments = [row for row in payments if row["id"] not in deposit_ids]
+    deposits = {"held_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "hold"),
+                "refunded_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "refund"),
+                "retained_minor": sum(r.retained_minor for r in deposit_rows if r.kind == "refund")}
+    overtime = q.overtime_payments(session, branch.id, start, end)
+    payments.extend({"id": row.id, "method": row.method, "status": row.status,
+                     "amount_minor": row.amount_minor, "recorded_at": row.received_at} for row in overtime)
+    refunds = q.product_refunds(session, branch.id, start, end)
+    return shifts, payments, deposits, refunds
+
+
 def owner_overview(factory, principal, from_date, to_date, branch_id):
     with session_factory(factory)() as session:
         try:
@@ -68,7 +93,8 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
             raise
         if not branches:
             raise HttpStatusError(403)
-        branch = branches[0]
+        # shortcut: without branch_id a multi-branch admin sees the first branch by name (reported in period.branch_id), not an aggregate.
+        branch = min(branches, key=lambda b: (b.name, str(b.id)))
         zone = ZoneInfo(branch.timezone or "America/Mexico_City")
         now = datetime.now(timezone.utc)
         today = now.astimezone(zone).date()
@@ -79,28 +105,10 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
         end = datetime.combine(last + timedelta(days=1), time.min, zone).astimezone(timezone.utc)
         in_window = lambda value: start <= _utc(value) < end
 
-        shifts = q.branch_shifts(session, branch.id)
-        payments = []
-        for shift in shifts:
-            payments.extend(row for row in shift_financial_summary(session, shift)["payments"] if in_window(row["recorded_at"]))
-        # Rental deposits are custody liabilities: shift_financial_summary counts them for the cash count,
-        # but they are not revenue, so they are removed here and reported separately.
-        deposit_rows = q.deposit_movements(session, branch.id, start, end)
-        # Member credit deposits are likewise liabilities: counted for the cash count, never as income.
-        deposit_ids = {row.id for row in deposit_rows} | q.credit_deposit_ids(session, branch.id, start, end)
-        payments = [row for row in payments if row["id"] not in deposit_ids]
-        deposits = {"held_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "hold"),
-                    "refunded_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "refund"),
-                    "retained_minor": sum(r.retained_minor for r in deposit_rows if r.kind == "refund")}
-        overtime = q.overtime_payments(session, branch.id, start, end)
-        payments.extend({"id": row.id, "method": row.method, "status": row.status,
-                         "amount_minor": row.amount_minor, "recorded_at": row.received_at} for row in overtime)
+        shifts, payments, deposits, refunds = branch_money(session, branch, start, end)
         # Only confirmed payments count as money received; transfers under review stay pending.
         cash = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "cash")
         card = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "card")
-        # Income paid from saldo a favor is recognized when applied (its deposit was removed above).
-        credit = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "credit")
-        refunds = q.product_refunds(session, branch.id, start, end)
         cash -= sum(row.amount_minor for row in refunds if row.payout_method == "cash")
         card -= sum(row.amount_minor for row in refunds if row.payout_method == "card")
         by_method = _by_method(session, payments, refunds)
@@ -166,7 +174,7 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
             ("Stock bajo", low), ("Casilleros vencidos", overdue), ("Cancelaciones sin revisar", cancellations)) if count]
         return {
             "period": {"from": first, "to": last, "branch_id": branch.id, "timezone": str(zone)},
-            "pulse": {"confirmed_minor": cash + card + credit, "alerts_count": sum(c["count"] for c in categories)},
+            "pulse": {"confirmed_minor": sum(row["amount_minor"] for row in by_method), "alerts_count": sum(c["count"] for c in categories)},
             "finances": {"cash_minor": cash, "card_minor": card,
                 "confirmed_count": sum(1 for row in payments if row["status"] == "confirmed" and row["amount_minor"] >= 0),
                 "pending_transfer_minor": sum(row["amount_minor"] for row in pending), "pending_transfer_count": len(pending),

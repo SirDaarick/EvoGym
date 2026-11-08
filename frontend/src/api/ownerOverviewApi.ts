@@ -15,7 +15,7 @@ export interface OwnerOverviewResponse {
   pulse: { confirmed_minor: number; alerts_count: number };
   finances: { cash_minor: number; card_minor: number; confirmed_count: number; pending_transfer_minor: number;
     pending_transfer_count: number; shift_discrepancies: OverviewShiftDiscrepancy[];
-    count_discrepancies: { shift_id: string; product: string; expected_quantity: number; physical_quantity: number }[];
+    count_discrepancies: { shift_id: string; product: string; expected_quantity: number | null; physical_quantity: number }[];
     by_method?: OverviewMethodRow[]; deposits?: OverviewDeposits };
   cancellations?: OverviewCancellations;
   members: { total_members: number; active_members: number; active_percent: number; median_tenure_months: number;

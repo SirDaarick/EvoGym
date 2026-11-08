@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from admin_session_helpers import approved_admin_headers
 from app.main import create_app
+from app.notifications.delivery import FakeDeliveryAdapter
 from app.notifications.outbox import enqueue
 from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db
@@ -107,7 +108,13 @@ def test_owner_gimi_outbox_notifications_and_delivery(tmp_path):
             assert rows[0]["status"] == "pending"
             assert rows[0]["recipient"] == "+525512345678"
 
-            # Deliver batch
+            # Deliver batch: no real provider configured, so nothing is faked and the row stays pending
+            noop = client.post("/api/v1/owner/gimi/notifications/deliver", json={"batch_size": 10}, headers=headers)
+            assert noop.json() == {"attempted": 0}
+            assert client.get("/api/v1/owner/gimi/notifications", headers=headers).json()[0]["status"] == "pending"
+
+            # A test-only adapter injected through app state is the only way rows get marked sent here
+            client.app.state.notification_adapter = FakeDeliveryAdapter()
             deliver_res = client.post(
                 "/api/v1/owner/gimi/notifications/deliver",
                 json={"batch_size": 10},
@@ -122,5 +129,23 @@ def test_owner_gimi_outbox_notifications_and_delivery(tmp_path):
             assert len(after_rows) == 1
             assert after_rows[0]["status"] == "sent"
             assert after_rows[0]["provider_message_id"] is not None
+    finally:
+        engine.dispose()
+
+
+def test_owner_gimi_chat_and_whatsapp_simulate_are_admin_only(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory)
+        _, reception_token = _seed_receptionist(factory, branch)
+        seed_admin(factory)
+        delivery = FakeRecoveryDelivery()
+        staff = {"Authorization": f"Bearer {reception_token}"}
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            assert client.post("/api/v1/owner/gimi/chat", json={"message": "hola"}, headers=staff).status_code == 403
+            sim = {"phone": "+525500005606", "message": "hola"}
+            assert client.post("/api/v1/owner/gimi/whatsapp/simulate", json=sim, headers=staff).status_code == 403
+            headers = approved_admin_headers(client, delivery)
+            assert client.post("/api/v1/owner/gimi/chat", json={"message": "hola"}, headers=headers).status_code == 200
     finally:
         engine.dispose()

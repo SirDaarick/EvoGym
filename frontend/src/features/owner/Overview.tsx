@@ -117,7 +117,7 @@ interface OverviewViewProps {
     cancellations?: { totalCount: number; productSales: number; productRefunds: { count: number; amountMinor: number };
       rental: { count: number; refundMinor: number; cancelledDebtMinor: number; unreviewedCount: number } };
     deposits?: { heldMinor: number; refundedMinor: number; retainedMinor: number };
-    countDiscrepancies: { id: string; shiftId: string; variance: number; productName: string }[];
+    countDiscrepancies: { id: string; shiftId: string; variance: number | null; productName: string }[];
   };
   attendance: { liveOccupancyCount: number; gymCapacity: number; liveOccupancyPercent: number;
     peakHour: { label: string }; valleyHour: { label: string }; averageDurationMinutes: number };
@@ -355,7 +355,7 @@ export function OverviewView({ period, setPeriod, summary, attendance, memberAna
                             {count.productName}
                             <p className="muted">{count.shiftId}</p>
                           </td>
-                          <td>{count.variance}</td>
+                          <td>{count.variance ?? 'n/d'}</td>
                         </tr>
                       ))}
                     </tbody>

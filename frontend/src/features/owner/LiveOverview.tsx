@@ -48,7 +48,7 @@ export function LiveOverview({ apiRequest }: { apiRequest: AuthenticatedRequest 
     deposits: finances.deposits && { heldMinor: finances.deposits.held_minor, refundedMinor: finances.deposits.refunded_minor,
       retainedMinor: finances.deposits.retained_minor },
     countDiscrepancies: finances.count_discrepancies.map((row, index) => ({ id: `${row.shift_id}-${index}`,
-      shiftId: row.shift_id, productName: row.product, variance: row.physical_quantity - row.expected_quantity })),
+      shiftId: row.shift_id, productName: row.product, variance: row.expected_quantity === null ? null : row.physical_quantity - row.expected_quantity })),
   } : null} attendance={{ liveOccupancyCount: attendance.live_occupancy_count, gymCapacity: attendance.gym_capacity,
     liveOccupancyPercent: attendance.gym_capacity ? Math.round(100 * attendance.live_occupancy_count / attendance.gym_capacity) : 0,
     peakHour: { label: hour(attendance.peak_hour) }, valleyHour: { label: hour(attendance.valley_hour) }, averageDurationMinutes: 0 }}

@@ -110,3 +110,16 @@ describe('formatShiftWindow', () => {
     expect(formatShiftWindow('2026-10-01T15:00:00Z', null, 'America/Mexico_City')).toBe('01 oct, 09:00 – sin cierre');
   });
 });
+
+
+describe('live overview count discrepancies', () => {
+  it('shows n/d instead of NaN when the expected quantity was never initialized', async () => {
+    const body = { ...data, finances: { ...data.finances, count_discrepancies: [
+      { shift_id: 's1', product: 'Agua', expected_quantity: null, physical_quantity: 4 }] } };
+    const request = vi.fn(async (_path: string) => new Response(JSON.stringify(body), { status: 200 }));
+    render(<MemoryRouter><Overview apiRequest={request} /></MemoryRouter>);
+    expect(await screen.findByText('Agua')).toBeVisible();
+    expect(screen.getByText('n/d')).toBeVisible();
+    expect(screen.queryByText('NaN')).not.toBeInTheDocument();
+  });
+});

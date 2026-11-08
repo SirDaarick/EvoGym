@@ -71,6 +71,7 @@ def owner_history(factory, principal, from_date, to_date, category, method, bran
             raise
         if not branches:
             raise HttpStatusError(403)
+        # shortcut: all-branch history uses the first branch's timezone for day windows; upgrade if branches span timezones.
         zone = ZoneInfo(branches[0].timezone or "America/Mexico_City")
         today = datetime.now(timezone.utc).astimezone(zone).date()
         first, last = from_date or today, to_date or today

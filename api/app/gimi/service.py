@@ -9,7 +9,7 @@ from app.errors import HttpStatusError, session_factory
 from app.gimi.rag.document_ingest import ingest_document
 from app.gimi.rag.ingest import Rule, ingest_rules
 from app.gimi.schemas import DeliverBatchInput, KnowledgeRuleInput
-from app.notifications.delivery import FakeDeliveryAdapter, NotConfiguredDeliveryAdapter, deliver_batch
+from app.notifications.delivery import NotConfiguredDeliveryAdapter, deliver_batch
 
 
 def _require_admin(principal) -> None:
@@ -174,12 +174,10 @@ def list_outbox_notifications(factory, principal, status: str | None = None, lim
         ]
 
 
-def trigger_outbox_delivery(factory, principal, payload: DeliverBatchInput, settings=None) -> dict:
+def trigger_outbox_delivery(factory, principal, payload: DeliverBatchInput, adapter=None) -> dict:
     _require_admin(principal)
-    # If production and not configured, use NotConfiguredDeliveryAdapter; otherwise allow FakeDeliveryAdapter
-    is_prod = getattr(settings, "environment", "development") == "production"
-    adapter = NotConfiguredDeliveryAdapter() if is_prod else FakeDeliveryAdapter()
-    attempted = deliver_batch(factory, adapter, batch_size=payload.batch_size)
+    # Never fake delivery: without a configured adapter rows stay pending.
+    attempted = deliver_batch(factory, adapter or NotConfiguredDeliveryAdapter(), batch_size=payload.batch_size)
     return {"attempted": attempted}
 
 
@@ -225,3 +223,4 @@ def simulate_whatsapp_inbound(factory, principal, payload: "WhatsappSimulateInpu
             reply_text=outbox.body if outbox else "No se generó respuesta.",
             outbox_id=str(outbox.id) if outbox else None,
         )
+

@@ -707,48 +707,46 @@ class GimiDispatcher:
     # -----------------------------------------------------------------------
 
     def _handle_owner_financial_overview(self, session: Session, actor: GimiActor, params) -> DispatchResult:
-        # Aggregated stats with optional date range
-        from app.db.models import Order, Payment
+        # Same branch-local windows and money rules as the owner overview endpoint (deposits excluded, refunds netted).
+        from zoneinfo import ZoneInfo
 
-        base_filter = [Payment.status == "confirmed"]
-        date_label = "acumulado histórico"
+        from app.db.models import Branch
+        from app.finance import queries as finance_queries
+        from app.finance.overview import _by_method, branch_money
 
         from_date = getattr(params, "from_date", None)
         to_date = getattr(params, "to_date", None)
-
-        if from_date:
-            start_dt = datetime.combine(from_date, time.min, tzinfo=timezone.utc)
-            base_filter.append(Payment.received_at >= start_dt)
-        if to_date:
-            end_dt = datetime.combine(to_date, time.max, tzinfo=timezone.utc)
-            base_filter.append(Payment.received_at <= end_dt)
-
+        date_label = "acumulado histórico"
         if from_date and to_date:
-            if from_date == to_date:
-                date_label = f"del {from_date.isoformat()}"
-            else:
-                date_label = f"del {from_date.isoformat()} al {to_date.isoformat()}"
+            date_label = f"del {from_date.isoformat()}" if from_date == to_date else f"del {from_date.isoformat()} al {to_date.isoformat()}"
         elif from_date:
             date_label = f"desde el {from_date.isoformat()}"
         elif to_date:
             date_label = f"hasta el {to_date.isoformat()}"
 
-        total_sales = session.scalar(select(func.sum(Payment.amount_minor)).where(*base_filter)) or 0
-        total_payments = session.scalar(select(func.count(Payment.id)).where(*base_filter)) or 0
+        if actor.branch_id is not None:
+            branch = session.get(Branch, actor.branch_id)
+            branches = [branch] if branch is not None and branch.is_active else []
+        else:
+            branches = finance_queries.active_branches(session)
 
-        cash_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "cash")
-        ) or 0
-        card_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "card")
-        ) or 0
-        transfer_sum = session.scalar(
-            select(func.sum(Payment.amount_minor)).where(*base_filter, Payment.method == "transfer")
-        ) or 0
+        totals = {"cash": 0, "card": 0, "transfer": 0, "credit": 0}
+        count = 0
+        for branch in branches:
+            zone = ZoneInfo(branch.timezone or "America/Mexico_City")
+            start = datetime.combine(from_date, time.min, zone).astimezone(timezone.utc) if from_date else datetime(2000, 1, 1, tzinfo=timezone.utc)
+            end = (datetime.combine(to_date + timedelta(days=1), time.min, zone).astimezone(timezone.utc)
+                   if to_date else datetime(2100, 1, 1, tzinfo=timezone.utc))
+            _, payments, _, refunds = branch_money(session, branch, start, end)
+            for row in _by_method(session, payments, refunds):
+                totals[row["method"]] += row["amount_minor"]
+            count += sum(1 for row in payments if row["status"] == "confirmed" and row["amount_minor"] >= 0)
+        total_sales = sum(totals.values())
 
         summary = (
-            f"Resumen financiero ({date_label}): {_format_money(total_sales)} confirmados ({total_payments} operaciones). "
-            f"Efectivo: {_format_money(cash_sum)}, Tarjeta: {_format_money(card_sum)}, Transferencia: {_format_money(transfer_sum)}."
+            f"Resumen financiero ({date_label}): {_format_money(total_sales)} confirmados ({count} operaciones). "
+            f"Efectivo: {_format_money(totals['cash'])}, Tarjeta: {_format_money(totals['card'])}, "
+            f"Transferencia: {_format_money(totals['transfer'])}, Saldo a favor: {_format_money(totals['credit'])}."
         )
 
         return DispatchResult(
@@ -759,13 +757,13 @@ class GimiDispatcher:
                 "from_date": from_date.isoformat() if from_date else None,
                 "to_date": to_date.isoformat() if to_date else None,
                 "total_sales_minor": total_sales,
-                "total_orders": total_payments,
-                "cash_minor": cash_sum,
-                "card_minor": card_sum,
-                "transfer_minor": transfer_sum,
+                "total_orders": count,
+                "cash_minor": totals["cash"],
+                "card_minor": totals["card"],
+                "transfer_minor": totals["transfer"],
+                "credit_minor": totals["credit"],
             },
         )
-
     def _handle_owner_attendance_analytics(self, session: Session, actor: GimiActor, params) -> DispatchResult:
         now_utc = datetime.now(timezone.utc)
         period = getattr(params, "period", "today")

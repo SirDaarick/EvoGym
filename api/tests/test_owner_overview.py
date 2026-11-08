@@ -520,3 +520,52 @@ def test_owner_overview_excludes_rental_deposits_and_reports_them_separately(tmp
             assert response.json()["pulse"]["confirmed_minor"] == 500
     finally:
         engine.dispose()
+
+
+def test_owner_overview_headline_includes_confirmed_transfer_and_equals_by_method(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory)
+        actor, _ = _seed_receptionist(factory, branch)
+        seed_admin(factory)
+        with factory.begin() as session:
+            member = Member(member_number="TRF-OVERVIEW", full_name="Transfer Member", phone="5550100")
+            plan = Plan(code="trf-plan", name="Trf Plan", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Trf Plan", price_minor=12000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            register = create_cash_register(session, branch, "trf-overview", "Trf")
+            session.flush()
+            open_shift(session, register_id=register.id, opened_by=actor,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            sale = post_membership_cash_sale(session, register_id=register.id, actor_id=actor,
+                authorized_branch_id=branch, member_id=member.id, plan_version_id=version.id,
+                idempotency_key="trf-confirmed", payment_method="transfer")
+            for payment in session.query(Payment).filter(Payment.order_id == sale.order.id):
+                payment.status = "confirmed"
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            data = client.get(f"/api/v1/owner/overview?branch_id={branch}", headers=approved_admin_headers(client, delivery)).json()
+            assert data["finances"]["pending_transfer_minor"] == 0
+            methods = {m["method"]: m for m in data["finances"]["by_method"]}
+            assert methods["transfer"]["amount_minor"] == 12000
+            assert data["pulse"]["confirmed_minor"] == 12000
+            assert data["pulse"]["confirmed_minor"] == sum(m["amount_minor"] for m in data["finances"]["by_method"])
+    finally:
+        engine.dispose()
+
+def test_owner_overview_without_branch_id_uses_first_branch_by_name_and_reports_it(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        beta = _seed_branch(factory, code="beta", name="Beta")
+        alpha = _seed_branch(factory, code="alpha", name="Alpha")
+        seed_admin(factory)
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            headers = approved_admin_headers(client, delivery)
+            assert client.get("/api/v1/owner/overview", headers=headers).json()["period"]["branch_id"] == str(alpha)
+            assert client.get(f"/api/v1/owner/overview?branch_id={beta}", headers=headers).json()["period"]["branch_id"] == str(beta)
+    finally:
+        engine.dispose()

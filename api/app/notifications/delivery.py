@@ -100,6 +100,9 @@ def _claim(factory, now: datetime, batch_size: int) -> list[OutboundMessage]:
         ).all()
         claimed = []
         for row in rows:
+            if row.status == "sending" and row.attempts >= row.max_attempts:  # reclaimed lease with no attempts left
+                row.status, row.locked_at, row.last_error = "dead", None, "lease_expired"
+                continue
             row.status = "sending"
             row.attempts += 1
             row.locked_at = now

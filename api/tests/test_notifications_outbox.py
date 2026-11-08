@@ -135,3 +135,14 @@ def test_stale_sending_row_is_reclaimed(factory):
         row.status, row.attempts, row.locked_at = "sending", 1, NOW - timedelta(hours=1)
     assert deliver_batch(factory, FakeDeliveryAdapter(), now=NOW) == 1
     assert _row(factory, row_id).status == "sent"
+
+
+def test_stale_sending_row_at_max_attempts_is_dead_not_resent(factory):
+    row_id = _enqueue(factory)
+    with factory.begin() as session:
+        row = session.get(NotificationOutbox, row_id)
+        row.status, row.attempts, row.locked_at = "sending", row.max_attempts, NOW - timedelta(hours=1)
+    adapter = FakeDeliveryAdapter()
+    assert deliver_batch(factory, adapter, now=NOW) == 0
+    row = _row(factory, row_id)
+    assert adapter.sent == [] and (row.status, row.attempts, row.last_error) == ("dead", row.max_attempts, "lease_expired")
