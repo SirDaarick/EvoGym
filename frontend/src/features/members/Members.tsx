@@ -322,12 +322,13 @@ export function MemberDetail({
     onRefresh?: () => void;
     onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
     legalFullName?: string;
+    preferredName?: string | null;
     email?: string | null;
     liveNotesList?: MemberNoteDTO[];
     onAddLiveNote?: (body: string) => Promise<void>;
     noteSubmitting?: boolean;
     noteError?: string;
-    onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+    onUpdateMember?: (payload: { full_name: string; preferred_name: string | null; phone: string; email: string | null }) => Promise<void>;
     apiRequest?: AuthenticatedRequest;
   };
 }) {
@@ -346,6 +347,7 @@ function LiveMemberDetail({
   onRefresh,
   onCheckIn,
   legalFullName,
+  preferredName,
   email,
   liveNotesList,
   onAddLiveNote,
@@ -364,12 +366,13 @@ function LiveMemberDetail({
   onRefresh?: () => void;
   onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
   legalFullName?: string;
+  preferredName?: string | null;
   email?: string | null;
   liveNotesList?: MemberNoteDTO[];
   onAddLiveNote?: (body: string) => Promise<void>;
   noteSubmitting?: boolean;
   noteError?: string;
-  onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+  onUpdateMember?: (payload: { full_name: string; preferred_name: string | null; phone: string; email: string | null }) => Promise<void>;
   apiRequest?: AuthenticatedRequest;
 }) {
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
@@ -382,6 +385,7 @@ function LiveMemberDetail({
     orderId?: string;
   }>({ open: false, operation: 'sale' });
   const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
+  const [editPreferredName, setEditPreferredName] = useState(preferredName ?? '');
   const [editPhone, setEditPhone] = useState(member.phone ?? '');
   const [editEmail, setEditEmail] = useState(email ?? '');
   const [savingEdit, setSavingEdit] = useState(false);
@@ -528,6 +532,7 @@ function LiveMemberDetail({
 
   function handleOpenEdit() {
     setEditFullName(legalFullName ?? member.name);
+    setEditPreferredName(preferredName ?? '');
     setEditPhone(member.phone ?? '');
     setEditEmail(email ?? '');
     setEditError('');
@@ -543,6 +548,7 @@ function LiveMemberDetail({
       if (onUpdateMember) {
         await onUpdateMember({
           full_name: editFullName.trim(),
+          preferred_name: editPreferredName.trim() || null,
           phone: editPhone.trim(),
           email: editEmail.trim() || null,
         });
@@ -562,9 +568,10 @@ function LiveMemberDetail({
         <PageHeader
           eyebrow="Socio"
           title={member.name}
-          description={member.phone || 'Teléfono no capturado'}
+          description={[preferredName?.trim() ? legalFullName : null, member.phone || 'Teléfono no capturado'].filter(Boolean).join(' · ')}
           action={
             <div className="member-hero-actions">
+              {preferredName?.trim() && <Badge tone="success">Le dicen así</Badge>}
               <Badge tone={statusTone}>
                 {currentPeriod ? (currentPeriod.access_status === 'eligible' ? 'Elegible' : currentPeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : currentPeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : currentPeriod.access_status) : ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
               </Badge>
@@ -619,6 +626,14 @@ function LiveMemberDetail({
             required
             value={editFullName}
             onChange={e => setEditFullName(e.target.value)}
+            disabled={savingEdit}
+          />
+          <Field
+            id="edit-preferred-name"
+            label="¿Cómo le gusta que le digan? (opcional)"
+            value={editPreferredName}
+            onChange={e => setEditPreferredName(e.target.value)}
+            maxLength={160}
             disabled={savingEdit}
           />
           <Field

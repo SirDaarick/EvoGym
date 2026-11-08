@@ -4,6 +4,7 @@ import { LiveMembershipCheckout } from './LiveMembershipCheckout';
 
 export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { onFindLater: (memberNumber: string) => void; onUnresolvedChange: (unresolved: boolean) => void }) {
   const [fullName, setFullName] = useState('');
+  const [preferredName, setPreferredName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -55,6 +56,7 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     const request: CreateMemberRequest = {
       member_number: createMemberNumber(),
       full_name: fullName.trim(),
+      ...(preferredName.trim() ? { preferred_name: preferredName.trim() } : {}),
       phone: phone.trim(),
       ...(email.trim() ? { email: email.trim() } : {}),
     };
@@ -66,6 +68,7 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     const request: CreateMemberRequest = {
       member_number: createMemberNumber(),
       full_name: fullName.trim(),
+      ...(preferredName.trim() ? { preferred_name: preferredName.trim() } : {}),
       phone: phone.trim(),
       ...(email.trim() ? { email: email.trim() } : {}),
     };
@@ -85,6 +88,8 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     </> : <form onSubmit={submit}>
       <label htmlFor="live-registration-name">Nombre completo</label>
       <input id="live-registration-name" required value={fullName} onChange={event => setFullName(event.target.value)} disabled={Boolean(intent) || submitting} />
+      <label htmlFor="live-registration-preferred-name">¿Cómo le gusta que le digan? (opcional)</label>
+      <input id="live-registration-preferred-name" maxLength={160} value={preferredName} onChange={event => setPreferredName(event.target.value)} disabled={Boolean(intent) || submitting} />
       <label htmlFor="live-registration-phone">Teléfono</label>
       <input id="live-registration-phone" required value={phone} onChange={event => setPhone(event.target.value)} disabled={Boolean(intent) || submitting} />
       <label htmlFor="live-registration-email">Correo electrónico (opcional)</label>

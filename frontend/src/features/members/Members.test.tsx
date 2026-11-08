@@ -558,6 +558,7 @@ describe('member workflow', () => {
           const body = JSON.parse(init?.body as string);
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
           expect(body.full_name).toBe('Elena Morales');
+          expect(body.preferred_name).toBe('Ele');
           expect(body.phone).toBe('5551112233');
           expect(body.email).toBe('elena@example.com');
           return new Response(JSON.stringify(currentMember), { status: 201 });
@@ -567,6 +568,7 @@ describe('member workflow', () => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
           expect(body).toEqual({
             full_name: 'Elena Morales',
+            preferred_name: 'Lena',
             phone: '5559998877',
             email: null,
           });
@@ -602,6 +604,7 @@ describe('member workflow', () => {
         </MemoryRouter>
       );
       await userEvent.type(screen.getByLabelText('Nombre completo'), 'Elena Morales');
+      await userEvent.type(screen.getByLabelText('¿Cómo le gusta que le digan? (opcional)'), 'Ele');
       await userEvent.type(screen.getByLabelText('Teléfono'), '5551112233');
       await userEvent.type(screen.getByLabelText('Correo electrónico (opcional)'), 'elena@example.com');
       await userEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
@@ -617,15 +620,24 @@ describe('member workflow', () => {
         </MemoryRouter>
       );
       expect(await screen.findByRole('button', { name: 'Editar datos' })).toBeVisible();
+      // Hero highlights the preferred name and keeps the legal name as secondary text
+      expect(screen.getByRole('heading', { level: 1, name: 'Ele' })).toBeVisible();
+      expect(screen.getByText('Le dicen así')).toBeVisible();
+      expect(screen.getByText(/Elena Morales · /)).toBeVisible();
       await userEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
 
       // Legal name "Elena Morales" must be pre-filled, NOT preferred_name "Ele"!
       const nameInput = screen.getByLabelText('Nombre completo') as HTMLInputElement;
+      const preferredInput = screen.getByLabelText('¿Cómo le gusta que le digan? (opcional)') as HTMLInputElement;
       const phoneInput = screen.getByLabelText('Teléfono') as HTMLInputElement;
       const emailInput = screen.getByLabelText('Correo electrónico (opcional)') as HTMLInputElement;
       expect(nameInput.value).toBe('Elena Morales');
+      expect(preferredInput.value).toBe('Ele');
       expect(phoneInput.value).toBe('5551112233');
       expect(emailInput.value).toBe('elena@example.com');
+
+      await userEvent.clear(preferredInput);
+      await userEvent.type(preferredInput, 'Lena');
 
       // Update phone and clear email
       await userEvent.clear(phoneInput);

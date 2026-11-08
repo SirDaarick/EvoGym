@@ -29,6 +29,7 @@ export interface CurrentRegisterShift {
 export interface CreateMemberRequest {
   member_number: string;
   full_name: string;
+  preferred_name?: string | null;
   phone: string;
   email?: string | null;
 }
