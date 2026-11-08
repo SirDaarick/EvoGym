@@ -19,6 +19,7 @@ import {
 } from '../../api/membershipCheckoutApi';
 import { depositMemberCredit } from '../../api/memberCreditApi';
 import { getMember } from '../../api/membersApi';
+import { getMemberReceivables, recordRentalRepayment, type MemberReceivableItem } from '../../api/rentalsApi';
 import { browserRequest } from '../../api/http';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList, { type AnimatedListEntry } from '../catalog/react-bits/AnimatedList';
@@ -47,6 +48,27 @@ interface DebtPaymentIntent {
   body: MembershipDebtPaymentInput;
   idempotencyKey: string;
   changeToCreditMinor?: number;
+}
+
+/** A rental repayment: the endpoint takes one method per call, so saldo a favor and cash go as two calls. */
+interface RentalRepaymentIntent {
+  registerId: string;
+  rentalId: string;
+  creditMinor: number;
+  cashMinor: number;
+  /** The credit call already succeeded; a retry must send only the cash part. */
+  creditDone: boolean;
+}
+
+interface ReceiptView {
+  amountMinor: number;
+  creditMinor: number;
+  remainingMinor: number;
+  footer: string;
+}
+
+function rentalLabel(item: MemberReceivableItem): string {
+  return `Renta de ${item.kind === 'locker' ? 'casillero' : 'guantes'} ${item.asset_code}`;
 }
 
 const CREDIT_DEPOSIT_FAILED = 'El pago sí se registró, pero no se pudo depositar el saldo a favor. Puedes agregarlo desde el perfil del socio.';
@@ -121,6 +143,10 @@ export function LiveMembershipCheckout({
   const [unknownDebtIntent, setUnknownDebtIntent] = useState<DebtPaymentIntent | null>(null);
   const [debtReceipt, setDebtReceipt] = useState<MembershipDebtPaymentReceipt | null>(null);
   const debtIdempotencyMapRef = useRef<Record<string, string>>({});
+  const [rentalDebts, setRentalDebts] = useState<MemberReceivableItem[]>([]);
+  const [selectedRentalId, setSelectedRentalId] = useState('');
+  const [pendingRentalIntent, setPendingRentalIntent] = useState<RentalRepaymentIntent | null>(null);
+  const [rentalReceipt, setRentalReceipt] = useState<ReceiptView | null>(null);
 
   const submittingRef = useRef(false);
 
@@ -258,20 +284,36 @@ export function LiveMembershipCheckout({
     let active = true;
     if (!registerId || !selectedMember) {
       setOpenDebts([]);
+      setRentalDebts([]);
       return () => { active = false; };
     }
     setDebtsLoading(true);
     setError('');
-    void (apiRequest
-      ? listRegisterMemberOpenDebts(registerId, selectedMember.id, apiRequest)
-      : listRegisterMemberOpenDebts(registerId, selectedMember.id)
-    ).then(items => {
+    const branchId = registers.find(r => r.id === registerId)?.branch_id;
+    // Rental receivables are best effort: a failure keeps the membership debts usable.
+    const rentalsRequest = typeof branchId === 'string'
+      ? getMemberReceivables(apiRequest ?? browserRequest, selectedMember.id, branchId)
+          .then(page => page.items.filter(item => item.outstanding_minor > 0))
+          .catch(() => [] as MemberReceivableItem[])
+      : Promise.resolve([] as MemberReceivableItem[]);
+    void Promise.all([
+      apiRequest
+        ? listRegisterMemberOpenDebts(registerId, selectedMember.id, apiRequest)
+        : listRegisterMemberOpenDebts(registerId, selectedMember.id),
+      rentalsRequest,
+    ]).then(([items, rentals]) => {
       if (!active) return;
       setOpenDebts(items);
+      setRentalDebts(rentals);
       const preferred = (initialOrderId && items.find(d => d.order_id === initialOrderId)) || items[0];
+      setSelectedRentalId('');
       if (preferred) {
         setSelectedDebtOrderId(preferred.order_id);
         setDebtAmountMajor((preferred.remaining_balance_minor / 100).toFixed(2));
+      } else if (rentals[0]) {
+        setSelectedDebtOrderId('');
+        setSelectedRentalId(rentals[0].payment_id);
+        setDebtAmountMajor((rentals[0].outstanding_minor / 100).toFixed(2));
       } else {
         setSelectedDebtOrderId('');
         setDebtAmountMajor('');
@@ -280,9 +322,12 @@ export function LiveMembershipCheckout({
       if (active) setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los adeudos pendientes.');
     }).finally(() => { if (active) setDebtsLoading(false); });
     return () => { active = false; };
-  }, [registerId, selectedMember, initialOrderId, apiRequest]);
+  }, [registerId, registers, selectedMember, initialOrderId, apiRequest]);
 
-  const selectedDebt = openDebts.find(d => d.order_id === selectedDebtOrderId) ?? null;
+  const selectedRental = rentalDebts.find(r => r.payment_id === selectedRentalId) ?? null;
+  const selectedDebt = selectedRental ? null : openDebts.find(d => d.order_id === selectedDebtOrderId) ?? null;
+  const hasDebtTarget = selectedDebt !== null || selectedRental !== null;
+  const owedMinor = selectedRental ? selectedRental.outstanding_minor : selectedDebt ? selectedDebt.remaining_balance_minor : null;
   const rawDebtNumber = Number(debtAmountMajor);
   const parsedDebtMinor = debtAmountMajor.trim() ? Math.round(rawDebtNumber * 100) : 0;
   const debtAmountInvalid =
@@ -290,7 +335,22 @@ export function LiveMembershipCheckout({
     !Number.isFinite(rawDebtNumber) ||
     !Number.isSafeInteger(parsedDebtMinor) ||
     parsedDebtMinor <= 0 ||
-    (selectedDebt !== null && parsedDebtMinor > selectedDebt.remaining_balance_minor);
+    (owedMinor !== null && parsedDebtMinor > owedMinor);
+
+  /** Index into the combined list: membership debts first, then rental receivables. */
+  function selectDebtEntry(idx: number) {
+    if (pendingRentalIntent) return;
+    if (idx < openDebts.length) {
+      setSelectedRentalId('');
+      setSelectedDebtOrderId(openDebts[idx].order_id);
+      setDebtAmountMajor((openDebts[idx].remaining_balance_minor / 100).toFixed(2));
+    } else if (rentalDebts[idx - openDebts.length]) {
+      const rental = rentalDebts[idx - openDebts.length];
+      setSelectedDebtOrderId('');
+      setSelectedRentalId(rental.payment_id);
+      setDebtAmountMajor((rental.outstanding_minor / 100).toFixed(2));
+    }
+  }
 
   function getStableDebtIdempotencyKey(regId: string, orderId: string, minor: number, creditMinor = 0): string {
     const fingerprint = `${regId}:${orderId}:${minor}:${creditMinor}`;
@@ -328,7 +388,62 @@ export function LiveMembershipCheckout({
     }
   }
 
+  async function sendRentalPayment(intent: RentalRepaymentIntent) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError('');
+    let creditDone = intent.creditDone;
+    try {
+      const call = (method: 'credit' | 'cash', amountMinor: number, key: string) => recordRentalRepayment(
+        apiRequest ?? browserRequest,
+        intent.rentalId,
+        { register_id: intent.registerId, method, amount_minor: amountMinor },
+        key,
+      );
+      let last;
+      if (intent.creditMinor > 0 && !creditDone) {
+        last = await call('credit', intent.creditMinor, getStableDebtIdempotencyKey(intent.registerId, `rental-credit:${intent.rentalId}`, intent.creditMinor));
+        creditDone = true;
+      }
+      if (intent.cashMinor > 0) {
+        last = await call('cash', intent.cashMinor, getStableDebtIdempotencyKey(intent.registerId, `rental-cash:${intent.rentalId}`, intent.cashMinor));
+      }
+      setPendingRentalIntent(null);
+      void loadMemberCredit(selectedMemberId);
+      setRentalReceipt({
+        amountMinor: intent.creditMinor + intent.cashMinor,
+        creditMinor: intent.creditMinor,
+        remainingMinor: last?.remaining_minor ?? 0,
+        footer: selectedRental ? rentalLabel(selectedRental) : 'Renta',
+      });
+      notifyCompleted();
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'No se pudo registrar el abono de la renta.';
+      if (creditDone && intent.creditMinor > 0) {
+        // Credit is already spent; keep only the cash part pending so a retry never re-sends it.
+        setPendingRentalIntent({ ...intent, creditDone: true });
+        setError(`El saldo a favor (${formatMoney(intent.creditMinor)}) sí se aplicó; solo falta el efectivo (${formatMoney(intent.cashMinor)}). Reintenta el cobro en efectivo. ${message}`);
+      } else if (isObject(reason) && reason.kind === 'network') {
+        setPendingRentalIntent(intent);
+        setError('No se pudo confirmar si el servidor registró el abono. Conservamos la misma solicitud; reintentala para consultar el resultado sin duplicar el cobro.');
+      } else {
+        setPendingRentalIntent(null);
+        setError(message);
+      }
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
   function submitDebtPayment() {
+    if (pendingRentalIntent) { void sendRentalPayment(pendingRentalIntent); return; }
+    if (selectedRental) {
+      if (!registerId || !shift || debtAmountInvalid || submittingRef.current) return;
+      void sendRentalPayment({ registerId, rentalId: selectedRental.rental_id, creditMinor: 0, cashMinor: parsedDebtMinor, creditDone: false });
+      return;
+    }
     if (!selectedMember || !registerId || !shift || !selectedDebt || debtAmountInvalid || submittingRef.current) return;
     const idempotencyKey = getStableDebtIdempotencyKey(registerId, selectedDebt.order_id, parsedDebtMinor);
     void sendDebtPayment({
@@ -425,17 +540,36 @@ export function LiveMembershipCheckout({
   const selectedPlanIndex = plans.findIndex(p => p.id === planId);
 
   // AnimatedList entries for debts
-  const debtEntries: AnimatedListEntry[] = openDebts.map(d => ({
-    id: d.order_id,
-    title: d.description_snapshot,
-    description: `Pedido ${d.order_id.slice(0, 8)}… · Adeudo inicial: ${formatMoney(d.initial_outstanding_minor)} MXN`,
-    meta: `Resta: ${formatMoney(d.remaining_balance_minor)} MXN`,
-  }));
+  const debtEntries: AnimatedListEntry[] = [
+    ...openDebts.map(d => ({
+      id: d.order_id,
+      title: d.description_snapshot,
+      description: `Pedido ${d.order_id.slice(0, 8)}… · Adeudo inicial: ${formatMoney(d.initial_outstanding_minor)} MXN`,
+      meta: `Resta: ${formatMoney(d.remaining_balance_minor)} MXN`,
+    })),
+    ...rentalDebts.map(r => ({
+      id: r.payment_id,
+      title: rentalLabel(r),
+      description: `Adeudo inicial: ${formatMoney(r.amount_minor)} MXN`,
+      meta: `Resta: ${formatMoney(r.outstanding_minor)} MXN`,
+    })),
+  ];
 
-  const selectedDebtIndex = openDebts.findIndex(d => d.order_id === selectedDebtOrderId);
+  const selectedDebtIndex = selectedRental
+    ? openDebts.length + rentalDebts.findIndex(r => r.payment_id === selectedRentalId)
+    : openDebts.findIndex(d => d.order_id === selectedDebtOrderId);
+
+  const receipt: ReceiptView | null = debtReceipt
+    ? {
+        amountMinor: debtReceipt.amount_minor,
+        creditMinor: debtReceipt.credit_minor ?? 0,
+        remainingMinor: debtReceipt.remaining_balance_minor,
+        footer: `Recibo: ${debtReceipt.id} · Turno: ${debtReceipt.shift_id}`,
+      }
+    : rentalReceipt;
 
   // Debt repayment receipt dialog
-  if (debtReceipt) {
+  if (receipt) {
     return (
       <div
         className="membership-checkout-modal-overlay"
@@ -450,17 +584,17 @@ export function LiveMembershipCheckout({
           </div>
           <h3 id="checkout-title" style={{ margin: '8px 0', fontSize: '20px' }}>Abono registrado</h3>
           <p role="status">
-            {(debtReceipt.credit_minor ?? 0) > 0
-              ? `Abono confirmado por ${formatMoney(debtReceipt.amount_minor)}, de los cuales ${formatMoney(debtReceipt.credit_minor ?? 0)} con saldo a favor.`
-              : `Abono en efectivo confirmado por ${formatMoney(debtReceipt.amount_minor)}.`}
+            {receipt.creditMinor > 0
+              ? `Abono confirmado por ${formatMoney(receipt.amountMinor)}, de los cuales ${formatMoney(receipt.creditMinor)} con saldo a favor.`
+              : `Abono en efectivo confirmado por ${formatMoney(receipt.amountMinor)}.`}
           </p>
           {creditWarning && <p role="alert">{creditWarning}</p>}
           <p>
-            Saldo restante del pedido: {formatMoney(debtReceipt.remaining_balance_minor)} MXN
-            {debtReceipt.remaining_balance_minor === 0 ? ' · Adeudo liquidado en su totalidad.' : ''}
+            Saldo restante del pedido: {formatMoney(receipt.remainingMinor)} MXN
+            {receipt.remainingMinor === 0 ? ' · Adeudo liquidado en su totalidad.' : ''}
           </p>
           <p className="muted" style={{ fontSize: '13px' }}>
-            Recibo: {debtReceipt.id} · Turno: {debtReceipt.shift_id}
+            {receipt.footer}
           </p>
           <Button onClick={onClose} style={{ marginTop: '16px' }}>Cerrar</Button>
         </div>
@@ -545,8 +679,8 @@ export function LiveMembershipCheckout({
               variant={operation === 'debt_payment' ? 'primary' : 'secondary'}
               className="button-sm"
               onClick={() => { setOperation('debt_payment'); setError(''); }}
-              disabled={submitting || Boolean(unknownIntent) || Boolean(unknownDebtIntent) || (Boolean(selectedMember) && !debtsLoading && openDebts.length === 0)}
-              title={Boolean(selectedMember) && !debtsLoading && openDebts.length === 0 ? 'El socio no tiene adeudos pendientes' : undefined}
+              disabled={submitting || Boolean(unknownIntent) || Boolean(unknownDebtIntent) || Boolean(pendingRentalIntent) || (Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0)}
+              title={Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0 ? 'El socio no tiene adeudos pendientes' : undefined}
             >
               Liquidar adeudo
             </Button>
@@ -655,25 +789,15 @@ export function LiveMembershipCheckout({
                   <p className="muted">Selecciona primero un socio para consultar sus adeudos pendientes.</p>
                 ) : debtsLoading ? (
                   <p role="status" className="muted">Cargando adeudos pendientes…</p>
-                ) : openDebts.length === 0 ? (
+                ) : debtEntries.length === 0 ? (
                   <p role="status" className="muted">No hay adeudos pendientes en esta sucursal para este socio.</p>
                 ) : (
                   <>
                     <AnimatedList
                       items={debtEntries}
                       selectedIndex={selectedDebtIndex >= 0 ? selectedDebtIndex : undefined}
-                      onSelectedIndexChange={idx => {
-                        if (openDebts[idx]) {
-                          setSelectedDebtOrderId(openDebts[idx].order_id);
-                          setDebtAmountMajor((openDebts[idx].remaining_balance_minor / 100).toFixed(2));
-                        }
-                      }}
-                      onItemSelect={(_item, idx) => {
-                        if (openDebts[idx]) {
-                          setSelectedDebtOrderId(openDebts[idx].order_id);
-                          setDebtAmountMajor((openDebts[idx].remaining_balance_minor / 100).toFixed(2));
-                        }
-                      }}
+                      onSelectedIndexChange={selectDebtEntry}
+                      onItemSelect={(_item, idx) => selectDebtEntry(idx)}
                       accentColor="#FC6C06"
                       theme={dark ? 'dark' : 'light'}
                       animation="pop"
@@ -682,15 +806,8 @@ export function LiveMembershipCheckout({
                     />
                     <select
                       id="checkout-debt-order"
-                      value={selectedDebtOrderId}
-                      onChange={e => {
-                        const nextOrderId = e.target.value;
-                        setSelectedDebtOrderId(nextOrderId);
-                        const nextDebt = openDebts.find(d => d.order_id === nextOrderId);
-                        if (nextDebt) {
-                          setDebtAmountMajor((nextDebt.remaining_balance_minor / 100).toFixed(2));
-                        }
-                      }}
+                      value={selectedRental ? selectedRental.payment_id : selectedDebtOrderId}
+                      onChange={e => selectDebtEntry(debtEntries.findIndex(entry => entry.id === e.target.value))}
                       disabled={Boolean(unknownDebtIntent) || submitting}
                       style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
                     >
@@ -699,14 +816,19 @@ export function LiveMembershipCheckout({
                           {debt.description_snapshot} · Pedido {debt.order_id.slice(0, 8)} · Restante {formatMoney(debt.remaining_balance_minor)}
                         </option>
                       ))}
+                      {rentalDebts.map(rental => (
+                        <option key={rental.payment_id} value={rental.payment_id}>
+                          {rentalLabel(rental)} · Restante {formatMoney(rental.outstanding_minor)}
+                        </option>
+                      ))}
                     </select>
                   </>
                 )}
               </div>
 
-              {selectedDebt && debtAmountMajor.trim() !== '' && debtAmountInvalid && (
+              {hasDebtTarget && owedMinor !== null && debtAmountMajor.trim() !== '' && debtAmountInvalid && (
                 <p role="alert" style={{ marginTop: '6px', color: 'var(--color-danger, #b91c1c)', fontSize: '13px' }}>
-                  El abono en efectivo debe ser mayor a cero y no superar el saldo pendiente ({formatMoney(selectedDebt.remaining_balance_minor)}).
+                  El abono en efectivo debe ser mayor a cero y no superar el saldo pendiente ({formatMoney(owedMinor)}).
                 </p>
               )}
 
@@ -720,16 +842,16 @@ export function LiveMembershipCheckout({
                 title="Cobro de adeudo"
                 step1Title="Adeudo"
                 step2Title="Cobro"
-                totalMinor={selectedDebt ? (parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : selectedDebt.remaining_balance_minor) : 0}
+                totalMinor={owedMinor !== null ? (parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : owedMinor) : 0}
                 allowCredit
                 assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name, creditMinor: memberCreditMinor } : null}
-                step1ActionDisabled={!selectedMember || !selectedDebt || !registerId || !shift || debtAmountInvalid || debtsLoading || shiftLoading || submitting}
+                step1ActionDisabled={!selectedMember || !hasDebtTarget || !registerId || !shift || debtAmountInvalid || debtsLoading || shiftLoading || submitting}
                 step1ActionLabel={
                   !selectedMember
                     ? 'Selecciona un socio beneficiario'
-                    : !selectedDebt
+                    : owedMinor === null
                     ? 'Selecciona un adeudo'
-                    : `Proceder al cobro · ${formatMoney(parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : selectedDebt.remaining_balance_minor)} MXN →`
+                    : `Proceder al cobro · ${formatMoney(parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : owedMinor)} MXN →`
                 }
                 confirmActionLabel="Registrar abono en efectivo"
                 statusMessage={error}
@@ -739,6 +861,14 @@ export function LiveMembershipCheckout({
                   const changeToCredit = breakdown.changeToCreditMinor ?? 0;
                   // The abono is the credit part plus the cash that stays on the debt (change left as credit does not).
                   const paid = credit + (breakdown.tenderedMinor ?? 0) - changeToCredit;
+                  if (pendingRentalIntent) {
+                    void sendRentalPayment(pendingRentalIntent);
+                    return;
+                  }
+                  if (selectedRental && paid > 0 && paid <= selectedRental.outstanding_minor) {
+                    void sendRentalPayment({ registerId, rentalId: selectedRental.rental_id, creditMinor: credit, cashMinor: paid - credit, creditDone: false });
+                    return;
+                  }
                   if (paid > 0 && selectedDebt && paid <= selectedDebt.remaining_balance_minor) {
                     const idempotencyKey = getStableDebtIdempotencyKey(registerId, selectedDebt.order_id, paid, credit);
                     void sendDebtPayment({
@@ -761,27 +891,27 @@ export function LiveMembershipCheckout({
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span className="muted">Concepto:</span>
-                      <strong>{selectedDebt?.description_snapshot ?? 'Sin seleccionar'}</strong>
+                      <strong>{selectedRental ? rentalLabel(selectedRental) : selectedDebt?.description_snapshot ?? 'Sin seleccionar'}</strong>
                     </div>
-                    {selectedDebt && (
+                    {(selectedDebt || selectedRental) && (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span className="muted">Adeudo inicial:</span>
-                          <span>{formatMoney(selectedDebt.initial_outstanding_minor)} MXN</span>
+                          <span>{formatMoney(selectedRental ? selectedRental.amount_minor : selectedDebt?.initial_outstanding_minor ?? 0)} MXN</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span className="muted">Abonado previamente:</span>
-                          <span>{formatMoney(selectedDebt.paid_amount_minor)} MXN</span>
+                          <span>{formatMoney(selectedRental ? selectedRental.settled_minor : selectedDebt?.paid_amount_minor ?? 0)} MXN</span>
                         </div>
                       </>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--color-divider)', paddingTop: '6px' }}>
                       <span className="muted">Saldo pendiente:</span>
                       <strong style={{ color: 'var(--color-primary-ink)', fontSize: '15px' }}>
-                        {selectedDebt ? `${formatMoney(selectedDebt.remaining_balance_minor)} MXN` : '$0.00 MXN'}
+                        {owedMinor !== null ? `${formatMoney(owedMinor)} MXN` : '$0.00 MXN'}
                       </strong>
                     </div>
-                    {selectedDebt && parsedDebtMinor > 0 && parsedDebtMinor < selectedDebt.remaining_balance_minor && !debtAmountInvalid && (
+                    {owedMinor !== null && parsedDebtMinor > 0 && parsedDebtMinor < owedMinor && !debtAmountInvalid && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--color-divider)', paddingTop: '6px' }}>
                         <span className="muted">Abono a registrar:</span>
                         <strong style={{ color: '#166534', fontSize: '14px' }}>
@@ -804,12 +934,12 @@ export function LiveMembershipCheckout({
                 step="0.01"
                 value={debtAmountMajor}
                 onChange={e => setDebtAmountMajor(e.target.value)}
-                disabled={Boolean(unknownDebtIntent) || submitting || !selectedDebt}
+                disabled={Boolean(unknownDebtIntent) || Boolean(pendingRentalIntent) || submitting || !hasDebtTarget}
               />
               <button
                 type="button"
                 onClick={submitDebtPayment}
-                disabled={loading || debtsLoading || shiftLoading || submitting || !selectedMember || !registerId || !shift || !selectedDebt || debtAmountInvalid}
+                disabled={loading || debtsLoading || shiftLoading || submitting || !selectedMember || !registerId || !shift || !hasDebtTarget || (debtAmountInvalid && !pendingRentalIntent)}
               >
                 Registrar abono en efectivo
               </button>
