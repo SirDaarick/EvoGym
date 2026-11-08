@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
+from app.credit.queries import CreditConflictError
 from app.db.models import ProductSaleIntent, ProductSaleResolution
 from app.errors import AppError, HttpStatusError, http_errors
 from app.sales import queries as q
@@ -35,7 +36,7 @@ class Principal(Protocol):
 
 _SALE_ERRORS = (
     (CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403), (CashSaleConflictError, 409),
-    (InvalidBranchTimezoneError, 409), (ValueError, 422),
+    (CreditConflictError, 409), (InvalidBranchTimezoneError, 409), (ValueError, 422),
 )
 _PRODUCT_ERRORS = ((CashSaleNotFoundError, 404), (AppError, None), (ValueError, 422))
 _RETURN_ERRORS = ((ProductReturnNotFoundError, 404), (InvalidBranchTimezoneError, 409))
@@ -116,7 +117,8 @@ def _debt_payment_dto(receipt) -> MembershipDebtPaymentDTO:
     return MembershipDebtPaymentDTO(
         id=receipt.id, debt_id=receipt.debt_id, order_id=receipt.order_id, member_id=receipt.member_id,
         branch_id=receipt.branch_id, register_id=receipt.register_id, shift_id=receipt.shift_id,
-        amount_minor=receipt.amount_minor, remaining_after_minor=receipt.remaining_after_minor,
+        amount_minor=receipt.amount_minor, credit_minor=receipt.credit_minor,
+        remaining_after_minor=receipt.remaining_after_minor,
         received_by=receipt.received_by, created_at=receipt.created_at,
     )
 
@@ -480,12 +482,13 @@ def post_membership_debt_payment(factory, principal: Principal, register_id: UUI
     """Returns (dto, replayed). Collect an explicit membership debt abono to the current open branch shift."""
     try:
         with http_errors((CashSaleNotFoundError, 404), (CashSaleAccessDenied, 403),
-                          (CashSaleConflictError, 409), (ValueError, 422)):
+                          (CashSaleConflictError, 409), (CreditConflictError, 409), (ValueError, 422)):
             with factory() as session:
                 result = q.post_membership_debt_payment(
                     session, register_id=register_id, actor_id=principal.staff_id,
                     authorized_branch_id=_authorized_branch(principal), order_id=payload.order_id,
-                    amount_minor=payload.amount_minor, idempotency_key=idempotency_key)
+                    amount_minor=payload.amount_minor, credit_minor=payload.credit_minor,
+                    idempotency_key=idempotency_key)
                 session.commit()
                 return _debt_payment_dto(result.receipt), result.replayed
     except IntegrityError:
@@ -496,5 +499,6 @@ def post_membership_debt_payment(factory, principal: Principal, register_id: UUI
             return q.find_debt_payment_by_key(session, branch_id=register.branch_id,
                                               received_by=principal.staff_id, idempotency_key=idempotency_key)
         return _replay_winner(factory, register_id, find,
-                              q.debt_payment_fingerprint(register_id, payload.order_id, payload.amount_minor),
+                              q.debt_payment_fingerprint(register_id, payload.order_id, payload.amount_minor,
+                                                         payload.credit_minor),
                               lambda _session, existing: _debt_payment_dto(existing))

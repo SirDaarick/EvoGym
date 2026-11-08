@@ -108,6 +108,7 @@ class MembershipDebtPaymentRequest(BaseModel):
 
     order_id: UUID
     amount_minor: StrictInt = Field(gt=0)
+    credit_minor: StrictInt = Field(default=0, ge=0, description="Part of amount_minor paid from saldo a favor.")
 
 
 class MembershipDebtPaymentDTO(BaseModel):
@@ -119,6 +120,7 @@ class MembershipDebtPaymentDTO(BaseModel):
     register_id: UUID
     shift_id: UUID
     amount_minor: int
+    credit_minor: int = 0
     remaining_balance_minor: int = Field(validation_alias="remaining_after_minor")
     received_by: UUID
     received_at: datetime = Field(validation_alias="created_at")

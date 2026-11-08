@@ -117,6 +117,71 @@ def test_deposit_requires_an_open_shift(tmp_path):
         engine.dispose()
 
 
+def test_debt_repayment_can_draw_part_or_all_from_credit(tmp_path):
+    from app.db.models import MembershipDebtPayment, Plan, PlanVersion
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        ctx = _seed(factory)
+        with factory.begin() as session:
+            plan = Plan(code="credit-month", name="Credit Month", kind="membership", status="active")
+            session.add(plan)
+            session.flush()
+            version = PlanVersion(plan_id=plan.id, version_number=1, name="Credit Month v1", price_minor=10000,
+                                  currency="MXN", duration_value=1, duration_unit="month", is_active=True)
+            session.add(version)
+            session.flush()
+            version_id = version.id
+        base = f"/api/v1/registers/{ctx['register_id']}"
+        with TestClient(create_app(configured_settings(url))) as client:
+            sale = client.post(f"{base}/membership-sales", headers=_headers(ctx["token"], "cr-sale"), json={
+                "member_id": str(ctx["member_id"]), "plan_version_id": str(version_id), "cash_amount_minor": 4000})
+            assert sale.status_code == 201, sale.text
+            order_id = sale.json()["order"]["id"]  # leaves a 6000 debt
+            assert client.post(f"{base}/member-credit-deposits", headers=_headers(ctx["token"], "cr-dep"), json={
+                "member_id": str(ctx["member_id"]), "amount_minor": 5000}).status_code == 201
+
+            repay = f"{base}/membership-debt-payments"
+            over_credit = client.post(repay, headers=_headers(ctx["token"], "cr-over"), json={
+                "order_id": order_id, "amount_minor": 6000, "credit_minor": 5001})
+            assert over_credit.status_code == 409  # more than the 5000 balance
+            above_amount = client.post(repay, headers=_headers(ctx["token"], "cr-above"), json={
+                "order_id": order_id, "amount_minor": 1000, "credit_minor": 1001})
+            assert above_amount.status_code == 422
+            assert _balance(factory, ctx["member_id"]) == 5000
+
+            partial = client.post(repay, headers=_headers(ctx["token"], "cr-partial"), json={
+                "order_id": order_id, "amount_minor": 4500, "credit_minor": 3000})
+            assert partial.status_code == 201, partial.text
+            assert partial.json()["credit_minor"] == 3000
+            assert partial.json()["remaining_balance_minor"] == 1500
+            replay = client.post(repay, headers=_headers(ctx["token"], "cr-partial"), json={
+                "order_id": order_id, "amount_minor": 4500, "credit_minor": 3000})
+            assert replay.status_code == 200
+            assert _balance(factory, ctx["member_id"]) == 2000
+
+            full_credit = client.post(repay, headers=_headers(ctx["token"], "cr-full"), json={
+                "order_id": order_id, "amount_minor": 1500, "credit_minor": 1500})
+            assert full_credit.status_code == 201, full_credit.text
+            assert full_credit.json()["remaining_balance_minor"] == 0
+        assert _balance(factory, ctx["member_id"]) == 500
+
+        with factory() as session:
+            shift = session.get(Shift, ctx["shift_id"])
+            # opening + 4000 sale cash + 5000 deposit + 1500 cash part of the partial repayment
+            assert expected_cash_for_shift(session, shift) == shift.opening_cash_minor + 4000 + 5000 + 1500
+            summary = shift_financial_summary(session, shift)
+            by_method = {item["method"]: item["amount_minor"] for item in summary["payment_methods"]}
+            assert by_method["credit"] == 4500
+            assert by_method["cash"] == 4000 + 5000 + 1500
+            credit_rows = [row for row in summary["payments"] if row["method"] == "credit"]
+            assert sorted(row["amount_minor"] for row in credit_rows) == [1500, 3000]
+            assert all(row["description"] == "Abono de membresía (saldo a favor)" for row in credit_rows)
+            applies = session.query(MemberCreditMovement).filter_by(kind="apply").all()
+            assert {m.debt_id for m in applies} == {session.query(MembershipDebtPayment).first().debt_id}
+    finally:
+        engine.dispose()
+
+
 def test_movements_list_is_newest_first_and_apply_never_overdraws(tmp_path):
     url, engine, factory = _setup_db(tmp_path)
     try:
@@ -130,7 +195,10 @@ def test_movements_list_is_newest_first_and_apply_never_overdraws(tmp_path):
                               headers={"Authorization": f"Bearer {ctx['token']}"})
             assert page.status_code == 200, page.text
             assert page.json()["total_items"] == 2
-            assert [item["amount_minor"] for item in page.json()["items"]] == [3000, 2000]
+            items = page.json()["items"]
+            assert sorted(item["amount_minor"] for item in items) == [2000, 3000]
+            # Same-second timestamps tie, so the contract is (created_at, id) descending.
+            assert items == sorted(items, key=lambda item: (item["created_at"], item["id"]), reverse=True)
 
         with factory.begin() as session:
             member = session.get(Member, ctx["member_id"])

@@ -422,10 +422,11 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
             raise ValueError("Cash inflow exceeds signed 64-bit minor units.")
         inflow += amount
     repayment_amounts = session.scalars(
-        select(MembershipDebtPayment.amount_minor).where(MembershipDebtPayment.shift_id == shift.id)
+        select(MembershipDebtPayment.amount_minor - MembershipDebtPayment.credit_minor)
+        .where(MembershipDebtPayment.shift_id == shift.id)
     )
     for amount in repayment_amounts:
-        if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
+        if type(amount) is not int or amount < 0 or inflow > maximum - amount:
             raise ValueError("Cash repayment inflow exceeds signed 64-bit minor units.")
         inflow += amount
     for amount in session.scalars(select(MemberCreditMovement.amount_minor).where(
@@ -564,17 +565,20 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
             pending_transfer_minor += payment.amount_minor
 
     for debt in debt_rows:
+        cash_part = debt.amount_minor - debt.credit_minor  # the credit part is reported from its ledger row
+        if cash_part == 0:
+            continue
         payments.append({"id": debt.id, "description": "Abono de membresía", "method": "cash",
-                         "status": "confirmed", "amount_minor": debt.amount_minor,
+                         "status": "confirmed", "amount_minor": cash_part,
                          "recorded_at": debt.created_at})
-        confirmed_minor += debt.amount_minor
-        cash_minor += debt.amount_minor
+        confirmed_minor += cash_part
+        cash_minor += cash_part
         activity = families.setdefault("membership", {"family": "membership", "count": 0, "amount_minor": 0})
         activity["count"] = int(activity["count"]) + 1
-        activity["amount_minor"] = int(activity["amount_minor"]) + debt.amount_minor
+        activity["amount_minor"] = int(activity["amount_minor"]) + cash_part
         bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
         bucket["count"] = int(bucket["count"]) + 1
-        bucket["amount_minor"] = int(bucket["amount_minor"]) + debt.amount_minor
+        bucket["amount_minor"] = int(bucket["amount_minor"]) + cash_part
 
     for payment, rental in rental_rows:
         description = "Renta de guantes" if rental.kind == "glove" else "Renta de casillero"
@@ -627,6 +631,33 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
         bucket["count"] = int(bucket["count"]) + 1
         bucket["amount_minor"] = int(bucket["amount_minor"]) + signed
+
+    # Credit applications are income paid from a member's saldo a favor: no cash moves, method "credit".
+    for movement in session.scalars(
+        select(MemberCreditMovement).where(
+            MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "apply")
+        .order_by(MemberCreditMovement.created_at.desc(), MemberCreditMovement.id.desc())
+    ):
+        if movement.debt_id is not None:
+            family, description = "membership", "Abono de membresía"
+        elif movement.order_id is not None:
+            order = session.get(Order, movement.order_id)
+            family = "product" if order.order_kind == "product" else "membership"
+            description = session.scalar(
+                select(OrderItem.description_snapshot).where(OrderItem.order_id == order.id)
+                .order_by(OrderItem.line_number).limit(1)) or "Membresía"
+        else:
+            family, description = "rental", "Renta"
+        payments.append({"id": movement.id, "description": f"{description} (saldo a favor)", "method": "credit",
+                         "status": "confirmed", "amount_minor": movement.amount_minor,
+                         "recorded_at": movement.created_at})
+        confirmed_minor += movement.amount_minor
+        activity = families.setdefault(family, {"family": family, "count": 0, "amount_minor": 0})
+        activity["count"] = int(activity["count"]) + 1
+        activity["amount_minor"] = int(activity["amount_minor"]) + movement.amount_minor
+        bucket = methods.setdefault("credit", {"method": "credit", "count": 0, "amount_minor": 0})
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["amount_minor"] = int(bucket["amount_minor"]) + movement.amount_minor
 
     # Credit deposits are cash held for the member (a liability, like rental deposits), not sales.
     for movement in credit_rows:

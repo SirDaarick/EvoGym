@@ -13,7 +13,7 @@ S7. (accounting, derived) Deposit = cash in drawer but liability, not sales. App
 
 ## Tasks
 - [x] T1 (S1,S3,S7) ledger table + migration + `app/credit` helper + deposit endpoint + shift cash summary + movements read — inline. Evidence: `tests/test_member_credit.py` 4 passed (written after the code, no RED observed); regression `test_shifts/test_sales/test_owner_overview/test_pending_money/test_member_reads/test_contract_smoke/test_migrations` green after updating head/table lists. Risk: item 1 (new migration, persisted money format) + item 4 (balance under concurrent writes; relies on member `FOR UPDATE`, Postgres concurrency test pending in T3).
-- [ ] T2 (S4,S7) credit in debt abonos (`source` column) — inline
+- [x] T2 (S4,S7) credit in debt abonos — inline. Design change vs plan: `credit_minor` column on `membership_debt_payments` (one receipt, cash part = amount − credit) instead of a `source` column, so a tick can cover part of an abono with one idempotency key. Summary: credit income comes from ledger `apply` rows (method `credit`), cash readers use `amount − credit`; owner overview pulse adds credit. Evidence: `test_debt_repayment_can_draw_part_or_all_from_credit` + 145 passed across shifts/sales/overview/pending/reads/smoke/migrations. Risk: item 1 (migration 0059 adds column to money table) + item 3 (`MembershipDebtPaymentRequest/DTO` gain optional fields; cash readers changed).
 - [ ] T3 (S2,S4) credit + change-to-credit in membership, product, rental payments — inline
 - [ ] T4 (S2-S6) frontend: Compra actual tick + change choice, callers, profile balance card/button/movements — inline
 

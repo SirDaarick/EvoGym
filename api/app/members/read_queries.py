@@ -434,7 +434,7 @@ def purchase_item(session: Session, row) -> dict:
                 "method": receipt.method, "status": "paid" if receipt.status == "confirmed" else "pending"}
     payment = session.get(MembershipDebtPayment, row.id)
     return {"description": "Membership debt payment", "amount_minor": payment.amount_minor,
-            "method": "cash", "status": "paid"}
+            "method": "credit" if payment.credit_minor == payment.amount_minor else "cash", "status": "paid"}
 
 
 def summary_data(session: Session, member_id: UUID, branch: UUID, now: datetime) -> dict:

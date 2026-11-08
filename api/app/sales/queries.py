@@ -16,6 +16,7 @@ from app.db.models import (
     Product, StockInitialization, StockMovement, ProductRefund, ProductSaleCancellation, ProductSaleIntent, StaffUser,
     PaymentTerminal, RoleGrant,
 )
+from app.credit.queries import apply_credit
 from app.errors import AppError
 from app.inventory.queries import get_on_hand_stock
 from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, RegisterMemberOpenDebtDTO
@@ -991,8 +992,10 @@ def review_membership_transfer(
     return TransferReviewResult(order, item, payment, membership, sample_entitlement, replayed=False)
 
 
-def debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int) -> str:
-    canonical = f"{register_id}\n{order_id}\n{amount_minor}".encode("ascii")
+def debt_payment_fingerprint(register_id: UUID, order_id: UUID, amount_minor: int, credit_minor: int = 0) -> str:
+    # Credit-free requests keep the original canonical form so earlier idempotency keys still replay.
+    suffix = f"\ncredit={credit_minor}" if credit_minor else ""
+    canonical = f"{register_id}\n{order_id}\n{amount_minor}{suffix}".encode("ascii")
     return sha256(canonical).hexdigest()
 
 
@@ -1005,10 +1008,17 @@ def post_membership_debt_payment(
     order_id: UUID,
     amount_minor: int,
     idempotency_key: str,
+    credit_minor: int = 0,
 ) -> MembershipDebtPaymentResult:
-    """Append one cash repayment to an explicit membership debt and open branch shift."""
+    """Append one repayment to an explicit membership debt and open branch shift.
+
+    `credit_minor` of `amount_minor` is drawn from the member's saldo a favor (no cash moves);
+    the remainder is cash received on the shift.
+    """
     if type(amount_minor) is not int or not 0 < amount_minor <= MAX_MINOR:
         raise ValueError("Repayment amount must be a positive signed 64-bit integer.")
+    if type(credit_minor) is not int or not 0 <= credit_minor <= amount_minor:
+        raise ValueError("Credit amount must be between zero and the repayment amount.")
     if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
         raise ValueError("Idempotency key must contain between 1 and 128 characters.")
 
@@ -1021,7 +1031,7 @@ def post_membership_debt_payment(
     if authorized_branch_id is not None and register.branch_id != authorized_branch_id:
         raise CashSaleAccessDenied("Access restricted to staff branch.")
 
-    fingerprint = debt_payment_fingerprint(register_id, order_id, amount_minor)
+    fingerprint = debt_payment_fingerprint(register_id, order_id, amount_minor, credit_minor)
     existing = session.scalar(
         select(MembershipDebtPayment).where(
             MembershipDebtPayment.branch_id == register.branch_id,
@@ -1088,6 +1098,7 @@ def post_membership_debt_payment(
         register_id=register.id,
         shift_id=shift.id,
         amount_minor=amount_minor,
+        credit_minor=credit_minor,
         remaining_after_minor=remaining - amount_minor,
         received_by=actor_id,
         idempotency_key=idempotency_key,
@@ -1095,6 +1106,9 @@ def post_membership_debt_payment(
     )
     session.add(receipt)
     session.flush()
+    if credit_minor:
+        apply_credit(session, member=member, register=register, shift=shift, actor_id=actor_id,
+                     amount_minor=credit_minor, debt_id=debt.id)
     return MembershipDebtPaymentResult(receipt, replayed=False)
 
 

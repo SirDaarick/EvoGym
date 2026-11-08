@@ -15,6 +15,7 @@ class MembershipDebtPayment(Base):
     __table_args__ = (
         CheckConstraint("amount_minor > 0", name="ck_membership_debt_payments_positive_amount"),
         CheckConstraint("remaining_after_minor >= 0", name="ck_membership_debt_payments_nonnegative_remaining"),
+        CheckConstraint("credit_minor >= 0 AND credit_minor <= amount_minor", name="ck_membership_debt_payments_credit_bounds"),
         CheckConstraint("length(idempotency_key) > 0", name="ck_membership_debt_payments_nonempty_key"),
         CheckConstraint("length(request_fingerprint) = 64", name="ck_membership_debt_payments_fingerprint"),
         UniqueConstraint("branch_id", "received_by", "idempotency_key", name="uq_membership_debt_payments_actor_key"),
@@ -43,6 +44,8 @@ class MembershipDebtPayment(Base):
     )
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     remaining_after_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Portion of amount_minor paid from member credit; the cash received is amount_minor - credit_minor.
+    credit_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     received_by: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False
     )

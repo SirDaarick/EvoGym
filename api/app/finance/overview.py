@@ -98,6 +98,8 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
         # Only confirmed payments count as money received; transfers under review stay pending.
         cash = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "cash")
         card = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "card")
+        # Income paid from saldo a favor is recognized when applied (its deposit was removed above).
+        credit = sum(row["amount_minor"] for row in payments if row["status"] == "confirmed" and row["method"] == "credit")
         refunds = q.product_refunds(session, branch.id, start, end)
         cash -= sum(row.amount_minor for row in refunds if row.payout_method == "cash")
         card -= sum(row.amount_minor for row in refunds if row.payout_method == "card")
@@ -164,7 +166,7 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
             ("Stock bajo", low), ("Casilleros vencidos", overdue), ("Cancelaciones sin revisar", cancellations)) if count]
         return {
             "period": {"from": first, "to": last, "branch_id": branch.id, "timezone": str(zone)},
-            "pulse": {"confirmed_minor": cash + card, "alerts_count": sum(c["count"] for c in categories)},
+            "pulse": {"confirmed_minor": cash + card + credit, "alerts_count": sum(c["count"] for c in categories)},
             "finances": {"cash_minor": cash, "card_minor": card,
                 "confirmed_count": sum(1 for row in payments if row["status"] == "confirmed" and row["amount_minor"] >= 0),
                 "pending_transfer_minor": sum(row["amount_minor"] for row in pending), "pending_transfer_count": len(pending),
