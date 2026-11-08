@@ -1,6 +1,6 @@
 import { memberStatus, membershipRenewalStreak } from '@/domain/membership';
 import { openAttendance } from '@/domain/attendance';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
   flexRender,
@@ -323,12 +323,13 @@ export function MemberDetail({
     onRefresh?: () => void;
     onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
     legalFullName?: string;
+    preferredName?: string | null;
     email?: string | null;
     liveNotesList?: MemberNoteDTO[];
     onAddLiveNote?: (body: string) => Promise<void>;
     noteSubmitting?: boolean;
     noteError?: string;
-    onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+    onUpdateMember?: (payload: { full_name: string; preferred_name: string | null; phone: string; email: string | null }) => Promise<void>;
     apiRequest?: AuthenticatedRequest;
   };
 }) {
@@ -347,6 +348,7 @@ function LiveMemberDetail({
   onRefresh,
   onCheckIn,
   legalFullName,
+  preferredName,
   email,
   liveNotesList,
   onAddLiveNote,
@@ -365,12 +367,13 @@ function LiveMemberDetail({
   onRefresh?: () => void;
   onCheckIn?: () => Promise<{ ok: boolean; message: string }>;
   legalFullName?: string;
+  preferredName?: string | null;
   email?: string | null;
   liveNotesList?: MemberNoteDTO[];
   onAddLiveNote?: (body: string) => Promise<void>;
   noteSubmitting?: boolean;
   noteError?: string;
-  onUpdateMember?: (payload: { full_name: string; phone: string; email: string | null }) => Promise<void>;
+  onUpdateMember?: (payload: { full_name: string; preferred_name: string | null; phone: string; email: string | null }) => Promise<void>;
   apiRequest?: AuthenticatedRequest;
 }) {
   const [activeTab, setActiveTab] = useState<'counter' | 'record'>('counter');
@@ -383,6 +386,7 @@ function LiveMemberDetail({
     orderId?: string;
   }>({ open: false, operation: 'sale' });
   const [editFullName, setEditFullName] = useState(legalFullName ?? member.name);
+  const [editPreferredName, setEditPreferredName] = useState(preferredName ?? '');
   const [editPhone, setEditPhone] = useState(member.phone ?? '');
   const [editEmail, setEditEmail] = useState(email ?? '');
   const [savingEdit, setSavingEdit] = useState(false);
@@ -527,8 +531,23 @@ function LiveMemberDetail({
       }));
   }, [safeRentals, member.id, member.name]);
 
+  // A preferred name made only of words from the legal name (e.g. "Elena") is highlighted inside the legal name; any other one is a nickname and becomes the title.
+  const alias = preferredName?.trim() ?? '';
+  const legalName = legalFullName?.trim();
+  const fold = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const aliasWords = fold(alias).split(/\s+/).filter(Boolean);
+  const legalWords = legalName ? legalName.split(/\s+/) : [];
+  const isLegalPart = aliasWords.length > 0 && aliasWords.every(word => legalWords.some(legal => fold(legal) === word));
+  const nickname = alias && !isLegalPart ? alias : '';
+  const heroTitle = nickname
+    ? <span className="member-preferred-name">{nickname}</span>
+    : isLegalPart
+      ? legalWords.map((word, index) => <Fragment key={index}>{index > 0 && ' '}{aliasWords.includes(fold(word)) ? <strong className="member-preferred-part">{word}</strong> : word}</Fragment>)
+      : (legalName ?? member.name);
+
   function handleOpenEdit() {
     setEditFullName(legalFullName ?? member.name);
+    setEditPreferredName(preferredName ?? '');
     setEditPhone(member.phone ?? '');
     setEditEmail(email ?? '');
     setEditError('');
@@ -544,6 +563,7 @@ function LiveMemberDetail({
       if (onUpdateMember) {
         await onUpdateMember({
           full_name: editFullName.trim(),
+          preferred_name: editPreferredName.trim() || null,
           phone: editPhone.trim(),
           email: editEmail.trim() || null,
         });
@@ -562,8 +582,8 @@ function LiveMemberDetail({
       <div className="member-hero-details">
         <PageHeader
           eyebrow="Socio"
-          title={member.name}
-          description={member.phone || 'Teléfono no capturado'}
+          title={heroTitle}
+          description={[nickname ? legalName : null, member.phone || 'Teléfono no capturado'].filter(Boolean).join(' · ')}
           action={
             <div className="member-hero-actions">
               <Badge tone={statusTone}>
@@ -620,6 +640,14 @@ function LiveMemberDetail({
             required
             value={editFullName}
             onChange={e => setEditFullName(e.target.value)}
+            disabled={savingEdit}
+          />
+          <Field
+            id="edit-preferred-name"
+            label="¿Cómo le gusta que le digan? (opcional)"
+            value={editPreferredName}
+            onChange={e => setEditPreferredName(e.target.value)}
+            maxLength={160}
             disabled={savingEdit}
           />
           <Field

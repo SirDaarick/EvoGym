@@ -558,6 +558,7 @@ describe('member workflow', () => {
           const body = JSON.parse(init?.body as string);
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
           expect(body.full_name).toBe('Elena Morales');
+          expect(body.preferred_name).toBe('Ele');
           expect(body.phone).toBe('5551112233');
           expect(body.email).toBe('elena@example.com');
           return new Response(JSON.stringify(currentMember), { status: 201 });
@@ -567,6 +568,7 @@ describe('member workflow', () => {
           expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
           expect(body).toEqual({
             full_name: 'Elena Morales',
+            preferred_name: 'Lena',
             phone: '5559998877',
             email: null,
           });
@@ -602,6 +604,7 @@ describe('member workflow', () => {
         </MemoryRouter>
       );
       await userEvent.type(screen.getByLabelText('Nombre completo'), 'Elena Morales');
+      await userEvent.type(screen.getByLabelText('¿Cómo le gusta que le digan? (opcional)'), 'Ele');
       await userEvent.type(screen.getByLabelText('Teléfono'), '5551112233');
       await userEvent.type(screen.getByLabelText('Correo electrónico (opcional)'), 'elena@example.com');
       await userEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
@@ -617,15 +620,23 @@ describe('member workflow', () => {
         </MemoryRouter>
       );
       expect(await screen.findByRole('button', { name: 'Editar datos' })).toBeVisible();
+      // A nickname ("Ele" is not a word of the legal name) becomes the big title; the legal name goes small below it
+      expect(screen.getByRole('heading', { level: 1, name: 'Ele' })).toBeVisible();
+      expect(screen.getByText(/Elena Morales · /)).toBeVisible();
       await userEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
 
       // Legal name "Elena Morales" must be pre-filled, NOT preferred_name "Ele"!
       const nameInput = screen.getByLabelText('Nombre completo') as HTMLInputElement;
+      const preferredInput = screen.getByLabelText('¿Cómo le gusta que le digan? (opcional)') as HTMLInputElement;
       const phoneInput = screen.getByLabelText('Teléfono') as HTMLInputElement;
       const emailInput = screen.getByLabelText('Correo electrónico (opcional)') as HTMLInputElement;
       expect(nameInput.value).toBe('Elena Morales');
+      expect(preferredInput.value).toBe('Ele');
       expect(phoneInput.value).toBe('5551112233');
       expect(emailInput.value).toBe('elena@example.com');
+
+      await userEvent.clear(preferredInput);
+      await userEvent.type(preferredInput, 'Lena');
 
       // Update phone and clear email
       await userEvent.clear(phoneInput);
@@ -639,6 +650,20 @@ describe('member workflow', () => {
           expect.objectContaining({ method: 'PATCH' })
         );
       });
+    });
+
+    it('keeps the full legal name as title and highlights only the preferred words inside it', async () => {
+      const aliasMember = { ...fixtureMember, full_name: 'Elena Aurora Morales', preferred_name: 'elena' };
+      const aliasRequest = vi.fn(async (path: string) =>
+        new Response(JSON.stringify(path.includes('/reload') ? fixtureReload : aliasMember)));
+      render(
+        <MemoryRouter initialEntries={[`/reception/members/${aliasMember.id}`]}>
+          <ApiMemberDetail role="RECEPTION" request={aliasRequest} isAdmin={false} />
+        </MemoryRouter>
+      );
+      const heading = await screen.findByRole('heading', { level: 1, name: 'Elena Aurora Morales' });
+      expect(heading.querySelectorAll('strong.member-preferred-part')).toHaveLength(1);
+      expect(heading.querySelector('strong.member-preferred-part')).toHaveTextContent('Elena');
     });
 
     it('surfaces alert on 422/409/500, preserves typed form values, and never fabricates saved state', async () => {

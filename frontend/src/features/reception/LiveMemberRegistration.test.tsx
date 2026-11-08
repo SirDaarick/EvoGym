@@ -17,6 +17,23 @@ describe('LiveMemberRegistration', () => {
     expect(api.create).toHaveBeenCalledWith({ member_number: 'M' + 'a'.repeat(31), full_name: 'Ana Pérez', phone: '5551234567', email: 'ana@example.com' });
     expect(screen.getByText('Identificador backend: backend-uuid')).toBeInTheDocument();
   });
+  it('sends the preferred name when provided and omits it when blank', async () => {
+    api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });
+    const { unmount } = render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('¿Cómo le gusta que le digan? (opcional)'), { target: { value: '  Anita ' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    await screen.findByRole('heading', { name: /Venta de membresía/ });
+    expect(api.create).toHaveBeenLastCalledWith({ member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', preferred_name: 'Anita', phone: '5551234567' });
+    unmount();
+    render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    await screen.findByRole('heading', { name: /Venta de membresía/ });
+    expect(api.create.mock.calls[1][0]).not.toHaveProperty('preferred_name');
+  });
   it('retries uncertain creation with the exact original payload and number', async () => {
     api.create.mockRejectedValueOnce(Object.assign(new Error('network'), { kind: 'network' })).mockResolvedValueOnce({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });
     const onUnresolvedChange = vi.fn();

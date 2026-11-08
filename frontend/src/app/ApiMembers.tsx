@@ -151,6 +151,7 @@ export function ApiMembers({ role, request }: { role: Role; request: Authenticat
 export function ApiNewMember({ role, request }: { role: Role; request: AuthenticatedRequest }) {
   const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
+  const [preferredName, setPreferredName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -167,6 +168,7 @@ export function ApiNewMember({ role, request }: { role: Role; request: Authentic
       const created = await createMember(request, {
         member_number: createMemberNumber(),
         full_name: fullName.trim(),
+        ...(preferredName.trim() ? { preferred_name: preferredName.trim() } : {}),
         phone: phone.trim(),
         ...(email.trim() ? { email: email.trim() } : {}),
       });
@@ -198,6 +200,14 @@ export function ApiNewMember({ role, request }: { role: Role; request: Authentic
             required
             value={fullName}
             onChange={e => setFullName(e.target.value)}
+            disabled={submitting}
+          />
+          <Field
+            id="member-preferred-name"
+            label="¿Cómo le gusta que le digan? (opcional)"
+            value={preferredName}
+            onChange={e => setPreferredName(e.target.value)}
+            maxLength={160}
             disabled={submitting}
           />
           <Field
@@ -471,6 +481,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
         onRefresh: () => void load(),
         onCheckIn: recordCheckIn,
         legalFullName: member.full_name,
+        preferredName: member.preferred_name,
         email: member.email,
         liveNotesList: notesList,
         onAddLiveNote: handleAddNote,
