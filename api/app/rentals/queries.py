@@ -311,7 +311,7 @@ def record_receivable_payment(
     authorized_branch_id: UUID | None, method: str, amount_minor: int, idempotency_key: str,
 ) -> tuple[RentalReceipt, bool]:
     clean_idempotency_key(idempotency_key)
-    if method not in ("cash", "transfer"):
+    if method not in ("cash", "transfer", "credit"):
         raise ValueError("Card payments require a server-bound terminal attempt.")
     if type(amount_minor) is not int or not 0 < amount_minor <= MAX_MINOR:
         raise ValueError("Repayment amount must be a positive signed 64-bit integer.")
@@ -337,11 +337,12 @@ def record_receivable_payment(
         raise RentalConflictError("Rental has no collectable outstanding balance.")
     if amount_minor > collectable:
         raise RentalConflictError("Repayment cannot exceed the collectable rental balance.")
-    remaining = max(0, rental_outstanding_minor(session, rental) - (
-        amount_minor if method == "cash" else 0))
+    settles_now = method in ("cash", "credit")  # transfers stay pending until reviewed
+    remaining = max(0, rental_outstanding_minor(session, rental) - (amount_minor if settles_now else 0))
+    member = lock_member(session, rental.member_id) if method == "credit" else None
     receipt = RentalReceipt(
         rental_id=rental.id, branch_id=rental.branch_id, register_id=register.id,
-        shift_id=shift.id, method=method, status="confirmed" if method == "cash" else "pending",
+        shift_id=shift.id, method=method, status="confirmed" if settles_now else "pending",
         amount_minor=amount_minor, remaining_minor=remaining,
         idempotency_key=idempotency_key, request_fingerprint=request_fingerprint,
         received_by=actor_id,
@@ -355,6 +356,9 @@ def record_receivable_payment(
         take = min(left, charge_collectable_minor(session, charge))
         if take <= 0:
             continue
+        if member is not None:
+            apply_credit(session, member=member, register=register, shift=shift, actor_id=actor_id,
+                         amount_minor=take, rental_charge_id=charge.id)
         session.add(Payment(
             rental_charge_id=charge.id, rental_receipt_id=receipt.id, register_id=register.id,
             shift_id=shift.id, method=method, status=receipt.status,

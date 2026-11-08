@@ -131,7 +131,7 @@ class RentalReceipt(Base):
 
     __tablename__ = "rental_receipts"
     __table_args__ = (
-        CheckConstraint("method IN ('cash', 'transfer')", name="ck_rental_receipts_method"),
+        CheckConstraint("method IN ('cash', 'transfer', 'credit')", name="ck_rental_receipts_method"),
         CheckConstraint("status IN ('pending', 'confirmed')", name="ck_rental_receipts_status"),
         CheckConstraint("amount_minor BETWEEN 1 AND 9223372036854775807", name="ck_rental_receipts_amount"),
         CheckConstraint("remaining_minor BETWEEN 0 AND 9223372036854775807", name="ck_rental_receipts_remaining"),

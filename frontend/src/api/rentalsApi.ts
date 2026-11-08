@@ -203,7 +203,7 @@ export interface MemberReceivablePage {
 
 export interface ReceivablePaymentInput {
   register_id: string;
-  method: TenderMethod;
+  method: TenderMethod | 'credit';
   amount_minor: number;
 }
 
@@ -216,7 +216,7 @@ export interface ReceivablePaymentDTO {
   id: string;
   rental_id: string;
   charge_id: string;
-  method: TenderMethod;
+  method: TenderMethod | 'credit';
   status: string;
   amount_minor: number;
   remaining_minor: number;

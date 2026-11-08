@@ -27,6 +27,42 @@ def _body(branch, ids, asset, price, credit, components=()):
             "credit_minor": credit}
 
 
+def test_rental_debt_can_be_paid_from_credit(rental_world):  # noqa: F811
+    client, factory, branch, _other, _actor, token, ids, _admin = rental_world
+    rented = client.post("/api/v1/rentals/gloves", headers=_auth(token, "rd-glove"),
+                         json=_body(branch, ids, "glove", 2500, 0))
+    assert rented.status_code == 201, rented.text
+    rental_id = rented.json()["id"]
+    assert rented.json()["outstanding_minor"] == 2500
+    pay = f"/api/v1/rentals/{rental_id}/receivable-payments"
+    body = {"register_id": str(ids["register"]), "method": "credit", "amount_minor": 1000}
+
+    assert client.post(pay, headers=_auth(token, "rd-over"), json=body).status_code == 409  # no balance yet
+    _deposit(client, token, ids, 1500, "rd-dep")
+    paid = client.post(pay, headers=_auth(token, "rd-pay"), json=body)
+    assert paid.status_code == 201, paid.text
+    assert paid.json()["method"] == "credit" and paid.json()["status"] == "confirmed"
+    assert paid.json()["remaining_minor"] == 1500
+    replay = client.post(pay, headers=_auth(token, "rd-pay"), json=body)
+    assert replay.status_code == 200 and replay.json()["id"] == paid.json()["id"]
+    assert _balance(factory, ids) == 500
+
+    too_much = client.post(pay, headers=_auth(token, "rd-too-much"), json={**body, "amount_minor": 600})
+    assert too_much.status_code == 409  # only 500 left
+    rest = client.post(pay, headers=_auth(token, "rd-rest"), json={**body, "amount_minor": 500})
+    assert rest.status_code == 201 and rest.json()["remaining_minor"] == 1000
+    assert _balance(factory, ids) == 0
+    after = client.get(f"/api/v1/rentals/{rental_id}", headers={"Authorization": f"Bearer {token}"})
+    assert after.json()["paid_minor"] == 1500 and after.json()["outstanding_minor"] == 1000
+
+    with factory() as session:
+        shift = session.query(Shift).one()
+        assert expected_cash_for_shift(session, shift) == shift.opening_cash_minor + 1500  # only the deposit
+        summary = shift_financial_summary(session, shift)
+        by_method = {item["method"]: item["amount_minor"] for item in summary["payment_methods"]}
+        assert by_method["credit"] == 1500 and by_method["cash"] == 1500
+
+
 def test_glove_and_locker_rentals_draw_credit_and_locker_cancellation_is_blocked(rental_world):  # noqa: F811
     client, factory, branch, _other, _actor, token, ids, _admin = rental_world
     overdraft = client.post("/api/v1/rentals/gloves", headers=_auth(token, "rc-overdraft"),

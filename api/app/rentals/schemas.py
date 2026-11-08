@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, m
 from app.db.models.inventory import normalize_product_code
 
 TenderMethod = Literal["cash", "transfer"]
+ReceivableMethod = Literal["cash", "transfer", "credit"]  # credit = paid from the member's saldo a favor
 
 
 class RentalAssetInput(BaseModel):
@@ -120,7 +121,7 @@ class RentalRenewalInput(BaseModel):
 class ReceivablePaymentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     register_id: UUID
-    method: TenderMethod
+    method: ReceivableMethod
     amount_minor: StrictInt = Field(gt=0, le=2**63 - 1)
 
 
@@ -197,7 +198,7 @@ class ReceivablePaymentDTO(BaseModel):
     id: UUID
     rental_id: UUID
     charge_id: UUID
-    method: TenderMethod
+    method: ReceivableMethod
     status: str
     amount_minor: int
     remaining_minor: int
