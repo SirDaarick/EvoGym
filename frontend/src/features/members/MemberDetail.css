@@ -112,6 +112,23 @@
   line-height: 1.15;
 }
 
+.member-hero-details .page-header h1 .member-preferred-name {
+  color: var(--color-primary);
+  font-size: clamp(34px, 4.4vw, 48px);
+  font-weight: 900;
+}
+
+.member-preferred-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .member-hero-details .page-header .muted {
   display: inline-flex;
   align-items: center;

@@ -530,6 +530,14 @@ function LiveMemberDetail({
       }));
   }, [safeRentals, member.id, member.name]);
 
+  // A preferred name made only of words from the legal name (e.g. "Elena") is not a nickname: keep the legal name as title and just tag it.
+  const alias = preferredName?.trim() ?? '';
+  const legalName = legalFullName?.trim();
+  const words = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
+  const isLegalPart = Boolean(alias && legalName) && words(alias).every(word => words(legalName!).includes(word));
+  const nickname = alias && !isLegalPart ? alias : '';
+  const sameNameAlias = alias && isLegalPart ? alias : '';
+
   function handleOpenEdit() {
     setEditFullName(legalFullName ?? member.name);
     setEditPreferredName(preferredName ?? '');
@@ -566,12 +574,12 @@ function LiveMemberDetail({
       <div className="member-hero-avatar-wrap"><div className="member-hero-avatar" aria-hidden="true">{getMemberInitials(member.name)}</div></div>
       <div className="member-hero-details">
         <PageHeader
-          eyebrow="Socio"
-          title={member.name}
-          description={[preferredName?.trim() ? legalFullName : null, member.phone || 'Teléfono no capturado'].filter(Boolean).join(' · ')}
+          eyebrow={nickname ? 'Socio · así le gusta que le digan' : 'Socio'}
+          title={nickname ? <span className="member-preferred-name">{nickname}</span> : (legalName ?? member.name)}
+          description={[nickname ? legalName : null, member.phone || 'Teléfono no capturado'].filter(Boolean).join(' · ')}
           action={
             <div className="member-hero-actions">
-              {preferredName?.trim() && <Badge tone="success">Le dicen así</Badge>}
+              {sameNameAlias && <span className="member-preferred-chip">Le dicen: {sameNameAlias}</span>}
               <Badge tone={statusTone}>
                 {currentPeriod ? (currentPeriod.access_status === 'eligible' ? 'Elegible' : currentPeriod.access_status === 'branch_restricted' ? 'Restringido a otra sucursal' : currentPeriod.access_status === 'restricted_unpaid' ? 'Restringido por adeudo' : currentPeriod.access_status) : ({ active: 'Activo', inactive: 'Inactivo', expired: 'Vencido', suspended: 'Suspendido', pending: 'Pendiente' } as Record<string, string>)[status] ?? 'Estado no disponible'}
               </Badge>
