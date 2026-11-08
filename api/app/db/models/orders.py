@@ -17,6 +17,7 @@ from sqlalchemy import (
     Uuid,
     event,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -179,6 +180,11 @@ class Payment(Base):
         UniqueConstraint("order_id", name="uq_payments_order"),
         UniqueConstraint("received_by", "idempotency_key", name="uq_payments_received_by_idempotency"),
         Index("ix_payments_rental_receipt_id", "rental_receipt_id"),
+        Index(
+            "ux_payments_mp_payment_intent_id", "mp_payment_intent_id", unique=True,
+            postgresql_where=text("mp_payment_intent_id IS NOT NULL"),
+            sqlite_where=text("mp_payment_intent_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)

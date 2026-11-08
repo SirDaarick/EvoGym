@@ -691,7 +691,9 @@ export function DevolucionesModal({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <button
                     type="button"
-                    onClick={() => setRefundMethod('cash')}
+                    disabled
+                    aria-disabled="true"
+                    title="El reembolso usa el metodo del pago original"
                     style={{
                       padding: '10px',
                       borderRadius: '8px',
@@ -710,7 +712,9 @@ export function DevolucionesModal({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRefundMethod('card')}
+                    disabled
+                    aria-disabled="true"
+                    title="El reembolso usa el metodo del pago original"
                     style={{
                       padding: '10px',
                       borderRadius: '8px',

@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, null, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -262,6 +263,8 @@ def post_card_product_sale(
         if existing.request_fingerprint != fingerprint or existing.order_kind != "product":
             raise ProductSaleIdempotencyConflict("Idempotency key was already used for a different request.")
         return existing, True
+    if session.scalar(select(Payment.id).where(Payment.mp_payment_intent_id == card_intent_id)) is not None:
+        raise ProductSaleRejected("Card payment intent was already used.")
     if register.status != "active":
         raise ProductSaleRejected("Cash register is not active.")
     branch = session.get(Branch, register.branch_id)
@@ -330,7 +333,10 @@ def post_card_product_sale(
         authorization_code=authorization_code,
     )
     session.add(payment)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError as exc:  # concurrent sale won the unique mp_payment_intent_id; the caller rolls back
+        raise ProductSaleRejected("Card payment intent was already used.") from exc
     if credit_minor:
         apply_credit(session, member=lock_member(session, member_id), register=register, shift=shift,
                      actor_id=actor_id, amount_minor=credit_minor, order_id=order.id)
@@ -546,6 +552,8 @@ def post_product_return(
         raise ProductReturnConflictError("Cross-branch returns are not allowed.")
     if order.payment is None or order.payment.status != "confirmed":
         raise ProductReturnConflictError("Only orders with confirmed payment can be returned.")
+    if payout_method != order.payment.method:
+        raise ProductReturnConflictError("Refund must use the original payment method.")
     if credit_applied_for_order(session, order.id):
         raise ProductReturnConflictError("Orders paid with saldo a favor cannot be returned yet.")
 

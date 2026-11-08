@@ -88,7 +88,7 @@ def test_mercadopago_http_client_operations():
     with patch("urllib.request.urlopen", return_value=mock_resp_create) as mock_urlopen:
         dto = client.create_payment_intent(device_id="DEVICE_01", amount_minor=1500, external_reference="ref-abc")
         assert dto.id == "mp-intent-001"
-        assert dto.status == "OPEN"
+        assert dto.status == "ON_TERMINAL"  # unfinished Point states all map to ON_TERMINAL (the DTO/UI "in progress" state)
         assert dto.amount_minor == 1500
         mock_urlopen.assert_called_once()
 
@@ -96,7 +96,7 @@ def test_mercadopago_http_client_operations():
     mock_resp_status = MagicMock()
     mock_resp_status.read.return_value = json.dumps({
         "id": "mp-intent-001",
-        "status": "PROCESSED",
+        "state": "FINISHED",
         "amount": 15.00,
         "payment": {
             "authorization_code": "MP-AUTH-999",
@@ -569,5 +569,44 @@ def test_point_calls_hold_no_db_session_and_replay_stays_idempotent(tmp_path, mo
             assert counting.open == 0
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(Order)) == 1
+    finally:
+        engine.dispose()
+
+
+def test_one_card_intent_funds_only_one_sale(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "pos-reuse", "POS")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+            product = Product(code="towel-r", name="Gym Towel", price_minor=2000, created_by=staff_id)
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=branch_id, product_id=product.id, quantity=10, initialized_by=staff_id))
+            register_id, product_id = register.id, str(product.id)
+
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "card-reuse-1"}
+            intent = client.post(f"/api/v1/registers/{register_id}/card-intent", headers=headers,
+                                 json={"amount_minor": 2000, "external_reference": "reuse"})
+            payload = {"member_id": None, "items": [{"product_id": product_id, "quantity": 1}],
+                       "expected_total_minor": 2000, "card_intent_id": intent.json()["payment_intent_id"]}
+            url_sale = f"/api/v1/registers/{register_id}/product-sales/card"
+            first = client.post(url_sale, headers=headers, json=payload)
+            assert first.status_code == 201, first.text
+
+            second = client.post(url_sale, headers={**headers, "Idempotency-Key": "card-reuse-2"}, json=payload)
+            assert second.status_code == 409
+            replay = client.post(url_sale, headers=headers, json=payload)
+            assert replay.status_code == 200 and replay.json() == first.json()
+
+            with factory() as session:
+                assert session.scalar(select(func.count()).select_from(Order)) == 1
+                assert session.scalar(select(func.count()).select_from(Payment)) == 1
+                assert get_on_hand_stock(session, branch_id=branch_id, product_id=UUID(product_id)) == 9
     finally:
         engine.dispose()

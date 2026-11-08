@@ -163,6 +163,10 @@ def test_product_return_happy_path_waste_and_card_payout(tmp_path):
             assert sale_res.status_code == 201
             order_item_id = sale_res.json()["items"][0]["id"]
 
+            with factory.begin() as session:  # make it a card sale: a card refund must match the original method
+                order_id = session.scalar(select(OrderItem.order_id).where(OrderItem.id == UUID(order_item_id)))
+                session.scalar(select(Payment).where(Payment.order_id == order_id)).method = "card"
+
             # Return with waste and card payout
             return_payload = {
                 "order_item_id": order_item_id,
@@ -186,7 +190,7 @@ def test_product_return_happy_path_waste_and_card_payout(tmp_path):
                 # Stock should NOT be returned into available stock
                 assert get_on_hand_stock(session, branch_id=branch_id, product_id=UUID(p1_id)) == 3
                 # Card payout does NOT reduce cash expected closing cash
-                assert expected_cash_for_shift(session, shift) == 100 + 1200
+                assert expected_cash_for_shift(session, shift) == 100
 
                 # Check waste movement record
                 mov = session.scalar(
@@ -502,5 +506,44 @@ def test_return_rejected_when_no_shifts_ever_opened(tmp_path):
             )
             assert res.status_code == 409
             assert "Open the first shift" in res.text
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("sale_method,payout", [("cash", "card"), ("card", "cash")])
+def test_return_payout_must_match_original_payment_method(tmp_path, sale_method, payout):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "reg-match", "Match Register")
+            open_shift(session, register_id=register.id, opened_by=staff_id,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 1}])
+            member, product1, _ = _seed_products_and_member(session, branch_id, staff_id)
+            register_id, member_id, p1_id = register.id, member.id, str(product1.id)
+
+        headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "sale-match"}
+        with TestClient(create_app(configured_settings(url))) as client:
+            sale_payload = {"member_id": str(member_id), "items": [{"product_id": p1_id, "quantity": 1}],
+                            "expected_total_minor": 1200}
+            client.post(f"/api/v1/registers/{register_id}/product-sale-intent", headers=headers, json=sale_payload)
+            sale_res = client.post(f"/api/v1/registers/{register_id}/product-sales", headers=headers, json=sale_payload)
+            order_item_id = sale_res.json()["items"][0]["id"]
+            with factory.begin() as session:
+                order_id = session.scalar(select(OrderItem.order_id).where(OrderItem.id == UUID(order_item_id)))
+                session.scalar(select(Payment).where(Payment.order_id == order_id)).method = sale_method
+
+            res = client.post(
+                f"/api/v1/registers/{register_id}/product-returns",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "ret-match"},
+                json={"order_item_id": order_item_id, "reason": "Wrong method", "disposition": "restock",
+                      "payout_method": payout},
+            )
+            assert res.status_code == 409
+            assert res.json()["error"]["code"] == "product_return_rejected"
+            with factory.begin() as session:
+                assert session.scalar(select(ProductRefund.id)) is None
+                assert get_on_hand_stock(session, branch_id=branch_id, product_id=UUID(p1_id)) == 4
     finally:
         engine.dispose()

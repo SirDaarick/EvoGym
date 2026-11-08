@@ -4,6 +4,7 @@ import hashlib
 from uuid import UUID, uuid4
 
 from sqlalchemy import case, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
@@ -291,6 +292,7 @@ def record_stock_movement(
             existing.product_id != product_id
             or existing.kind != kind
             or existing.quantity != quantity
+            or existing.reason != (reason.strip() if reason else None)
         ):
             raise IdempotencyConflictError("Idempotency key already used with different parameters.")
         on_hand = get_on_hand_stock(session, branch_id=branch_id, product_id=product_id)
@@ -311,8 +313,16 @@ def record_stock_movement(
                 initialized_by=actor_id,
                 initialized_at=datetime.now(timezone.utc),
             )
-            session.add(init_row)
-            session.flush()
+            try:
+                with session.begin_nested():
+                    session.add(init_row)
+            except IntegrityError:  # a concurrent first restock won uq_stock_initializations_branch_product
+                init_row = session.scalar(
+                    select(StockInitialization).where(
+                        StockInitialization.branch_id == branch_id,
+                        StockInitialization.product_id == product_id,
+                    ).with_for_update()
+                )
         else:
             raise InsufficientStockError("Stock has not been initialized for this product.")
 

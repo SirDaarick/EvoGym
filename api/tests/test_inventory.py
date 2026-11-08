@@ -782,3 +782,36 @@ def test_stock_movements_ledger_invariants_and_branch_scope(tmp_path):
             assert cross_branch.status_code == 403
     finally:
         engine.dispose()
+
+
+def test_first_restock_race_reuses_the_winning_initialization(tmp_path):
+    from unittest.mock import patch
+    from test_shifts import _seed_branch, _seed_receptionist, _setup_db
+    from app.inventory.queries import get_on_hand_stock, record_stock_movement
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, _ =_seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            product = Product(code="race", name="Race", price_minor=100, created_by=staff_id)
+            session.add(product)
+            session.flush()
+            session.add(StockInitialization(branch_id=branch_id, product_id=product.id, quantity=3, initialized_by=staff_id))
+            product_id = product.id
+        with factory.begin() as session:
+            real_scalar = session.scalar
+            calls = {"n": 0}
+
+            def scalar_hiding_winner(statement, *args, **kwargs):  # the init-row read misses the concurrent winner
+                calls["n"] += 1
+                return None if calls["n"] == 2 else real_scalar(statement, *args, **kwargs)
+
+            with patch.object(session, "scalar", side_effect=scalar_hiding_winner):
+                movement, on_hand, is_new = record_stock_movement(
+                    session, branch_id=branch_id, product_id=product_id, kind="restock", quantity=2,
+                    actor_id=staff_id, idempotency_key="race-1")
+            assert is_new and on_hand == 5
+            assert get_on_hand_stock(session, branch_id=branch_id, product_id=product_id) == 5
+    finally:
+        engine.dispose()
