@@ -84,6 +84,18 @@ describe('LiveMembershipCheckout', () => {
     expect(screen.queryByText(/Membresía activada/i)).not.toBeInTheDocument();
   });
 
+  it('does not show the overtime banner at checkout when the register has an open shift', async () => {
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('Plan de membresía'), { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(api.shift).toHaveBeenCalledWith(register.id));
+    const proceed = (await screen.findByText(/Proceder al cobro/)).closest('button')!;
+    await waitFor(() => expect(proceed).toBeEnabled());
+    fireEvent.click(proceed);
+    await waitFor(() => expect(screen.queryByText(/Proceder al cobro/)).not.toBeInTheDocument());
+    expect(screen.queryByTestId('overtime-sale-banner')).not.toBeInTheDocument();
+  });
+
   it('keeps the exact transfer request and idempotency key for retry after an unknown outcome', async () => {
     api.transfer.mockRejectedValueOnce(Object.assign(new Error('network unavailable'), { kind: 'network' }));
     render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);

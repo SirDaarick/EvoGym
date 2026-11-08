@@ -35,6 +35,8 @@ export interface CurrentPurchaseCardProps {
   title?: string;
   step1Title?: string;
   step2Title?: string;
+  /** Live open-shift state; when set it decides overtime and the clock heuristic (demo) is ignored. */
+  hasOpenShift?: boolean;
   shiftWindow?: string;
   currentTime?: Date | string;
   assignedMember?: { id?: string; name: string; phone?: string; creditMinor?: number } | null;
@@ -96,6 +98,7 @@ export function CurrentPurchaseCard({
   step2Title = 'Cobro',
   shiftWindow,
   currentTime,
+  hasOpenShift,
   assignedMember = null,
   onAssignMemberClick,
   headerContent,
@@ -141,7 +144,7 @@ export function CurrentPurchaseCard({
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
   const [isPointModalOpen, setIsPointModalOpen] = useState(false);
   // Automatic Overtime classification: obligatory when selling during shift cut or transition
-  const isOvertime = isShiftTransitionOrOvertime(shiftWindow, currentTime);
+  const isOvertime = hasOpenShift === undefined ? isShiftTransitionOrOvertime(shiftWindow, currentTime) : !hasOpenShift;
   const [internalError, setInternalError] = useState<string | null>(null);
   const [useCredit, setUseCredit] = useState(false);
   const [leaveAsCredit, setLeaveAsCredit] = useState(false);
@@ -484,6 +487,7 @@ export function CurrentPurchaseCard({
             {!cashOnly && <div className="cart-overtime-toggle-slot" style={{ marginBottom: isOvertime ? '12px' : '0' }}>
               <OvertimeSaleToggle
                 isOvertime={isOvertime}
+                hasOpenShift={hasOpenShift}
                 shiftWindow={shiftWindow}
                 currentTime={currentTime}
               />

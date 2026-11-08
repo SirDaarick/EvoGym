@@ -29,7 +29,11 @@ it('requires a reason to void an expense and removes it from the active total', 
     if (path.endsWith('/void') && init?.method === 'POST') { voided = true; return new Response('{}'); }
     return new Response(JSON.stringify({ items: [{ id: '1', branch_id: 'b', shift_id: 's', category: 'limpieza', concept: 'Soap', payee_name: 'Shop', amount_minor: 15000, payment_method: 'cash', recorded_by_name: 'Cashier', recorded_at: '2026-10-30T12:00:00Z', voucher_reference: 'T-1', evidence_url: null, voided_at: voided ? '2026-10-30T13:00:00Z' : null, voided_by_name: null, void_reason: voided ? 'Duplicate' : null }], total_minor: voided ? 0 : 15000 }));
   });
-  render(<GastoModal isOpen onClose={() => {}} apiRequest={request} registerId="r" branchId="b" />);
+  const { unmount } = render(<GastoModal isOpen onClose={() => {}} apiRequest={request} registerId="r" branchId="b" />);
+  await screen.findByText('Soap');
+  expect(screen.queryByRole('button', { name: 'Anular' })).not.toBeInTheDocument();
+  unmount();
+  render(<GastoModal isOpen onClose={() => {}} apiRequest={request} registerId="r" branchId="b" canVoid />);
   await userEvent.click(await screen.findByRole('button', { name: 'Anular' }));
   await userEvent.type(screen.getByLabelText('Motivo *'), 'Duplicate');
   await userEvent.click(screen.getByRole('button', { name: 'Confirmar anulación' }));

@@ -19,9 +19,11 @@ export interface GastoModalProps {
   mode?: 'shift' | 'business';
   branches?: { id: string; name: string }[];
   onSaved?: () => void | Promise<void>;
+  /** Void is admin-only on the backend (403 for receptionists); only admin hosts pass true. */
+  canVoid?: boolean;
 }
 
-export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, mode = 'shift', branches = [], onSaved }: GastoModalProps) {
+export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, mode = 'shift', branches = [], onSaved, canVoid = false }: GastoModalProps) {
   let demo: ReturnType<typeof useDemo> | null = null;
   try { demo = useDemo(); } catch { /* Live mode does not mount DemoProvider. */ }
   const [liveExpenses, setLiveExpenses] = useState<ExpenseDTO[]>([]);
@@ -318,7 +320,7 @@ export function GastoModal({ isOpen, onClose, apiRequest, registerId, branchId, 
                       <td>{expense.payeeName}</td>
                       <td>{expense.category ? EXPENSE_CATEGORIES[expense.category].label : '—'}</td>
                       <td>{expense.voucherReference || '—'} {expense.evidenceUrl && <a href={expense.evidenceUrl} target="_blank" rel="noreferrer">Ver foto</a>}</td>
-                      <td>{expense.voided ? <Badge tone="warning">Anulado</Badge> : apiRequest && <button type="button" onClick={() => { setVoidTarget(liveExpenses.find(item => item.id === expense.id) ?? null); setVoidReason(''); setVoidReasonError(''); }}>Anular</button>}</td>
+                      <td>{expense.voided ? <Badge tone="warning">Anulado</Badge> : apiRequest && canVoid && <button type="button" onClick={() => { setVoidTarget(liveExpenses.find(item => item.id === expense.id) ?? null); setVoidReason(''); setVoidReasonError(''); }}>Anular</button>}</td>
                       <td className="muted">
                         {new Date(expense.recordedAt).toLocaleTimeString('es-MX', {
                           hour: '2-digit',

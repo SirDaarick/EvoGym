@@ -265,6 +265,9 @@ export function LiveMembershipCheckout({
     return () => { active = false; };
   }, [apiRequest]);
 
+  // Undefined until the register's shift lookup settles, so the clock fallback never flashes a false banner.
+  const openShiftFlag = registerId && !shiftLoading ? Boolean(shift) : undefined;
+
   // Load shift when registerId is set
   useEffect(() => {
     let active = true;
@@ -840,6 +843,7 @@ export function LiveMembershipCheckout({
               <CurrentPurchaseCard
                 className="current-purchase-card--modal"
                 title="Cobro de adeudo"
+                hasOpenShift={openShiftFlag}
                 step1Title="Adeudo"
                 step2Title="Cobro"
                 totalMinor={owedMinor !== null ? (parsedDebtMinor > 0 && !debtAmountInvalid ? parsedDebtMinor : owedMinor) : 0}
@@ -1066,6 +1070,7 @@ export function LiveMembershipCheckout({
                 <CurrentPurchaseCard
                   className="current-purchase-card--modal"
                   title="Venta de membresía"
+                  hasOpenShift={openShiftFlag}
                   step1Title="Membresía"
                   step2Title="Cobro"
                   totalMinor={price ?? 0}

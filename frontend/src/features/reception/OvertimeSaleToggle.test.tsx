@@ -62,6 +62,18 @@ describe('OvertimeSaleToggle and isShiftTransitionOrOvertime', () => {
     expect(screen.getByText(/⚡ Venta en Corte de Caja \/ Overtime/)).toBeInTheDocument();
   });
 
+  it('derives overtime from the open-shift state, not the clock', () => {
+    const cutTime = new Date(2026, 9, 19, 13, 50);
+
+    const { container, rerender } = render(
+      <OvertimeSaleToggle hasOpenShift shiftWindow="06:00–14:00" currentTime={cutTime} />
+    );
+    expect(container).toBeEmptyDOMElement();
+
+    rerender(<OvertimeSaleToggle hasOpenShift={false} currentTime={new Date(2026, 9, 19, 10, 30)} />);
+    expect(screen.getByTestId('overtime-sale-banner')).toBeInTheDocument();
+  });
+
   it('renders nothing when sale is during normal shift hours', () => {
     const normalTime = new Date(2026, 9, 19, 10, 30);
 

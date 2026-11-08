@@ -24,7 +24,10 @@ def test_shift_expense_and_contribution_reconcile_cash(tmp_path):
             shift_id = shift.id
 
         headers = {"Authorization": f"Bearer {token}"}
-        with TestClient(create_app(configured_settings(url))) as client:
+        seed_admin(factory)
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin = approved_admin_headers(client, delivery)
             expense = client.post(f"/api/v1/registers/{register_id}/expenses", headers={**headers, "Idempotency-Key": "expense-1"},
                                   json={"category": "limpieza", "concept": "Soap", "payee_name": "Supplier", "amount_minor": 800})
             assert expense.status_code == 201
@@ -64,13 +67,17 @@ def test_shift_expense_and_contribution_reconcile_cash(tmp_path):
                                         json={"concept": "Fund", "contributor_name": "Admin", "amount_minor": 801})
             assert extra_altered.status_code == 409
             assert client.get(f"/api/v1/registers/{register_id}/cash-contributions", headers=headers).json()["total_minor"] == 800
-            voided = client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=headers, json={"reason": "Duplicate"})
+            assert client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=headers, json={"reason": "Duplicate"}).status_code == 403
+            voided = client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=admin, json={"reason": "Duplicate"})
             assert voided.status_code == 200
             assert client.get(f"/api/v1/registers/{register_id}/expenses", headers=headers).json()["total_minor"] == 0
             assert client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers).json()["expected_cash_minor"] == 1000
-            same_void = client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=headers, json={"reason": "Duplicate"})
+            same_void = client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=admin, json={"reason": "Duplicate"})
             assert same_void.status_code == 200
-            assert client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=headers, json={"reason": "Different"}).status_code == 409
+            assert client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=admin, json={"reason": "Different"}).status_code == 409
+            assert client.post(f"/api/v1/shifts/{shift_id}/close", headers=headers, json={"counted_cash_minor": 1000}).status_code == 201
+            replay_after_close = client.post(f"/api/v1/expenses/{expense.json()['id']}/void", headers=admin, json={"reason": "Duplicate"})
+            assert replay_after_close.status_code == 200 and replay_after_close.json()["id"] == expense.json()["id"]
     finally:
         engine.dispose()
 
@@ -122,7 +129,10 @@ def test_expense_can_exceed_expected_cash_and_close_shows_difference(tmp_path):
                                denomination_counts=[{"denomination_minor": 100, "quantity": 2}])
             shift_id = shift.id
         headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "overdraft"}
-        with TestClient(create_app(configured_settings(url))) as client:
+        seed_admin(factory)
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            admin = approved_admin_headers(client, delivery)
             created = client.post(f"/api/v1/registers/{register_id}/expenses", headers=headers,
                                   json={"category": "limpieza", "concept": "Soap", "payee_name": "Shop", "amount_minor": 800})
             assert created.status_code == 201
@@ -132,7 +142,9 @@ def test_expense_can_exceed_expected_cash_and_close_shows_difference(tmp_path):
             assert closed.status_code == 201
             assert closed.json()["expected_cash_at_close_minor"] == -600
             assert closed.json()["difference_minor"] == 600
-            assert client.post(f"/api/v1/expenses/{created.json()['id']}/void", headers=headers, json={"reason": "Mistake"}).status_code == 409
+            void_path = f"/api/v1/expenses/{created.json()['id']}/void"
+            assert client.post(void_path, headers=headers, json={"reason": "Mistake"}).status_code == 403
+            assert client.post(void_path, headers=admin, json={"reason": "Mistake"}).status_code == 409
     finally:
         engine.dispose()
 
@@ -278,7 +290,8 @@ def test_reception_and_owner_expense_scenario(tmp_path):
             shift = open_shift(session, register_id=register_id, opened_by=staff_id,
                                denomination_counts=[{"denomination_minor": 100, "quantity": 2}])
             shift_id = shift.id
-        app = create_app(configured_settings(url))
+        delivery = FakeRecoveryDelivery()
+        app = create_app(configured_settings(url), recovery_delivery=delivery)
         finance_staff_id = seed_admin(factory)
         app.dependency_overrides[finance_principal] = lambda: FinancePrincipal(finance_staff_id, True, None)
         headers = {"Authorization": f"Bearer {token}"}
@@ -295,7 +308,8 @@ def test_reception_and_owner_expense_scenario(tmp_path):
             second = client.post(f"/api/v1/registers/{register_id}/expenses", headers={**headers, "Idempotency-Key": "scenario-2"},
                                  json={"category": "consumibles", "concept": "Agua", "payee_name": "Proveedor", "amount_minor": 5000})
             assert second.status_code == 201
-            voided = client.post(f"/api/v1/expenses/{second.json()['id']}/void", headers=headers, json={"reason": "Captura duplicada"})
+            admin = approved_admin_headers(client, delivery)
+            voided = client.post(f"/api/v1/expenses/{second.json()['id']}/void", headers=admin, json={"reason": "Captura duplicada"})
             assert voided.status_code == 200
             assert voided.json()["void_reason"] == "Captura duplicada"
             after_void = client.get(f"/api/v1/registers/{register_id}/expenses", headers=headers).json()

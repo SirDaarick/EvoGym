@@ -165,19 +165,18 @@ def void_expense(factory, storage, resolve_finance, expense_id, principal, paylo
         row = q.get_expense(session, expense_id)
         if row is None:
             raise HttpStatusError(404)
-        if principal.is_admin or row.shift_id is None:
-            authorized_branches(session, resolve_finance(), row.branch_id)
-        else:
-            require_receptionist(session, row.branch_id, principal)
+        if not principal.is_admin:
+            raise HttpStatusError(403)
+        authorized_branches(session, resolve_finance(), row.branch_id)
         if row.shift_id is not None:
-            _register(session, q.shift_register_id(session, row.shift_id), principal, lock=True)
+            q.get_register(session, q.shift_register_id(session, row.shift_id), lock=True)
             shift = q.lock_shift(session, row.shift_id)
-            if shift is None or shift.status != "open":
-                raise HttpStatusError(409)
         row = q.lock_expense(session, expense_id)
         if row.voided_at is not None:
             if row.void_reason == payload.reason:
                 return _dto(session, row, storage)
+            raise HttpStatusError(409)
+        if row.shift_id is not None and (shift is None or shift.status != "open"):
             raise HttpStatusError(409)
         row.voided_at = datetime.now(timezone.utc)
         row.voided_by_id = principal.staff_id

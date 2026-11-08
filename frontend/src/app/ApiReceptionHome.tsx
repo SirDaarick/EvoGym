@@ -69,9 +69,10 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
     backToStart: () => setStep(1),
   });
 
+  const hasOpenShift = Boolean(registers.find(register => register.id === registerId)?.has_open_shift);
   const purchaseContent = <>
     <CurrentPurchaseCard totalMinor={total} disabled={locked} step={step} onStepChange={setStep}
-      useLiveCardIntent allowCredit
+      useLiveCardIntent allowCredit hasOpenShift={hasOpenShift}
       step1ActionDisabled={!selected.length || !registerId || locked} onConfirmPayment={(value: CheckoutPaymentBreakdown) => void sale.submit(value)}
       statusMessage={message} statusType={error ? 'error' : pending ? 'warning' : 'success'}
       assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone, creditMinor: member.credit_balance_minor ?? 0 } : null}
@@ -113,8 +114,8 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
         />
         <ExtraModal isOpen={modals.isOpen('extra')} onClose={modals.close} apiRequest={request} registerId={registerId} />
         <GastoModal isOpen={modals.isOpen('gasto')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId} />
-        <GuantesModal isOpen={modals.isOpen('guantes')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId || branches[0]?.id} />
-        <CasillerosModal isOpen={modals.isOpen('casilleros')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId || branches[0]?.id} />
+        <GuantesModal isOpen={modals.isOpen('guantes')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId || branches[0]?.id} hasOpenShift={hasOpenShift} />
+        <CasillerosModal isOpen={modals.isOpen('casilleros')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId || branches[0]?.id} hasOpenShift={hasOpenShift} />
       </>
     )}
   </>;

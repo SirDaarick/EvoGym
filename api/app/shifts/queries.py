@@ -131,8 +131,8 @@ def has_receptionist_grant(session: Session, *, staff_id: UUID, branch_id: UUID 
 
 
 def get_active_register_ids(session: Session) -> set[UUID]:
-    """Return set of cash_register_ids that have an active ('open' or 'closing') shift."""
-    stmt = select(Shift.cash_register_id).where(Shift.status.in_(["open", "closing"]))
+    """Return set of cash_register_ids that have an open shift."""
+    stmt = select(Shift.cash_register_id).where(Shift.status == "open")
     return set(session.scalars(stmt).all())
 
 
@@ -149,12 +149,12 @@ def get_open_shift(
     session: Session,
     register_id: UUID,
 ) -> Shift | None:
-    """Retrieve the currently open or closing shift for a cash register."""
+    """Retrieve the currently open shift for a cash register."""
     stmt = (
         select(Shift)
         .where(
             Shift.cash_register_id == register_id,
-            Shift.status.in_(["open", "closing"]),
+            Shift.status == "open",
         )
         .options(
             selectinload(Shift.inventory_review).joinedload(ShiftInventoryReview.snapshot),
@@ -223,7 +223,7 @@ def open_shift(
         select(Shift)
         .where(
             Shift.cash_register_id == register_id,
-            Shift.status.in_(["open", "closing"]),
+            Shift.status == "open",
         )
         .with_for_update()
     )
@@ -696,7 +696,7 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
             "pending_transfer_minor": pending_transfer_minor,
             "payment_methods": sorted(methods.values(), key=lambda item: str(item["method"])),
             "activities": activities, "payments": payments,
-            "expected_cash_minor": expected_cash_for_shift(session, shift)}
+            "expected_cash_minor": (shift.expected_cash_at_close_minor if shift.status == "closed" and shift.expected_cash_at_close_minor is not None else expected_cash_for_shift(session, shift))}
 
 
 def get_shift_by_id(

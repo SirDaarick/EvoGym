@@ -3,6 +3,8 @@ import './OvertimeSaleToggle.css';
 
 export interface OvertimeSaleToggleProps {
   isOvertime?: boolean;
+  /** Live open-shift state (backend rule: overtime = no open shift). Overrides the clock heuristic. */
+  hasOpenShift?: boolean;
   shiftWindow?: string;
   currentTime?: Date | string;
   className?: string;
@@ -53,13 +55,15 @@ export function isShiftTransitionOrOvertime(
  */
 export function OvertimeSaleToggle({
   isOvertime: controlledIsOvertime,
+  hasOpenShift,
   shiftWindow,
   currentTime,
   className = '',
 }: OvertimeSaleToggleProps) {
   const isAutoOvertime = useMemo(() => {
+    if (hasOpenShift !== undefined) return !hasOpenShift;
     return isShiftTransitionOrOvertime(shiftWindow, currentTime);
-  }, [shiftWindow, currentTime]);
+  }, [hasOpenShift, shiftWindow, currentTime]);
 
   const active = controlledIsOvertime ?? isAutoOvertime;
 
