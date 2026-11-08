@@ -7,7 +7,12 @@ import { DemoProvider, useDemo } from '../../demo/DemoProvider';
 import { createDemoState } from '../../demo/adapter';
 import { ShiftCloseDialog } from './ShiftCloseDialog';
 
-const originalShowModal = HTMLDialogElement.prototype.showModal;
+const offline = vi.hoisted(() => ({ on: false, dispatch: vi.fn(async () => ({})) }));
+vi.mock('../../offline/connectivity', async orig => ({ ...(await orig<object>()), isOnlineHint: () => !offline.on }));
+vi.mock('../../offline/dispatcher', async orig => ({ ...(await orig<object>()), dispatch: offline.dispatch }));
+vi.mock('../../offline/db', async orig => ({ ...(await orig<object>()), openLocalDb: () => ({}) }));
+
+const originalShowModal =HTMLDialogElement.prototype.showModal;
 const originalClose = HTMLDialogElement.prototype.close;
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -57,6 +62,21 @@ describe('ShiftCloseDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/shifts/shift-1/close', expect.objectContaining({ method: 'POST', body: JSON.stringify({ counted_cash_minor: 0, closing_notes: 'conteo manual' }) }));
     expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, 1000])('queues an offline manual total of %i as counted_cash_minor, not a fabricated denomination', async minor => {
+    offline.on = true;
+    offline.dispatch.mockClear();
+    const user = userEvent.setup();
+    render(createElement(ShiftCloseDialog as ComponentType<any>, { isOpen: true, shiftId: 'shift-1', shiftName: 'Matutino', expectedCashMinor: 1000, apiRequest: vi.fn(), onClose: vi.fn(), onSuccess: vi.fn() }));
+    await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
+    await user.selectOptions(await screen.findByLabelText('Forma de conteo'), 'manual');
+    await user.type(await screen.findByLabelText('Efectivo contado (MXN)'), String(minor / 100));
+    await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
+    offline.on = false;
+    const calls = offline.dispatch.mock.calls as unknown as [unknown, { type: string; payload: unknown }][];
+    expect(calls[0][1]).toEqual({ type: 'shift.arqueo_close', payload: { shift_ref: 'shift-1', denomination_counts: [], counted_cash_minor: minor, voucher_count: 0, closing_notes: null } });
   });
 
   it('submits denomination counts from the shared amount-per-denomination control', async () => {

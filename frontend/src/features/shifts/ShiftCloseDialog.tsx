@@ -211,7 +211,8 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
             shift_ref: shiftId,
             denomination_counts: review.denominations
               ? review.denominations.map(row => ({ denomination_minor: row.valueMinor, quantity: row.quantity }))
-              : [{ denomination_minor: review.countedCashMinor, quantity: 1 }],
+              : [],
+            ...(review.denominations ? {} : { counted_cash_minor: review.countedCashMinor }),
             voucher_count: 0,
             closing_notes: notes || null,
           },

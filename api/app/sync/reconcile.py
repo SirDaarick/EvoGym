@@ -34,8 +34,6 @@ def check_staff_branch_authorization(session: Session, staff_id: UUID, branch_id
     grants = session.scalars(
         select(RoleGrant).where(RoleGrant.staff_id == staff_id, RoleGrant.is_active.is_(True))
     ).all()
-    if not grants:
-        return True  # If no RBAC grants seeded, active staff is permitted
     for g in grants:
         if g.scope_kind == "organization" or g.branch_id == branch_id:
             return True
@@ -274,8 +272,26 @@ def reconcile_event(
                 .where(CashRegister.branch_id == device.branch_id, Shift.status == "open")
                 .order_by(Shift.opened_at.desc())
             )
+        if shift is not None and session.scalar(
+            select(CashRegister.branch_id).where(CashRegister.id == shift.cash_register_id)
+        ) != device.branch_id:
+            shift = None  # a device may only close shifts of its own branch
 
-        if shift is None:
+        if shift is not None and shift.status != "open":
+            # Closed or closing already: keep the event journaled and flag it instead of failing the whole batch.
+            event_row.result_shift_id = shift.id
+            flags.append(
+                raise_flag(
+                    session,
+                    event_row_id=event_row.id,
+                    branch_id=device.branch_id,
+                    shift_id=shift.id,
+                    kind="orphan_shift_reference",
+                    details={"shift_ref": payload.shift_ref, "reason": f"shift_{shift.status}"},
+                    now=current_time,
+                )
+            )
+        elif shift is None:
             flags.append(
                 raise_flag(
                     session,
@@ -294,11 +310,7 @@ def reconcile_event(
                 if payload.denomination_counts
                 else None
             )
-            total_counted = (
-                sum(d.denomination_minor * d.quantity for d in payload.denomination_counts)
-                if payload.denomination_counts
-                else 0
-            )
+            total_counted = payload.counted_cash_minor or 0  # legacy [] close = zero count
             close_res = close_shift(
                 session,
                 shift_id=shift.id,

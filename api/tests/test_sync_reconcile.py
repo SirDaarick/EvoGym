@@ -73,6 +73,7 @@ def recon_env(tmp_path):
 
         branch_id = branch.id
         staff_id = staff.id
+        session.add(RoleGrant(staff_id=staff_id, role="receptionist", scope_kind="branch", branch_id=branch_id, is_active=True))
 
         # Cash Register
         reg = CashRegister(branch_id=branch_id, name="Caja 1", code="caja-1", status="active")
@@ -316,3 +317,95 @@ def test_reconcile_shift_open_and_close_with_discrepancy(recon_env):
         summary = shift_financial_summary(session, shift)
         assert "contingency_flags_count" in summary
         assert summary["contingency_flags_count"] >= 1
+
+
+def _post_event(env, token, prefix, seq, event_type, payload, actor_id=None):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    event = {
+        "event_id": f"{prefix}-{seq:05d}", "seq": seq, "event_type": event_type, "schema_version": 1,
+        "actor_staff_id": str(actor_id or env["staff_id"]), "payload": payload, "payload_hash": payload_hash(payload),
+        "client_recorded_at": now_iso, "clock_anchor_utc": now_iso, "clock_monotonic_delta_ms": 100,
+    }
+    res = env["client"].post("/api/v1/sync/contingency-events", json={"events": [event]},
+                             headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200, res.text
+    return res.json()["ingested"][0]
+
+
+def _close_payload(shift_ref):
+    return {"shift_ref": str(shift_ref), "denomination_counts": [{"denomination_minor": 10000, "quantity": 1}],
+            "voucher_count": 0, "closing_notes": None}
+
+
+def test_arqueo_close_manual_total_persists_counted_cash_and_replays(recon_env):
+    token, prefix = _bootstrap(recon_env["client"], recon_env["branch_id"])
+    with recon_env["factory"].begin() as session:
+        shift = Shift(cash_register_id=recon_env["reg_id"], opened_by=recon_env["staff_id"], status="open",
+                      opened_at=datetime.now(timezone.utc) - timedelta(hours=1), opening_cash_minor=0)
+        session.add(shift)
+        session.flush()
+        shift_id = shift.id
+    payload = {"shift_ref": str(shift_id), "counted_cash_minor": 12345, "voucher_count": 0, "closing_notes": None}
+    first = _post_event(recon_env, token, prefix, 1, "shift.arqueo_close", payload)
+    assert first["status"] in ("accepted", "flagged_audit"), first
+    with recon_env["factory"]() as session:
+        closed = session.get(Shift, shift_id)
+        assert closed.status == "closed"
+        assert closed.counted_cash_minor == 12345
+        assert closed.difference_minor == 12345 - closed.expected_cash_at_close_minor
+        snapshot = (closed.counted_cash_minor, closed.difference_minor, closed.closed_at)
+    # Replaying the same event id is idempotent and leaves the close untouched.
+    _post_event(recon_env, token, prefix, 1, "shift.arqueo_close", payload)
+    with recon_env["factory"]() as session:
+        again = session.get(Shift, shift_id)
+        assert (again.counted_cash_minor, again.difference_minor, again.closed_at) == snapshot
+
+
+def test_actor_without_active_grants_is_flagged_not_authorized(recon_env):
+    token, prefix = _bootstrap(recon_env["client"], recon_env["branch_id"])
+    with recon_env["factory"].begin() as session:
+        revoked = StaffUser(login_identifier="revoked@example.invalid")
+        session.add(revoked)
+        session.flush()
+        session.add(RoleGrant(staff_id=revoked.id, role="receptionist", scope_kind="branch",
+                              branch_id=recon_env["branch_id"], is_active=False))
+        revoked_id = revoked.id
+    payload = {"register_id": str(recon_env["reg_id"]), "opening_cash_minor": 0, "denomination_counts": []}
+    result = _post_event(recon_env, token, prefix, 1, "shift.open", payload, actor_id=revoked_id)
+    assert (result["status"], result["reason_code"]) == ("flagged_audit", "actor_not_authorized")
+
+
+def test_arqueo_close_cannot_close_a_shift_of_another_branch(recon_env):
+    token, prefix = _bootstrap(recon_env["client"], recon_env["branch_id"])
+    with recon_env["factory"].begin() as session:
+        other = Branch(code="norte", name="Norte", timezone="America/Mexico_City", is_active=True)
+        session.add(other)
+        session.flush()
+        register = CashRegister(branch_id=other.id, name="Caja N", code="caja-n", status="active")
+        session.add(register)
+        session.flush()
+        foreign = Shift(cash_register_id=register.id, opened_by=recon_env["staff_id"], status="open",
+                        opened_at=datetime.now(timezone.utc), opening_cash_minor=0)
+        session.add(foreign)
+        session.flush()
+        foreign_id = foreign.id
+    result = _post_event(recon_env, token, prefix, 1, "shift.arqueo_close", _close_payload(foreign_id))
+    assert (result["status"], result["reason_code"]) == ("flagged_audit", "orphan_shift_reference")
+    with recon_env["factory"]() as session:
+        assert session.get(Shift, foreign_id).status == "open"
+
+
+def test_arqueo_close_of_an_already_closed_shift_is_flagged_and_does_not_block_the_batch(recon_env):
+    token, prefix = _bootstrap(recon_env["client"], recon_env["branch_id"])
+    with recon_env["factory"].begin() as session:
+        closed = Shift(cash_register_id=recon_env["reg_id"], opened_by=recon_env["staff_id"], status="closed",
+                       opened_at=datetime(2025, 2, 1, tzinfo=timezone.utc), closed_at=datetime(2025, 2, 1, 20, tzinfo=timezone.utc),
+                       opening_cash_minor=0)
+        session.add(closed)
+        session.flush()
+        closed_id = closed.id
+    first = _post_event(recon_env, token, prefix, 1, "shift.arqueo_close", _close_payload(closed_id))
+    assert (first["status"], first["reason_code"]) == ("flagged_audit", "orphan_shift_reference")
+    # The device watermark advanced, so the next event is accepted in sequence.
+    open_payload = {"register_id": str(recon_env["reg_id"]), "opening_cash_minor": 0, "denomination_counts": []}
+    assert _post_event(recon_env, token, prefix, 2, "shift.open", open_payload)["status"] == "accepted"

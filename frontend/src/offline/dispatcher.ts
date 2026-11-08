@@ -43,6 +43,7 @@ export interface ShiftOpenCommandPayload {
 export interface ArqueoCloseCommandPayload {
   shift_ref: string;
   denomination_counts: DenominationCountPayload[];
+  counted_cash_minor?: number;
   voucher_count: number;
   closing_notes?: string | null;
 }

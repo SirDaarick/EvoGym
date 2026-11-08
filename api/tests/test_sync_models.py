@@ -121,6 +121,21 @@ def test_payload_models_validate_each_type():
     }), ArqueoClosePayload)
 
 
+def test_arqueo_close_manual_total_xor_denominations():
+    base = {"shift_ref": "S-1", "voucher_count": 0}
+    for ok in (
+        {"counted_cash_minor": 0}, {"counted_cash_minor": 500, "denomination_counts": []},
+        {"denomination_counts": [{"denomination_minor": 100, "quantity": 1}]}, {},  # {} = legacy zero close
+    ):
+        assert isinstance(parse_payload("shift.arqueo_close", {**base, **ok}), ArqueoClosePayload)
+    for bad in (
+        {"counted_cash_minor": -1},
+        {"counted_cash_minor": 100, "denomination_counts": [{"denomination_minor": 100, "quantity": 1}]},
+    ):
+        with pytest.raises(ValidationError):
+            parse_payload("shift.arqueo_close", {**base, **bad})
+
+
 @pytest.mark.parametrize("payload", [
     _sale(extra=1), _sale(items=[]), _sale(total_minor=-1), _sale(online_idempotency_key="bad key!"),
     _sale(items=[{"product_id": str(uuid4()), "quantity": 0, "unit_price_minor": 1}]),

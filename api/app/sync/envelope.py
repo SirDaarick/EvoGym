@@ -88,8 +88,15 @@ class ShiftOpenPayload(_Strict):
 class ArqueoClosePayload(_Strict):
     shift_ref: str = Field(min_length=1, max_length=64)
     denomination_counts: list[DenominationCount] = Field(default_factory=list)
+    counted_cash_minor: int | None = Field(default=None, ge=0)  # manual total; mutually exclusive with denomination_counts
     voucher_count: int = Field(default=0, ge=0)
     closing_notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _one_count_source(self):
+        if self.counted_cash_minor is not None and self.denomination_counts:
+            raise ValueError("send either denomination_counts or counted_cash_minor, not both")
+        return self
 
 
 _PAYLOADS: dict[str, type[_Strict]] = {
