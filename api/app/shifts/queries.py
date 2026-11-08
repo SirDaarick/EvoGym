@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db.models import RoleGrant
 from app.db.models.orders import Order, OrderItem, Payment, ProductRefund
+from app.db.models.member_credit_movements import MemberCreditMovement
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.rentals import Rental, RentalCancellation, RentalCharge, RentalDepositMovement
 from app.db.models.shifts import (
@@ -427,6 +428,11 @@ def expected_cash_for_shift(session: Session, shift: Shift) -> int:
         if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
             raise ValueError("Cash repayment inflow exceeds signed 64-bit minor units.")
         inflow += amount
+    for amount in session.scalars(select(MemberCreditMovement.amount_minor).where(
+            MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "deposit")):
+        if type(amount) is not int or amount <= 0 or inflow > maximum - amount:
+            raise ValueError("Credit deposit inflow exceeds signed 64-bit minor units.")
+        inflow += amount
     rental_amounts = session.scalars(
         select(Payment.amount_minor).where(
             Payment.shift_id == shift.id,
@@ -516,6 +522,11 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
     deposit_rows = session.scalars(
         select(RentalDepositMovement).where(RentalDepositMovement.shift_id == shift.id)
         .order_by(RentalDepositMovement.created_at.desc(), RentalDepositMovement.id.desc())
+    ).all()
+    credit_rows = session.scalars(
+        select(MemberCreditMovement).where(
+            MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "deposit")
+        .order_by(MemberCreditMovement.created_at.desc(), MemberCreditMovement.id.desc())
     ).all()
 
     order_descriptions: dict[UUID, str] = {}
@@ -616,6 +627,20 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
         bucket["count"] = int(bucket["count"]) + 1
         bucket["amount_minor"] = int(bucket["amount_minor"]) + signed
+
+    # Credit deposits are cash held for the member (a liability, like rental deposits), not sales.
+    for movement in credit_rows:
+        payments.append({"id": movement.id, "description": "Saldo a favor recibido", "method": "cash",
+                         "status": "confirmed", "amount_minor": movement.amount_minor,
+                         "recorded_at": movement.created_at})
+        confirmed_minor += movement.amount_minor
+        cash_minor += movement.amount_minor
+        activity = families.setdefault("credit", {"family": "credit", "count": 0, "amount_minor": 0})
+        activity["count"] = int(activity["count"]) + 1
+        activity["amount_minor"] = int(activity["amount_minor"]) + movement.amount_minor
+        bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["amount_minor"] = int(bucket["amount_minor"]) + movement.amount_minor
 
     payments.sort(key=lambda row: (row["recorded_at"], str(row["id"])), reverse=True)
     activities = list(families.values()) if confirmed_minor else []

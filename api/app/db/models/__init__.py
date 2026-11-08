@@ -41,6 +41,7 @@ from app.db.models.orders import (
 from app.db.models.memberships import MembershipPeriod
 from app.db.models.payment_review_events import PaymentReviewEvent
 from app.db.models.membership_debts import MembershipDebt
+from app.db.models.member_credit_movements import MemberCreditMovement
 from app.db.models.membership_debt_payments import MembershipDebtPayment
 from app.db.models.expenses import Expense, ShiftCashContribution
 from app.db.models.payroll import PayrollAdvance, PayrollPayment
@@ -84,6 +85,7 @@ __all__ = [
     "RentalReceipt",
     "MembershipPeriod",
     "MembershipDebt",
+    "MemberCreditMovement",
     "MembershipDebtPayment",
     "Expense",
     "ShiftCashContribution",

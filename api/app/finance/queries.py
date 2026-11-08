@@ -2,7 +2,7 @@
 from sqlalchemy import func, select
 
 from app.db.models import (
-    Branch, CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MembershipDebt, MembershipDebtPayment,
+    Branch, CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MemberCreditMovement, MembershipDebt, MembershipDebtPayment,
     MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, PayrollAdvance, PayrollPayment, Product,
     PaymentTerminal, ProductRefund, ProductSaleCancellation, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, RentalDepositMovement, Shift,
     ShiftInventoryObservation, ShiftInventoryReview, StaffAttendanceCheckout, StaffAttendanceRecord,
@@ -173,6 +173,12 @@ def rental_cancellations(session, branch_id, start, end):
 def deposit_movements(session, branch_id, start, end):
     return session.scalars(select(RentalDepositMovement).where(RentalDepositMovement.branch_id == branch_id,
         RentalDepositMovement.created_at >= start, RentalDepositMovement.created_at < end)).all()
+
+
+def credit_deposit_ids(session, branch_id, start, end):
+    return set(session.scalars(select(MemberCreditMovement.id).where(
+        MemberCreditMovement.branch_id == branch_id, MemberCreditMovement.kind == "deposit",
+        MemberCreditMovement.created_at >= start, MemberCreditMovement.created_at < end)))
 
 
 def register_names(session, branch_id):

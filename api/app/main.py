@@ -35,6 +35,7 @@ from app.api.staff_attendance import router as staff_attendance_router
 from app.api.staff_schedules import router as staff_schedules_router
 from app.api.shifts import router as shifts_router
 from app.api.inventory import router as inventory_router
+from app.api.member_credit import router as member_credit_router
 from app.api.sales import router as sales_router
 from app.api.pending_money import router as pending_money_router
 from app.api.membership_access import router as membership_access_router
@@ -297,6 +298,7 @@ def create_app(settings: Settings | None = None, *, recovery_delivery=None) -> F
     application.include_router(shifts_router)
     application.include_router(inventory_router)
     application.include_router(sales_router)
+    application.include_router(member_credit_router)
     application.include_router(pending_money_router)
     from app.api.owner_overview import router as owner_overview_router
     application.include_router(owner_overview_router)

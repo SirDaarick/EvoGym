@@ -86,7 +86,8 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
         # Rental deposits are custody liabilities: shift_financial_summary counts them for the cash count,
         # but they are not revenue, so they are removed here and reported separately.
         deposit_rows = q.deposit_movements(session, branch.id, start, end)
-        deposit_ids = {row.id for row in deposit_rows}
+        # Member credit deposits are likewise liabilities: counted for the cash count, never as income.
+        deposit_ids = {row.id for row in deposit_rows} | q.credit_deposit_ids(session, branch.id, start, end)
         payments = [row for row in payments if row["id"] not in deposit_ids]
         deposits = {"held_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "hold"),
                     "refunded_minor": sum(r.amount_minor for r in deposit_rows if r.kind == "refund"),
