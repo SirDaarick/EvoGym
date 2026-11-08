@@ -90,6 +90,7 @@ class RentalCreateInput(BaseModel):
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
     accepted_shortfall_minor: StrictInt = Field(ge=0, le=2**63 - 1)
     expected_deposit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1)
+    credit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1, description="Part of the price paid from saldo a favor.")
 
 
 class RentalEndInput(BaseModel):
@@ -113,6 +114,7 @@ class RentalRenewalInput(BaseModel):
     components: list[TenderComponentInput] = Field(default_factory=list, max_length=8)
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
     accepted_shortfall_minor: StrictInt = Field(ge=0, le=2**63 - 1)
+    credit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1, description="Part of the price paid from saldo a favor.")
 
 
 class ReceivablePaymentInput(BaseModel):

@@ -7,6 +7,8 @@ import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 import type { AuthenticatedRequest } from '../../api/inventoryApi';
+import { getMember } from '../../api/membersApi';
+import { depositMemberCredit } from '../../api/memberCreditApi';
 import {
   listRentalAssets,
   listRentals,
@@ -129,6 +131,19 @@ export function CasillerosModal({
 
   const [selectedLockerId, setSelectedLockerId] = useState<string>('locker-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
+
+  // Saldo a favor of the selected member; unknown balance simply hides the tick.
+  const [memberCreditMinor, setMemberCreditMinor] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setMemberCreditMinor(0);
+    if (assignedMemberId) {
+      getMember(apiRequest, assignedMemberId)
+        .then(detail => { if (active && typeof detail?.credit_balance_minor === 'number') setMemberCreditMinor(detail.credit_balance_minor); })
+        .catch(() => { /* non-fatal: no saldo a favor offered */ });
+    }
+    return () => { active = false; };
+  }, [assignedMemberId, apiRequest]);
 
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -295,6 +310,7 @@ export function CasillerosModal({
 
   const assignedMember = selectedLiveMember;
 
+
   const flatActiveMembers = liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }));
 
   const memberGroups =
@@ -355,6 +371,7 @@ export function CasillerosModal({
           expected_total_minor: selectedLocker.monthlyPriceMinor,
           accepted_shortfall_minor: tender.shortfallMinor,
           expected_deposit_minor: depositMinor,
+          ...(tender.creditMinor > 0 ? { credit_minor: tender.creditMinor } : {}),
         },
         crypto.randomUUID()
       );
@@ -365,6 +382,16 @@ export function CasillerosModal({
           if (!result.confirmed) cardWarning = cardPendingMessage(result.attempt, tender.cardMinor);
         } catch (err: any) {
           cardWarning = `${err.message || 'No se pudo iniciar el cobro con tarjeta.'} El casillero quedó con saldo pendiente.`;
+        }
+      }
+      // The rental is already recorded; a failed deposit must not look like a failed rental.
+      const changeToCreditMinor = breakdown?.changeToCreditMinor ?? 0;
+      if (changeToCreditMinor > 0) {
+        try {
+          await depositMemberCredit(apiRequest, registerId, { member_id: assignedMemberId, amount_minor: changeToCreditMinor }, crypto.randomUUID());
+        } catch {
+          const msg = 'El casillero quedó registrado, pero no se pudo abonar el cambio como saldo a favor. Puedes agregarlo desde el perfil del socio.';
+          cardWarning = cardWarning ? cardWarning + ' ' + msg : msg;
         }
       }
       await refreshLive();
@@ -865,7 +892,8 @@ export function CasillerosModal({
                     useLiveCardIntent
                     statusMessage={depositNotice(depositMinor)}
                     statusType="warning"
-                    assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
+                    allowCredit
+                    assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone, creditMinor: memberCreditMinor } : null}
                     onAssignMemberClick={() => setIsSearchOpen(true)}
                     onConfirmPayment={handleConfirmAssignment}
                   >
@@ -1187,6 +1215,14 @@ export function CasillerosModal({
               </button>
             </div>
 
+            {!cancellationPreview.can_cancel && (
+              <div style={{ padding: '16px 16px 0' }}>
+                <Notice tone="warning">
+                  Este casillero no admite cancelación con reembolso (por ejemplo, si se pagó con saldo a favor). Usa Liberar casillero, que no genera reembolso.
+                </Notice>
+              </div>
+            )}
+
             <form noValidate onSubmit={handleConfirmCancellationSubmit} style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="guantes-bento-card" style={{ background: 'var(--color-surface-sunken, #f8f9fa)' }}>
                 <div className="guantes-spec-list">
@@ -1286,7 +1322,7 @@ export function CasillerosModal({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={cancellingSubmitting}
+                  disabled={cancellingSubmitting || !cancellationPreview.can_cancel}
                 >
                   {cancellingSubmitting ? 'Cancelando...' : 'Confirmar cancelación'}
                 </Button>

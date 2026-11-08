@@ -17,13 +17,16 @@ export interface RentalTender {
   cardMinor: number;
   /** Amount left unpaid at creation (shortfall plus the card portion). */
   shortfallMinor: number;
+  /** Member credit applied (neither a component nor shortfall). */
+  creditMinor: number;
 }
 
 export function buildRentalTender(totalMinor: number, breakdown?: CheckoutPaymentBreakdown): RentalTender {
   if (!breakdown) {
-    return { components: [{ method: 'cash', amount_minor: totalMinor }], cardMinor: 0, shortfallMinor: 0 };
+    return { components: [{ method: 'cash', amount_minor: totalMinor }], cardMinor: 0, shortfallMinor: 0, creditMinor: 0 };
   }
   const shortfall = breakdown.shortfallMinor ?? 0;
+  const credit = breakdown.creditAppliedMinor ?? 0;
   const components: TenderComponentInput[] = [];
   let cardMinor = 0;
   const add = (method: string | undefined, amount: number | undefined) => {
@@ -32,12 +35,12 @@ export function buildRentalTender(totalMinor: number, breakdown?: CheckoutPaymen
     else components.push({ method: method as 'cash' | 'transfer', amount_minor: amount });
   };
   if (breakdown.mode === 'single') {
-    add(breakdown.method, totalMinor - shortfall);
+    add(breakdown.method, totalMinor - credit - shortfall);
   } else {
     add(breakdown.mixedMethod1, breakdown.mixedAmount1Minor);
     add(breakdown.mixedMethod2, breakdown.mixedAmount2Minor);
   }
-  return { components, cardMinor, shortfallMinor: shortfall + cardMinor };
+  return { components, cardMinor, shortfallMinor: shortfall + cardMinor, creditMinor: credit };
 }
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.credit.queries import apply_credit
 from app.db.models import (
     Branch, CashRegister, Member, Payment, PaymentReviewEvent, PaymentTerminal, Rental, RentalAsset,
     RentalCancellation, RentalCardAttempt, RentalCharge, RentalDepositMovement, RentalReceipt, RoleGrant,
@@ -110,21 +111,35 @@ def _component_fingerprint(register_id: UUID, components) -> list[tuple[str, int
 
 
 def _validate_checkout(price_minor: int, expected_total_minor: int,
-                       accepted_shortfall_minor: int, components) -> None:
+                       accepted_shortfall_minor: int, components, credit_minor: int = 0) -> None:
     if expected_total_minor != price_minor:
         raise RentalConflictError("Rental price changed; review the current price.")
-    offered = sum(component.amount_minor for component in components)
+    if type(credit_minor) is not int or not 0 <= credit_minor <= MAX_MINOR:
+        raise ValueError("Credit amount must be a non-negative signed 64-bit integer.")
+    offered = sum(component.amount_minor for component in components) + credit_minor
     if offered > price_minor:
         raise RentalConflictError("Tender cannot exceed the charge amount.")
     if price_minor - offered != accepted_shortfall_minor:
         raise RentalConflictError("Shortfall acceptance does not match the server calculation.")
 
 
+def _pay_with_credit(session: Session, *, member: Member, charge: RentalCharge, register: CashRegister,
+                     shift, actor_id: UUID, credit_minor: int) -> None:
+    """Settle `credit_minor` of a charge from the member's saldo a favor (no cash moves)."""
+    if not credit_minor:
+        return
+    apply_credit(session, member=member, register=register, shift=shift, actor_id=actor_id,
+                 amount_minor=credit_minor, rental_charge_id=charge.id)
+    session.add(Payment(rental_charge_id=charge.id, register_id=register.id, shift_id=shift.id,
+                        method="credit", status="confirmed", amount_minor=credit_minor, received_by=actor_id))
+    session.flush()
+
+
 def create_rental(
     session: Session, *, kind: str, branch_id: UUID, asset_id: UUID, member_id: UUID,
     register_id: UUID, actor_id: UUID, authorized_branch_id: UUID | None,
     components, expected_total_minor: int, accepted_shortfall_minor: int,
-    idempotency_key: str, expected_deposit_minor: int = 0,
+    idempotency_key: str, expected_deposit_minor: int = 0, credit_minor: int = 0,
 ) -> tuple[Rental, bool]:
     clean_idempotency_key(idempotency_key)
     _lock_actor(session, actor_id)
@@ -135,6 +150,8 @@ def create_rental(
     parts = [branch_id, kind, str(asset_id), str(member_id), str(register_id), contents]
     if expected_deposit_minor:
         parts.append(expected_deposit_minor)
+    if credit_minor:  # credit-free requests keep their original fingerprint
+        parts.append(f"credit:{credit_minor}")
     request_fingerprint = fingerprint(*parts)
     existing = session.scalar(select(Rental).where(
         Rental.actor_id == actor_id, Rental.branch_id == branch_id, Rental.idempotency_key == idempotency_key,
@@ -144,7 +161,7 @@ def create_rental(
             raise RentalConflictError("Idempotency key was already used for a different request.")
         return existing, True
     asset = lock_asset(session, asset_id, branch_id, kind)
-    _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components)
+    _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components, credit_minor)
     if expected_deposit_minor != asset.deposit_minor:
         raise RentalConflictError("Rental deposit changed; review the current deposit.")
     if active_rental_id(session, asset.id) is not None:
@@ -172,6 +189,8 @@ def create_rental(
     session.flush()
     record_components(session, rental=rental, charge=charge, register=register, shift=shift,
                       actor_id=actor_id, components=components)
+    _pay_with_credit(session, member=member, charge=charge, register=register, shift=shift,
+                     actor_id=actor_id, credit_minor=credit_minor)
     if asset.deposit_minor > 0:
         session.add(RentalDepositMovement(
             rental_id=rental.id, branch_id=branch_id, register_id=register.id, shift_id=shift.id,
@@ -190,7 +209,7 @@ def cancellation_facts_today(branch: Branch):
 def renew_rental(
     session: Session, *, rental_id: UUID, register_id: UUID, actor_id: UUID,
     authorized_branch_id: UUID | None, components, expected_total_minor: int,
-    accepted_shortfall_minor: int, idempotency_key: str,
+    accepted_shortfall_minor: int, idempotency_key: str, credit_minor: int = 0,
 ) -> tuple[Rental, bool]:
     clean_idempotency_key(idempotency_key)
     _lock_actor(session, actor_id)
@@ -203,7 +222,8 @@ def renew_rental(
     register = lock_register(session, register_id, rental.branch_id)
     shift = open_shift(session, register_id)
     contents = _component_fingerprint(register_id, components)
-    request_fingerprint = fingerprint(str(rental.id), str(register_id), contents)
+    request_fingerprint = fingerprint(str(rental.id), str(register_id), contents,
+                                      *([f"credit:{credit_minor}"] if credit_minor else []))
     existing = session.scalar(select(RentalCharge).where(
         RentalCharge.rental_id == rental.id, RentalCharge.idempotency_key == idempotency_key,
     ).with_for_update())
@@ -212,7 +232,7 @@ def renew_rental(
             raise RentalConflictError("Idempotency key was already used for a different renewal.")
         return rental, True
     asset = lock_asset(session, rental.asset_id, rental.branch_id, rental.kind)
-    _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components)
+    _validate_checkout(asset.price_minor, expected_total_minor, accepted_shortfall_minor, components, credit_minor)
     period_start = rental.ends_on
     if period_start is None:
         raise RentalConflictError("Locker rental has no renewable period.")
@@ -227,6 +247,9 @@ def renew_rental(
     session.flush()
     record_components(session, rental=rental, charge=charge, register=register, shift=shift,
                       actor_id=actor_id, components=components)
+    if credit_minor:
+        _pay_with_credit(session, member=lock_member(session, rental.member_id), charge=charge,
+                         register=register, shift=shift, actor_id=actor_id, credit_minor=credit_minor)
     if starts_on > period_start:
         rental.starts_on = starts_on
     rental.ends_on = ends_on
@@ -364,13 +387,22 @@ def receivable_dto(session: Session, receipt: RentalReceipt) -> ReceivablePaymen
     )
 
 
+def _paid_with_credit(session: Session, rental: Rental) -> bool:
+    """A refund would pay out cash for money the member paid from saldo a favor, so those rentals are
+    ended with `release` (no refund) until credit refunds exist."""
+    charge_ids = [charge.id for charge in charges_for_rental(session, rental.id)]
+    return bool(charge_ids) and session.scalar(select(Payment.id).where(
+        Payment.rental_charge_id.in_(charge_ids), Payment.method == "credit").limit(1)) is not None
+
+
 def preview_cancellation(session: Session, *, rental_id: UUID,
                          authorized_branch_id: UUID | None) -> CancellationPreviewDTO:
     rental = _locked_rental(session, rental_id)
     branch = _rental_branch(session, rental, authorized_branch_id)
     facts = cancellation_facts(session, rental, branch)
     can_cancel = (rental.kind == "locker" and rental.status == "active"
-                  and not pending_transfer_exists(session, rental))
+                  and not pending_transfer_exists(session, rental)
+                  and not _paid_with_credit(session, rental))
     return CancellationPreviewDTO(
         can_cancel=can_cancel, preview_token=facts["preview_token"],
         settled_minor=facts["settled_minor"], max_refundable_minor=facts["settled_minor"],
@@ -416,6 +448,8 @@ def confirm_cancellation(
         raise RentalConflictError("Only active locker rentals can be cancelled.")
     if pending_transfer_exists(session, rental):
         raise RentalConflictError("Resolve pending transfer payments before cancelling.")
+    if _paid_with_credit(session, rental):
+        raise RentalConflictError("Rentals paid with saldo a favor cannot be cancelled with a refund yet.")
     facts = cancellation_facts(session, rental, branch)
     if preview_token != facts["preview_token"]:
         raise RentalConflictError("Cancellation preview is stale; review the updated facts.")

@@ -643,6 +643,8 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
             MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "apply")
         .order_by(MemberCreditMovement.created_at.desc(), MemberCreditMovement.id.desc())
     ):
+        if movement.rental_charge_id is not None:
+            continue  # rental credit is also a `credit` Payment row, reported with the rental payments
         if movement.debt_id is not None:
             family, description = "membership", "Abono de membresía"
         elif movement.order_id is not None:

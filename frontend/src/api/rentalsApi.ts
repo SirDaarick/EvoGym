@@ -62,6 +62,8 @@ export interface RentalCreateInput {
   accepted_shortfall_minor: number;
   /** Must equal the asset's current `deposit_minor` (collected in cash); 409 otherwise. */
   expected_deposit_minor?: number;
+  /** Member credit applied to the charge; sum(components) + credit + shortfall must equal the total. */
+  credit_minor?: number;
 }
 
 export interface RentalRenewalInput {
@@ -69,6 +71,7 @@ export interface RentalRenewalInput {
   components: TenderComponentInput[];
   expected_total_minor: number;
   accepted_shortfall_minor: number;
+  credit_minor?: number;
 }
 
 export interface RentalChargeDTO {

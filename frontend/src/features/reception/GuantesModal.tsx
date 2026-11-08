@@ -6,6 +6,8 @@ import AnimatedList from '../catalog/react-bits/AnimatedList';
 import SwipeToast from '../catalog/react-bits/SwipeToast';
 import { CurrentPurchaseCard, type CheckoutPaymentBreakdown } from './CurrentPurchaseCard';
 import type { AuthenticatedRequest } from '../../api/inventoryApi';
+import { getMember } from '../../api/membersApi';
+import { depositMemberCredit } from '../../api/memberCreditApi';
 import {
   listRentalAssets,
   listRentals,
@@ -75,6 +77,19 @@ export function GuantesModal({
 
   const [selectedGloveId, setSelectedGloveId] = useState<string>('glove-01');
   const [assignedMemberId, setAssignedMemberId] = useState<string | null>(null);
+
+  // Saldo a favor of the selected member; unknown balance simply hides the tick.
+  const [memberCreditMinor, setMemberCreditMinor] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setMemberCreditMinor(0);
+    if (assignedMemberId) {
+      getMember(apiRequest, assignedMemberId)
+        .then(detail => { if (active && typeof detail?.credit_balance_minor === 'number') setMemberCreditMinor(detail.credit_balance_minor); })
+        .catch(() => { /* non-fatal: no saldo a favor offered */ });
+    }
+    return () => { active = false; };
+  }, [assignedMemberId, apiRequest]);
 
   const [memberQuery, setMemberQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -232,6 +247,7 @@ export function GuantesModal({
 
   const assignedMember = selectedLiveMember;
 
+
   const flatActiveMembers = liveMembers.map(m => ({ id: m.id, name: m.full_name, phone: m.phone }));
 
   const memberGroups =
@@ -292,6 +308,7 @@ export function GuantesModal({
           expected_total_minor: selectedGlove.priceMinor,
           accepted_shortfall_minor: tender.shortfallMinor,
           expected_deposit_minor: depositMinor,
+          ...(tender.creditMinor > 0 ? { credit_minor: tender.creditMinor } : {}),
         },
         crypto.randomUUID()
       );
@@ -302,6 +319,16 @@ export function GuantesModal({
           if (!result.confirmed) cardWarning = cardPendingMessage(result.attempt, tender.cardMinor);
         } catch (err: any) {
           cardWarning = `${err.message || 'No se pudo iniciar el cobro con tarjeta.'} La renta quedó con saldo pendiente.`;
+        }
+      }
+      // The rental is already recorded; a failed deposit must not look like a failed rental.
+      const changeToCreditMinor = breakdown?.changeToCreditMinor ?? 0;
+      if (changeToCreditMinor > 0) {
+        try {
+          await depositMemberCredit(apiRequest, registerId, { member_id: assignedMemberId, amount_minor: changeToCreditMinor }, crypto.randomUUID());
+        } catch {
+          const msg = 'La renta quedó registrada, pero no se pudo abonar el cambio como saldo a favor. Puedes agregarlo desde el perfil del socio.';
+          cardWarning = cardWarning ? cardWarning + ' ' + msg : msg;
         }
       }
       await refreshLive();
@@ -694,7 +721,8 @@ export function GuantesModal({
                   useLiveCardIntent
                   statusMessage={depositNotice(depositMinor)}
                   statusType="warning"
-                  assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone } : null}
+                  allowCredit
+                  assignedMember={assignedMember ? { id: assignedMember.id, name: assignedMember.name, phone: assignedMember.phone, creditMinor: memberCreditMinor } : null}
                   onAssignMemberClick={() => setIsSearchOpen(true)}
                   onConfirmPayment={handleConfirmRental}
                 >

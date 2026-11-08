@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { GuantesModal } from './GuantesModal';
@@ -250,5 +250,60 @@ describe('GuantesModal (live only)', () => {
     await userEvent.click(screen.getByText('#02 · Rojo · 12 oz').closest('button')!);
     expect(screen.getByLabelText(/Nuevo depósito reembolsable/)).toBeDisabled();
     expect(screen.getByText(/Solo se edita con el activo libre/)).toBeVisible();
+  });
+});
+
+describe('GuantesModal saldo a favor', () => {
+  const withMember = (balance: number, extra?: (url: string, init?: RequestInit) => Response | undefined) =>
+    makeRequest([glove()], [], (url, init) => {
+      if (url === '/api/v1/members/member-9') return new Response(JSON.stringify({ id: 'member-9', credit_balance_minor: balance }), { status: 200 });
+      if (url === '/api/v1/rentals/gloves' && init?.method === 'POST') return new Response(JSON.stringify(rental({ id: 'new' })), { status: 201 });
+      return extra?.(url, init);
+    });
+
+  it('applies credit and sends credit_minor with no components when it covers the total', async () => {
+    const request = withMember(5000);
+    renderModal(request);
+    await screen.findByText('#01 · Rojo · 12 oz');
+    await assignMember();
+    await userEvent.click(await screen.findByLabelText('Usar saldo a favor'));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro y entregar' }));
+
+    await screen.findByText('Renta confirmada');
+    expect(postBody(request, '/api/v1/rentals/gloves')).toMatchObject({
+      components: [], credit_minor: 2500, accepted_shortfall_minor: 0,
+    });
+  });
+
+  it('hides the credit tick at balance 0 and sends no credit_minor', async () => {
+    const request = withMember(0);
+    renderModal(request);
+    await screen.findByText('#01 · Rojo · 12 oz');
+    await assignMember();
+    await screen.findByRole('radio', { name: 'Efectivo' });
+    expect(screen.queryByLabelText('Usar saldo a favor')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro y entregar' }));
+    await screen.findByText('Renta confirmada');
+    expect(postBody(request, '/api/v1/rentals/gloves')).not.toHaveProperty('credit_minor');
+  });
+
+  it('deposits the excess as credit after the rental and warns when the deposit fails', async () => {
+    const request = withMember(0, (url, init) =>
+      url.endsWith('/member-credit-deposits') && init?.method === 'POST'
+        ? new Response(JSON.stringify({ detail: 'boom' }), { status: 500 })
+        : undefined
+    );
+    renderModal(request);
+    await screen.findByText('#01 · Rojo · 12 oz');
+    await assignMember();
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    fireEvent.change(screen.getByLabelText('Monto recibido'), { target: { value: '30' } });
+    await userEvent.click(screen.getByLabelText('Dejar $5.00 como saldo a favor'));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cobro y entregar' }));
+
+    expect(await screen.findByText(/Puedes agregarlo desde el perfil del socio/)).toBeInTheDocument();
+    expect(postBody(request, '/api/v1/rentals/gloves')).toMatchObject({ components: [{ method: 'cash', amount_minor: 2500 }] });
+    expect(postBody(request, '/member-credit-deposits')).toEqual({ member_id: 'member-9', amount_minor: 500 });
   });
 });

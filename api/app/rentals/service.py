@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
+from app.credit.queries import CreditConflictError
 from app.errors import HttpStatusError, http_errors, session_factory
 from app.rentals import queries as q
 from app.rentals.payments import (
@@ -23,7 +24,7 @@ from app.sales.point import MercadoPagoPointHttpClient, PointTerminalClient
 
 _ERRORS = (
     (RentalNotFoundError, 404), (RentalAccessDenied, 403), (RentalConflictError, 409),
-    (RentalProviderUnavailableError, 503), (IntegrityError, 409), (ValueError, 422),
+    (RentalProviderUnavailableError, 503), (IntegrityError, 409), (CreditConflictError, 409), (ValueError, 422),
 )
 
 
@@ -135,7 +136,7 @@ def create_rental(factory, principal, kind: str, payload, idempotency_key: str):
             components=payload.components,
             expected_total_minor=payload.expected_total_minor,
             accepted_shortfall_minor=payload.accepted_shortfall_minor,
-            expected_deposit_minor=payload.expected_deposit_minor,
+            expected_deposit_minor=payload.expected_deposit_minor, credit_minor=payload.credit_minor,
             idempotency_key=idempotency_key,
         )
         return q.rental_dto(session, rental), replayed
@@ -225,7 +226,7 @@ def renew_rental(factory, principal, rental_id: UUID, payload, idempotency_key: 
             actor_id=principal.staff_id, authorized_branch_id=principal.branch_id,
             components=payload.components,
             expected_total_minor=payload.expected_total_minor,
-            accepted_shortfall_minor=payload.accepted_shortfall_minor,
+            accepted_shortfall_minor=payload.accepted_shortfall_minor, credit_minor=payload.credit_minor,
             idempotency_key=idempotency_key,
         )
         return q.rental_dto(session, rental), replayed
