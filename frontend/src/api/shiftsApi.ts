@@ -7,6 +7,20 @@ export interface CashRegisterDTO {
   name: string;
   status: string;
   has_open_shift: boolean;
+  last_closed_shift_id?: string | null;
+  expected_opening_cash_minor?: number | null;
+}
+
+export interface ShiftCloseDraftInputDTO {
+  mode: 'denominations' | 'manual';
+  entry_mode: 'units' | 'amount';
+  denomination_counts: { denomination_minor: number; quantity: number }[];
+  manual_total: string;
+  closing_notes: string;
+}
+
+export interface ShiftCloseDraftDTO extends ShiftCloseDraftInputDTO {
+  updated_at?: string | null;
 }
 
 export interface InventorySnapshotDTO {
@@ -28,9 +42,13 @@ export interface ShiftDTO {
   inventory_review: { snapshot_id: string; observations: { product_id: string; code: string; name: string; unit: string; physical_quantity: number; reason: string | null; expected_quantity: number | null; initialized: boolean | null }[] } | null;
   expected_cash_at_close_minor: number | null;
   current_expected_cash_minor: number | null;
+  expected_opening_cash_minor?: number | null;
+  opening_difference_minor?: number | null;
   counted_cash_minor: number | null;
   difference_minor: number | null;
+  notes?: string | null;
   closing_notes: string | null;
+  closing_draft?: ShiftCloseDraftDTO | null;
 }
 
 export interface ShiftPageDTO { items: ShiftDTO[]; total: number; offset: number; limit: number; }
@@ -41,7 +59,7 @@ export interface ShiftSummaryDTO {
   pending_transfer_minor: number;
   payment_methods: { method: 'cash' | 'transfer' | 'credit'; count: number; amount_minor: number }[];
   activities: { family: string; count: number; amount_minor: number }[];
-  payments: { id: string; description: string; method: 'cash' | 'transfer' | 'credit'; status: 'confirmed' | 'pending' | 'under_review'; amount_minor: number; recorded_at: string }[];
+  payments: { id: string; description: string; method: 'cash' | 'transfer' | 'credit'; status: 'confirmed' | 'pending' | 'under_review'; amount_minor: number; recorded_at: string; is_overtime?: boolean }[];
   expected_cash_minor: number;
   expense_minor: number;
   expense_count: number;
@@ -49,14 +67,23 @@ export interface ShiftSummaryDTO {
 }
 
 export class ShiftApiError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = 'ShiftApiError'; }
+  constructor(readonly status: number, message: string, readonly code?: string) { super(message); this.name = 'ShiftApiError'; }
 }
 
 async function requestJson<T>(request: ApiRequest, path: string, init?: RequestInit): Promise<T> {
   const response = await request(path, init);
   if (!response.ok) {
+    let backendMessage: string | undefined;
+    let code: string | undefined;
+    try {
+      const data = await response.json();
+      backendMessage = data?.error?.message ?? data?.detail ?? data?.message;
+      code = data?.error?.code ?? data?.code;
+    } catch {
+      // not JSON
+    }
     const messages: Record<number, string> = { 401: 'La sesión expiró o fue revocada.', 403: 'No tienes autorización para consultar estos datos.', 404: 'No se encontró el turno solicitado.', 409: 'El turno cambió. Actualiza los datos e intenta nuevamente.', 422: 'Revisa los datos enviados e intenta nuevamente.' };
-    throw new ShiftApiError(response.status, messages[response.status] ?? (response.status >= 500 ? 'El servidor no pudo completar la operación.' : `La solicitud falló (${response.status}).`));
+    throw new ShiftApiError(response.status, backendMessage || messages[response.status] || (response.status >= 500 ? 'El servidor no pudo completar la operación.' : `La solicitud falló (${response.status}).`), code);
   }
   return response.json() as Promise<T>;
 }
@@ -91,6 +118,7 @@ export function openShift(request: ApiRequest, payload: {
   opening_cash_minor?: number;
   denomination_counts?: { denomination_minor: number; quantity: number }[];
   inventory_observations: { product_id: string; physical_quantity: number; reason?: string }[];
+  notes?: string;
 }): Promise<ShiftDTO> {
   return requestJson(request, '/api/v1/shifts/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 }
@@ -101,4 +129,16 @@ export function closeShift(request: ApiRequest, id: string, payload: {
   closing_notes?: string;
 }): Promise<ShiftDTO> {
   return requestJson(request, `/api/v1/shifts/${encodeURIComponent(id)}/close`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
+export function saveShiftCloseDraft(
+  request: ApiRequest,
+  id: string,
+  payload: ShiftCloseDraftInputDTO,
+): Promise<ShiftDTO> {
+  return requestJson(request, `/api/v1/shifts/${encodeURIComponent(id)}/close-draft`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }

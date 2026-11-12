@@ -26,6 +26,7 @@ export function PayrollDialog({ dialog, currentWeekStart, busy, serverError, onS
   const [nextWeekText, setNextWeekText] = useState('');
   const [notes, setNotes] = useState('');
   const [method, setMethod] = useState<'cash' | 'transfer'>('transfer');
+  const [nextAdvanceMethod, setNextAdvanceMethod] = useState<'cash' | 'transfer'>('transfer');
   const [amountError, setAmountError] = useState('');
   const [nextError, setNextError] = useState('');
 
@@ -44,7 +45,7 @@ export function PayrollDialog({ dialog, currentWeekStart, busy, serverError, onS
       setNextError('El adelanto de próxima semana no puede superar la base semanal.');
       return;
     }
-    onSubmit({ dialog, amountMinor: amount, nextAdvanceMinor: nextAdvance, notes: notes.trim(), method });
+    onSubmit({ dialog, amountMinor: amount, nextAdvanceMinor: nextAdvance, notes: notes.trim(), method, nextAdvanceMethod });
   }
 
   return (
@@ -60,6 +61,9 @@ export function PayrollDialog({ dialog, currentWeekStart, busy, serverError, onS
         <Button variant="secondary" disabled={busy} onClick={onClose}>Cerrar</Button>
       </>}
     >
+      <p className="payroll-owner-notice muted" style={{ fontSize: '0.85rem', marginTop: '4px', marginBottom: '12px' }}>
+        Los pagos y adelantos de nómina salen de la cuenta del dueño (no descuenta de la caja del turno).
+      </p>
       {dialog.mode === 'advance' ? <>
         {dialog.targetWeek !== currentWeekStart && <p className="badge badge-neutral">Semana del {dialog.targetWeek}</p>}
         <Field id="payroll-amount" label="Importe" value={advanceText} error={amountError} disabled={busy}
@@ -69,9 +73,19 @@ export function PayrollDialog({ dialog, currentWeekStart, busy, serverError, onS
         </Button>
         <Field id="payroll-notes" label="Notas opcionales" value={notes} maxLength={255} disabled={busy}
           onChange={event => setNotes(event.target.value)} />
+        <div className="field">
+          <label htmlFor="payroll-advance-method">Método de pago del adelanto</label>
+          <select id="payroll-advance-method" value={method} disabled={busy} onChange={event => setMethod(event.target.value as 'cash' | 'transfer')}>
+            <option value="transfer">Transferencia</option>
+            <option value="cash">Efectivo</option>
+          </select>
+        </div>
       </> : <>
         <p>Base: {formatMoney(item.base_minor)}</p>
-        <p>Adelantos: −{formatMoney(item.advances_minor)}</p>
+        <p>
+          Adelantos: −{formatMoney(item.advances_minor)}
+          {item.advance_payment_method ? ` (${item.advance_payment_method === 'cash' ? 'Efectivo' : 'Transferencia'})` : ''}
+        </p>
         <p>Neto a liquidar: {formatMoney(item.net_minor)}</p>
         <div className="field">
           <label htmlFor="payroll-method">Método de pago</label>
@@ -83,6 +97,13 @@ export function PayrollDialog({ dialog, currentWeekStart, busy, serverError, onS
         <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
           <Field id="payroll-next-advance" label="+ Adelanto próxima semana (opcional)" placeholder="0.00" value={nextWeekText}
             error={nextError} disabled={busy} onChange={event => setNextWeekText(event.target.value)} />
+          {nextWeekText.trim() && <div className="field">
+            <label htmlFor="payroll-next-method">Método de pago del adelanto</label>
+            <select id="payroll-next-method" value={nextAdvanceMethod} disabled={busy} onChange={event => setNextAdvanceMethod(event.target.value as 'cash' | 'transfer')}>
+              <option value="transfer">Transferencia</option>
+              <option value="cash">Efectivo</option>
+            </select>
+          </div>}
           <span className="muted" style={{ fontSize: '0.82rem', display: 'block', marginTop: '4px' }}>
             Si el personal solicita un anticipo al cobrar su semana, se deducirá del siguiente periodo.
           </span>

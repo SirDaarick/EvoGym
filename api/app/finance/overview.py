@@ -169,9 +169,18 @@ def owner_overview(factory, principal, from_date, to_date, branch_id):
                 if begins <= now and not any(e.series_id == series.id and e.occurrence_date == day and _utc(e.occurred_at) <= now for e in entries):
                     absent.add(series.profile_id)
         payday = today + timedelta(days=(5 - today.weekday()) % 7)
+        debt_checkins_count = sum(
+            1 for c in checkins
+            if getattr(c, "access_warnings", None)
+            and "outstanding_balance" in c.access_warnings
+            and "outstanding_balance_confirmed" in c.access_warnings
+        )
+        corrections_count = q.attendance_corrections_count(session, branch.id, start, end)
+        waste_count = q.waste_movements_count(session, branch.id, start, end)
         categories = [{"category": name, "count": count} for name, count in (
             ("Diferencias de caja", len(discrepancies)), ("Diferencias de inventario", len(counts)),
-            ("Stock bajo", low), ("Casilleros vencidos", overdue), ("Cancelaciones sin revisar", cancellations)) if count]
+            ("Stock bajo", low), ("Casilleros vencidos", overdue), ("Cancelaciones sin revisar", cancellations),
+            ("Entradas con adeudo", debt_checkins_count), ("Correcciones de asistencia", corrections_count), ("Mermas de inventario", waste_count)) if count]
         return {
             "period": {"from": first, "to": last, "branch_id": branch.id, "timezone": str(zone)},
             "pulse": {"confirmed_minor": sum(row["amount_minor"] for row in by_method), "alerts_count": sum(c["count"] for c in categories)},

@@ -6,6 +6,8 @@ export interface ProductSaleInput {
   expected_total_minor: number;
   /** Part of the total paid from the member's saldo a favor; sent identically on every call of one sale. */
   credit_minor?: number;
+  /** Cash collected upfront when partial; remainder becomes assigned member debt. */
+  cash_amount_minor?: number;
 }
 
 /** What the payment itself must carry once the credit part is deducted. */
@@ -51,7 +53,7 @@ export async function submitCashProductSale(request: AuthenticatedRequest, regis
       || result.order.total_minor !== payload.expected_total_minor || !result.payment
       || typeof result.payment !== 'object' || !('status' in result.payment) || result.payment.status !== 'confirmed'
       || !('method' in result.payment) || result.payment.method !== 'cash'
-      || !('amount_minor' in result.payment) || result.payment.amount_minor !== dueMinor(payload)) {
+      || !('amount_minor' in result.payment) || result.payment.amount_minor !== (payload.cash_amount_minor ?? dueMinor(payload))) {
     throw new Error('No se pudo confirmar el resultado. Reintenta sin cambiar la compra.');
   }
   return result as ProductSaleResult;

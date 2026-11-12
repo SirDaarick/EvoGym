@@ -4,11 +4,23 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, t
 import type { CashDenominationCount } from '../../domain/models';
 import { useDemo } from '../../demo/DemoProvider';
 import { Button, Notice } from '../../shared/ui';
-import { closeShift as closeApiShift, getShift } from '../../api/shiftsApi';
+import {
+  closeShift as closeApiShift,
+  getShift,
+  saveShiftCloseDraft,
+  type ApiRequest,
+  type ShiftCloseDraftDTO,
+  type ShiftDTO,
+} from '../../api/shiftsApi';
 import { openLocalDb } from '../../offline/db';
 import { dispatch } from '../../offline/dispatcher';
 import { isOnlineHint } from '../../offline/connectivity';
-import type { ApiRequest } from '../../api/shiftsApi';
+import {
+  clearLocalCloseDraft,
+  closeDraftToServerInput,
+  resolveInitialCloseDraft,
+  writeLocalCloseDraft,
+} from './shiftCloseDraftStorage';
 import './ShiftCloseDialog.css';
 
 type CountMode = 'denominations' | 'manual';
@@ -31,6 +43,8 @@ interface ApiShiftCloseDialogProps {
   expectedCashMinor: number;
   expectedCashBreakdown?: { openingMinor?: number; receiptsMinor?: number; extrasMinor?: number; expensesMinor?: number };
   apiRequest: ApiRequest;
+  initialDraft?: ShiftCloseDraftDTO | null;
+  onDraftSaved?: (shift: ShiftDTO) => void;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
 }
@@ -50,7 +64,9 @@ interface CloseDialogViewProps {
   review: Pick<CloseReview, 'countedCashMinor' | 'expectedCashMinor'> | null;
   formError: string;
   canSubmit: boolean;
+  savingDraft?: boolean;
   storageNotice?: ReactNode;
+  onSaveDraft?: () => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateDraft: (field: string, value: string) => void;
@@ -105,11 +121,15 @@ export function ShiftCloseDialog(props: ShiftCloseDialogProps | ApiShiftCloseDia
   return <DemoShiftCloseDialog {...props} />;
 }
 
-function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, expectedCashBreakdown, apiRequest, onClose, onSuccess }: ApiShiftCloseDialogProps) {
+function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, expectedCashBreakdown, apiRequest, initialDraft: serverDraft, onDraftSaved, onClose, onSuccess }: ApiShiftCloseDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [draft, setDraft] = useState<CloseDraft>({ ...initialDraft });
+  const initialResolution = useMemo(() => resolveInitialCloseDraft(shiftId, serverDraft), [shiftId, serverDraft]);
+  const [draft, setDraft] = useState<CloseDraft>(() => initialResolution.draft);
   const [review, setReview] = useState<CloseReview | null>(null);
   const [formError, setFormError] = useState('');
+  const [draftNotice, setDraftNotice] = useState(() => initialResolution.notice);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const dirtyRef = useRef(initialResolution.dirty);
   const mode: CountMode = draft.mode === 'manual' ? 'manual' : 'denominations';
   const entryMode: 'units' | 'amount' = draft.entryMode === 'amount' ? 'amount' : 'units';
   const counts = useMemo(() => demoDenominations.map(item => ({
@@ -125,19 +145,88 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
     if (isOpen && dialog && !dialog.open) dialog.showModal();
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!dirtyRef.current) {
+      const next = resolveInitialCloseDraft(shiftId, serverDraft);
+      setDraft(next.draft);
+      setDraftNotice(next.notice);
+    }
+  }, [shiftId, serverDraft]);
+
+  useEffect(() => {
+    if (review && review.expectedCashMinor !== expectedCashMinor) {
+      setReview(null);
+      setDraftNotice('El efectivo esperado se actualizó con nuevos movimientos; verifica tu conteo antes de confirmar.');
+    }
+  }, [expectedCashMinor, review]);
+
+  function applyDraftChange(updater: (current: CloseDraft) => CloseDraft) {
+    setDraft(current => {
+      const next = updater(current);
+      dirtyRef.current = true;
+      writeLocalCloseDraft(shiftId, next, { synced: false });
+      return next;
+    });
+    setDraftNotice('');
+    setReview(null);
+    setFormError('');
+  }
+
+  async function persistDraftToServer(draftToSave: CloseDraft, notifyParent = true) {
+    writeLocalCloseDraft(shiftId, draftToSave, { synced: false });
+    if (!isOnlineHint()) {
+      dirtyRef.current = true;
+      setDraftNotice('Avance guardado en este navegador (sin conexión). El turno sigue abierto.');
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const updated = await saveShiftCloseDraft(apiRequest, shiftId, closeDraftToServerInput(draftToSave));
+      dirtyRef.current = false;
+      writeLocalCloseDraft(shiftId, draftToSave, {
+        synced: true,
+        updatedAt: updated.closing_draft?.updated_at ?? new Date().toISOString(),
+      });
+      if (notifyParent) onDraftSaved?.(updated);
+      setDraftNotice('Avance guardado en el servidor. El turno sigue abierto y puedes seguir vendiendo.');
+    } catch (reason) {
+      dirtyRef.current = true;
+      setDraftNotice(
+        reason instanceof Error
+          ? `Avance guardado en este navegador; no se pudo sincronizar (${reason.message}).`
+          : 'Avance guardado en este navegador; no se pudo sincronizar con el servidor.',
+      );
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
   function closeDialog() {
+    if (dirtyRef.current && isOnlineHint()) {
+      const snapshot = draft;
+      void saveShiftCloseDraft(apiRequest, shiftId, closeDraftToServerInput(snapshot))
+        .then(updated => {
+          dirtyRef.current = false;
+          writeLocalCloseDraft(shiftId, snapshot, {
+            synced: true,
+            updatedAt: updated.closing_draft?.updated_at ?? new Date().toISOString(),
+          });
+          onDraftSaved?.(updated);
+        })
+        .catch(() => {
+          // Local mirror stays available until the next save or reopen.
+        });
+    }
     if (dialogRef.current?.open) dialogRef.current.close();
     onClose();
   }
 
   function updateDraft(field: string, value: string) {
-    setDraft(current => ({ ...current, [field]: value }));
-    setReview(null);
-    setFormError('');
+    applyDraftChange(current => ({ ...current, [field]: value }));
   }
 
   function setEntryMode(nextMode: 'units' | 'amount') {
-    setDraft(current => {
+    applyDraftChange(current => {
       const next: CloseDraft = { ...current, entryMode: nextMode };
       for (const item of demoDenominations) {
         const quantity = parseCashQuantity(current[`quantity-${item.valueMinor}`] ?? '0') ?? 0;
@@ -146,12 +235,10 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
       }
       return next;
     });
-    setReview(null);
-    setFormError('');
   }
 
   function changeDenomination(valueMinor: number, value: string, currentMode: 'units' | 'amount') {
-    setDraft(current => {
+    applyDraftChange(current => {
       const next = { ...current };
       if (currentMode === 'amount') {
         next[`amount-${valueMinor}`] = value;
@@ -167,15 +254,15 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
       }
       return next;
     });
-    setReview(null);
-    setFormError('');
   }
 
   function updateDenominationQuantity(valueMinor: number, quantity: number) {
     const value = Math.max(0, quantity).toString();
-    setDraft(current => ({ ...current, [`quantity-${valueMinor}`]: value, [`amount-${valueMinor}`]: Number(value) > 0 ? (Number(value) * valueMinor / 100).toString() : '' }));
-    setReview(null);
-    setFormError('');
+    applyDraftChange(current => ({
+      ...current,
+      [`quantity-${valueMinor}`]: value,
+      [`amount-${valueMinor}`]: Number(value) > 0 ? (Number(value) * valueMinor / 100).toString() : '',
+    }));
   }
 
   function increment(valueMinor: number) {
@@ -192,6 +279,11 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
     event.preventDefault();
     if (actualTotal === null || !Number.isSafeInteger(actualTotal) || actualTotal < 0) {
       setFormError(mode === 'manual' ? 'Escribe un importe válido, con hasta dos decimales.' : 'Revisa las cantidades: solo enteros no negativos dentro del límite permitido.');
+      return;
+    }
+    const diff = actualTotal - expectedCashMinor;
+    if (isOnlineHint() && diff !== 0 && !draft.closingNotes?.trim()) {
+      setFormError('Se requiere un comentario al cerrar turno cuando hay diferencia de efectivo.');
       return;
     }
     setReview({ countedCashMinor: actualTotal, expectedCashMinor, revision: 0, ...(mode === 'denominations' ? { denominations: counts } : {}) });
@@ -219,6 +311,7 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
         },
         'offline-staff',
       );
+      clearLocalCloseDraft(shiftId);
       if (dialogRef.current?.open) dialogRef.current.close();
       await onSuccess();
       return;
@@ -229,6 +322,7 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
         ...(notes ? { closing_notes: notes } : {}),
       });
       if (closed.status !== 'closed') throw new Error('El servidor no confirmó el cierre.');
+      clearLocalCloseDraft(shiftId);
       if (dialogRef.current?.open) dialogRef.current.close();
       await onSuccess();
     } catch (reason) {
@@ -239,6 +333,7 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
             && review.denominations.every(row => current.closing_denomination_counts.some(saved => saved.denomination_minor === row.valueMinor && saved.quantity === row.quantity))
           : current.closing_denomination_counts.length === 0;
         if (current.status === 'closed' && current.counted_cash_minor === review.countedCashMinor && current.closing_notes === (notes || null) && sameCounts) {
+          clearLocalCloseDraft(shiftId);
           if (dialogRef.current?.open) dialogRef.current.close();
           await onSuccess();
           return;
@@ -250,7 +345,10 @@ function ApiShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, ex
 
   return <ShiftCloseDialogView isOpen={isOpen} shiftName={shiftName} expectedCashMinor={expectedCashMinor} expectedCashBreakdown={expectedCashBreakdown}
     dialogRef={dialogRef} draft={draft} mode={mode} entryMode={entryMode} counts={counts} actualTotal={actualTotal} difference={difference} review={review}
-    formError={formError} canSubmit={true} onClose={closeDialog} onSubmit={prepareReview}
+    formError={formError} canSubmit={!savingDraft} savingDraft={savingDraft}
+    storageNotice={draftNotice ? <p role="status" className="muted" style={{ marginBottom: '0.75rem' }}>{draftNotice}</p> : null}
+    onSaveDraft={() => void persistDraftToServer(draft)}
+    onClose={closeDialog} onSubmit={prepareReview}
     onUpdateDraft={updateDraft} onSetEntryMode={setEntryMode} onChangeDenomination={changeDenomination} onIncrement={increment} onDecrement={decrement}
     onConfirm={() => void confirmClose()} onBackToCount={() => { setReview(null); setFormError(''); }} />;
 }
@@ -446,7 +544,7 @@ function DemoShiftCloseDialog({ isOpen, shiftId, shiftName, expectedCashMinor, e
 }
 
 
-function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCashBreakdown, dialogRef, draft, mode, entryMode, counts, actualTotal, difference, review, formError, canSubmit, storageNotice, onClose, onSubmit, onUpdateDraft, onSetEntryMode, onChangeDenomination, onIncrement, onDecrement, onConfirm, onBackToCount }: CloseDialogViewProps) {
+function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCashBreakdown, dialogRef, draft, mode, entryMode, counts, actualTotal, difference, review, formError, canSubmit, savingDraft, storageNotice, onSaveDraft, onClose, onSubmit, onUpdateDraft, onSetEntryMode, onChangeDenomination, onIncrement, onDecrement, onConfirm, onBackToCount }: CloseDialogViewProps) {
   if (!isOpen) return null;
   return (
     <dialog
@@ -697,7 +795,10 @@ function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCa
                   {/* OBSERVACIONES DEL CIERRE */}
                   <div className="shift-close-notes-card clay-card">
                     <div className="shift-close-notes field">
-                      <label htmlFor="shift-closing-notes">Observaciones del cierre</label>
+                      <div className="flex items-center gap-1">
+                        <label htmlFor="shift-closing-notes">Observaciones del cierre</label>
+                        {difference !== null && difference !== 0 && <span aria-hidden="true" className="text-red-500 font-bold">*</span>}
+                      </div>
                       <textarea
                         id="shift-closing-notes"
                         rows={2}
@@ -713,6 +814,11 @@ function ShiftCloseDialogView({ isOpen, shiftName, expectedCashMinor, expectedCa
                       <Button type="submit" disabled={!canSubmit}>
                         Revisar cierre
                       </Button>
+                      {onSaveDraft && (
+                        <Button type="button" variant="secondary" disabled={Boolean(savingDraft)} onClick={onSaveDraft}>
+                          {savingDraft ? 'Guardando avance…' : 'Guardar avance'}
+                        </Button>
+                      )}
                       <Button type="button" variant="secondary" onClick={onClose}>
                         Volver al turno
                       </Button>

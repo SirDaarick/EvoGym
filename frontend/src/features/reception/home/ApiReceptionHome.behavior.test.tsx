@@ -66,4 +66,63 @@ describe('ApiReceptionHome data flow', () => {
     expect(JSON.parse(sessionStorage.getItem('evogym:product-sale:actor') ?? 'null')).toBeNull();
     expect(count(request, path => path.endsWith('/product-sales'))).toBe(0);
   }, 15000);
+
+  it.each([
+    { tendered: '20', expectedCashMinor: 2000, expectedPendingText: '$30.00 MXN' },
+    { tendered: '0', expectedCashMinor: 0, expectedPendingText: '$50.00 MXN' },
+  ])('submits partial cash product sale ($tendered) after confirming PendingBalanceModal', async ({ tendered, expectedCashMinor, expectedPendingText }) => {
+    let inventoryCalls = 0;
+    const partialProduct = { ...water, price_minor: 5000 };
+    const saleBodies: unknown[] = [];
+    const request = makeRequest(path => {
+      if (path.startsWith('/api/v1/inventory/branches/')) {
+        inventoryCalls += 1;
+        return json({ items: [partialProduct], total: 1 });
+      }
+      if (path.startsWith('/api/v1/members?')) {
+        return json({ items: [{ id: 'm-1', full_name: 'Carlos Ruiz', phone: '555' }], total: 1, page: 1, limit: 20, pages: 1 });
+      }
+      if (path.endsWith('/product-sales/resolve')) {
+        return json({ status: 'completed', order_id: 'order-1', total_minor: 5000 });
+      }
+      return undefined;
+    });
+    const baseImpl = request.getMockImplementation()!;
+    request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/product-sales')) {
+        saleBodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return json({
+          order: { id: 'order-1', total_minor: 5000 }, items: [],
+          payment: { id: 'p-1', method: 'cash', status: 'confirmed', amount_minor: expectedCashMinor },
+        }, 201);
+      }
+      return baseImpl(path);
+    });
+
+    renderWithQuery(<ApiReceptionHome request={request} actorId="actor" />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Seleccionar Water' }, { timeout: 5000 }));
+    await userEvent.type(screen.getByLabelText('Asignar socio'), 'Carlos');
+    await userEvent.click(await screen.findByRole('button', { name: /Carlos Ruiz/ }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar cobro' }));
+    expect(screen.getByRole('radio', { name: 'Transferencia' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    await userEvent.type(screen.getByLabelText('Monto recibido'), tendered);
+    await userEvent.click(screen.getByRole('button', { name: 'Realizar cobro' }));
+
+    expect(await screen.findByRole('dialog')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar y asignar pendiente' }));
+
+    expect(await screen.findByText(new RegExp(`Compra registrada con saldo pendiente de ${expectedPendingText.replace('$', '\\$')}`))).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(saleBodies).toEqual([
+      {
+        member_id: 'm-1',
+        items: [{ product_id: 'product', quantity: 1 }],
+        expected_total_minor: 5000,
+        cash_amount_minor: expectedCashMinor,
+      },
+    ]);
+    await vi.waitFor(() => expect(inventoryCalls).toBe(2));
+  }, 15000);
 });

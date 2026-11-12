@@ -5,7 +5,7 @@ from app.db.models import (
     Branch, CashRegister, ClassSampleCheckIn, Member, MemberCheckIn, MemberCreditMovement, MembershipDebt, MembershipDebtPayment,
     MembershipPeriod, Order, OrderItem, Payment, PaymentReviewEvent, PayrollAdvance, PayrollPayment, Product,
     PaymentTerminal, ProductRefund, ProductSaleCancellation, RegisterInventorySnapshotItem, Rental, RentalCancellation, RentalCharge, RentalDepositMovement, Shift,
-    ShiftInventoryObservation, ShiftInventoryReview, StaffAttendanceCheckout, StaffAttendanceRecord,
+    ShiftInventoryObservation, ShiftInventoryReview, StaffAttendanceCheckout, StaffAttendanceCorrection, StaffAttendanceRecord,
     StaffRosterProfile, StaffScheduleSeries, StockInitialization, StockMovement,
 )
 
@@ -107,6 +107,25 @@ def payroll_profiles(session, branch_id):
 def advances_total(session, profile_id, week):
     return session.scalar(select(func.coalesce(func.sum(PayrollAdvance.amount_minor), 0)).where(
         PayrollAdvance.staff_profile_id == profile_id, PayrollAdvance.week_start == week))
+
+
+def advance_payment_method(session, profile_id, week):
+    from app.db.models import Expense
+    return session.scalar(
+        select(Expense.payment_method)
+        .join(PayrollAdvance, PayrollAdvance.expense_id == Expense.id)
+        .where(PayrollAdvance.staff_profile_id == profile_id, PayrollAdvance.week_start == week)
+        .order_by(PayrollAdvance.created_at.desc(), PayrollAdvance.id.desc())
+        .limit(1)
+    )
+
+
+def expense_payment_methods(session, expense_ids):
+    from app.db.models import Expense
+    ids = [eid for eid in expense_ids if eid is not None]
+    return {eid: method for eid, method in session.execute(
+        select(Expense.id, Expense.payment_method).where(Expense.id.in_(ids))
+    )} if ids else {}
 
 
 def week_payment(session, profile_id, week):
@@ -273,3 +292,29 @@ def checkout_attendance_ids(session, attendance_ids):
 def schedule_series(session, branch_id, profile_ids):
     return session.scalars(select(StaffScheduleSeries).where(StaffScheduleSeries.branch_id == branch_id,
         StaffScheduleSeries.profile_id.in_(profile_ids))).all()
+
+
+def attendance_corrections_count(session, branch_id, start, end):
+    return session.scalar(
+        select(func.count())
+        .select_from(StaffAttendanceCorrection)
+        .join(StaffAttendanceRecord, StaffAttendanceCorrection.attendance_id == StaffAttendanceRecord.id)
+        .where(StaffAttendanceRecord.branch_id == branch_id,
+               StaffAttendanceCorrection.corrected_at >= start,
+               StaffAttendanceCorrection.corrected_at < end)
+    ) or 0
+
+
+
+
+def waste_movements_count(session, branch_id, start, end):
+    return session.scalar(
+        select(func.count())
+        .select_from(StockMovement)
+        .where(
+            StockMovement.branch_id == branch_id,
+            StockMovement.kind == "waste",
+            StockMovement.recorded_at >= start,
+            StockMovement.recorded_at < end,
+        )
+    ) or 0

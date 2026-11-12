@@ -384,4 +384,137 @@ it('opens guantes and casilleros modals from operational shortcuts in live mode'
 
     expect(await screen.findByRole('heading', { name: 'Casilleros' })).toBeVisible();
   });
+
+  it('registers product merma through 2-step catalog modal, syncs quantities, and surfaces API errors', async () => {
+    let inventoryFetchedCount = 0;
+    let wasteAttempts = 0;
+    const wasteRequests: Array<{ body: unknown; idempotencyKey: string | null }> = [];
+    let currentWaterStock = 5;
+
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/registers/product-sale-intent') return new Response('null');
+      if (path === '/api/v1/registers') {
+        return new Response(JSON.stringify([{ id: 'reg-1', branch_id: 'branch-1', code: 'front', name: 'Front', status: 'active', has_open_shift: true }]));
+      }
+      if (path === '/api/v1/inventory/branches') {
+        return new Response(JSON.stringify([{ id: 'branch-1', code: 'MAIN', name: 'Central' }]));
+      }
+      if (path.startsWith('/api/v1/inventory/branches/branch-1/stock')) {
+        inventoryFetchedCount += 1;
+        return new Response(JSON.stringify({
+          items: [
+            {
+              product_id: 'prod-1',
+              code: 'P001',
+              name: 'Water',
+              category: 'Bebidas',
+              price_minor: 1500,
+              cost_minor: 800,
+              is_active: true,
+              unit: 'piece',
+              initialized: true,
+              opening_quantity: currentWaterStock,
+              restocked_quantity: 0,
+              waste_quantity: 0,
+              quantity: currentWaterStock,
+              initialized_at: '2026-10-31T00:00:00Z',
+            },
+            {
+              product_id: 'prod-2',
+              code: 'P002',
+              name: 'Electrolyte',
+              category: 'Bebidas',
+              price_minor: 2500,
+              cost_minor: 1200,
+              is_active: true,
+              unit: 'piece',
+              initialized: true,
+              opening_quantity: 4,
+              restocked_quantity: 0,
+              waste_quantity: 0,
+              quantity: 4,
+              initialized_at: '2026-10-31T00:00:00Z',
+            },
+          ],
+          total: 2,
+        }));
+      }
+      if (path === '/api/v1/inventory/branches/branch-1/waste' && init?.method === 'POST') {
+        wasteAttempts += 1;
+        const headers = init.headers as Record<string, string> | undefined;
+        wasteRequests.push({
+          body: JSON.parse(String(init.body ?? '{}')),
+          idempotencyKey: headers?.['Idempotency-Key'] ?? headers?.['idempotency-key'] ?? null,
+        });
+        if (wasteAttempts === 1) {
+          return new Response(JSON.stringify({ detail: 'Stock insuficiente para Water.' }), { status: 409 });
+        }
+        currentWaterStock -= 1;
+        return new Response(JSON.stringify({
+          items: [
+            {
+              id: 'mov-waste-1',
+              branch_id: 'branch-1',
+              product_id: 'prod-1',
+              kind: 'waste',
+              quantity: 1,
+              reason: 'Botella aplastada en almacén',
+              recorded_by: 'actor',
+              idempotency_key: 'w:abc:0',
+              recorded_at: '2026-10-31T01:00:00Z',
+              on_hand_quantity: currentWaterStock,
+            },
+          ],
+        }), { status: 201 });
+      }
+      throw new Error(path);
+    });
+
+    render(<ApiReceptionHome request={request} actorId="actor" />);
+
+    const mermaBtn = await screen.findByRole('button', { name: 'Merma' });
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Seleccionar Water' })).toBeEnabled());
+    expect(mermaBtn).toBeDisabled();
+    expect(screen.getByText('Para registrar merma, selecciona primero los productos en el catálogo.')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Water' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Water' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Electrolyte' }));
+    expect(mermaBtn).toBeEnabled();
+
+    await userEvent.click(mermaBtn);
+    expect(await screen.findByText(/Paso 1 de 2/)).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Disminuir merma de Water' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar Electrolyte de merma' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    expect(await screen.findByText(/Paso 2 de 2/)).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
+    expect(screen.getByText('Escribe el motivo u observaciones de la merma.')).toBeVisible();
+    expect(wasteAttempts).toBe(0);
+
+    await userEvent.type(screen.getByLabelText('Motivo u observaciones *'), 'Botella aplastada en almacén');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
+
+    expect(await screen.findByText('Stock insuficiente para Water.')).toBeVisible();
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    const fetchCountBeforeConfirm = inventoryFetchedCount;
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
+
+    expect(await screen.findByText('Merma registrada: 1 unidad(es) descontada(s) del inventario.')).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(inventoryFetchedCount).toBeGreaterThan(fetchCountBeforeConfirm));
+
+    expect(wasteRequests[1].idempotencyKey).toBeTruthy();
+    expect(wasteRequests[1].idempotencyKey).not.toBe(wasteRequests[0].idempotencyKey);
+    expect(wasteRequests[1].body).toEqual({
+      items: [{ product_id: 'prod-1', quantity: 1 }],
+      reason: 'Botella aplastada en almacén',
+    });
+
+    expect(screen.getByLabelText('Cantidad de Water')).toHaveTextContent('1');
+    expect(screen.getByLabelText('Cantidad de Electrolyte')).toHaveTextContent('1');
+  });
 });

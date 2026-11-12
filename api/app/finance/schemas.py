@@ -59,6 +59,7 @@ class PayrollInput(BaseModel):
 class AdvanceInput(PayrollInput):
     amount_minor: int = Field(gt=0, le=9223372036854775807, strict=True)
     notes: str | None = Field(default=None, max_length=255)
+    payment_method: Literal["transfer", "cash"] = "transfer"
 
 
 class PaymentInput(PayrollInput):

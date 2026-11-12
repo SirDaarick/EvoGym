@@ -8,10 +8,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import Expense, ShiftCashContribution
+from app.db.models import Expense, InventoryPurchase, ShiftCashContribution
 from app.errors import HttpStatusError
+from app.inventory.service import assert_and_reverse_purchase_inventory
 from app.expenses import queries as q
 from app.finance import queries as fq
 from app.finance.service import authorized_branches
@@ -178,6 +180,11 @@ def void_expense(factory, storage, resolve_finance, expense_id, principal, paylo
             raise HttpStatusError(409)
         if row.shift_id is not None and (shift is None or shift.status != "open"):
             raise HttpStatusError(409)
+        purchase = session.scalar(
+            select(InventoryPurchase).where(InventoryPurchase.expense_id == expense_id).with_for_update()
+        )
+        if purchase is not None:
+            assert_and_reverse_purchase_inventory(session, purchase, principal.staff_id, payload.reason)
         row.voided_at = datetime.now(timezone.utc)
         row.voided_by_id = principal.staff_id
         row.void_reason = payload.reason

@@ -4,6 +4,7 @@ import type { GimiChatMessage } from '../../domain/gimi';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 import { chatWithGimi } from '../../api/ownerGimiApi';
 import { useOptionalDemo } from '../../demo/DemoProvider';
+import { createEmptyDemoState } from '../../demo/adapter';
 import {
   answerGimiQuery,
   getStoredChatHistory,
@@ -34,7 +35,7 @@ const INITIAL_SUGGESTIONS_BY_ROLE: Record<Role, string[]> = {
 
 export function GimiChatWidget({ role, request }: GimiChatWidgetProps) {
   const demo = useOptionalDemo();
-  const state = demo?.state;
+  const state = demo?.state ?? createEmptyDemoState();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);

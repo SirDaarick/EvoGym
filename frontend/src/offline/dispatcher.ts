@@ -12,6 +12,8 @@ export interface CheckInCommandPayload {
   period_id: string;
   branch_id: string;
   local_access_decision: 'valid' | 'valid_with_outstanding_balance' | 'denied';
+  online_idempotency_key?: string;
+  confirm_outstanding_balance?: boolean;
 }
 
 export interface CashSaleItemPayload {
@@ -122,6 +124,10 @@ export async function dispatch(
       } else if (command.type === 'pos.cash_sale') {
         for (const line of command.payload.items) {
           const product = await db.catalog.get(line.product_id);
+          if (!command.payload.online_idempotency_key &&
+              (!product || typeof product.on_hand !== 'number' || product.on_hand < line.quantity)) {
+            throw new Error('No hay existencias suficientes en el inventario local.');
+          }
           if (product && typeof product.on_hand === 'number') {
             await db.catalog.update(line.product_id, {
               on_hand: product.on_hand - line.quantity,

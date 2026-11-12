@@ -1,8 +1,8 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { createMember, createMemberNumber, type CreatedMember, type CreateMemberRequest } from '../../api/membershipCheckoutApi';
+import { createMember, createMemberNumber, findMembersByPhone, type CreatedMember, type CreateMemberRequest } from '../../api/membershipCheckoutApi';
 import { LiveMembershipCheckout } from './LiveMembershipCheckout';
 
-export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { onFindLater: (memberNumber: string) => void; onUnresolvedChange: (unresolved: boolean) => void }) {
+export function LiveMemberRegistration({ onFindLater, onUnresolvedChange, onSelectMember }: { onFindLater: (memberNumber: string) => void; onUnresolvedChange: (unresolved: boolean) => void; onSelectMember?: (member: CreatedMember) => void }) {
   const [fullName, setFullName] = useState('');
   const [preferredName, setPreferredName] = useState('');
   const [phone, setPhone] = useState('');
@@ -13,6 +13,8 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [intent, setIntent] = useState<CreateMemberRequest | null>(null);
   const [numberConflict, setNumberConflict] = useState(false);
+  const [phoneConflict, setPhoneConflict] = useState(false);
+  const [matches, setMatches] = useState<CreatedMember[]>([]);
   const submittingRef = useRef(false);
 
   async function register(request: CreateMemberRequest) {
@@ -28,7 +30,13 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
       onUnresolvedChange(false);
       setCheckoutOpen(true);
     } catch (reason) {
-      if (reason instanceof Error && 'kind' in reason && reason.kind === 'conflict') {
+      if (reason instanceof Error && 'code' in reason && reason.code === 'member_phone_exists') {
+        setIntent(null);
+        setNumberConflict(false);
+        setPhoneConflict(true);
+        onUnresolvedChange(false);
+        setError('Ya existe un socio con este teléfono. Búscalo para continuar con su ficha en lugar de registrarlo de nuevo.');
+      } else if (reason instanceof Error && 'kind' in reason && reason.kind === 'conflict') {
         setIntent(null);
         setNumberConflict(true);
         onUnresolvedChange(false);
@@ -50,7 +58,7 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     }
   }
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (submittingRef.current || !fullName.trim() || !phone.trim()) return;
     const request: CreateMemberRequest = {
@@ -60,8 +68,25 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
       phone: phone.trim(),
       ...(email.trim() ? { email: email.trim() } : {}),
     };
-    setIntent(request);
-    void register(request);
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError('');
+    try {
+      const found = await findMembersByPhone(request.phone);
+      if (found.length) {
+        setMatches(found);
+        setIntent(request);
+      } else {
+        submittingRef.current = false;
+        setIntent(request);
+        await register(request);
+      }
+    } catch {
+      setError('No se pudo verificar el teléfono. Intenta nuevamente.');
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   function retryWithNewNumber() {
@@ -75,6 +100,11 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
     setNumberConflict(false);
     setIntent(request);
     void register(request);
+  }
+
+  function changePhone(value: string) {
+    setPhone(value);
+    setPhoneConflict(false);
   }
 
   return <section aria-labelledby="live-registration-title" style={{ marginTop: '1.5rem', borderTop: '1px solid #cbd5e1', paddingTop: '1rem' }}>
@@ -91,13 +121,20 @@ export function LiveMemberRegistration({ onFindLater, onUnresolvedChange }: { on
       <label htmlFor="live-registration-preferred-name">¿Cómo le gusta que le digan? (opcional)</label>
       <input id="live-registration-preferred-name" maxLength={160} value={preferredName} onChange={event => setPreferredName(event.target.value)} disabled={Boolean(intent) || submitting} />
       <label htmlFor="live-registration-phone">Teléfono</label>
-      <input id="live-registration-phone" required value={phone} onChange={event => setPhone(event.target.value)} disabled={Boolean(intent) || submitting} />
+      <input id="live-registration-phone" required value={phone} onChange={event => changePhone(event.target.value)} disabled={Boolean(intent) || submitting} />
       <label htmlFor="live-registration-email">Correo electrónico (opcional)</label>
       <input id="live-registration-email" type="email" value={email} onChange={event => setEmail(event.target.value)} disabled={Boolean(intent) || submitting} />
       {error && <p role="alert">{error}</p>}
-      {intent
+      {phoneConflict && <button type="button" onClick={() => onFindLater(phone.trim())}>Buscar socio con este teléfono</button>}
+      {matches.length > 0 && <section aria-label="Socios con este teléfono">
+        <p>Este teléfono ya está registrado. Selecciona un socio o registra otra persona.</p>
+        {matches.map(match => <button key={match.id} type="button" onClick={() => onSelectMember ? onSelectMember(match) : onFindLater(match.member_number)}><span>{match.full_name}</span> · {match.member_number}</button>)}
+        <button type="button" onClick={() => { setMatches([]); if (intent) void register(intent); }}>Registrar otra persona</button>
+        <button type="button" onClick={() => { setMatches([]); setIntent(null); }}>Cancelar</button>
+      </section>}
+      {intent && matches.length === 0
         ? <button type="button" onClick={() => void register(intent)} disabled={submitting}>Reintentar registro seguro</button>
-        : numberConflict
+        : matches.length > 0 ? null : numberConflict
           ? <button type="button" onClick={retryWithNewNumber} disabled={submitting}>Generar otro número y reintentar</button>
           : <button type="submit" disabled={!fullName.trim() || !phone.trim() || submitting}>{submitting ? 'Registrando…' : 'Registrar socio'}</button>}
     </form>}

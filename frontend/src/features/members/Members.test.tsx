@@ -1,12 +1,19 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
+import Dexie from 'dexie';
 import { describe, expect, it, vi } from 'vitest';
 import * as memberReadsApi from '../../api/memberReadsApi';
+import * as offlineDb from '../../offline/db';
+import * as offlineDispatcher from '../../offline/dispatcher';
+import * as syncApi from '../../offline/syncApi';
 import { App } from '../../app/App';
 import { DemoProvider } from '../../demo/DemoProvider';
 import { MemberDetail } from './Members';
 import { ApiMembers, ApiMemberDetail, ApiNewMember } from '../../app/ApiMembers';
+import { createQueryClient } from '../../app/queryClient';
+import { withQuery } from '../../test/renderWithQuery';
+import { NetworkError } from '../../api/http';
 import type { AuthenticatedRequest } from '../../api/membershipCheckoutApi';
 
 async function mount(path = '/reception/members') {
@@ -450,6 +457,9 @@ describe('member workflow', () => {
           if (key) idempotencyKeysUsed.push(key);
 
           if (callCount === 1) {
+            throw Object.assign(new Error('Sesión no válida.'), { kind: 'http', status: 401 });
+          }
+          if (callCount === 2) {
             return new Response(JSON.stringify({ message: 'Internal server error' }), { status: 500 });
           }
           return new Response(JSON.stringify({
@@ -477,14 +487,82 @@ describe('member workflow', () => {
       expect(await screen.findByRole('button', { name: 'Registrar entrada' })).toBeVisible();
 
       await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+      expect(await screen.findByRole('alert', { name: 'Resultado de asistencia' })).toHaveTextContent('Sesión no válida.');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
       expect(await screen.findByRole('alert', { name: 'Resultado de asistencia' })).toHaveTextContent(/No se pudo registrar la entrada|Internal server error/);
 
       await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
       expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
 
-      expect(idempotencyKeysUsed.length).toBe(2);
+      expect(idempotencyKeysUsed.length).toBe(3);
       expect(idempotencyKeysUsed[0]).toBe(idempotencyKeysUsed[1]);
+      expect(idempotencyKeysUsed[1]).toBe(idempotencyKeysUsed[2]);
       expect(idempotencyKeysUsed[0]).toMatch(/^checkin-/);
+    });
+
+    it.each([true, false])('asks before admitting a member with a balance (confirmation: %s)', async accepted => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(accepted);
+      const requests: RequestInit[] = [];
+      const request = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/v1/members/member-f05') return new Response(JSON.stringify({ ...mockDetailMember, member_number: 'SOC-F05', full_name: 'Carlos Santana', status: 'active', credit_balance_minor: 0 }));
+        if (path === '/api/v1/members/member-f05/reload?visit_limit=12') return new Response(JSON.stringify(mockReload));
+        if (path.startsWith('/api/v1/member-check-ins/branches/')) {
+          requests.push(init ?? {});
+          return requests.length === 1
+            ? new Response(JSON.stringify({ error: { code: 'debt_confirmation_required' } }), { status: 409 })
+            : new Response('{}', { status: 201 });
+        }
+        return new Response('{}');
+      });
+      try {
+        render(<MemoryRouter initialEntries={['/reception/members/member-f05']}><ApiMemberDetail role="RECEPTION" request={request} isAdmin={false} /></MemoryRouter>);
+        await userEvent.click(await screen.findByRole('button', { name: 'Registrar entrada' }));
+        expect(confirm).toHaveBeenCalledOnce();
+        if (accepted) {
+          expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada.');
+          expect(JSON.parse(String(requests[1].body))).toEqual({ confirm_outstanding_balance: true });
+        } else {
+          expect(await screen.findByRole('alert', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada cancelada.');
+          expect(requests).toHaveLength(1);
+        }
+      } finally { confirm.mockRestore(); }
+    });
+
+    it('preserves the online idempotency key when a network failure queues the entry', async () => {
+      const db = {
+        members: { get: vi.fn().mockResolvedValue({ status: 'active', active_periods: [{ period_id: 'period-f05', access: 'valid' }] }) },
+        meta: {
+          get: vi.fn().mockResolvedValue({ value: { id: 'branch-1' } }),
+          where: vi.fn().mockReturnValue({
+            startsWith: vi.fn().mockReturnValue({
+              first: vi.fn().mockResolvedValue(undefined),
+            }),
+          }),
+        },
+      } as unknown as ReturnType<typeof offlineDb.openLocalDb>;
+      const open = vi.spyOn(offlineDb, 'openLocalDb').mockReturnValue(db);
+      const dispatch = vi.spyOn(offlineDispatcher, 'dispatch').mockResolvedValue({ success: true } as Awaited<ReturnType<typeof offlineDispatcher.dispatch>>);
+      let onlineKey = '';
+      const request = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === '/api/v1/members/member-f05') return new Response(JSON.stringify({ ...mockDetailMember, member_number: 'SOC-F05', full_name: 'Carlos Santana', preferred_name: null, email: null, birth_date: null, notes: null, status: 'active', credit_balance_minor: 0, pending_balance_minor: 0, has_pending_balance: false, emergency_contact_name: null, emergency_contact_phone: null, photo_url: null }));
+        if (path === '/api/v1/members/member-f05/reload?visit_limit=12') return new Response(JSON.stringify(mockReload));
+        if (path.startsWith('/api/v1/member-check-ins/branches/')) {
+          onlineKey = (init?.headers as Record<string, string>)['Idempotency-Key'];
+          throw new TypeError('network unavailable');
+        }
+        return new Response('{}');
+      });
+      try {
+        render(<MemoryRouter initialEntries={['/reception/members/member-f05']}><ApiMemberDetail role="RECEPTION" request={request} isAdmin={false} /></MemoryRouter>);
+        await userEvent.click(await screen.findByRole('button', { name: 'Registrar entrada' }));
+        expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada en contingencia.');
+        expect(dispatch).toHaveBeenCalledWith(db, expect.objectContaining({ payload: expect.objectContaining({ online_idempotency_key: onlineKey }) }), expect.any(String));
+        expect(onlineKey).toMatch(/^checkin-/);
+      } finally {
+        open.mockRestore();
+        dispatch.mockRestore();
+      }
     });
   });
 
@@ -550,7 +628,7 @@ describe('member workflow', () => {
             items: [currentMember],
             total: 1,
             page: 1,
-            limit: 100,
+            limit: 50,
             pages: 1,
           }));
         }
@@ -589,9 +667,11 @@ describe('member workflow', () => {
 
       // 1. Live directory shows both "Nuevo socio" and "Actualizar"
       const { unmount: unmountDir } = render(
-        <MemoryRouter initialEntries={['/reception/members']}>
-          <ApiMembers role="RECEPTION" request={mockRequest} />
-        </MemoryRouter>
+        withQuery(
+          <MemoryRouter initialEntries={['/reception/members']}>
+            <ApiMembers role="RECEPTION" request={mockRequest} />
+          </MemoryRouter>,
+        ),
       );
       expect(await screen.findByRole('link', { name: 'Nuevo socio' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'Actualizar' })).toBeVisible();
@@ -1320,6 +1400,605 @@ describe('member workflow', () => {
       expect(await screen.findByRole('heading', { name: 'Rentas' })).toBeVisible();
       expect(screen.getByText('Renta de guantes · #07')).toBeVisible();
       expect(screen.getByText('Renta de casillero · #14')).toBeVisible();
+    });
+
+    it('verifies checkout debt repayment refreshes local roster delta into IndexedDB and subsequent offline check-in skips debt prompt', async () => {
+      const dbName = `test-chain-roster-${Date.now()}`;
+      const localDb = offlineDb.openLocalDb(dbName);
+      await localDb.open();
+      const closeSpy = vi.spyOn(localDb, 'close').mockImplementation(() => {});
+      const openSpy = vi.spyOn(offlineDb, 'openLocalDb').mockReturnValue(localDb);
+      const dispatchSpy = vi.spyOn(offlineDispatcher, 'dispatch').mockResolvedValue({ success: true } as Awaited<ReturnType<typeof offlineDispatcher.dispatch>>);
+      const confirmSpy = vi.spyOn(window, 'confirm');
+
+      const debtMember = {
+        ...fixtureMember,
+        id: 'member-chain-1',
+        full_name: 'Laura Deuda',
+        preferred_name: null,
+        status: 'active' as const,
+        pending_balance_minor: 20000,
+        has_pending_balance: true,
+      };
+
+      await localDb.device.put({
+        id: 'current',
+        token: 'device-chain-token',
+        branchId: 'branch-1',
+      });
+      await localDb.meta.bulkPut([
+        { key: 'branch', value: { id: 'branch-1' } },
+        { key: 'last_roster_cursor', value: 'cursor-0' },
+      ]);
+      await localDb.members.put({
+        member_id: debtMember.id,
+        member_number: 'M-101',
+        full_name: debtMember.full_name,
+        status: 'active',
+        has_debt: true,
+        active_periods: [
+          {
+            period_id: 'period-chain-1',
+            starts_on: '2026-11-01',
+            ends_on: '2026-11-30',
+            access: 'valid_with_outstanding_balance',
+          },
+        ],
+      });
+
+      const reloadWithDebt: memberReadsApi.MemberReloadResponse = {
+        ...fixtureReload,
+        profile: { ...debtMember, organization_id: 'org-1', home_branch_id: 'branch-1' },
+        active_periods: [{
+          id: 'period-chain-1',
+          order_item_id: 'item-chain-1',
+          plan_version_id: 'plan-v1',
+          plan_name: 'Mensual',
+          starts_on: '2026-11-01',
+          ends_on: '2026-11-30',
+          branch_id: 'branch-1',
+          is_current: true,
+          access_status: 'eligible',
+        }],
+        financial: {
+          has_pending_balance: true,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: 20000,
+          currency: 'MXN',
+          debts: [{
+            debt_id: 'debt-chain-1',
+            order_id: 'order-chain-1',
+            branch_id: 'branch-1',
+            currency: 'MXN',
+            initial_outstanding_minor: 20000,
+            remaining_balance_minor: 20000,
+            created_at: '2026-11-01T10:00:00Z',
+          }],
+        },
+      };
+
+      const reloadSettled: memberReadsApi.MemberReloadResponse = {
+        ...reloadWithDebt,
+        financial: {
+          has_pending_balance: false,
+          credit_balance_minor: 0,
+          total_pending_balance_minor: 0,
+          currency: 'MXN',
+          debts: [],
+        },
+      };
+
+      let currentReload = reloadWithDebt;
+      let currentMember = debtMember;
+      let checkInAttempts = 0;
+
+      const deltaSpy = vi.spyOn(syncApi, 'getRosterDelta').mockResolvedValue({
+        snapshot_required: false,
+        has_more: false,
+        removed_member_ids: [],
+        registers: [],
+        members: [{
+          member_id: debtMember.id,
+          member_number: 'M-101',
+          full_name: debtMember.full_name,
+          phone_last4: '2233',
+          photo_hash: null,
+          status: 'active',
+          has_debt: false,
+          active_periods: [{
+            period_id: 'period-chain-1',
+            starts_on: '2026-11-01',
+            ends_on: '2026-11-30',
+            access: 'valid',
+          }],
+          changed_at: '2026-11-10T12:00:00Z',
+        }],
+        next_cursor: { changed_at: '2026-11-10T12:00:00Z', id: 'cursor-1' },
+      });
+
+      const mockRequest = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.includes('/reload')) return new Response(JSON.stringify(currentReload));
+        if (path === `/api/v1/members/${debtMember.id}`) return new Response(JSON.stringify(currentMember));
+        if (path.includes('/api/v1/catalog/plans')) return new Response(JSON.stringify([]));
+        if (path === '/api/v1/registers') return new Response(JSON.stringify([{ id: 'reg-chain-1', name: 'Caja Principal', has_open_shift: true }]));
+        if (path.includes('/api/v1/shifts/current')) return new Response(JSON.stringify({ id: 'shift-chain-1', cash_register_id: 'reg-chain-1' }));
+        if (path === `/api/v1/registers/reg-chain-1/members/${debtMember.id}/debts`) {
+          return new Response(JSON.stringify([{
+            debt_id: 'debt-chain-1',
+            order_id: 'order-chain-1',
+            member_id: debtMember.id,
+            branch_id: 'branch-1',
+            currency: 'MXN',
+            description_snapshot: 'Mensualidad Estándar',
+            initial_outstanding_minor: 20000,
+            paid_amount_minor: 0,
+            remaining_balance_minor: 20000,
+            created_at: '2026-11-01T10:00:00Z',
+          }]));
+        }
+        if (path === '/api/v1/registers/reg-chain-1/membership-debt-payments' && init?.method === 'POST') {
+          currentReload = reloadSettled;
+          currentMember = { ...debtMember, pending_balance_minor: 0, has_pending_balance: false };
+          return new Response(JSON.stringify({
+            id: 'receipt-chain-1',
+            debt_id: 'debt-chain-1',
+            order_id: 'order-chain-1',
+            member_id: debtMember.id,
+            branch_id: 'branch-1',
+            register_id: 'reg-chain-1',
+            shift_id: 'shift-chain-1',
+            amount_minor: 20000,
+            remaining_balance_minor: 0,
+            received_by: 'staff-1',
+            received_at: '2026-11-10T12:00:00Z',
+          }), { status: 201 });
+        }
+        if (path.startsWith('/api/v1/member-check-ins/branches/')) {
+          checkInAttempts++;
+          if (checkInAttempts === 1) {
+            return new Response(JSON.stringify({
+              error: {
+                code: 'debt_confirmation_required',
+                message: 'El socio tiene un adeudo pendiente.',
+              },
+            }), { status: 400 });
+          }
+          throw new TypeError('Network connection lost');
+        }
+        return new Response('{}');
+      });
+
+      try {
+        render(
+          <MemoryRouter initialEntries={[`/reception/members/${debtMember.id}`]}>
+            <ApiMemberDetail role="RECEPTION" request={mockRequest} isAdmin={false} />
+          </MemoryRouter>,
+        );
+
+        // --- Step 1: Pre-repayment check-in triggers debt confirmation prompt, confirms, and falls back to offline queue on network drop ---
+        confirmSpy.mockReturnValueOnce(true);
+        const checkInBtn = await screen.findByRole('button', { name: 'Registrar entrada' });
+        await userEvent.click(checkInBtn);
+
+        expect(confirmSpy).toHaveBeenCalledWith('El socio tiene un adeudo pendiente. ¿Confirmas su entrada?');
+        expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada en contingencia.');
+        expect(dispatchSpy).toHaveBeenLastCalledWith(
+          localDb,
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              local_access_decision: 'valid_with_outstanding_balance',
+              confirm_outstanding_balance: true,
+            }),
+          }),
+          expect.any(String),
+        );
+
+        const beforeRepayMember = await localDb.members.get(debtMember.id);
+        expect(beforeRepayMember?.has_debt).toBe(true);
+        expect(beforeRepayMember?.active_periods?.[0].access).toBe('valid_with_outstanding_balance');
+
+        // --- Step 2: Pay debt via Liquidar adeudo checkout ---
+        confirmSpy.mockClear();
+        dispatchSpy.mockClear();
+
+        const payDebtBtn = screen.getByRole('button', { name: 'Liquidar adeudo' });
+        await userEvent.click(payDebtBtn);
+
+        const modal = await screen.findByRole('dialog');
+        expect(within(modal).getByRole('heading', { name: /Liquidar adeudo · Laura Deuda/i })).toBeVisible();
+        expect(await within(modal).findByLabelText('Adeudo pendiente')).toHaveValue('order-chain-1');
+        await userEvent.click(within(modal).getByRole('button', { name: 'Registrar abono en efectivo' }));
+        expect(await within(modal).findByRole('heading', { name: 'Abono registrado' })).toBeVisible();
+
+        await userEvent.click(within(modal).getByRole('button', { name: 'Cerrar' }));
+        await waitFor(() => {
+          expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        });
+
+        // --- Step 3: Verify refreshLocalRoster called syncApi and applied delta to IndexedDB ---
+        expect(deltaSpy).toHaveBeenCalled();
+        const afterRepayMember = await localDb.members.get(debtMember.id);
+        expect(afterRepayMember?.has_debt).toBe(false);
+        expect(afterRepayMember?.active_periods?.[0].access).toBe('valid');
+
+        // --- Step 4: Subsequent offline check-in now skips the confirmation prompt because access is valid ---
+        await userEvent.click(screen.getByRole('button', { name: 'Registrar entrada' }));
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(await screen.findByRole('status', { name: 'Resultado de asistencia' })).toHaveTextContent('Entrada registrada en contingencia.');
+        expect(dispatchSpy).toHaveBeenLastCalledWith(
+          localDb,
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              local_access_decision: 'valid',
+            }),
+          }),
+          expect.any(String),
+        );
+        expect(dispatchSpy.mock.calls[0][1].payload).not.toHaveProperty('confirm_outstanding_balance');
+      } finally {
+        openSpy.mockRestore();
+        closeSpy.mockRestore();
+        dispatchSpy.mockRestore();
+        confirmSpy.mockRestore();
+        deltaSpy.mockRestore();
+        localDb.close();
+        await Dexie.delete(dbName);
+      }
+    });
+  });
+
+  describe('ApiMembers phase 2 server-driven directory', () => {
+    const buildApiMember = (index: number, overrides: Partial<Record<string, unknown>> = {}) => ({
+      id: `member-p2-${index}`,
+      member_number: `M-${String(index).padStart(3, '0')}`,
+      full_name: `Socio ${index}`,
+      preferred_name: null,
+      phone: `555000${String(index).padStart(4, '0')}`,
+      status: 'active',
+      joined_on: '2026-01-01',
+      credit_balance_minor: 0,
+      emergency_contact_name: null,
+      emergency_contact_phone: null,
+      photo_url: null,
+      membership_ends_on: index % 2 === 0 ? '2026-12-31' : null,
+      membership_status: 'active',
+      ...overrides,
+    });
+
+    it('requests only page=1&limit=50 on mount, renders skeleton, expiry dates, counter, and live region', async () => {
+      let resolveFirst!: (res: Response) => void;
+      const firstRequest = new Promise<Response>(resolve => { resolveFirst = resolve; });
+      const request = vi.fn(async () => firstRequest);
+
+      render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+
+      const skeleton = screen.getByRole('status', { name: 'Cargando socios' });
+      expect(skeleton).toBeInTheDocument();
+      expect(within(skeleton).getByText('Cargando socios…')).toHaveClass('sr-only');
+
+      resolveFirst(new Response(JSON.stringify({
+        items: [
+          buildApiMember(1, { full_name: 'Ana Vigente', membership_ends_on: '2026-12-31', membership_status: 'active' }),
+          buildApiMember(2, { full_name: 'Beto Sin Fecha', membership_ends_on: null, membership_status: 'pending' }),
+        ],
+        total: 120,
+        page: 1,
+        limit: 50,
+        pages: 3,
+      })));
+
+      expect(await screen.findByText('Ana Vigente')).toBeInTheDocument();
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc',
+        expect.objectContaining({ headers: { Accept: 'application/json' }, signal: expect.any(AbortSignal) }),
+      );
+      expect(screen.getByText('120 socios')).toBeVisible();
+      expect(screen.getByRole('table', { name: 'Socios registrados' }).querySelector('caption')).toHaveTextContent('120 socios');
+      expect(screen.getByText('2026-12-31')).toBeVisible();
+      expect(screen.getByText('—')).toBeVisible();
+      expect(screen.getByText('Mostrando 2 de 120 socios')).toBeInTheDocument();
+    });
+
+    it('renders singular "1 socio" counter and end-of-list live region when total is 1', async () => {
+      const request = vi.fn(async () => new Response(JSON.stringify({
+        items: [buildApiMember(1, { full_name: 'Socio Único', membership_ends_on: '2027-01-15' })],
+        total: 1,
+        page: 1,
+        limit: 50,
+        pages: 1,
+      })));
+
+      render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+
+      expect(await screen.findByText('Socio Único')).toBeInTheDocument();
+      expect(screen.getByText('1 socio')).toBeVisible();
+      expect(screen.getByText('Mostrando 1 de 1 socio · Fin de la lista')).toBeInTheDocument();
+    });
+
+    it('attaches HTTP status on 4xx errors so QueryClient does not retry', async () => {
+      const request = vi.fn(async () => new Response('{}', { status: 403 }));
+      const prodClient = createQueryClient();
+
+      render(withQuery(
+        <MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>,
+        prodClient,
+      ));
+
+      expect(await screen.findByText('No tienes autorización para consultar estos datos.')).toBeInTheDocument();
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+
+    it('observes sentinel row at length - 10, loads page=2 on intersection, deduplicates by id, and stops when hasNextPage is false', async () => {
+      const originalIO = globalThis.IntersectionObserver;
+      const observeCalls: { target: Element; callback: IntersectionObserverCallback; disconnect: ReturnType<typeof vi.fn> }[] = [];
+
+      class MockIntersectionObserver implements IntersectionObserver {
+        readonly root = null;
+        readonly rootMargin = '';
+        readonly scrollMargin = '';
+        readonly thresholds = [];
+        private readonly callback: IntersectionObserverCallback;
+        disconnect = vi.fn();
+        takeRecords = vi.fn(() => []);
+        unobserve = vi.fn();
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe = vi.fn((target: Element) => {
+          observeCalls.push({ target, callback: this.callback, disconnect: this.disconnect });
+        });
+      }
+
+      globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+
+      let resolvePage2!: (res: Response) => void;
+      const page2Promise = new Promise<Response>(resolve => { resolvePage2 = resolve; });
+      const page1Items = Array.from({ length: 50 }, (_, idx) =>
+        buildApiMember(idx + 1, { id: idx === 49 ? 'dup-member' : `member-p1-${idx + 1}`, full_name: `Member ${idx + 1}` }),
+      );
+      const request = vi.fn(async (path: string) => {
+        const page = new URLSearchParams(path.split('?')[1]).get('page');
+        if (page === '2') return page2Promise;
+        return new Response(JSON.stringify({ items: page1Items, total: 52, page: 1, limit: 50, pages: 2 }));
+      });
+
+      try {
+        render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+
+        expect(await screen.findByText('Member 1')).toBeInTheDocument();
+        await waitFor(() => expect(observeCalls).toHaveLength(1));
+
+        const bodyRows = screen.getByRole('table', { name: 'Socios registrados' }).querySelectorAll('tbody tr');
+        expect(bodyRows).toHaveLength(50);
+        expect(observeCalls[0].target).toBe(bodyRows[40]);
+
+        observeCalls[0].callback([{ isIntersecting: true, target: observeCalls[0].target } as IntersectionObserverEntry], {} as IntersectionObserver);
+        expect(observeCalls[0].disconnect).toHaveBeenCalled();
+
+        expect(await screen.findByText('Cargando más socios…')).toBeInTheDocument();
+        expect(request).toHaveBeenCalledWith(
+          '/api/v1/members?page=2&limit=50&sort_by=full_name&sort_dir=asc',
+          expect.any(Object),
+        );
+
+        resolvePage2(new Response(JSON.stringify({
+          items: [
+            buildApiMember(50, { id: 'dup-member', full_name: 'Duplicate Name Ignored' }),
+            buildApiMember(51, { id: 'member-p2-51', full_name: 'Member 51' }),
+            buildApiMember(52, { id: 'member-p2-52', full_name: 'Member 52' }),
+          ],
+          total: 52,
+          page: 2,
+          limit: 50,
+          pages: 2,
+        })));
+
+        expect(await screen.findByText('Member 52')).toBeInTheDocument();
+        expect(screen.queryByText('Duplicate Name Ignored')).not.toBeInTheDocument();
+        expect(screen.getByText('Member 50')).toBeInTheDocument();
+        expect(screen.getByText('Mostrando 52 de 52 socios · Fin de la lista')).toBeInTheDocument();
+        expect(observeCalls).toHaveLength(1);
+      } finally {
+        globalThis.IntersectionObserver = originalIO;
+      }
+    });
+
+    it('filters by status chips via click and keyboard arrows and resets to page=1', async () => {
+      const request = vi.fn(async (path: string) => {
+        const status = new URLSearchParams(path.split('?')[1]).get('membership_status');
+        const items = status === 'pending' ? [] : [buildApiMember(1, { full_name: status ? `Socio ${status}` : 'Socio todos', membership_status: status ?? 'active' })];
+        return new Response(JSON.stringify({ items, total: items.length, page: 1, limit: 50, pages: items.length ? 1 : 0 }));
+      });
+
+      render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+      expect(await screen.findByText('Socio todos')).toBeInTheDocument();
+
+      const group = screen.getByRole('radiogroup', { name: 'Filtrar por estado' });
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map(r => r.textContent)).toEqual(['Todos', 'Activos', 'Vencidos', 'Inactivos', 'Suspendidos', 'Pendientes']);
+
+      const activosChip = within(group).getByRole('radio', { name: 'Activos' });
+      await userEvent.click(activosChip);
+      expect(await screen.findByText('Socio active')).toBeInTheDocument();
+      expect(request).toHaveBeenLastCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc&membership_status=active',
+        expect.any(Object),
+      );
+
+      activosChip.focus();
+      await userEvent.keyboard('{ArrowRight}');
+      expect(within(group).getByRole('radio', { name: 'Vencidos' })).toHaveAttribute('aria-checked', 'true');
+      expect(await screen.findByText('Socio expired')).toBeInTheDocument();
+      expect(request).toHaveBeenLastCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc&membership_status=expired',
+        expect.any(Object),
+      );
+
+      await userEvent.click(within(group).getByRole('radio', { name: 'Inactivos' }));
+      expect(await screen.findByText('Socio inactive')).toBeInTheDocument();
+
+      await userEvent.click(within(group).getByRole('radio', { name: 'Suspendidos' }));
+      expect(await screen.findByText('Socio suspended')).toBeInTheDocument();
+
+      await userEvent.click(within(group).getByRole('radio', { name: 'Pendientes' }));
+      expect(await screen.findByText('Sin coincidencias')).toBeInTheDocument();
+
+      await userEvent.click(within(group).getByRole('radio', { name: 'Todos' }));
+      expect(await screen.findByText('Socio todos')).toBeInTheDocument();
+      expect(request).toHaveBeenLastCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc',
+        expect.any(Object),
+      );
+    });
+
+    it('sends mapped sort_by and sort_dir for all four sortable columns', async () => {
+      const request = vi.fn(async () => new Response(JSON.stringify({
+        items: [buildApiMember(1, { full_name: 'Ada Lovelace', membership_ends_on: '2026-11-30' })],
+        total: 1,
+        page: 1,
+        limit: 50,
+        pages: 1,
+      })));
+
+      render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+      expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Numero' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=phone&sort_dir=asc',
+        expect.any(Object),
+      ));
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Numero' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=phone&sort_dir=desc',
+        expect.any(Object),
+      ));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Estado' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=membership_status&sort_dir=asc',
+        expect.any(Object),
+      ));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Fecha vencimiento' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=membership_ends_on&sort_dir=asc',
+        expect.any(Object),
+      ));
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Fecha vencimiento' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=membership_ends_on&sort_dir=desc',
+        expect.any(Object),
+      ));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Socio' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Socio' }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=desc',
+        expect.any(Object),
+      ));
+    });
+
+    it('debounces search input (~300ms) and resets to page=1', async () => {
+      const request = vi.fn(async (path: string) => {
+        const search = new URLSearchParams(path.split('?')[1]).get('search');
+        const items = search === 'Ada'
+          ? [buildApiMember(1, { full_name: 'Ada Lovelace' })]
+          : [buildApiMember(1, { full_name: 'Ada Lovelace' }), buildApiMember(2, { full_name: 'Grace Hopper' })];
+        return new Response(JSON.stringify({ items, total: items.length, page: 1, limit: 50, pages: 1 }));
+      });
+
+      render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+      expect(await screen.findByText('Grace Hopper')).toBeInTheDocument();
+      const initialCalls = request.mock.calls.length;
+
+      const searchInput = screen.getByRole('textbox', { name: 'Buscar socio' });
+      await userEvent.type(searchInput, 'Ada');
+      expect(request.mock.calls.length).toBe(initialCalls);
+
+      await waitFor(() => expect(request).toHaveBeenCalledWith(
+        '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc&search=Ada',
+        expect.any(Object),
+      ));
+      await waitFor(() => expect(screen.queryByText('Grace Hopper')).not.toBeInTheDocument());
+      expect(request.mock.calls.length).toBe(initialCalls + 1);
+    });
+
+    it('falls back to local db.members with client-side filtering when offline or on network error', async () => {
+      const localDb = {
+        members: {
+          toArray: vi.fn().mockResolvedValue([
+            {
+              member_id: 'loc-1',
+              member_number: 'L-01',
+              full_name: 'Lucía Local',
+              phone_last4: '1234',
+              status: 'active',
+              changed_at: '2026-10-01T10:00:00Z',
+              active_periods: [{ period_id: 'p-1', starts_on: '2026-10-01', ends_on: '2026-12-15', access: 'valid' }],
+            },
+            {
+              member_id: 'loc-2',
+              member_number: 'L-02',
+              full_name: 'Mario Offline',
+              phone_last4: '5678',
+              status: 'expired',
+              changed_at: '2026-09-01T10:00:00Z',
+              active_periods: [{ period_id: 'p-2', starts_on: '2026-09-01', ends_on: '2026-09-30', access: 'denied' }],
+            },
+          ]),
+        },
+      } as unknown as ReturnType<typeof offlineDb.openLocalDb>;
+
+      const openSpy = vi.spyOn(offlineDb, 'openLocalDb').mockReturnValue(localDb);
+      const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const request = vi.fn(async () => { throw new NetworkError(); });
+
+      try {
+        render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+
+        expect(await screen.findByText('Lucía Local')).toBeInTheDocument();
+        expect(screen.getByText('Mario Offline')).toBeInTheDocument();
+        expect(screen.getByText('2026-12-15')).toBeVisible();
+        expect(screen.getByText('2026-09-30')).toBeVisible();
+        expect(request).not.toHaveBeenCalled();
+        expect(screen.queryByRole('radiogroup', { name: 'Filtrar por estado' })).not.toBeInTheDocument();
+
+        await userEvent.type(screen.getByRole('textbox', { name: 'Buscar socio' }), 'Mario');
+        expect(screen.queryByText('Lucía Local')).not.toBeInTheDocument();
+        expect(screen.getByText('Mario Offline')).toBeInTheDocument();
+        expect(screen.getByText('1 socio')).toBeVisible();
+      } finally {
+        onLineSpy.mockRestore();
+        openSpy.mockRestore();
+      }
+    });
+
+    it('falls back to db.members on network error when online, and shows API error when db.members is empty offline', async () => {
+      const emptyDb = {
+        members: { toArray: vi.fn().mockResolvedValue([]) },
+      } as unknown as ReturnType<typeof offlineDb.openLocalDb>;
+
+      const openSpy = vi.spyOn(offlineDb, 'openLocalDb').mockReturnValue(emptyDb);
+      const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const request = vi.fn(async () => { throw new NetworkError(); });
+
+      try {
+        const { unmount } = render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+        expect(await screen.findByText('No se pudieron cargar los socios desde la API.')).toBeInTheDocument();
+        unmount();
+
+        onLineSpy.mockReturnValue(true);
+        (emptyDb.members.toArray as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+          { member_id: 'loc-net-1', member_number: 'L-99', full_name: 'Respaldo Red', status: 'active' },
+        ]);
+        render(withQuery(<MemoryRouter initialEntries={['/reception/members']}><ApiMembers role="RECEPTION" request={request} /></MemoryRouter>));
+        expect(await screen.findByText('Respaldo Red')).toBeInTheDocument();
+      } finally {
+        onLineSpy.mockRestore();
+        openSpy.mockRestore();
+      }
     });
   });
 });

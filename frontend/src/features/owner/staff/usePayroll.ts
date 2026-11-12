@@ -17,6 +17,7 @@ export interface PayrollSubmission {
   nextAdvanceMinor: number | null;
   notes: string;
   method: 'cash' | 'transfer';
+  nextAdvanceMethod: 'cash' | 'transfer';
 }
 
 /** Records an advance or pays the week, then refreshes the payroll queries. */
@@ -25,11 +26,11 @@ export function usePayroll(branchId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ dialog, amountMinor, nextAdvanceMinor, notes, method }: PayrollSubmission) => {
+    mutationFn: async ({ dialog, amountMinor, nextAdvanceMinor, notes, method, nextAdvanceMethod }: PayrollSubmission) => {
       if (!request) throw new Error('La sesión Admin no está disponible. Vuelve a iniciar sesión.');
       const target = { branch_id: branchId, staff_profile_id: dialog.item.profile_id, week_start: dialog.targetWeek };
       if (dialog.mode === 'advance') {
-        await recordPayrollAdvance(request, { ...target, amount_minor: amountMinor!, ...(notes ? { notes } : {}) }, dialog.key);
+        await recordPayrollAdvance(request, { ...target, amount_minor: amountMinor!, payment_method: method, ...(notes ? { notes } : {}) }, dialog.key);
         return;
       }
       await payPayrollWeek(request, { ...target, payment_method: method }, dialog.key);
@@ -38,6 +39,7 @@ export function usePayroll(branchId: string) {
           ...target,
           week_start: addDays(dialog.targetWeek, 7),
           amount_minor: nextAdvanceMinor,
+          payment_method: nextAdvanceMethod,
           notes: 'Adelanto registrado junto con liquidación semanal',
         }, dialog.nextWeekKey || crypto.randomUUID());
       }

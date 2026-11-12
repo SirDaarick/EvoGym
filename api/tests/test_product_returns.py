@@ -547,3 +547,91 @@ def test_return_payout_must_match_original_payment_method(tmp_path, sale_method,
                 assert get_on_hand_stock(session, branch_id=branch_id, product_id=UUID(p1_id)) == 4
     finally:
         engine.dispose()
+
+
+def test_partial_product_sale_return_rules(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "reg-partial-ret", "Partial Return Reg")
+            open_shift(
+                session, register_id=register.id, opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 100, "quantity": 1}],
+            )
+            member, product1, _ = _seed_products_and_member(session, branch_id, staff_id)
+            member.credit_balance_minor = 1000
+            register_id, member_id, p1_id = register.id, member.id, str(product1.id)
+
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(create_app(configured_settings(url))) as client:
+            # 1. Partial cash sale (1200 total, 500 cash -> 700 debt) blocks eligible & direct return.
+            sale1_headers = {**headers, "Idempotency-Key": "partial-ret-1"}
+            sale1 = {
+                "member_id": str(member_id),
+                "items": [{"product_id": p1_id, "quantity": 1}],
+                "expected_total_minor": 1200,
+                "cash_amount_minor": 500,
+            }
+            assert client.post(f"/api/v1/registers/{register_id}/product-sale-intent", headers=sale1_headers, json=sale1).status_code == 200
+            sale1_res = client.post(f"/api/v1/registers/{register_id}/product-sales", headers=sale1_headers, json=sale1)
+            assert sale1_res.status_code == 201
+            assert client.post(f"/api/v1/registers/{register_id}/product-sales/resolve", headers=sale1_headers, json=sale1).status_code == 200
+            order1_id = sale1_res.json()["order"]["id"]
+            item1_id = sale1_res.json()["items"][0]["id"]
+
+            elig1 = client.get(f"/api/v1/registers/{register_id}/members/{member_id}/eligible-product-returns", headers=headers)
+            assert elig1.status_code == 200 and elig1.json() == []
+
+            ret1 = client.post(
+                f"/api/v1/registers/{register_id}/product-returns",
+                headers={**headers, "Idempotency-Key": "ret-unpaid"},
+                json={"order_item_id": item1_id, "reason": "Con adeudo", "disposition": "restock", "payout_method": "cash"},
+            )
+            assert ret1.status_code == 409
+            assert "outstanding balance" in ret1.text
+
+            # 2. Settling the debt fully in cash unlocks return eligibility & refund.
+            repay1 = client.post(
+                f"/api/v1/registers/{register_id}/membership-debt-payments",
+                headers={**headers, "Idempotency-Key": "repay-cash-1"},
+                json={"order_id": order1_id, "amount_minor": 700, "credit_minor": 0},
+            )
+            assert repay1.status_code == 201
+            elig2 = client.get(f"/api/v1/registers/{register_id}/members/{member_id}/eligible-product-returns", headers=headers)
+            assert [row["order_item_id"] for row in elig2.json()] == [item1_id]
+            ret1_ok = client.post(
+                f"/api/v1/registers/{register_id}/product-returns",
+                headers={**headers, "Idempotency-Key": "ret-paid-cash"},
+                json={"order_item_id": item1_id, "reason": "Liquidado en efectivo", "disposition": "restock", "payout_method": "cash"},
+            )
+            assert ret1_ok.status_code == 201
+
+            # 3. Debt settled using saldo a favor remains non-returnable for cash.
+            sale2_headers = {**headers, "Idempotency-Key": "partial-ret-2"}
+            sale2 = {**sale1}
+            assert client.post(f"/api/v1/registers/{register_id}/product-sale-intent", headers=sale2_headers, json=sale2).status_code == 200
+            sale2_res = client.post(f"/api/v1/registers/{register_id}/product-sales", headers=sale2_headers, json=sale2)
+            assert sale2_res.status_code == 201
+            assert client.post(f"/api/v1/registers/{register_id}/product-sales/resolve", headers=sale2_headers, json=sale2).status_code == 200
+            order2_id = sale2_res.json()["order"]["id"]
+            item2_id = sale2_res.json()["items"][0]["id"]
+
+            repay2 = client.post(
+                f"/api/v1/registers/{register_id}/membership-debt-payments",
+                headers={**headers, "Idempotency-Key": "repay-credit-2"},
+                json={"order_id": order2_id, "amount_minor": 700, "credit_minor": 700},
+            )
+            assert repay2.status_code == 201
+            elig3 = client.get(f"/api/v1/registers/{register_id}/members/{member_id}/eligible-product-returns", headers=headers)
+            assert elig3.status_code == 200 and elig3.json() == []
+            ret2 = client.post(
+                f"/api/v1/registers/{register_id}/product-returns",
+                headers={**headers, "Idempotency-Key": "ret-paid-credit"},
+                json={"order_item_id": item2_id, "reason": "Abono con saldo", "disposition": "restock", "payout_method": "cash"},
+            )
+            assert ret2.status_code == 409
+            assert "saldo a favor" in ret2.text
+    finally:
+        engine.dispose()

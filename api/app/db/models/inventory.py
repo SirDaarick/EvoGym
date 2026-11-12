@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -99,6 +99,29 @@ class StockMovement(Base):
     recorded_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class InventoryPurchase(Base):
+    """One committed purchase, its exact line totals, and its linked expense."""
+
+    __tablename__ = "inventory_purchases"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "idempotency_key", name="uq_inventory_purchase_branch_key"),
+        CheckConstraint("total_minor > 0", name="ck_inventory_purchase_total_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False)
+    recorded_by: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("staff_users.id", ondelete="RESTRICT"), nullable=False)
+    expense_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("expenses.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lines: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+InventoryPurchaseLine = InventoryPurchase
 
 
 class RegisterInventorySnapshot(Base):

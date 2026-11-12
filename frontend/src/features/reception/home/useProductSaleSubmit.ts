@@ -6,7 +6,7 @@ import { depositMemberCredit } from '@/api/memberCreditApi';
 import { resolveCashProductSale } from '@/api/productSalesApi';
 import type { CheckoutPaymentBreakdown } from '../CurrentPurchaseCard';
 import { cancelCardSale, runCardSale } from './cardSale';
-import { runCashSale, type SaleContext } from './cashSale';
+import { runCashSale, saleSuccessMessage, type SaleContext } from './cashSale';
 import type { Intent, ProductSaleIntentApi } from './useProductSaleIntent';
 
 export interface SaleCart {
@@ -55,13 +55,43 @@ export function useProductSaleSubmit(p: Params) {
 
   async function submit(breakdown?: CheckoutPaymentBreakdown) {
     if (!intentLoaded || submitting.current || intent || !registerId || !cart.items.length) return;
-    if (breakdown && (breakdown.mode !== 'single' || (breakdown.method !== 'cash' && breakdown.method !== 'card') || breakdown.shortfallMinor > 0)) return;
     if (!Number.isSafeInteger(cart.total)) { setError(true); setMessage('El total excede el límite seguro de esta pantalla.'); return; }
+    if (breakdown && breakdown.mode !== 'single') {
+      setError(true);
+      setMessage('La venta de productos no admite pago mixto; usa un solo método de cobro.');
+      return;
+    }
+    if (breakdown && breakdown.method !== 'cash' && breakdown.method !== 'card') {
+      setError(true);
+      setMessage('La venta de productos solo acepta efectivo o tarjeta.');
+      return;
+    }
     const creditMinor = cart.memberId ? breakdown?.creditAppliedMinor ?? 0 : 0;
     const changeToCreditMinor = cart.memberId ? breakdown?.changeToCreditMinor ?? 0 : 0;
+    const payableMinor = cart.total - creditMinor;
+    const shortfallMinor = breakdown?.shortfallMinor ?? 0;
+    if (breakdown?.method === 'card' && shortfallMinor > 0) {
+      setError(true);
+      setMessage('El cobro con tarjeta debe cubrir el total a pagar.');
+      return;
+    }
+    if (shortfallMinor > 0 && !cart.memberId) {
+      setError(true);
+      setMessage('Para dejar saldo pendiente debes asignar un socio en el carrito.');
+      return;
+    }
+    if (shortfallMinor > payableMinor) {
+      setError(true);
+      setMessage('El monto pendiente no puede exceder el total por cobrar.');
+      return;
+    }
+    const cashAmountMinor = breakdown?.method === 'cash' && shortfallMinor > 0
+      ? payableMinor - shortfallMinor
+      : undefined;
     const submitted: Intent = { key: crypto.randomUUID(), registerId, payload: {
       member_id: cart.memberId, items: cart.items, expected_total_minor: cart.total,
       ...(creditMinor > 0 ? { credit_minor: creditMinor } : {}),
+      ...(cashAmountMinor !== undefined ? { cash_amount_minor: cashAmountMinor } : {}),
     } };
     try {
       saleIntent.persistIntent(submitted);
@@ -87,7 +117,11 @@ export function useProductSaleSubmit(p: Params) {
       const status = await resolveCashProductSale(request, intent.registerId, intent.payload, intent.key);
       const morePending = await saleIntent.refreshResolvedIntent();
       p.resetCart(); invalidateStock();
-      setMessage(morePending ? 'Hay otra compra pendiente de confirmar.' : status === 'completed' ? 'Compra registrada.' : 'La compra no se registró y fue cancelada.');
+      setMessage(morePending
+        ? 'Hay otra compra pendiente de confirmar.'
+        : status === 'completed'
+        ? saleSuccessMessage(intent.payload)
+        : 'La compra no se registró y fue cancelada.');
     } catch {
       setError(true); setMessage(NOT_RESOLVED);
     } finally { submitting.current = false; setPending(false); }

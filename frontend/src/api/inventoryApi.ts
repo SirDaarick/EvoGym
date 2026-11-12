@@ -103,6 +103,30 @@ export interface CreateMovementPayload {
   idempotency_key: string;
 }
 
+export interface WasteBatchPayload {
+  items: { product_id: string; quantity: number }[];
+  reason: string;
+}
+
+export interface WasteBatchResponse {
+  items: StockMovementItem[];
+}
+
+export interface InventoryPurchaseInput {
+  items: { product_id: string; quantity: number; cost_minor: number }[];
+  pay_from_drawer: boolean;
+  register_id?: string;
+}
+
+export interface PurchaseCostAlert {
+  purchase_id: string;
+  product_id: string;
+  product_name: string;
+  previous_cost_minor: number;
+  unit_cost_minor: number;
+  recorded_at: string;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let message = `Error de API (${res.status})`;
@@ -112,6 +136,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
         if (typeof data.detail === 'string') message = data.detail;
         else if (Array.isArray(data.detail) && data.detail[0]?.msg) message = data.detail[0].msg;
         else if (typeof data.message === 'string') message = data.message;
+        else if ('error' in data && data.error && typeof data.error === 'object' && 'message' in data.error && typeof data.error.message === 'string') message = data.error.message;
       }
       throw new InventoryApiError(res.status, message, data);
     } catch (err) {
@@ -176,6 +201,38 @@ export async function recordStockMovement(
     body: JSON.stringify(payload),
   });
   return handleResponse<StockMovementItem>(res);
+}
+
+export async function recordWasteBatch(
+  request: AuthenticatedRequest,
+  branchId: string,
+  payload: WasteBatchPayload,
+  key: string,
+): Promise<WasteBatchResponse> {
+  const res = await request(`/api/v1/inventory/branches/${encodeURIComponent(branchId)}/waste`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<WasteBatchResponse>(res);
+}
+
+export async function createInventoryPurchase(
+  request: AuthenticatedRequest, branchId: string, payload: InventoryPurchaseInput, key: string,
+): Promise<{ id: string; total_minor: number; expense_id: string }> {
+  const res = await request(`/api/v1/inventory/branches/${encodeURIComponent(branchId)}/purchases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+}
+
+export async function listPurchaseCostAlerts(request: AuthenticatedRequest, branchId: string): Promise<PurchaseCostAlert[]> {
+  const res = await request(`/api/v1/inventory/branches/${encodeURIComponent(branchId)}/purchase-cost-alerts`);
+  const page = await handleResponse<{ items: PurchaseCostAlert[] }>(res);
+  if (!Array.isArray(page.items)) throw new Error('Invalid purchase cost alerts response.');
+  return page.items;
 }
 
 export async function openContainer(request: AuthenticatedRequest, branchId: string, productId: string, key: string): Promise<void> {

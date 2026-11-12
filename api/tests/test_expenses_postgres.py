@@ -5,6 +5,7 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -12,7 +13,8 @@ from app.api.shifts import ShiftActorPrincipal, get_shift_actor_principal
 from app.db.models import RoleGrant, Shift
 from app.main import create_app
 from app.shifts.queries import expected_cash_for_shift
-from test_admin_auth import configured_settings
+from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
+from admin_session_helpers import approved_admin_headers
 
 
 @pytest.fixture
@@ -76,11 +78,21 @@ def test_cash_movements_serialize_with_close(postgres_expense_target, movement):
     with factory.begin() as session:
         session.add(RoleGrant(staff_id=staff_id, role="receptionist", scope_kind="branch", branch_id=branch_id))
         shift_id = session.scalar(select(Shift.id).where(Shift.cash_register_id == register_id, Shift.status == "open"))
-    app = create_app(configured_settings(url))
-    app.dependency_overrides[get_shift_actor_principal] = lambda: ShiftActorPrincipal(staff_id, False, branch_id)
+    admin_id = seed_admin(factory)
+    delivery = FakeRecoveryDelivery()
+    app = create_app(configured_settings(url), recovery_delivery=delivery)
+    admin_headers = {}
+
+    def principal(request: Request):
+        if request.headers.get("authorization") == admin_headers.get("Authorization") and admin_headers:
+            return ShiftActorPrincipal(admin_id, True, None)
+        return ShiftActorPrincipal(staff_id, False, branch_id)
+
+    app.dependency_overrides[get_shift_actor_principal] = principal
     headers = {"Idempotency-Key": "movement-key"}
     expense_body = {"category": "limpieza", "concept": "Soap", "payee_name": "Shop", "amount_minor": 800}
     with TestClient(app) as client:
+        admin_headers.update(approved_admin_headers(client, delivery))
         expense_id = None
         if movement in ("void", "concurrent_void"):
             response = client.post(f"/api/v1/registers/{register_id}/expenses", headers=headers, json=expense_body)
@@ -95,12 +107,12 @@ def test_cash_movements_serialize_with_close(postgres_expense_target, movement):
             if movement == "contribution":
                 return client.post(f"/api/v1/registers/{register_id}/cash-contributions", headers=headers,
                                    json={"concept": "Fund", "contributor_name": "Admin", "amount_minor": 800}).status_code
-            return client.post(f"/api/v1/expenses/{expense_id}/void", json={"reason": "First"}).status_code
+            return client.post(f"/api/v1/expenses/{expense_id}/void", headers=admin_headers, json={"reason": "First"}).status_code
 
         def competing_request():
             barrier.wait()
             if movement == "concurrent_void":
-                return client.post(f"/api/v1/expenses/{expense_id}/void", json={"reason": "Second"}).status_code
+                return client.post(f"/api/v1/expenses/{expense_id}/void", headers=admin_headers, json={"reason": "Second"}).status_code
             return client.post(f"/api/v1/shifts/{shift_id}/close", json={"counted_cash_minor": 0}).status_code
 
         with ThreadPoolExecutor(max_workers=2) as pool:

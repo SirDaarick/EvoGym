@@ -7,7 +7,8 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.db.models import RoleGrant
+from app.db.models import MembershipDebt, RoleGrant
+from app.db.models.inventory import StockMovement
 from app.db.models.orders import Order, OrderItem, Payment, ProductRefund
 from app.db.models.member_credit_movements import MemberCreditMovement
 from app.db.models.membership_debt_payments import MembershipDebtPayment
@@ -165,6 +166,91 @@ def get_open_shift(
     return session.scalar(stmt)
 
 
+def get_latest_closed_shift_id(session: Session, register_id: UUID) -> UUID | None:
+    """Return the most recently closed shift ID for a register, if any."""
+    return session.scalar(
+        select(Shift.id)
+        .where(
+            Shift.cash_register_id == register_id,
+            Shift.status == "closed",
+        )
+        .order_by(Shift.closed_at.desc(), Shift.opened_at.desc(), Shift.id.desc())
+        .limit(1)
+    )
+
+
+def expected_opening_cash_for_register(session: Session, register_id: UUID) -> tuple[int, bool]:
+    """Calculate expected opening cash and whether a prior baseline exists on this register.
+
+    Takes the previous counted closing amount and intervening overtime cash sales into account.
+    Returns (expected_opening_cash, has_prior_baseline).
+    """
+    last_closed_shift = session.scalar(
+        select(Shift)
+        .where(
+            Shift.cash_register_id == register_id,
+            Shift.status == "closed",
+        )
+        .order_by(Shift.closed_at.desc(), Shift.opened_at.desc(), Shift.id.desc())
+        .limit(1)
+    )
+    overtime_cash = session.scalar(
+        select(func.coalesce(func.sum(Payment.amount_minor), 0))
+        .join(Order, Order.id == Payment.order_id)
+        .where(
+            Order.register_id == register_id,
+            Order.is_overtime.is_(True),
+            Order.financial_shift_id.is_(None),
+            Payment.method == "cash",
+            Payment.status == "confirmed",
+        )
+    ) or 0
+    if last_closed_shift is not None:
+        base = last_closed_shift.counted_cash_minor if last_closed_shift.counted_cash_minor is not None else 0
+        return base + overtime_cash, True
+    elif overtime_cash > 0:
+        return overtime_cash, True
+    else:
+        return 0, False
+
+
+def expected_opening_cash_for_shift(session: Session, shift: Shift) -> tuple[int | None, int | None]:
+    """Calculate expected opening cash and opening difference for a shift.
+
+    Returns (expected_opening_cash, opening_difference).
+    """
+    last_closed_shift = session.scalar(
+        select(Shift)
+        .where(
+            Shift.cash_register_id == shift.cash_register_id,
+            Shift.status == "closed",
+            Shift.id != shift.id,
+            Shift.opened_at <= shift.opened_at,
+        )
+        .order_by(Shift.closed_at.desc(), Shift.opened_at.desc(), Shift.id.desc())
+        .limit(1)
+    )
+    overtime_cash = session.scalar(
+        select(func.coalesce(func.sum(Payment.amount_minor), 0))
+        .join(Order, Order.id == Payment.order_id)
+        .where(
+            Order.register_id == shift.cash_register_id,
+            Order.financial_shift_id == shift.id,
+            Order.cash_included_in_opening.is_(True),
+            Payment.method == "cash",
+            Payment.status == "confirmed",
+        )
+    ) or 0
+    if last_closed_shift is not None:
+        base = last_closed_shift.counted_cash_minor if last_closed_shift.counted_cash_minor is not None else 0
+        expected = base + overtime_cash
+        return expected, shift.opening_cash_minor - expected
+    elif overtime_cash > 0:
+        expected = overtime_cash
+        return expected, shift.opening_cash_minor - expected
+    return None, None
+
+
 def open_shift(
     session: Session,
     register_id: UUID,
@@ -173,7 +259,9 @@ def open_shift(
     inventory_snapshot_id: UUID,
     inventory_observations: list[dict[str, object]] | None = None,
     opening_cash_minor: int | None = None,
+    notes: str | None = None,
     now: datetime | None = None,
+    require_notes_on_discrepancy: bool = True,
 ) -> Shift:
     """Open a new shift for a cash register with pessimistic locking and uniqueness guard."""
     maximum = 2**63 - 1
@@ -233,6 +321,10 @@ def open_shift(
             f"An open shift is already active on cash register {register_id}."
         )
 
+    expected_opening, has_baseline = expected_opening_cash_for_register(session, register_id)
+    if require_notes_on_discrepancy and has_baseline and opening_cash_minor != expected_opening and not notes:
+        raise ValueError("A comment is required when there is a cash difference at opening.")
+
     snapshot, snapshot_items = validate_opening_inventory_snapshot(
         session, register_id=register_id, branch_id=register.branch_id, snapshot_id=inventory_snapshot_id
     )
@@ -241,6 +333,7 @@ def open_shift(
         raise ValueError("Inventory observations must be a list.")
     seen_products: set[UUID] = set()
     persisted_observations: list[ShiftInventoryObservation] = []
+    stock_movements: list[StockMovement] = []
     for item in observations:
         if not isinstance(item, dict):
             raise ValueError("Inventory observations must be mappings.")
@@ -263,9 +356,21 @@ def open_shift(
             snapshot_item.initialized
             and snapshot_item.expected_quantity is not None
             and quantity != snapshot_item.expected_quantity
-            and not reason
         ):
-            raise ValueError("A reason is required when physical inventory differs from the known baseline.")
+            if not reason:
+                raise ValueError("A reason is required when physical inventory differs from the known baseline.")
+            diff = quantity - snapshot_item.expected_quantity
+            kind = "open_in" if diff > 0 else "open_out"
+            stock_movements.append(StockMovement(
+                branch_id=register.branch_id,
+                product_id=product_id,
+                kind=kind,
+                quantity=abs(diff),
+                reason=reason,
+                recorded_by=opened_by,
+                idempotency_key=f"shift-open:{snapshot.id}:{product_id}",
+                recorded_at=now or datetime.now(timezone.utc),
+            ))
         seen_products.add(product_id)
         persisted_observations.append(ShiftInventoryObservation(
             snapshot_item=snapshot_item, physical_quantity=quantity, reason=reason
@@ -276,10 +381,10 @@ def open_shift(
         cash_register_id=register_id,
         opened_by=opened_by,
         opening_cash_minor=opening_cash_minor,
+        closing_notes=notes,
         status="open",
+        opened_at=now or datetime.now(timezone.utc),
     )
-    if now is not None:
-        shift.opened_at = now
     shift.denomination_counts = [
         ShiftDenominationCount(denomination_minor=denomination, quantity=quantity)
         for denomination, quantity in validated_counts
@@ -291,6 +396,8 @@ def open_shift(
         observations=persisted_observations,
     )
     session.add(shift)
+    for sm in stock_movements:
+        session.add(sm)
     try:
         session.flush()
     except IntegrityError as exc:
@@ -324,6 +431,7 @@ def close_shift(
     counted_cash_minor: int | None = None,
     closing_notes: str | None = None,
     now: datetime | None = None,
+    require_notes_on_discrepancy: bool = True,
 ) -> ShiftCloseResult:
     """Freeze a shift's physical cash cut while serializing against register posting/opening."""
     maximum = 2**63 - 1
@@ -380,26 +488,65 @@ def close_shift(
         )
         same_counts = denomination_counts is not None and stored == sorted(validated)
         same_manual = denomination_counts is None and not stored and shift.counted_cash_minor == total_counted
-        if not (same_counts or same_manual) or shift.closing_notes != closing_notes:
+        same_notes = (
+            (shift.closing_notes == closing_notes)
+            or (closing_notes is None and shift.difference_minor == 0 and (shift.closing_notes is None or "\n[Cierre] " not in shift.closing_notes))
+            or (closing_notes is not None and shift.closing_notes is not None and closing_notes in shift.closing_notes)
+        )
+        if not (same_counts or same_manual) or not same_notes:
             raise ShiftCloseConflictError("A closed shift's cash cut cannot be changed.")
         return ShiftCloseResult(shift, replayed=True)
     if shift.status != "open":
         raise ShiftCloseConflictError("Only an open shift can be closed.")
 
     expected = expected_cash_for_shift(session, shift)
+    diff = total_counted - expected
+    if require_notes_on_discrepancy and diff != 0 and not closing_notes:
+        raise ValueError("A comment is required when there is a cash difference at closing.")
+
     shift.closed_by = closed_by
     shift.closed_at = now or datetime.now(timezone.utc)
     shift.expected_cash_at_close_minor = expected
     shift.counted_cash_minor = total_counted
-    shift.difference_minor = total_counted - expected
-    shift.closing_notes = closing_notes
+    shift.difference_minor = diff
+    if closing_notes:
+        if shift.closing_notes and closing_notes not in shift.closing_notes:
+            shift.closing_notes = f"{shift.closing_notes}\n[Cierre] {closing_notes}"
+        else:
+            shift.closing_notes = closing_notes
     shift.status = "closed"
+    shift.closing_draft = None
     shift.closing_denomination_counts = [
         ShiftClosingDenominationCount(denomination_minor=denomination, quantity=quantity)
         for denomination, quantity in validated
     ]
     session.flush()
     return ShiftCloseResult(shift, replayed=False)
+
+
+def save_shift_close_draft(
+    session: Session,
+    *,
+    shift_id: UUID,
+    draft: dict[str, object],
+    now: datetime | None = None,
+) -> Shift:
+    """Persist a progressive closing draft while keeping the shift open."""
+    shift = session.scalar(
+        select(Shift)
+        .where(Shift.id == shift_id)
+        .execution_options(populate_existing=True)
+        .with_for_update()
+    )
+    if shift is None:
+        raise ShiftNotFoundError("Shift not found.")
+    if shift.status != "open":
+        raise ShiftCloseConflictError("Only an open shift can save a closing draft.")
+    payload = dict(draft)
+    payload["updated_at"] = (now or datetime.now(timezone.utc)).isoformat()
+    shift.closing_draft = payload
+    session.flush()
+    return shift
 
 
 def expected_cash_for_shift(session: Session, shift: Shift) -> int:
@@ -504,10 +651,11 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         .order_by(Payment.received_at.desc(), Payment.id.desc())
     ).all()
     debt_rows = session.execute(
-        select(MembershipDebtPayment)
+        select(MembershipDebtPayment, Order.order_kind)
+        .join(Order, Order.id == MembershipDebtPayment.order_id)
         .where(MembershipDebtPayment.shift_id == shift.id)
         .order_by(MembershipDebtPayment.created_at.desc(), MembershipDebtPayment.id.desc())
-    ).scalars().all()
+    ).all()
     rental_rows = session.execute(
         select(Payment, Rental)
         .join(RentalCharge, RentalCharge.id == Payment.rental_charge_id)
@@ -554,7 +702,7 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         description = order_descriptions.get(order.id) or "Membresía"
         payments.append({"id": payment.id, "description": description, "method": payment.method,
                          "status": payment.status, "amount_minor": payment.amount_minor,
-                         "recorded_at": payment.received_at})
+                         "recorded_at": payment.received_at, "is_overtime": bool(order.is_overtime)})
         if payment.status == "confirmed":
             confirmed_minor += payment.amount_minor
             family = "product" if order.order_kind == "product" else "membership"
@@ -569,16 +717,19 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         elif payment.method == "transfer":
             pending_transfer_minor += payment.amount_minor
 
-    for debt in debt_rows:
+    for debt, order_kind in debt_rows:
         cash_part = debt.amount_minor - debt.credit_minor  # the credit part is reported from its ledger row
         if cash_part == 0:
             continue
-        payments.append({"id": debt.id, "description": "Abono de membresía", "method": "cash",
+        is_product = order_kind == "product"
+        family = "product" if is_product else "membership"
+        description = "Abono de producto" if is_product else "Abono de membresía"
+        payments.append({"id": debt.id, "description": description, "method": "cash",
                          "status": "confirmed", "amount_minor": cash_part,
                          "recorded_at": debt.created_at})
         confirmed_minor += cash_part
         cash_minor += cash_part
-        activity = families.setdefault("membership", {"family": "membership", "count": 0, "amount_minor": 0})
+        activity = families.setdefault(family, {"family": family, "count": 0, "amount_minor": 0})
         activity["count"] = int(activity["count"]) + 1
         activity["amount_minor"] = int(activity["amount_minor"]) + cash_part
         bucket = methods.setdefault("cash", {"method": "cash", "count": 0, "amount_minor": 0})
@@ -638,17 +789,31 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
         bucket["amount_minor"] = int(bucket["amount_minor"]) + signed
 
     # Credit applications are income paid from a member's saldo a favor: no cash moves, method "credit".
-    for movement in session.scalars(
+    apply_movements = session.scalars(
         select(MemberCreditMovement).where(
             MemberCreditMovement.shift_id == shift.id, MemberCreditMovement.kind == "apply")
         .order_by(MemberCreditMovement.created_at.desc(), MemberCreditMovement.id.desc())
-    ):
+    ).all()
+    debt_order_kinds: dict[UUID, str] = {}
+    apply_debt_ids = {movement.debt_id for movement in apply_movements if movement.debt_id is not None}
+    if apply_debt_ids:
+        debt_order_kinds = dict(session.execute(
+            select(MembershipDebt.id, Order.order_kind)
+            .join(Order, Order.id == MembershipDebt.order_id)
+            .where(MembershipDebt.id.in_(apply_debt_ids))
+        ).all())
+    for movement in apply_movements:
         if movement.rental_charge_id is not None:
             continue  # rental credit is also a `credit` Payment row, reported with the rental payments
+        movement_is_overtime = False
         if movement.debt_id is not None:
-            family, description = "membership", "Abono de membresía"
+            if debt_order_kinds.get(movement.debt_id) == "product":
+                family, description = "product", "Abono de producto"
+            else:
+                family, description = "membership", "Abono de membresía"
         elif movement.order_id is not None:
             order = session.get(Order, movement.order_id)
+            movement_is_overtime = bool(order.is_overtime) if order is not None else False
             family = "product" if order.order_kind == "product" else "membership"
             description = session.scalar(
                 select(OrderItem.description_snapshot).where(OrderItem.order_id == order.id)
@@ -657,7 +822,7 @@ def shift_financial_summary(session: Session, shift: Shift) -> dict[str, object]
             family, description = "rental", "Renta"
         payments.append({"id": movement.id, "description": f"{description} (saldo a favor)", "method": "credit",
                          "status": "confirmed", "amount_minor": movement.amount_minor,
-                         "recorded_at": movement.created_at})
+                         "recorded_at": movement.created_at, "is_overtime": movement_is_overtime})
         confirmed_minor += movement.amount_minor
         activity = families.setdefault(family, {"family": family, "count": 0, "amount_minor": 0})
         activity["count"] = int(activity["count"]) + 1
@@ -738,15 +903,24 @@ def to_payment_terminal_dto(terminal: PaymentTerminal) -> PaymentTerminalDTO:
 def to_cash_register_dto(
     register: CashRegister,
     has_open_shift: bool = False,
+    last_closed_shift_id: UUID | None = None,
+    expected_opening_cash_minor: int | None = None,
 ) -> CashRegisterDTO:
     """Convert CashRegister model to CashRegisterDTO."""
     dto = CashRegisterDTO.model_validate(register)
     dto.has_open_shift = has_open_shift
+    dto.last_closed_shift_id = str(last_closed_shift_id) if last_closed_shift_id is not None else None
+    dto.expected_opening_cash_minor = expected_opening_cash_minor
     return dto
 
 
 def to_shift_dto(shift: Shift, session: Session | None = None) -> ShiftDTO:
     """Convert Shift model to ShiftDTO."""
+    expected_opening: int | None = None
+    opening_diff: int | None = None
+    if session is not None:
+        expected_opening, opening_diff = expected_opening_cash_for_shift(session, shift)
+
     dto = ShiftDTO.model_validate({
         "id": shift.id,
         "cash_register_id": shift.cash_register_id,
@@ -762,9 +936,13 @@ def to_shift_dto(shift: Shift, session: Session | None = None) -> ShiftDTO:
         "current_expected_cash_minor": (
             expected_cash_for_shift(session, shift) if session is not None and shift.status == "open" else None
         ),
+        "expected_opening_cash_minor": expected_opening,
+        "opening_difference_minor": opening_diff,
         "counted_cash_minor": shift.counted_cash_minor,
         "difference_minor": shift.difference_minor,
+        "notes": shift.closing_notes,
         "closing_notes": shift.closing_notes,
+        "closing_draft": shift.closing_draft,
     })
     review = shift.inventory_review
     if review is not None:

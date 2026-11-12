@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import type { SortingState } from '@tanstack/react-table';
 import { useProductAccess } from '../features/auth/ProductAccessProvider';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { MemberReloadResponse, MemberStatus, MemberSummary } from '../api/memberReadsApi';
 import type { Member, Role } from '../domain/models';
-import { Members, MemberDetail } from '../features/members/Members';
+import { Members, MemberDetail, type MemberStatusFilter } from '../features/members/Members';
 import { rolePath } from './navigation';
 import { Button, Field, PageHeader, Panel } from '../shared/ui';
 import {
@@ -18,6 +20,7 @@ import {
 import { openLocalDb } from '../offline/db';
 import { dispatch } from '../offline/dispatcher';
 import { isOnlineHint } from '../offline/connectivity';
+import { HttpError, isAbortError, NetworkError } from '../api/http';
 
 interface ApiMember {
   id: string;
@@ -31,6 +34,8 @@ interface ApiMember {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   photo_url: string | null;
+  membership_ends_on?: string | null;
+  membership_status?: string | null;
 }
 
 interface ApiMemberPage {
@@ -39,6 +44,7 @@ interface ApiMemberPage {
   page: number;
   limit: number;
   pages: number;
+  offline?: boolean;
 }
 
 interface ApiMemberDetail extends ApiMember {
@@ -51,15 +57,68 @@ interface ApiMemberDetail extends ApiMember {
 
 type AuthenticatedRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
-async function readResponse<T>(request: AuthenticatedRequest, path: string): Promise<T> {
-  const response = await request(path, { headers: { Accept: 'application/json' } });
+const MEMBERS_PAGE_LIMIT = 50;
+const SEARCH_DEBOUNCE_MS = 300;
+const SORT_FIELD_MAP: Record<string, string> = {
+  name: 'full_name',
+  phone: 'phone',
+  membership: 'membership_status',
+  endsOn: 'membership_ends_on',
+};
+
+async function readResponse<T>(
+  request: AuthenticatedRequest,
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await request(path, {
+    headers: { Accept: 'application/json' },
+    ...(signal ? { signal } : {}),
+  });
   if (!response.ok) {
-    if (response.status === 401) throw new Error('La sesión expiró. Inicia sesión nuevamente.');
-    if (response.status === 403) throw new Error('No tienes autorización para consultar estos datos.');
-    if (response.status === 404) throw new Error('El recurso solicitado no está disponible.');
-    throw new Error('No se pudieron cargar los datos desde la API.');
+    let message = 'No se pudieron cargar los datos desde la API.';
+    if (response.status === 401) message = 'La sesión expiró. Inicia sesión nuevamente.';
+    else if (response.status === 403) message = 'No tienes autorización para consultar estos datos.';
+    else if (response.status === 404) message = 'El recurso solicitado no está disponible.';
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return response.json() as Promise<T>;
+}
+
+async function loadLocalMembersPage(): Promise<ApiMemberPage | null> {
+  try {
+    const db = openLocalDb();
+    const localMembers = await db.members.toArray();
+    if (localMembers.length === 0) return null;
+    const items: ApiMember[] = localMembers.map(m => {
+      const latestEndsOn = Array.isArray(m.active_periods) && m.active_periods.length > 0
+        ? m.active_periods.reduce<string | null>(
+          (max, period) => (typeof period?.ends_on === 'string' && (!max || period.ends_on > max) ? period.ends_on : max),
+          null,
+        )
+        : null;
+      const membershipEndsOn = typeof m.membership_ends_on === 'string' ? m.membership_ends_on : latestEndsOn;
+      const status = typeof m.status === 'string' ? m.status : 'active';
+      return {
+        id: m.member_id,
+        member_number: m.member_number != null ? String(m.member_number) : '',
+        full_name: typeof m.full_name === 'string' ? m.full_name : m.member_id,
+        preferred_name: null,
+        phone: typeof m.phone_last4 === 'string' ? `***${m.phone_last4}` : '',
+        status,
+        joined_on: m.changed_at ? String(m.changed_at).split('T')[0] : '',
+        credit_balance_minor: 0,
+        emergency_contact_name: null,
+        emergency_contact_phone: null,
+        photo_url: null,
+        membership_ends_on: membershipEndsOn,
+        membership_status: status,
+      };
+    });
+    return { items, total: items.length, page: 1, limit: items.length, pages: 1, offline: true };
+  } catch {
+    return null;
+  }
 }
 
 function useOptionalProductAccess() {
@@ -69,6 +128,16 @@ function useOptionalProductAccess() {
     return null;
   }
 }
+
+const CHECK_IN_DENIAL_MESSAGES: Record<string, string> = {
+  membership_not_found: 'El socio no tiene una membresía registrada.',
+  wrong_branch: 'La membresía pertenece a otra sucursal.',
+  period_expired: 'La membresía está vencida.',
+  period_not_started: 'La membresía aún no inicia.',
+  transfer_not_received: 'La transferencia no tiene comprobante registrado.',
+  transfer_missing_funds: 'La transferencia está pendiente: los fondos no se han recibido.',
+  admin_payment_restriction: 'El administrador restringió el acceso por falta de pago.',
+};
 
 function extractErrorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
@@ -85,67 +154,151 @@ function extractErrorMessage(body: unknown, fallback: string): string {
 }
 
 export function ApiMembers({ role, request }: { role: Role; request: AuthenticatedRequest }) {
-  const [page, setPage] = useState<ApiMemberPage | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [membershipStatus, setMembershipStatus] = useState<MemberStatusFilter>('all');
+  const [sorting, setSorting] = useState<SortingState>([]);
 
-  async function load() {
-    setLoading(true);
-    setError('');
-    try {
-      if (!isOnlineHint()) {
-        throw new Error('offline');
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(prev => (prev === trimmed ? prev : trimmed));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const activeSort = sorting[0];
+  const sortBy = (activeSort && SORT_FIELD_MAP[activeSort.id]) || 'full_name';
+  const sortDir: 'asc' | 'desc' = activeSort ? (activeSort.desc ? 'desc' : 'asc') : 'asc';
+
+  const {
+    data,
+    error,
+    isPending,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey: ['members', { search: debouncedSearch, membershipStatus, sortBy, sortDir }],
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+    initialPageParam: 1,
+    getNextPageParam: (lastPage: ApiMemberPage) => (lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined),
+    queryFn: async ({ pageParam, signal }): Promise<ApiMemberPage> => {
+      if (pageParam === 1 && !isOnlineHint()) {
+        const offlinePage = await loadLocalMembersPage();
+        if (offlinePage) return offlinePage;
+        throw new Error('No se pudieron cargar los socios desde la API.');
       }
-      const firstPage = await readResponse<ApiMemberPage>(request, '/api/v1/members?page=1&limit=100');
-      const items = [...firstPage.items];
-      for (let pageNumber = 2; pageNumber <= firstPage.pages; pageNumber += 1) {
-        const nextPage = await readResponse<ApiMemberPage>(request, `/api/v1/members?page=${pageNumber}&limit=100`);
-        items.push(...nextPage.items);
-      }
-      setPage({ ...firstPage, items });
-    } catch (reason) {
+      const params = new URLSearchParams({
+        page: String(pageParam),
+        limit: String(MEMBERS_PAGE_LIMIT),
+        sort_by: sortBy,
+        sort_dir: sortDir,
+      });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (membershipStatus !== 'all') params.set('membership_status', membershipStatus);
+      const path = `/api/v1/members?${params.toString()}`;
       try {
-        const db = openLocalDb();
-        const localMembers = await db.members.toArray();
-        if (localMembers.length > 0) {
-          const items: ApiMember[] = localMembers.map(m => ({
-            id: m.member_id,
-            member_number: m.member_number != null ? String(m.member_number) : '',
-            full_name: typeof m.full_name === 'string' ? m.full_name : m.member_id,
-            preferred_name: null,
-            phone: typeof m.phone_last4 === 'string' ? `***${m.phone_last4}` : '',
-            status: typeof m.status === 'string' ? m.status : 'active',
-            joined_on: m.changed_at ? String(m.changed_at).split('T')[0] : '',
-            credit_balance_minor: 0,
-            emergency_contact_name: null,
-            emergency_contact_phone: null,
-            photo_url: null,
-          }));
-          setPage({ items, total: items.length, page: 1, limit: items.length, pages: 1 });
-          setError('');
-          return;
+        return await readResponse<ApiMemberPage>(request, path, signal);
+      } catch (reason) {
+        if (isAbortError(reason) || signal.aborted) throw reason;
+        const status = (reason as { status?: unknown } | null)?.status;
+        const isHttpStatusError = reason instanceof HttpError || (typeof status === 'number' && status >= 400);
+        if (pageParam === 1 && !isHttpStatusError) {
+          const offlinePage = await loadLocalMembersPage();
+          if (offlinePage) return offlinePage;
         }
-      } catch { /* proceed with error */ }
-      setPage(null);
-      setError(reason instanceof Error && reason.message !== 'offline' ? reason.message : 'No se pudieron cargar los socios desde la API.');
-    } finally {
-      setLoading(false);
+        throw reason;
+      }
+    },
+  });
+
+  const { members, statuses } = useMemo(() => {
+    const seen = new Set<string>();
+    const nextMembers: Member[] = [];
+    const nextStatuses: Record<string, { status: string; memberNumber?: string; searchAliases?: string; endsOn?: string | null }> = {};
+    for (const page of data?.pages ?? []) {
+      for (const item of page.items) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        nextMembers.push({
+          id: item.id,
+          name: item.preferred_name || item.full_name,
+          phone: item.phone,
+          email: undefined,
+          creditMinor: item.credit_balance_minor,
+          membership: null,
+          joinedOn: item.joined_on,
+        });
+        nextStatuses[item.id] = {
+          status: item.membership_status ?? item.status,
+          memberNumber: item.member_number,
+          searchAliases: item.full_name,
+          endsOn: item.membership_ends_on ?? null,
+        };
+      }
     }
-  }
+    return { members: nextMembers, statuses: nextStatuses };
+  }, [data]);
 
-  useEffect(() => { void load(); }, [request]);
+  const isOffline = data?.pages[0]?.offline === true;
+  const isRefreshing = isFetching && !isPending && !isFetchingNextPage;
+  const total = data?.pages[0]?.total ?? members.length;
+  const errorMessage = error instanceof Error
+    ? (error.message !== 'offline' ? error.message : 'No se pudieron cargar los socios desde la API.')
+    : error
+      ? 'No se pudieron cargar los socios desde la API.'
+      : '';
 
-  const members: Member[] = page?.items.map(item => ({
-    id: item.id,
-    name: item.preferred_name || item.full_name,
-    phone: item.phone,
-    email: undefined,
-    creditMinor: item.credit_balance_minor,
-    membership: null,
-    joinedOn: item.joined_on,
-  })) ?? [];
-  const statuses = Object.fromEntries((page?.items ?? []).map(item => [item.id, { status: item.status, memberNumber: item.member_number, searchAliases: item.full_name }]));
-  return <Members role={role} liveData={{ members, statuses, loading, error, onRefresh: () => void load() }} />;
+  const handleRefresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['members'], refetchType: 'none' });
+    void refetch();
+  }, [queryClient, refetch]);
+
+  const handleFetchNextPage = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
+
+  return (
+    <Members
+      role={role}
+      liveData={
+        isOffline
+          ? {
+            members,
+            statuses,
+            loading: isPending,
+            refreshing: isRefreshing,
+            error: errorMessage,
+            onRefresh: handleRefresh,
+            serverDriven: false,
+          }
+          : {
+            members,
+            statuses,
+            loading: isPending,
+            refreshing: isRefreshing,
+            error: errorMessage,
+            onRefresh: handleRefresh,
+            serverDriven: true,
+            total,
+            hasNextPage: Boolean(hasNextPage),
+            isFetchingNextPage,
+            fetchNextPage: handleFetchNextPage,
+            query: searchInput,
+            onQueryChange: setSearchInput,
+            statusFilter: membershipStatus,
+            onStatusFilterChange: setMembershipStatus,
+            sorting,
+            onSortingChange: setSorting,
+          }
+      }
+    />
+  );
 }
 
 export function ApiNewMember({ role, request }: { role: Role; request: AuthenticatedRequest }) {
@@ -254,7 +407,7 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
   const [loading, setLoading] = useState(true);
   const access = useOptionalProductAccess();
   const employeeBranchId = access?.principal?.kind === 'employee' ? access.principal.branch.branch_id : null;
-  const pendingKeyRef = useRef<{ target: string; key: string } | null>(null);
+  const pendingKeyRef = useRef<{ target: string; key: string; confirmed?: boolean } | null>(null);
 
   async function load() {
     if (!memberId) return;
@@ -380,6 +533,9 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
 
   async function recordOfflineCheckIn(): Promise<{ ok: boolean; message: string }> {
     const db = openLocalDb();
+    if (await db.meta.where('key').startsWith(`member-roster-uncertain:${memberId}:`).first()) {
+      return { ok: false, message: 'La información local del socio no está confirmada. Reintenta al recuperar la conexión.' };
+    }
     const local = await db.members.get(memberId);
     if (!local || local.status !== 'active') {
       return { ok: false, message: 'La membresía debe estar activa para registrar entrada.' };
@@ -391,10 +547,21 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
       return { ok: false, message: 'La membresía debe estar activa para registrar entrada.' };
     }
     const localDecision = period.access;
+    if (pendingKeyRef.current && !pendingKeyRef.current.confirmed && localDecision === 'valid_with_outstanding_balance') {
+      return { ok: false, message: 'No se pudo verificar la entrada pendiente. Reintenta al recuperar la conexión.' };
+    }
+    const confirmed = pendingKeyRef.current?.confirmed || (localDecision === 'valid_with_outstanding_balance'
+      && window.confirm('El socio tiene un adeudo pendiente. ¿Confirmas su entrada?'));
+    if (localDecision === 'valid_with_outstanding_balance' && !confirmed) {
+      return { ok: false, message: 'Entrada cancelada.' };
+    }
     const actorStaffId = access?.principal ? access.principal.identity.id : 'offline-staff';
     const branchMeta = await db.meta.get('branch');
     const branchVal = branchMeta?.value as { id?: string } | undefined;
     const branchId = employeeBranchId || branchVal?.id || 'branch-default';
+    if (pendingKeyRef.current && pendingKeyRef.current.target !== `${branchId}:${period.period_id}`) {
+      return { ok: false, message: 'No se pudo verificar la entrada pendiente. Reintenta al recuperar la conexión.' };
+    }
 
     try {
       await dispatch(
@@ -406,6 +573,8 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
             period_id: period.period_id,
             branch_id: branchId,
             local_access_decision: localDecision,
+            ...(confirmed ? { confirm_outstanding_balance: true } : {}),
+            ...(pendingKeyRef.current ? { online_idempotency_key: pendingKeyRef.current.key } : {}),
           },
         },
         actorStaffId,
@@ -434,23 +603,34 @@ export function ApiMemberDetail({ role, request, isAdmin }: { role: Role; reques
     try {
       const response = await request(
         `/api/v1/member-check-ins/branches/${encodeURIComponent(branchId)}/periods/${encodeURIComponent(period.id)}`,
-        { method: 'POST', headers: { 'Idempotency-Key': pendingKeyRef.current.key } },
+        { method: 'POST', headers: { 'Idempotency-Key': pendingKeyRef.current.key, ...(pendingKeyRef.current.confirmed ? { 'Content-Type': 'application/json' } : {}) },
+          ...(pendingKeyRef.current.confirmed ? { body: JSON.stringify({ confirm_outstanding_balance: true }) } : {}) },
       );
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         const code = body?.error?.code ?? body?.detail?.code;
         const reason = body?.error?.metadata?.reason ?? body?.detail?.metadata?.reason;
+        if (code === 'debt_confirmation_required') {
+          if (pendingKeyRef.current.confirmed) return { ok: false, message: 'No se pudo confirmar la entrada con adeudo.' };
+          if (!window.confirm('El socio tiene un adeudo pendiente. ¿Confirmas su entrada?')) {
+            pendingKeyRef.current = null;
+            return { ok: false, message: 'Entrada cancelada.' };
+          }
+          pendingKeyRef.current.confirmed = true;
+          return await recordCheckIn();
+        }
         if (code === 'membership_access_denied' || reason) {
           pendingKeyRef.current = null;
-          return { ok: false, message: 'La membresía debe estar activa para registrar entrada.' };
+          return { ok: false, message: CHECK_IN_DENIAL_MESSAGES[reason as string] ?? 'La membresía debe estar activa para registrar entrada.' };
         }
         return { ok: false, message: extractErrorMessage(body, 'No se pudo registrar la entrada.') };
       }
       pendingKeyRef.current = null;
       await load();
       return { ok: true, message: 'Entrada registrada.' };
-    } catch {
-      return await recordOfflineCheckIn();
+    } catch (reason) {
+      if (reason instanceof TypeError || reason instanceof NetworkError) return await recordOfflineCheckIn();
+      return { ok: false, message: reason instanceof Error ? reason.message : 'No se pudo registrar la entrada.' };
     }
   }
 

@@ -25,11 +25,19 @@ from app.sales.schemas import EligibleProductReturnDTO, ProductCartLineRequest, 
 MAX_MINOR = 2**63 - 1
 
 
-def product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor=0):
+def product_sale_fingerprint(
+    register_id, member_id, items, expected_total_minor, credit_minor=0, cash_amount_minor=None,
+):
     lines = sorted((str(item.product_id), item.quantity) for item in items)
     parts = (str(register_id), str(member_id), lines, expected_total_minor)
-    # Credit-free requests keep the original canonical form so earlier idempotency keys still match.
-    return sha256(repr(parts + (credit_minor,) if credit_minor else parts).encode()).hexdigest()
+    # Credit- and partial-cash-free requests keep the original canonical form so earlier idempotency keys still match.
+    if cash_amount_minor is not None:
+        canonical = parts + (credit_minor, cash_amount_minor)
+    elif credit_minor:
+        canonical = parts + (credit_minor,)
+    else:
+        canonical = parts
+    return sha256(repr(canonical).encode()).hexdigest()
 
 
 def _validate_sale_credit(credit_minor, total, member_id) -> None:
@@ -40,19 +48,38 @@ def _validate_sale_credit(credit_minor, total, member_id) -> None:
         raise ProductSaleRejected("Saldo a favor requires an assigned member.")
 
 
+def _validate_sale_cash_amount(cash_amount_minor, cash_amount_provided, payable_minor, member_id) -> int:
+    """Resolve cash collected upfront; any shortfall against `payable_minor` requires an assigned member."""
+    if not cash_amount_provided:
+        if cash_amount_minor is not None:
+            raise ValueError("Cash amount must be explicitly marked as provided.")
+        return payable_minor
+    if type(cash_amount_minor) is not int or not 0 <= cash_amount_minor <= payable_minor:
+        raise ProductSaleRejected("Cash amount must be between zero and the payable total.")
+    if cash_amount_minor < payable_minor and member_id is None:
+        raise ProductSaleRejected("Partial payments require an assigned member.")
+    return cash_amount_minor
+
+
 def get_product_sale_intent(session, *, actor_id):
     return session.get(ProductSaleIntent, actor_id)
 
 
 def prepare_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
-                         credit_minor=0):
+                         credit_minor=0, cash_amount_minor=None, cash_amount_provided=False):
+    if not cash_amount_provided and cash_amount_minor is not None:
+        raise ValueError("Cash amount must be explicitly marked as provided.")
+    if cash_amount_provided and (type(cash_amount_minor) is not int or not 0 <= cash_amount_minor <= MAX_MINOR):
+        raise ValueError("Cash amount must be a non-negative signed 64-bit integer.")
     seller = session.scalar(select(StaffUser).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     if seller is None or not seller.is_active:
         raise CashSaleConflictError("Staff account is inactive.")
     register = session.get(CashRegister, register_id)
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
+    fingerprint = product_sale_fingerprint(
+        register_id, member_id, items, expected_total_minor, credit_minor, cash_amount_minor,
+    )
     existing = session.get(ProductSaleIntent, actor_id)
     if existing:
         if existing.register_id != register_id or existing.idempotency_key != idempotency_key or existing.request_fingerprint != fingerprint:
@@ -66,7 +93,9 @@ def prepare_product_sale(session, *, register_id, actor_id, member_id, items, ex
     intent = ProductSaleIntent(seller_id=actor_id, register_id=register_id, idempotency_key=idempotency_key,
         request_fingerprint=fingerprint, payload={"member_id": str(member_id) if member_id else None,
         "items": [{"product_id": str(item.product_id), "quantity": item.quantity} for item in items],
-        "expected_total_minor": expected_total_minor, **({"credit_minor": credit_minor} if credit_minor else {})})
+        "expected_total_minor": expected_total_minor,
+        **({"credit_minor": credit_minor} if credit_minor else {}),
+        **({"cash_amount_minor": cash_amount_minor} if cash_amount_minor is not None else {})})
     session.add(intent)
     session.flush()
     return intent
@@ -88,15 +117,17 @@ class ContingencySaleResult:
 
 
 def post_cash_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
-                           credit_minor=0):
+                           credit_minor=0, cash_amount_minor=None, cash_amount_provided=False):
     """Online sale: server-priced, rejects insufficient or uninitialized stock.
 
-    `credit_minor` of the total is drawn from the member's saldo a favor; cash covers the rest.
+    `credit_minor` of the total is drawn from the member's saldo a favor; cash covers the rest
+    unless `cash_amount_minor` records a smaller upfront cash payment and leaves the remainder as
+    assigned member debt.
     """
     order, replayed, _, _ = _post_cash_sale(
         session, register_id=register_id, actor_id=actor_id, member_id=member_id, items=items,
         expected_total_minor=expected_total_minor, idempotency_key=idempotency_key, policy=SalePolicy.ONLINE,
-        credit_minor=credit_minor)
+        credit_minor=credit_minor, cash_amount_minor=cash_amount_minor, cash_amount_provided=cash_amount_provided)
     return order, replayed
 
 
@@ -119,9 +150,13 @@ def post_contingency_cash_sale(
 
 def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
                     policy, occurred_at=None, unit_prices=None, offline_receipt_number=None, shift_id=None,
-                    credit_minor=0):
+                    credit_minor=0, cash_amount_minor=None, cash_amount_provided=False):
     contingency = policy is SalePolicy.CONTINGENCY
     unit_prices = unit_prices or {}
+    if not cash_amount_provided and cash_amount_minor is not None:
+        raise ValueError("Cash amount must be explicitly marked as provided.")
+    if cash_amount_provided and (type(cash_amount_minor) is not int or not 0 <= cash_amount_minor <= MAX_MINOR):
+        raise ValueError("Cash amount must be a non-negative signed 64-bit integer.")
     # Keep seller serialization compatible with shift-close foreign key checks.
     session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
@@ -129,7 +164,11 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
         raise CashSaleNotFoundError("Cash register not found.")
     if contingency and credit_minor:
         raise ProductSaleRejected("Saldo a favor cannot be used in offline sales.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
+    if contingency and cash_amount_provided:
+        raise ProductSaleRejected("Partial cash payments are not supported in offline sales.")
+    fingerprint = product_sale_fingerprint(
+        register_id, member_id, items, expected_total_minor, credit_minor, cash_amount_minor,
+    )
     cancellation = session.get(ProductSaleCancellation, (actor_id, register.branch_id, idempotency_key))
     if cancellation is not None:
         raise ProductSaleRejected("Product sale intent was cancelled.")
@@ -155,8 +194,13 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
         ).order_by(Shift.closed_at.desc(), Shift.id.desc()).limit(1).with_for_update())
         if shift is None:
             raise FirstShiftRequired("Open the first shift before making a sale.")
-    if member_id is not None and session.get(Member, member_id) is None:
-        raise CashSaleNotFoundError("Member not found.")
+    member = None
+    if member_id is not None:
+        member = session.scalar(
+            select(Member).where(Member.id == member_id).execution_options(populate_existing=True).with_for_update()
+        )
+        if member is None:
+            raise CashSaleNotFoundError("Member not found.")
     if len({item.product_id for item in items}) != len(items):
         raise ProductSaleRejected("Each product may occur only once.")
     rows = []
@@ -191,6 +235,8 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
     if total != expected_total_minor:
         raise ProductSaleRejected("Product prices changed; review the total.")
     _validate_sale_credit(credit_minor, total, member_id)
+    payable_minor = total - credit_minor
+    received_minor = _validate_sale_cash_amount(cash_amount_minor, cash_amount_provided, payable_minor, member_id)
     order = Order(branch_id=register.branch_id, register_id=register_id, shift_id=shift.id,
                   financial_shift_id=None if is_overtime else shift.id, is_overtime=is_overtime,
                   member_id=member_id, seller_id=actor_id, order_kind="product", idempotency_key=idempotency_key,
@@ -212,18 +258,23 @@ def _post_cash_sale(session, *, register_id, actor_id, member_id, items, expecte
         session.flush()
         movement = StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
                                  quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
-                                 idempotency_key=f"sale:{line.id}")
-        if occurred_at is not None:
-            movement.recorded_at = occurred_at
+                                 idempotency_key=f"sale:{line.id}",
+                                 recorded_at=occurred_at or datetime.now(timezone.utc))
         session.add(movement)
-    payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=total - credit_minor,
+    payment = Payment(order_id=order.id, method="cash", status="confirmed", amount_minor=received_minor,
                       received_by=actor_id)
     if occurred_at is not None:
         payment.created_at = occurred_at
     session.add(payment)
     session.flush()
+    if received_minor < payable_minor:
+        session.add(MembershipDebt(
+            id=uuid4(), order_id=order.id, member_id=member.id,
+            initial_outstanding_minor=payable_minor - received_minor,
+        ))
+        session.flush()
     if credit_minor:
-        apply_credit(session, member=lock_member(session, member_id), register=register, shift=shift,
+        apply_credit(session, member=member, register=register, shift=shift,
                      actor_id=actor_id, amount_minor=credit_minor, order_id=order.id)
     session.refresh(order, ["items", "payment"])
     return order, False, variances, price_drifts
@@ -318,7 +369,8 @@ def post_card_product_sale(
         session.flush()
         session.add(StockMovement(branch_id=register.branch_id, product_id=product.id, kind="sale",
                                   quantity=quantity, recorded_by=actor_id, order_item_id=line.id,
-                                  idempotency_key=f"sale:{line.id}"))
+                                  idempotency_key=f"sale:{line.id}",
+                                  recorded_at=datetime.now(timezone.utc)))
     payment = Payment(
         order_id=order.id,
         method="card",
@@ -345,13 +397,19 @@ def post_card_product_sale(
 
 
 def resolve_product_sale(session, *, register_id, actor_id, member_id, items, expected_total_minor, idempotency_key,
-                         credit_minor=0):
+                         credit_minor=0, cash_amount_minor=None, cash_amount_provided=False):
+    if not cash_amount_provided and cash_amount_minor is not None:
+        raise ValueError("Cash amount must be explicitly marked as provided.")
+    if cash_amount_provided and (type(cash_amount_minor) is not int or not 0 <= cash_amount_minor <= MAX_MINOR):
+        raise ValueError("Cash amount must be a non-negative signed 64-bit integer.")
     # Both operations lock the seller first so cancellation cannot race a delayed POST.
     session.scalar(select(StaffUser.id).where(StaffUser.id == actor_id).with_for_update(key_share=True))
     register = session.scalar(select(CashRegister).where(CashRegister.id == register_id).with_for_update())
     if register is None:
         raise CashSaleNotFoundError("Cash register not found.")
-    fingerprint = product_sale_fingerprint(register_id, member_id, items, expected_total_minor, credit_minor)
+    fingerprint = product_sale_fingerprint(
+        register_id, member_id, items, expected_total_minor, credit_minor, cash_amount_minor,
+    )
     order = session.scalar(select(Order).where(Order.seller_id == actor_id, Order.branch_id == register.branch_id,
                                                Order.idempotency_key == idempotency_key))
     if order is not None:
@@ -386,12 +444,34 @@ _PUBLIC_RETURN_MESSAGES = frozenset({
     "Only product order items can be returned.",
     "Only product orders can be returned.",
     "Orders paid with saldo a favor cannot be returned yet.",
+    "Orders with an outstanding balance cannot be returned.",
     "Open the first shift before recording a return.",
     "Returns are only allowed on the same calendar day of purchase.",
     "Staff account is inactive.",
     "This product order item has already been returned.",
     "Unassigned sales cannot be returned.",
 })
+
+
+def _order_debt_return_block(session: Session, order_id: UUID, *, lock: bool = False) -> str | None:
+    """Block returns while a product order has an unpaid debt or any repayment settled with saldo a favor."""
+    stmt = select(MembershipDebt).where(MembershipDebt.order_id == order_id)
+    if lock:
+        stmt = stmt.execution_options(populate_existing=True).with_for_update()
+    debt = session.scalar(stmt)
+    if debt is None:
+        return None
+    paid_minor, credit_repaid_minor = session.execute(
+        select(
+            func.coalesce(func.sum(MembershipDebtPayment.amount_minor), 0),
+            func.coalesce(func.sum(MembershipDebtPayment.credit_minor), 0),
+        ).where(MembershipDebtPayment.debt_id == debt.id)
+    ).one()
+    if int(paid_minor) < debt.initial_outstanding_minor:
+        return "Orders with an outstanding balance cannot be returned."
+    if int(credit_repaid_minor) > 0:
+        return "Orders paid with saldo a favor cannot be returned yet."
+    return None
 
 
 class ProductReturnConflictError(AppError):
@@ -447,6 +527,8 @@ def list_eligible_product_returns(
             continue
         if credit_applied_for_order(session, order.id):
             continue  # a refund would pay out cash for money the member paid from saldo a favor
+        if _order_debt_return_block(session, order.id) is not None:
+            continue
         order_created = order.created_at if order.created_at.tzinfo is not None else order.created_at.replace(tzinfo=timezone.utc)
         if order_created.astimezone(branch_zone).date() != today:
             continue
@@ -556,6 +638,9 @@ def post_product_return(
         raise ProductReturnConflictError("Refund must use the original payment method.")
     if credit_applied_for_order(session, order.id):
         raise ProductReturnConflictError("Orders paid with saldo a favor cannot be returned yet.")
+    debt_block = _order_debt_return_block(session, order.id, lock=True)
+    if debt_block is not None:
+        raise ProductReturnConflictError(debt_block)
 
     try:
         branch_zone = ZoneInfo(branch.timezone)
@@ -1208,40 +1293,52 @@ def list_register_member_open_debts(
         select(
             MembershipDebt,
             Order,
-            OrderItem.description_snapshot,
             func.coalesce(func.sum(MembershipDebtPayment.amount_minor), 0).label("paid_minor"),
         )
         .join(Order, Order.id == MembershipDebt.order_id)
-        .outerjoin(OrderItem, (OrderItem.order_id == Order.id) & (OrderItem.line_number == 1))
         .outerjoin(MembershipDebtPayment, MembershipDebtPayment.debt_id == MembershipDebt.id)
         .where(
             MembershipDebt.member_id == member.id,
             Order.branch_id == register.branch_id,
         )
-        .group_by(MembershipDebt.id, Order.id, OrderItem.description_snapshot)
+        .group_by(MembershipDebt.id, Order.id)
         .order_by(Order.created_at.asc(), MembershipDebt.created_at.asc(), MembershipDebt.id.asc())
     ).all()
 
-    open_debts: list[RegisterMemberOpenDebtDTO] = []
-    for debt, order, description_snapshot, paid_minor in rows:
-        paid = int(paid_minor or 0)
-        remaining = debt.initial_outstanding_minor - paid
-        if remaining > 0:
-            open_debts.append(
-                RegisterMemberOpenDebtDTO(
-                    debt_id=debt.id,
-                    order_id=order.id,
-                    member_id=member.id,
-                    branch_id=order.branch_id,
-                    currency=order.currency,
-                    description_snapshot=description_snapshot or "Membresía",
-                    initial_outstanding_minor=debt.initial_outstanding_minor,
-                    paid_amount_minor=paid,
-                    remaining_balance_minor=remaining,
-                    created_at=debt.created_at,
-                )
-            )
-    return open_debts
+    open_rows = [
+        (debt, order, int(paid_minor or 0))
+        for debt, order, paid_minor in rows
+        if debt.initial_outstanding_minor - int(paid_minor or 0) > 0
+    ]
+    if not open_rows:
+        return []
+
+    descriptions_by_order: dict[UUID, list[str]] = {}
+    for order_id, name, qty in session.execute(
+        select(OrderItem.order_id, OrderItem.description_snapshot, OrderItem.quantity)
+        .where(OrderItem.order_id.in_([order.id for _, order, _ in open_rows]))
+        .order_by(OrderItem.order_id.asc(), OrderItem.line_number.asc())
+    ):
+        label = f"{name} x{qty}" if qty and qty > 1 else name
+        descriptions_by_order.setdefault(order_id, []).append(label)
+
+    return [
+        RegisterMemberOpenDebtDTO(
+            debt_id=debt.id,
+            order_id=order.id,
+            member_id=member.id,
+            branch_id=order.branch_id,
+            currency=order.currency,
+            description_snapshot=", ".join(descriptions_by_order.get(order.id, [])) or (
+                "Productos" if order.order_kind == "product" else "Membresía"
+            ),
+            initial_outstanding_minor=debt.initial_outstanding_minor,
+            paid_amount_minor=paid,
+            remaining_balance_minor=debt.initial_outstanding_minor - paid,
+            created_at=debt.created_at,
+        )
+        for debt, order, paid in open_rows
+    ]
 
 
 

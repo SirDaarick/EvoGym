@@ -22,7 +22,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 def test_migration_graph_has_one_head_with_distinct_admin_and_staff_revision_ids():
     scripts = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
 
-    assert scripts.get_heads() == ["0064_unique_card_intent"]
+    assert scripts.get_heads() == ["0067_shift_closing_draft"]
     assert scripts.get_revision("0031_admin_session_policy").revision == "0031_admin_session_policy"
     assert scripts.get_revision("0038_staff_occurrence_attendance").revision == "0038_staff_occurrence_attendance"
     assert scripts.get_revision("0039_shift_inv_obs_reason").down_revision == "0038_staff_occurrence_attendance"
@@ -434,7 +434,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "member_notes", "member_eligibility_records", "member_credit_movements",
                 "services", "plans", "plan_versions", "plan_version_services",
                 "payment_terminals", "cash_registers", "shifts", "shift_denomination_counts",
-                "products", "stock_initializations", "stock_movements",
+                "products", "stock_initializations", "stock_movements", "inventory_purchases",
                 "register_inventory_snapshots", "register_inventory_snapshot_items",
                 "shift_inventory_reviews", "shift_inventory_observations",
                     "orders", "order_items", "payments", "payment_review_events", "membership_periods", "membership_debts", "membership_debt_payments", "member_access_decisions",
@@ -452,7 +452,7 @@ def test_fresh_and_repeated_upgrade_create_only_staff_auth_tables(tmp_path, monk
                 "member_check_in_visits",
                 "class_sample_entitlements", "class_sample_check_ins",
             }
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
             checkin_triggers = {
                 row[0]
                 for row in connection.execute(
@@ -614,7 +614,7 @@ def test_existing_sqlite_varchar32_version_table_upgrades_without_rebuild(tmp_pa
         with engine.connect() as connection:
             version_column = next(column for column in inspect(connection).get_columns("alembic_version") if column["name"] == "version_num")
             assert version_column["type"].length == 32
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
     finally:
         engine.dispose()
 
@@ -633,6 +633,9 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
 
     captured = capsys.readouterr()
     generated_sql = captured.out
+    assert "Resolve payments sharing a card intent before migrating." in generated_sql
+    assert "CREATE UNIQUE INDEX ux_payments_mp_payment_intent_id" in generated_sql
+    assert "WHERE mp_payment_intent_id IS NOT NULL" in generated_sql
     assert "CREATE TABLE alembic_version" in generated_sql
     assert "version_num VARCHAR(128)" in generated_sql
     assert "ALTER TABLE IF EXISTS alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)" in generated_sql
@@ -672,6 +675,9 @@ def test_postgresql_offline_upgrade_emits_sql_without_connecting(tmp_path, monke
     assert "uq_shifts_active_per_register" in generated_sql
     assert "ix_members_member_number" in generated_sql
     assert "WHERE role = 'admin' AND scope_kind = 'organization'" in generated_sql
+    assert "CREATE TABLE inventory_purchases" in generated_sql
+    assert "uq_inventory_purchase_branch_key" in generated_sql
+    assert "ck_inventory_purchase_total_positive" in generated_sql
     assert "offline-only" not in captured.out + captured.err
 
 
@@ -703,7 +709,7 @@ def test_empty_baseline_upgrades_a_test_only_predecessor_without_dropping_data(t
     try:
         with engine.connect() as connection:
             assert connection.execute(text("select value from test_only_predecessor_data")).scalar_one() == "preserved"
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
     finally:
         engine.dispose()
 
@@ -729,7 +735,7 @@ def test_shift_denomination_migration_preserves_historical_shifts_without_fabric
         with engine.connect() as connection:
             assert connection.execute(text("select opening_cash_minor from shifts where id=:id"), {"id": shift_id}).scalar_one() == 25000
             assert connection.execute(text("select count(*) from shift_denomination_counts where shift_id=:id"), {"id": shift_id}).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
     finally:
         engine.dispose()
 
@@ -813,7 +819,7 @@ def test_opening_review_migration_preserves_populated_snapshot_and_historical_sh
             assert connection.execute(text("select count(*) from register_inventory_snapshot_items where id=:id"), {"id": item_id}).scalar_one() == 1
             assert connection.execute(text("select count(*) from shift_inventory_reviews")).scalar_one() == 0
             assert connection.execute(text("select count(*) from shifts where id=:id"), {"id": shift_id}).scalar_one() == 1
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
 
         command.downgrade(config, "0013_inventory_snapshots")
         with engine.connect() as connection:
@@ -846,7 +852,7 @@ def test_membership_sales_migration_preserves_branch_rows_and_is_reversible(tmp_
                 "Cash Proof", "America/Mexico_City"
             )
             assert connection.execute(text("select count(*) from orders")).scalar_one() == 0
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
 
         command.downgrade(config, "0014_opening_inventory_reviews")
         with engine.connect() as connection:
@@ -918,7 +924,7 @@ def test_overtime_closing_migration_backfills_cash_orders_and_is_reversible(tmp_
             ).one()
             assert row == (shift_id, shift_id, 0, 0)
             assert "shift_closing_denomination_counts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
             assert connection.execute(
                 text("select method, status, amount_minor from payments where id=:id"), {"id": payment_id}
             ).one() == ("cash", "confirmed", 125000)
@@ -1009,7 +1015,7 @@ def test_transfer_review_migration_preserves_legacy_pending_and_guards_review_hi
             ), {"id": payment_id}).one() == ("transfer", "pending", 1000)
             assert "payment_review_events" in inspect(connection).get_table_names()
             assert "membership_debts" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
 
         cash_order_id = uuid4().hex
         with engine.begin() as connection:
@@ -1093,7 +1099,7 @@ def test_membership_debt_payment_migration_preserves_debt_and_guards_downgrade(t
             assert connection.execute(text("select initial_outstanding_minor from membership_debts where id=:id"),
                                       {"id": debt_id}).scalar_one() == 6000
             assert "membership_debt_payments" in inspect(connection).get_table_names()
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
 
         receipt_id = uuid4().hex
         with engine.begin() as connection:
@@ -1374,6 +1380,115 @@ def test_contingency_sync_migration_upgrade_downgrade_upgrade(tmp_path, monkeypa
         assert "updated_at" not in {c["name"] for c in inspector.get_columns("products")}
         command.upgrade(config, "head")
         with engine.connect() as connection:
-            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
+    finally:
+        engine.dispose()
+
+
+
+def test_inventory_purchases_migration_upgrade_downgrade_upgrade(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    url = f"sqlite+pysqlite:///{(tmp_path / 'inventory-purchases-mig.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0065_shared_member_phones")
+    engine = create_engine(url)
+    try:
+        command.upgrade(config, "0066_inventory_purchases")
+        inspector = inspect(engine)
+        assert "inventory_purchases" in inspector.get_table_names()
+        columns = {c["name"] for c in inspector.get_columns("inventory_purchases")}
+        assert {
+            "id",
+            "branch_id",
+            "recorded_by",
+            "expense_id",
+            "idempotency_key",
+            "request_fingerprint",
+            "total_minor",
+            "lines",
+            "recorded_at",
+        } <= columns
+
+        # Clean downgrade when empty
+        command.downgrade(config, "0065_shared_member_phones")
+        inspector = inspect(engine)
+        assert "inventory_purchases" not in inspector.get_table_names()
+
+        # Upgrade again and insert a row, verifying downgrade is guarded
+        command.upgrade(config, "0066_inventory_purchases")
+        branch_id, staff_id, expense_id, purchase_id = (uuid4().hex for _ in range(4))
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO branches (id, code, name) VALUES (:id, 'b-test', 'Branch Test')"),
+                {"id": branch_id},
+            )
+            conn.execute(
+                text("INSERT INTO staff_users (id, login_identifier) VALUES (:id, 'buyer@example.invalid')"),
+                {"id": staff_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO expenses (id, branch_id, recorded_by_id, category, concept, payee_name, payment_method, amount_minor, idempotency_key, request_fingerprint) "
+                    "VALUES (:id, :b, :s, 'consumibles', 'Test expense', 'Supplier', 'transfer', 5000, 'exp-1', 'fp-1')"
+                ),
+                {"id": expense_id, "b": branch_id, "s": staff_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO inventory_purchases (id, branch_id, recorded_by, expense_id, idempotency_key, request_fingerprint, total_minor, lines) "
+                    "VALUES (:id, :b, :s, :e, 'pk-1', 'fp-2', 5000, '[]')"
+                ),
+                {"id": purchase_id, "b": branch_id, "s": staff_id, "e": expense_id},
+            )
+
+        with pytest.raises(RuntimeError, match="Cannot remove recorded inventory purchases"):
+            command.downgrade(config, "0065_shared_member_phones")
+
+        inspector = inspect(engine)
+        assert "inventory_purchases" in inspector.get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_inventory_purchases_offline_downgrade_postgresql(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EVOGYM_ENV", "production")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv(
+        "EVOGYM_DATABASE_URL",
+        "postgresql+psycopg://synthetic:offline-only@localhost/evogym_test",
+    )
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.downgrade(config, "0066_inventory_purchases:0065_shared_member_phones", sql=True)
+    captured = capsys.readouterr()
+    downgrade_sql = captured.out
+    assert "Cannot remove recorded inventory purchases." in downgrade_sql
+    assert "DROP TABLE inventory_purchases" in downgrade_sql
+
+
+def test_shift_closing_draft_migration_upgrade_downgrade(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    url = f"sqlite+pysqlite:///{(tmp_path / 'shift-closing-draft-mig.db').as_posix()}"
+    monkeypatch.setenv("EVOGYM_ENV", "test")
+    monkeypatch.setenv("EVOGYM_DEBUG", "false")
+    monkeypatch.setenv("EVOGYM_DATABASE_URL", url)
+    config = Config(str(API_DIR / "alembic.ini"))
+    command.upgrade(config, "0066_inventory_purchases")
+    engine = create_engine(url)
+    try:
+        command.upgrade(config, "0067_shift_closing_draft")
+        inspector = inspect(engine)
+        assert "closing_draft" in {c["name"] for c in inspector.get_columns("shifts")}
+        with engine.connect() as conn:
+            assert conn.execute(text("select version_num from alembic_version")).scalar_one() == "0067_shift_closing_draft"
+        command.downgrade(config, "0066_inventory_purchases")
+        inspector = inspect(engine)
+        assert "closing_draft" not in {c["name"] for c in inspector.get_columns("shifts")}
+        command.upgrade(config, "0067_shift_closing_draft")
+        inspector = inspect(engine)
+        assert "closing_draft" in {c["name"] for c in inspector.get_columns("shifts")}
     finally:
         engine.dispose()

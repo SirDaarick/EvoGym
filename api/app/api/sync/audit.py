@@ -37,8 +37,9 @@ def _resolve_audit_staff(
         except (AuthorizationDenied, ValueError):
             pass
 
-    # 2. Staff with ADMIN_AUDIT_READ or FINANCE_READ or MEMBER_OPERATIONAL_READ
-    for perm in (Permission.ADMIN_AUDIT_READ, Permission.FINANCE_READ, Permission.MEMBER_OPERATIONAL_READ):
+    # 2. Staff with ADMIN_AUDIT_READ or FINANCE_READ. Receptionists hold MEMBER_OPERATIONAL_READ and must not
+    # read or resolve audit flags (D-011, D-012).
+    for perm in (Permission.ADMIN_AUDIT_READ, Permission.FINANCE_READ):
         try:
             principal = validate_session(factory, token, perm)
             return principal.staff_id

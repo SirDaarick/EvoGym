@@ -96,4 +96,51 @@ describe('local command dispatcher', () => {
     const p = await db.catalog.get('prod-1');
     expect(p?.on_hand).toBe(17);
   });
+
+  it('rejects an offline sale exceeding local stock without recording it', async () => {
+    const db = open();
+    await db.device.put({ id: 'current', devicePrefix: 'REC-SUR1', next_seq: 1 });
+    await db.catalog.put({ product_id: 'prod-1', code: 'agua', name: 'Agua', unit: 'pieza', price_minor: 1500, is_active: true, on_hand: 2 });
+    await expect(dispatch(db, {
+      type: 'pos.cash_sale',
+      payload: { register_id: 'reg-1', local_shift_ref: 'shift-1', items: [{ product_id: 'prod-1', quantity: 3, unit_price_minor: 1500 }], total_minor: 4500 },
+    }, 'staff-1')).rejects.toThrow();
+    expect((await db.catalog.get('prod-1'))?.on_hand).toBe(2);
+    expect(await db.local_event_queue.count()).toBe(0);
+  });
+
+  it('preserves a possibly committed online sale for reconciliation even when local stock is insufficient', async () => {
+    const db = open();
+    await db.device.put({ id: 'current', devicePrefix: 'REC-SUR1', next_seq: 1 });
+    await db.catalog.put({ product_id: 'prod-1', code: 'agua', name: 'Agua', unit: 'pieza', price_minor: 1500, is_active: true, on_hand: 0 });
+    await dispatch(db, {
+      type: 'pos.cash_sale',
+      payload: { register_id: 'reg-1', local_shift_ref: 'shift-1', items: [{ product_id: 'prod-1', quantity: 1, unit_price_minor: 1500 }], total_minor: 1500, online_idempotency_key: 'online-1' },
+    }, 'staff-1');
+    expect(await db.local_event_queue.count()).toBe(1);
+  });
+
+  it('rolls back duplicate lines when their combined quantity exceeds local stock', async () => {
+    const db = open();
+    await db.device.put({ id: 'current', devicePrefix: 'REC-SUR1', next_seq: 1 });
+    await db.catalog.put({ product_id: 'prod-1', code: 'agua', name: 'Agua', unit: 'pieza', price_minor: 1500, is_active: true, on_hand: 3 });
+    const line = { product_id: 'prod-1', quantity: 2, unit_price_minor: 1500 };
+    await expect(dispatch(db, {
+      type: 'pos.cash_sale',
+      payload: { register_id: 'reg-1', local_shift_ref: 'shift-1', items: [line, line], total_minor: 6000 },
+    }, 'staff-1')).rejects.toThrow();
+    expect((await db.catalog.get('prod-1'))?.on_hand).toBe(3);
+    expect(await db.local_event_queue.count()).toBe(0);
+  });
+
+  it('serializes competing offline sales against local stock', async () => {
+    const db = open();
+    await db.device.put({ id: 'current', devicePrefix: 'REC-SUR1', next_seq: 1 });
+    await db.catalog.put({ product_id: 'prod-1', code: 'agua', name: 'Agua', unit: 'pieza', price_minor: 1500, is_active: true, on_hand: 3 });
+    const command = { type: 'pos.cash_sale' as const, payload: { register_id: 'reg-1', local_shift_ref: 'shift-1', items: [{ product_id: 'prod-1', quantity: 2, unit_price_minor: 1500 }], total_minor: 3000 } };
+    const results = await Promise.allSettled([dispatch(db, command, 'staff-1'), dispatch(db, command, 'staff-1')]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect((await db.catalog.get('prod-1'))?.on_hand).toBe(1);
+    expect(await db.local_event_queue.count()).toBe(1);
+  });
 });

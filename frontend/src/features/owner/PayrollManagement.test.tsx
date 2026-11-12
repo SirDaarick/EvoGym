@@ -38,15 +38,19 @@ describe('payroll actions', () => {
     await screen.findByText(/Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
     await user.click(await screen.findByRole('button', { name: 'Adelantar' }));
+    expect(screen.getByText(/no descuenta de la caja del turno/i)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Importe'), '500');
+    await user.selectOptions(screen.getByLabelText('Método de pago del adelanto'), 'cash');
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByLabelText('Importe')).toHaveValue('500');
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
     await waitFor(() => expect(screen.getByText('Pendiente $3,000.00 netos')).toBeInTheDocument());
+    const advanceCalls = (state.request as ReturnType<typeof vi.fn>).mock.calls.filter(([path]) => String(path).endsWith('/payroll/advances'));
+    expect(JSON.parse(advanceCalls[1][1].body as string).payment_method).toBe('cash');
   });
 
-  it('marks the week paid after confirmation', async () => {
+  it('marks the week paid after confirmation and displays advance payment method', async () => {
     const user = userEvent.setup();
     state.weekday = 4;
     let paid = false;
@@ -54,8 +58,9 @@ describe('payroll actions', () => {
       if (path.endsWith('/branches')) return new Response(JSON.stringify({ branches: [{ id: branch, code: 's', name: 'Sur', timezone: 'America/Mexico_City' }] }));
       if (path.includes('/roster-profiles')) return new Response(JSON.stringify({ profiles: [{ id: profile, full_name: 'Lucia', position: 'Staff', is_active: true, staff_user_id: null, monthly_salary_minor: 1400000 }] }));
       if (path.includes('/admin/staff-accounts?')) return new Response(JSON.stringify({ accounts: [] }));
-      if (path.includes('/payroll/weeks/')) return new Response(JSON.stringify({ items: [{ profile_id: profile, full_name: 'Lucia', base_minor: 350000, advances_minor: 50000, net_minor: 300000, daily_minor: 70000, paid: paid ? { payment_method: 'transfer', paid_at: '2026-10-30T12:00:00Z' } : null }] }));
+      if (path.includes('/payroll/weeks/')) return new Response(JSON.stringify({ items: [{ profile_id: profile, full_name: 'Lucia', base_minor: 350000, advances_minor: 50000, net_minor: 300000, daily_minor: 70000, advance_payment_method: 'cash', paid: paid ? { payment_method: 'transfer', paid_at: '2026-10-30T12:00:00Z' } : null }] }));
       if (path.endsWith('/payroll/payments')) { paid = true; return new Response('{}', { status: 201 }); }
+      if (path.endsWith('/payroll/advances')) return new Response('{}', { status: 201 });
       return new Response('', { status: 404 });
     });
     state.session = { status: 'authenticated', request: state.request };
@@ -63,7 +68,15 @@ describe('payroll actions', () => {
     await screen.findByText(/Sur/);
     await user.selectOptions(screen.getByLabelText('Sucursal'), branch);
     await user.click(await screen.findByRole('button', { name: 'Pagar $3,000.00' }));
+    expect(screen.getByText(/no descuenta de la caja del turno/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adelantos: −\$500\.00 \(Efectivo\)/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Método de pago'), 'transfer');
+    await user.type(screen.getByLabelText('+ Adelanto próxima semana (opcional)'), '100');
+    await user.selectOptions(screen.getByLabelText('Método de pago del adelanto'), 'cash');
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
     expect(await screen.findByText('Pagado $3,000.00 + $500.00 (adelanto)')).toBeInTheDocument();
+    const calls = (state.request as ReturnType<typeof vi.fn>).mock.calls;
+    expect(JSON.parse(calls.find(([path]) => String(path).endsWith('/payroll/payments'))![1].body as string).payment_method).toBe('transfer');
+    expect(JSON.parse(calls.find(([path]) => String(path).endsWith('/payroll/advances'))![1].body as string).payment_method).toBe('cash');
   });
 });

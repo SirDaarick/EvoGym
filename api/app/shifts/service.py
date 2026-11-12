@@ -22,7 +22,7 @@ from app.shifts import queries as q
 from app.shifts.queries import CashRegisterNotFoundError, ShiftAlreadyOpenError, ShiftCloseConflictError, ShiftNotFoundError
 from app.shifts.schemas import (
     CashRegisterDTO, CloseShiftDTO, CreateCashRegisterDTO, CreatePaymentTerminalDTO, OpenShiftDTO,
-    PaymentTerminalDTO, ShiftDTO, ShiftPageDTO, ShiftSummaryDTO,
+    PaymentTerminalDTO, ShiftCloseDraftInputDTO, ShiftDTO, ShiftPageDTO, ShiftSummaryDTO,
 )
 
 
@@ -104,7 +104,24 @@ def list_registers(session, principal: Principal, branch_id: UUID | None) -> lis
         effective_branch = branch_id
     registers = q.list_cash_registers(session, branch_id=effective_branch)
     active_ids = q.get_active_register_ids(session)
-    return [q.to_cash_register_dto(r, has_open_shift=(r.id in active_ids)) for r in registers]
+    items: list[CashRegisterDTO] = []
+    for register in registers:
+        is_open = register.id in active_ids
+        last_closed_id = q.get_latest_closed_shift_id(session, register.id)
+        expected_opening: int | None = None
+        if not is_open:
+            expected, has_baseline = q.expected_opening_cash_for_register(session, register.id)
+            if has_baseline:
+                expected_opening = expected
+        items.append(
+            q.to_cash_register_dto(
+                register,
+                has_open_shift=is_open,
+                last_closed_shift_id=last_closed_id,
+                expected_opening_cash_minor=expected_opening,
+            )
+        )
+    return items
 
 
 def create_register(session, principal: Principal, payload: CreateCashRegisterDTO) -> CashRegisterDTO:
@@ -133,6 +150,7 @@ def get_current_shift(session, principal: Principal, register_id: UUID) -> Shift
 def open_shift(session, principal: Principal, payload: OpenShiftDTO) -> ShiftDTO:
     register_uuid = _uuid(payload.cash_register_id)
     _get_register(session, principal, register_uuid)
+    notes = (payload.notes or payload.opening_notes or "").strip() or None
     with http_errors(
         (ShiftAlreadyOpenError, 409), (CashRegisterNotFoundError, 404), (InventorySnapshotUnavailableError, 404),
         (InventorySnapshotStaleError, 409), (InventorySnapshotConsumedError, 409), (ValueError, 422),
@@ -145,6 +163,7 @@ def open_shift(session, principal: Principal, payload: OpenShiftDTO) -> ShiftDTO
             denomination_counts=[item.model_dump() for item in payload.denomination_counts or []],
             inventory_snapshot_id=payload.inventory_snapshot_id,
             inventory_observations=[item.model_dump() for item in payload.inventory_observations],
+            notes=notes,
         )
         session.commit()
         return q.to_shift_dto(shift, session=session)
@@ -160,6 +179,7 @@ def close_shift(session, principal: Principal, shift_id: UUID, payload: CloseShi
             raise HttpStatusError(404)
         if not principal.is_admin and observed.cash_register.branch_id != principal.branch_id:
             raise HttpStatusError(404)
+        closing_notes = (payload.closing_notes or payload.notes or "").strip() or None
         result = q.close_shift(
             session,
             shift_id=shift_id,
@@ -169,10 +189,30 @@ def close_shift(session, principal: Principal, shift_id: UUID, payload: CloseShi
                 if payload.denomination_counts is not None else None
             ),
             counted_cash_minor=payload.counted_cash_minor if payload.denomination_counts is None else None,
-            closing_notes=payload.closing_notes,
+            closing_notes=closing_notes,
         )
         session.commit()
-        return q.to_shift_dto(result.shift), result.replayed
+        return q.to_shift_dto(result.shift, session=session), result.replayed
+
+
+def save_close_draft(
+    session,
+    principal: Principal,
+    shift_id: UUID,
+    payload: ShiftCloseDraftInputDTO,
+) -> ShiftDTO:
+    """Persist a progressive closing draft while the shift stays open."""
+    with http_errors(
+        (ShiftNotFoundError, 404), (CashRegisterNotFoundError, 404), (ShiftCloseConflictError, 409), (ValueError, 422),
+    ):
+        _get_shift(session, principal, shift_id)
+        shift = q.save_shift_close_draft(
+            session,
+            shift_id=shift_id,
+            draft=payload.model_dump(mode="json"),
+        )
+        session.commit()
+        return q.to_shift_dto(shift, session=session)
 
 
 def get_shift(session, principal: Principal, shift_id: UUID) -> ShiftDTO:

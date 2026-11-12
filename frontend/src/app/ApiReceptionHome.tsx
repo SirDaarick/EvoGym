@@ -16,6 +16,7 @@ import { useRecoveredMember } from '../features/reception/home/useRecoveredMembe
 import { MobileDetailPanel } from '../shared/MobileDetailPanel';
 import { Button, PageHeader } from '../shared/ui';
 import { DevolucionesModal } from '../features/reception/DevolucionesModal';
+import { MermaModal } from '../features/reception/MermaModal';
 import { GuantesModal } from '../features/reception/GuantesModal';
 import { CasillerosModal } from '../features/reception/CasillerosModal';
 import { ExtraModal } from '../features/reception/ExtraModal';
@@ -72,7 +73,7 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
   const hasOpenShift = Boolean(registers.find(register => register.id === registerId)?.has_open_shift);
   const purchaseContent = <>
     <CurrentPurchaseCard totalMinor={total} disabled={locked} step={step} onStepChange={setStep}
-      useLiveCardIntent allowCredit hasOpenShift={hasOpenShift}
+      useLiveCardIntent allowCredit allowMixed={false} disabledMethods={['transfer']} hasOpenShift={hasOpenShift}
       step1ActionDisabled={!selected.length || !registerId || locked} onConfirmPayment={(value: CheckoutPaymentBreakdown) => void sale.submit(value)}
       statusMessage={message} statusType={error ? 'error' : pending ? 'warning' : 'success'}
       assignedMember={member ? { id: member.id, name: member.full_name, phone: member.phone, creditMinor: member.credit_balance_minor ?? 0 } : null}
@@ -91,7 +92,7 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
       <div className="reception-products-column">
         <ReceptionShortcutBar registerReady={Boolean(registerId && currentBranchId)} locked={locked} onOpen={modals.open} />
         <ProductCatalogPanel registers={registers} branches={branches} registerId={registerId} stock={stock} quantities={quantities} locked={locked}
-          onRegisterChange={id => { setRegisterId(id); setQuantities({}); setStep(1); }} onQuantityChange={changeQuantity} onOpenReturns={() => modals.open('devoluciones')} />
+          hasSelectedItems={selected.length > 0} onRegisterChange={id => { setRegisterId(id); setQuantities({}); setStep(1); }} onQuantityChange={changeQuantity} onOpenReturns={() => modals.open('devoluciones')} onOpenWaste={currentBranchId ? () => modals.open('merma') : undefined} />
       </div>
       <MobileDetailPanel title="Compra actual" triggerLabel="Ver compra actual" className="reception-current-purchase-slot">
         {!modals.isOpen('suplementos') && purchaseContent}
@@ -112,6 +113,37 @@ export function ApiReceptionHome({ request, actorId }: { request: AuthenticatedR
             setError(false);
           }}
         />
+        {currentBranchId && (
+          <MermaModal
+            isOpen={modals.isOpen('merma')}
+            onClose={modals.close}
+            apiRequest={request}
+            branchId={currentBranchId}
+            liveItems={selected.map(item => ({
+              productId: item.product_id,
+              name: item.name,
+              priceMinor: item.price_minor,
+              costMinor: item.cost_minor,
+              availableStock: item.quantity ?? 0,
+              quantity: quantities[item.product_id] ?? 0,
+            }))}
+            onSuccess={({ items: wastedItems, message: wasteMsg }) => {
+              const nextQuantities = { ...quantities };
+              for (const movement of wastedItems) {
+                const remaining = (nextQuantities[movement.product_id] ?? 0) - movement.quantity;
+                if (remaining > 0) nextQuantities[movement.product_id] = remaining;
+                else delete nextQuantities[movement.product_id];
+              }
+              setQuantities(nextQuantities);
+              if (Object.values(nextQuantities).every(qty => qty <= 0)) {
+                setStep(1);
+              }
+              void queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+              setError(false);
+              setMessage(wasteMsg);
+            }}
+          />
+        )}
         <ExtraModal isOpen={modals.isOpen('extra')} onClose={modals.close} apiRequest={request} registerId={registerId} />
         <GastoModal isOpen={modals.isOpen('gasto')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId} />
         <GuantesModal isOpen={modals.isOpen('guantes')} onClose={modals.close} apiRequest={request} registerId={registerId} branchId={currentBranchId || branches[0]?.id} hasOpenShift={hasOpenShift} />

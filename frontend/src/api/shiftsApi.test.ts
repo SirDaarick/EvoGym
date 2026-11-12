@@ -25,12 +25,34 @@ describe('authenticated shifts API', () => {
 
   it('omits the denomination breakdown for a true manual opening and submits closing notes', async () => {
     const request = vi.fn<ApiRequest>(async () => response({ id: 'shift-1' }, 201));
-    await openShift(request, { cash_register_id: 'register-1', inventory_snapshot_id: 'snapshot-1', opening_cash_minor: 80000, inventory_observations: [] });
+    await openShift(request, { cash_register_id: 'register-1', inventory_snapshot_id: 'snapshot-1', opening_cash_minor: 80000, inventory_observations: [], notes: 'Fondo verificado' });
     await closeShift(request, 'shift-1', { counted_cash_minor: 80000, closing_notes: 'Revisado' });
 
     expect(request.mock.calls[0][1]?.headers).toEqual({ 'Content-Type': 'application/json' });
     expect(request.mock.calls[1][1]?.headers).toEqual({ 'Content-Type': 'application/json' });
     expect(JSON.parse(String(request.mock.calls[0][1]?.body))).not.toHaveProperty('denomination_counts');
+    expect(JSON.parse(String(request.mock.calls[0][1]?.body))).toEqual({
+      cash_register_id: 'register-1',
+      inventory_snapshot_id: 'snapshot-1',
+      opening_cash_minor: 80000,
+      inventory_observations: [],
+      notes: 'Fondo verificado',
+    });
     expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ counted_cash_minor: 80000, closing_notes: 'Revisado' });
+  });
+
+  it('surfaces backend validation and discrepancy error messages', async () => {
+    const request = vi.fn<ApiRequest>(async () => response({
+      error: {
+        code: 'http_error',
+        message: 'A comment is required when there is a cash difference at opening.',
+      },
+    }, 422));
+    await expect(openShift(request, {
+      cash_register_id: 'register-1',
+      inventory_snapshot_id: 'snapshot-1',
+      opening_cash_minor: 5000,
+      inventory_observations: [],
+    })).rejects.toThrow('A comment is required when there is a cash difference at opening.');
   });
 });

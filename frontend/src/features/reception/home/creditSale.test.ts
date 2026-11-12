@@ -10,8 +10,14 @@ const api = vi.hoisted(() => ({
   getCardIntentStatus: vi.fn(),
   cancelCardIntent: vi.fn(),
 }));
+const onlineState = vi.hoisted(() => ({ value: true }));
+const offlineDispatch = vi.hoisted(() => vi.fn());
 vi.mock('@/api/productSalesApi', async importOriginal => ({ ...(await importOriginal<object>()), ...api }));
-vi.mock('@/offline/connectivity', () => ({ isOnlineHint: () => true }));
+vi.mock('@/offline/connectivity', () => ({ isOnlineHint: () => onlineState.value }));
+vi.mock('@/offline/dispatcher', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  dispatch: offlineDispatch,
+}));
 
 import { runCardSale } from './cardSale';
 import { runCashSale, type SaleContext } from './cashSale';
@@ -35,6 +41,7 @@ function context(afterSale?: SaleContext['afterSale']): SaleContext {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  onlineState.value = true;
   api.createCardIntent.mockResolvedValue({ payment_intent_id: 'pi', device_id: 'dev' });
   api.getCardIntentStatus.mockResolvedValue({ status: 'PROCESSED' });
 });
@@ -59,5 +66,32 @@ describe('product sales with saldo a favor', () => {
     expect(ctx.ui.resetCart).toHaveBeenCalled();
     expect(ctx.ui.setError).toHaveBeenLastCalledWith(true);
     expect(ctx.ui.setMessage).toHaveBeenLastCalledWith(expect.stringContaining('sí se registró'));
+  });
+
+  it('blocks partial cash sales offline and never falls back to contingency queue on failure', async () => {
+    const partialSubmitted: PendingProductSale = {
+      key: 'partial-key-1',
+      registerId: 'register',
+      payload: {
+        member_id: 'member-1',
+        items: [{ product_id: 'p', quantity: 1 }],
+        expected_total_minor: 5000,
+        cash_amount_minor: 1500,
+      },
+    };
+    onlineState.value = false;
+    const offlineCtx = { ...context(), submitted: partialSubmitted };
+    await runCashSale(offlineCtx);
+    expect(offlineDispatch).not.toHaveBeenCalled();
+    expect(offlineCtx.intents.clearIntent).toHaveBeenCalled();
+    expect(offlineCtx.ui.setError).toHaveBeenLastCalledWith(true);
+    expect(offlineCtx.ui.setMessage).toHaveBeenLastCalledWith(expect.stringContaining('saldo pendiente'));
+
+    onlineState.value = true;
+    api.prepareProductSale.mockRejectedValueOnce(new Error('network drop'));
+    const failCtx = { ...context(), submitted: partialSubmitted };
+    await runCashSale(failCtx);
+    expect(offlineDispatch).not.toHaveBeenCalled();
+    expect(failCtx.ui.setError).toHaveBeenLastCalledWith(true);
   });
 });

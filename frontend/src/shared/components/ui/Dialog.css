@@ -127,12 +127,16 @@
   }
 }
 
-.ui-dialog__footer .ui-dialog__confirm--danger {
+.ui-dialog__footer .ui-dialog__confirm--danger:not(:disabled),
+:root[data-theme='dark'] .ui-dialog__footer .ui-dialog__confirm--danger.button-primary:not(:disabled),
+:root:not([data-theme]) .ui-dialog__footer .ui-dialog__confirm--danger.button-primary:not(:disabled) {
   background: #A32222;
   border-color: #A32222;
   color: #FFFFFF;
 }
 
-.ui-dialog__footer .ui-dialog__confirm--danger:hover:not(:disabled) {
+.ui-dialog__footer .ui-dialog__confirm--danger:hover:not(:disabled),
+:root[data-theme='dark'] .ui-dialog__footer .ui-dialog__confirm--danger.button-primary:hover:not(:disabled) {
   background: #861B1B;
+  border-color: #861B1B;
 }

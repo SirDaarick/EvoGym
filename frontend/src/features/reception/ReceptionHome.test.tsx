@@ -128,7 +128,8 @@ describe('Reception Home overview', () => {
     expect(screen.getByText(/Productos seleccionados/)).toBeVisible();
     expect(screen.getByText('Valor total de la merma:')).toBeVisible();
 
-    await userEvent.type(screen.getByLabelText('Motivo o comentario *'), 'Botella dañada en recepción');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await userEvent.type(screen.getByLabelText('Motivo u observaciones *'), 'Botella dañada en recepción');
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -154,7 +155,8 @@ describe('Reception Home overview', () => {
     expect(screen.getByText(/Productos seleccionados \(3 unidades\)/)).toBeVisible();
     expect(screen.getByText('Valor total de la merma:')).toBeVisible();
 
-    await userEvent.type(screen.getByLabelText('Motivo o comentario *'), 'Caja de productos rota en almacén');
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await userEvent.type(screen.getByLabelText('Motivo u observaciones *'), 'Caja de productos rota en almacén');
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -163,6 +165,27 @@ describe('Reception Home overview', () => {
       expect(screen.getByLabelText('Stock: 7')).toBeVisible(); // Barra 8 - 1 = 7
     });
     expect(screen.getByText('Sin productos seleccionados.')).toBeVisible();
+  });
+
+  it('auto-focuses reason input on merma step 2, validates empty reason, and closes on Escape', async () => {
+    render(<MemoryRouter><DemoProvider><ReceptionHome /></DemoProvider></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: 'Seleccionar Agua' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Merma' }));
+
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    const reasonInput = screen.getByLabelText('Motivo u observaciones *');
+    expect(reasonInput).toHaveFocus();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar merma' }));
+    expect(screen.getByText('Escribe el motivo u observaciones de la merma.')).toBeVisible();
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 
   it('opens Devoluciones modal, searches client, and allows selecting return items', async () => {

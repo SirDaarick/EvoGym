@@ -215,7 +215,7 @@ class CheckInApplyResult:
 
 def apply_member_check_in(session, *, branch_id: UUID, period_id: UUID, actor_id: UUID, occurred_at: datetime,
                           idempotency_key: str, request_fingerprint: str,
-                          enforce_access: bool = True) -> CheckInApplyResult:
+                          enforce_access: bool = True, confirm_outstanding_balance: bool = False) -> CheckInApplyResult:
     """Session-level check-in shared by the online endpoint and offline reconciliation.
 
     Visits are fixed 5-minute windows anchored to `visit.started_at` (>= 300 s starts a new one), looked
@@ -244,6 +244,15 @@ def apply_member_check_in(session, *, branch_id: UUID, period_id: UUID, actor_id
                 "reason": access.reason,
             })
         warnings.append(f"access_denied:{access.status.value}")
+
+    from app.members.queries import get_member_pending_balance_minor
+    if access.allowed and get_member_pending_balance_minor(session, period.member_id) > 0:
+        if "outstanding_balance" not in warnings:
+            warnings.append("outstanding_balance")
+        if enforce_access and not confirm_outstanding_balance:
+            raise PublicDomainError("debt_confirmation_required")
+    if confirm_outstanding_balance:
+        warnings.append("outstanding_balance_confirmed")
 
     # Visits within 5 minutes of the visit that covers `occurred_at` share it; the member row is locked first.
     visit = q.visit_at_or_before(session, period.member_id, occurred_at)
@@ -276,11 +285,14 @@ def apply_member_check_in(session, *, branch_id: UUID, period_id: UUID, actor_id
 
 
 def record_member_check_in(factory, principal: Principal, branch_id: UUID, period_id: UUID,
-                           idempotency_key: str) -> MemberCheckInResponse:
+                           idempotency_key: str, confirm_outstanding_balance: bool = False) -> MemberCheckInResponse:
     """Replays carry `replayed=True` (the router answers 200 for those)."""
     if factory is None:
         raise HttpStatusError(503)
-    fingerprint = sha256(f"{branch_id}\n{period_id}\n{principal.staff_id}".encode()).hexdigest()
+    fingerprint_text = f"{branch_id}\n{period_id}\n{principal.staff_id}"
+    if confirm_outstanding_balance:
+        fingerprint_text += "\nconfirmed"
+    fingerprint = sha256(fingerprint_text.encode()).hexdigest()
     with factory.begin() as session:
         _open_branch(session, principal, branch_id)
         # Replays must not read the clock (keeps the online time source untouched for them).
@@ -292,5 +304,6 @@ def record_member_check_in(factory, principal: Principal, branch_id: UUID, perio
         result = apply_member_check_in(
             session, branch_id=branch_id, period_id=period_id, actor_id=principal.staff_id,
             occurred_at=utc_now(), idempotency_key=idempotency_key, request_fingerprint=fingerprint,
+            confirm_outstanding_balance=confirm_outstanding_balance,
         )
         return _response(result.check_in, replayed=result.replayed)

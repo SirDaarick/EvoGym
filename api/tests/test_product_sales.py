@@ -392,3 +392,223 @@ def test_product_sale_intent_endpoint_recovery_and_delayed_request(tmp_path):
         assert rejected.value.status == 409
     finally:
         engine.dispose()
+
+
+def test_partial_cash_product_sale_creates_debt_repayment_and_shift_summary(tmp_path):
+    from uuid import uuid4
+    from app.db.models import Member, MembershipDebt
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, 'partial', 'Partial')
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{'denomination_minor': 100, 'quantity': 0}])
+            shift_id = shift.id
+            member = Member(member_number=f'SOC-{uuid4().hex[:6]}', full_name='Partial Buyer', phone='5550001',
+                            credit_balance_minor=500)
+            products = [Product(code='water-p', name='Water', price_minor=1200, created_by=staff_id),
+                        Product(code='bar-p', name='Bar', price_minor=800, created_by=staff_id)]
+            session.add(member)
+            session.add_all(products)
+            session.flush()
+            for product in products:
+                session.add(StockInitialization(branch_id=branch_id, product_id=product.id,
+                                                quantity=5, initialized_by=staff_id))
+            register_id, member_id = register.id, member.id
+            ids = [str(product.id) for product in products]
+
+        headers = {'Authorization': f'Bearer {token}', 'Idempotency-Key': 'partial-1'}
+        payload = {
+            'member_id': str(member_id),
+            'items': [{'product_id': ids[0], 'quantity': 2}, {'product_id': ids[1], 'quantity': 1}],
+            'expected_total_minor': 3200,
+            'cash_amount_minor': 1000,
+        }
+        with TestClient(create_app(configured_settings(url))) as client:
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=headers, json=payload).status_code == 200
+            sale_res = client.post(f'/api/v1/registers/{register_id}/product-sales', headers=headers, json=payload)
+            assert sale_res.status_code == 201, sale_res.text
+            order_id = sale_res.json()['order']['id']
+            assert sale_res.json()['order']['total_minor'] == 3200
+            assert sale_res.json()['payment']['amount_minor'] == 1000
+            assert client.post(f'/api/v1/registers/{register_id}/product-sales/resolve', headers=headers, json=payload).status_code == 200
+
+            debts = client.get(f'/api/v1/registers/{register_id}/members/{member_id}/debts',
+                               headers={'Authorization': f'Bearer {token}'})
+            assert debts.status_code == 200
+            assert len(debts.json()) == 1
+            assert debts.json()[0]['description_snapshot'] == 'Water x2, Bar'
+            assert debts.json()[0]['initial_outstanding_minor'] == 2200
+            assert debts.json()[0]['remaining_balance_minor'] == 2200
+
+            purchases_before = client.get(f'/api/v1/members/{member_id}/purchases',
+                                          headers={'Authorization': f'Bearer {token}'})
+            assert purchases_before.status_code == 200
+            assert purchases_before.json()['items'][0]['status'] == 'pending'
+
+            summary_before = client.get(f'/api/v1/shifts/{shift_id}/summary', headers={'Authorization': f'Bearer {token}'})
+            assert summary_before.status_code == 200
+            assert summary_before.json()['confirmed_cash_minor'] == 1000
+            assert summary_before.json()['activities'] == [{'family': 'product', 'count': 1, 'amount_minor': 1000}]
+
+            repay1 = client.post(
+                f'/api/v1/registers/{register_id}/membership-debt-payments',
+                headers={'Authorization': f'Bearer {token}', 'Idempotency-Key': 'repay-p1'},
+                json={'order_id': order_id, 'amount_minor': 1000, 'credit_minor': 500},
+            )
+            assert repay1.status_code == 201, repay1.text
+            assert repay1.json()['remaining_balance_minor'] == 1200
+
+            repay2 = client.post(
+                f'/api/v1/registers/{register_id}/membership-debt-payments',
+                headers={'Authorization': f'Bearer {token}', 'Idempotency-Key': 'repay-p2'},
+                json={'order_id': order_id, 'amount_minor': 1200, 'credit_minor': 0},
+            )
+            assert repay2.status_code == 201, repay2.text
+            assert repay2.json()['remaining_balance_minor'] == 0
+
+            debts_after = client.get(f'/api/v1/registers/{register_id}/members/{member_id}/debts',
+                                     headers={'Authorization': f'Bearer {token}'})
+            assert debts_after.status_code == 200 and debts_after.json() == []
+
+            summary_after = client.get(f'/api/v1/shifts/{shift_id}/summary', headers={'Authorization': f'Bearer {token}'})
+            assert summary_after.status_code == 200
+            body = summary_after.json()
+            assert body['confirmed_cash_minor'] == 2700
+            assert body['activities'] == [{'family': 'product', 'count': 4, 'amount_minor': 3200}]
+            descriptions = [row['description'] for row in body['payments']]
+            assert 'Abono de producto' in descriptions
+            assert 'Abono de producto (saldo a favor)' in descriptions
+
+            purchases_after = client.get(f'/api/v1/members/{member_id}/purchases',
+                                         headers={'Authorization': f'Bearer {token}'})
+            assert purchases_after.status_code == 200
+            purchase_descriptions = [row['description'] for row in purchases_after.json()['items']]
+            assert 'Product debt payment' in purchase_descriptions
+            assert purchases_after.json()['items'][-1]['status'] == 'paid'
+
+        with factory() as session:
+            debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == UUID(order_id)))
+            assert debt is not None and debt.initial_outstanding_minor == 2200
+    finally:
+        engine.dispose()
+
+
+def test_zero_cash_credit_combo_overtime_and_cash_amount_validations(tmp_path):
+    from uuid import uuid4
+    from app.db.models import Member, MembershipDebt
+    from app.sales.queries import SalePolicy, _post_cash_sale, ProductSaleRejected
+    from app.sales.schemas import ProductCartLineRequest
+    from app.shifts.queries import close_shift
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, 'combo', 'Combo')
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{'denomination_minor': 100, 'quantity': 0}])
+            shift_id = shift.id
+            member = Member(member_number=f'SOC-{uuid4().hex[:6]}', full_name='Combo Buyer', phone='5550002',
+                            credit_balance_minor=1000)
+            product = Product(code='combo-water', name='Combo Water', price_minor=1200, created_by=staff_id)
+            session.add_all([member, product])
+            session.flush()
+            session.add(StockInitialization(branch_id=branch_id, product_id=product.id,
+                                            quantity=10, initialized_by=staff_id))
+            register_id, member_id, product_id = register.id, member.id, str(product.id)
+
+        headers = {'Authorization': f'Bearer {token}'}
+        with TestClient(create_app(configured_settings(url))) as client:
+            path = f'/api/v1/registers/{register_id}/product-sales'
+            # 1. Explicit null cash_amount_minor -> 422
+            null_res = client.post(
+                f'/api/v1/registers/{register_id}/product-sale-intent',
+                headers={**headers, 'Idempotency-Key': 'null-cash'},
+                json={'items': [{'product_id': product_id, 'quantity': 1}], 'expected_total_minor': 1200,
+                      'cash_amount_minor': None},
+            )
+            assert null_res.status_code == 422
+
+            # 2. Partial cash without assigned member -> 409
+            anon_headers = {**headers, 'Idempotency-Key': 'anon-partial'}
+            anon_payload = {'member_id': None, 'items': [{'product_id': product_id, 'quantity': 1}],
+                            'expected_total_minor': 1200, 'cash_amount_minor': 500}
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=anon_headers, json=anon_payload).status_code == 200
+            assert client.post(path, headers=anon_headers, json=anon_payload).status_code == 409
+            assert client.post(path + '/resolve', headers=anon_headers, json=anon_payload).status_code == 200
+
+            # 3. $0 cash upfront with assigned member + fingerprint mismatch vs omitted cash_amount_minor
+            zero_headers = {**headers, 'Idempotency-Key': 'zero-cash'}
+            zero_payload = {'member_id': str(member_id), 'items': [{'product_id': product_id, 'quantity': 1}],
+                            'expected_total_minor': 1200, 'cash_amount_minor': 0}
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=zero_headers, json=zero_payload).status_code == 200
+            mismatch_res = client.post(path, headers=zero_headers, json={
+                'member_id': str(member_id), 'items': [{'product_id': product_id, 'quantity': 1}],
+                'expected_total_minor': 1200,
+            })
+            assert mismatch_res.status_code == 409
+            assert mismatch_res.json()['error']['code'] == 'idempotency_conflict'
+
+            zero_res = client.post(path, headers=zero_headers, json=zero_payload)
+            assert zero_res.status_code == 201, zero_res.text
+            assert zero_res.json()['payment']['amount_minor'] == 0
+            assert client.post(path + '/resolve', headers=zero_headers, json=zero_payload).status_code == 200
+
+            # 4. credit_minor + partial cash_amount_minor on the same sale (total 1200, credit 400, cash 300 -> debt 500)
+            combo_headers = {**headers, 'Idempotency-Key': 'combo-partial'}
+            combo_payload = {
+                'member_id': str(member_id),
+                'items': [{'product_id': product_id, 'quantity': 1}],
+                'expected_total_minor': 1200,
+                'credit_minor': 400,
+                'cash_amount_minor': 300,
+            }
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=combo_headers, json=combo_payload).status_code == 200
+            combo_res = client.post(path, headers=combo_headers, json=combo_payload)
+            assert combo_res.status_code == 201, combo_res.text
+            combo_order_id = UUID(combo_res.json()['order']['id'])
+            assert combo_res.json()['payment']['amount_minor'] == 300
+            assert combo_res.json()['credit_applied_minor'] == 400
+            assert client.post(path + '/resolve', headers=combo_headers, json=combo_payload).status_code == 200
+
+            # 5. cash_amount_minor > payable total (1200 - 400 = 800) rejected
+            over_headers = {**headers, 'Idempotency-Key': 'over-pay'}
+            over_payload = {**combo_payload, 'cash_amount_minor': 900}
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=over_headers, json=over_payload).status_code == 200
+            assert client.post(path, headers=over_headers, json=over_payload).status_code == 409
+            assert client.post(path + '/resolve', headers=over_headers, json=over_payload).status_code == 200
+
+            # 6. Overtime partial cash product sale after closing shift
+            with factory.begin() as session:
+                close_shift(session, shift_id=shift_id, closed_by=staff_id,
+                            denomination_counts=None, counted_cash_minor=300)
+
+            ot_headers = {**headers, 'Idempotency-Key': 'ot-partial'}
+            ot_payload = {'member_id': str(member_id), 'items': [{'product_id': product_id, 'quantity': 1}],
+                          'expected_total_minor': 1200, 'cash_amount_minor': 200}
+            assert client.post(f'/api/v1/registers/{register_id}/product-sale-intent', headers=ot_headers, json=ot_payload).status_code == 200
+            ot_res = client.post(path, headers=ot_headers, json=ot_payload)
+            assert ot_res.status_code == 201, ot_res.text
+            ot_order_id = UUID(ot_res.json()['order']['id'])
+            assert client.post(path + '/resolve', headers=ot_headers, json=ot_payload).status_code == 200
+
+        with factory() as session:
+            combo_debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == combo_order_id))
+            assert combo_debt is not None and combo_debt.initial_outstanding_minor == 500
+            assert session.get(Member, member_id).credit_balance_minor == 600
+            ot_order = session.get(Order, ot_order_id)
+            ot_debt = session.scalar(select(MembershipDebt).where(MembershipDebt.order_id == ot_order_id))
+            assert ot_order.is_overtime is True and ot_order.financial_shift_id is None
+            assert ot_debt is not None and ot_debt.initial_outstanding_minor == 1000
+            with pytest.raises(ProductSaleRejected, match='offline sales'):
+                _post_cash_sale(
+                    session, register_id=register_id, actor_id=staff_id, member_id=member_id,
+                    items=[ProductCartLineRequest(product_id=UUID(product_id), quantity=1)],
+                    expected_total_minor=1200, idempotency_key='offline-partial',
+                    policy=SalePolicy.CONTINGENCY, cash_amount_minor=500, cash_amount_provided=True,
+                )
+    finally:
+        engine.dispose()

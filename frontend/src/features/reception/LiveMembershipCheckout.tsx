@@ -21,6 +21,7 @@ import { depositMemberCredit } from '../../api/memberCreditApi';
 import { getMember } from '../../api/membersApi';
 import { getMemberReceivables, recordRentalRepayment, type MemberReceivableItem } from '../../api/rentalsApi';
 import { browserRequest } from '../../api/http';
+import { refreshLocalRoster, markMemberRosterUncertain, clearMemberRosterUncertain } from '../../offline/flushManager';
 import { Button, Notice } from '../../shared/ui';
 import AnimatedList, { type AnimatedListEntry } from '../catalog/react-bits/AnimatedList';
 import { CurrentPurchaseCard } from './CurrentPurchaseCard';
@@ -41,6 +42,7 @@ interface SaleIntent {
   idempotencyKey: string;
   /** Cash tendered above what was due that the member left as saldo a favor. */
   changeToCreditMinor?: number;
+  rosterMarker?: string;
 }
 
 interface DebtPaymentIntent {
@@ -48,6 +50,7 @@ interface DebtPaymentIntent {
   body: MembershipDebtPaymentInput;
   idempotencyKey: string;
   changeToCreditMinor?: number;
+  rosterMarker?: string;
 }
 
 /** A rental repayment: the endpoint takes one method per call, so saldo a favor and cash go as two calls. */
@@ -72,6 +75,7 @@ function rentalLabel(item: MemberReceivableItem): string {
 }
 
 const CREDIT_DEPOSIT_FAILED = 'El pago sí se registró, pero no se pudo depositar el saldo a favor. Puedes agregarlo desde el perfil del socio.';
+const LOCAL_ROSTER_REFRESH_FAILED = 'La operación se registró, pero no se pudo actualizar la copia local de socios.';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -251,13 +255,16 @@ export function LiveMembershipCheckout({
       apiRequest ? getRegisters(apiRequest) : getRegisters(),
     ]).then(([activePlans, availableRegisters]) => {
       if (!active) return;
-      const validPlans = activePlans.filter(plan => currentVersion(plan));
-      const openRegisters = availableRegisters.filter(register => register.has_open_shift);
+      const validPlans = activePlans.filter(plan => currentVersion(plan) && plan.status !== 'inactive' && plan.status !== 'archived');
+      const selectableRegisters = availableRegisters.filter(
+        register => register.has_open_shift || Boolean(register.last_closed_shift_id),
+      );
       setPlans(validPlans);
-      setRegisters(openRegisters);
-      // Automatically select active open register
-      if (openRegisters.length >= 1) {
-        setRegisterId(openRegisters[0].id);
+      setRegisters(selectableRegisters);
+      // Prefer a register with an open shift; fall back to a register ready for overtime sales.
+      const preferred = selectableRegisters.find(register => register.has_open_shift) ?? selectableRegisters[0];
+      if (preferred) {
+        setRegisterId(preferred.id);
       }
     }).catch(reason => {
       if (active) setError(reason instanceof Error ? reason.message : 'No se pudieron cargar los planes y cajas.');
@@ -265,14 +272,23 @@ export function LiveMembershipCheckout({
     return () => { active = false; };
   }, [apiRequest]);
 
-  // Undefined until the register's shift lookup settles, so the clock fallback never flashes a false banner.
+  const selectedRegister = registers.find(register => register.id === registerId) ?? null;
+  const overtimeSourceShiftId =
+    selectedRegister && !selectedRegister.has_open_shift && typeof selectedRegister.last_closed_shift_id === 'string'
+      ? selectedRegister.last_closed_shift_id
+      : null;
+  const canSubmitCashSale = Boolean(shift || overtimeSourceShiftId);
+  // Undefined until an open register's shift lookup settles, so the clock fallback never flashes a false banner.
   const openShiftFlag = registerId && !shiftLoading ? Boolean(shift) : undefined;
 
-  // Load shift when registerId is set
+  // Load shift when registerId is set and has an active open shift
   useEffect(() => {
     let active = true;
     setShift(null);
-    if (!registerId) return () => { active = false; };
+    if (!registerId || !selectedRegister?.has_open_shift) {
+      setShiftLoading(false);
+      return () => { active = false; };
+    }
     setShiftLoading(true);
     void (apiRequest ? getCurrentRegisterShift(registerId, apiRequest) : getCurrentRegisterShift(registerId)).then(value => {
       if (active && value.cash_register_id === registerId) setShift(value);
@@ -280,7 +296,7 @@ export function LiveMembershipCheckout({
       if (active) setError(reason instanceof Error ? reason.message : 'No se pudo consultar el turno abierto.');
     }).finally(() => { if (active) setShiftLoading(false); });
     return () => { active = false; };
-  }, [registerId, apiRequest]);
+  }, [registerId, selectedRegister?.has_open_shift, apiRequest]);
 
   // Load open debts whenever registerId + selectedMember are set
   useEffect(() => {
@@ -369,10 +385,23 @@ export function LiveMembershipCheckout({
     setSubmitting(true);
     setError('');
     try {
+      intent.rosterMarker ??= await markMemberRosterUncertain(selectedMemberId ?? '').catch(() => undefined);
       const receipt = await (apiRequest
         ? submitMembershipDebtPayment(intent.registerId, intent.body, intent.idempotencyKey, apiRequest)
         : submitMembershipDebtPayment(intent.registerId, intent.body, intent.idempotencyKey));
       setUnknownDebtIntent(null);
+      try {
+        const refreshed = await refreshLocalRoster();
+        if (refreshed) {
+          if (intent.rosterMarker) {
+            await clearMemberRosterUncertain(receipt.member_id, intent.rosterMarker).catch(() => setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED));
+          }
+        } else {
+          setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+        }
+      } catch {
+        setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+      }
       await depositChange(intent.registerId, receipt.member_id, intent.changeToCreditMinor);
       void loadMemberCredit(selectedMemberId);
       setDebtReceipt(receipt);
@@ -382,6 +411,7 @@ export function LiveMembershipCheckout({
         setUnknownDebtIntent(intent);
         setError('No se pudo confirmar si el servidor registró el abono. Conservamos la misma solicitud; reintentala para consultar el resultado sin duplicar el cobro.');
       } else {
+        if (intent.rosterMarker && selectedMemberId) await clearMemberRosterUncertain(selectedMemberId, intent.rosterMarker).catch(() => {});
         setUnknownDebtIntent(null);
         setError(reason instanceof Error ? reason.message : 'No se pudo registrar el abono del adeudo.');
       }
@@ -413,6 +443,14 @@ export function LiveMembershipCheckout({
         last = await call('cash', intent.cashMinor, getStableDebtIdempotencyKey(intent.registerId, `rental-cash:${intent.rentalId}`, intent.cashMinor));
       }
       setPendingRentalIntent(null);
+      try {
+        const refreshed = await refreshLocalRoster();
+        if (!refreshed) {
+          setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+        }
+      } catch {
+        setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+      }
       void loadMemberCredit(selectedMemberId);
       setRentalReceipt({
         amountMinor: intent.creditMinor + intent.cashMinor,
@@ -462,6 +500,7 @@ export function LiveMembershipCheckout({
     setSubmitting(true);
     setError('');
     try {
+      intent.rosterMarker ??= await markMemberRosterUncertain(intent.body.member_id).catch(() => undefined);
       const response = intent.method === 'cash'
         ? await (apiRequest
             ? submitMembershipCashSale(intent.registerId, intent.body as MembershipSaleRequest, intent.idempotencyKey, apiRequest)
@@ -470,6 +509,18 @@ export function LiveMembershipCheckout({
             ? submitMembershipTransferSale(intent.registerId, intent.body as MembershipTransferSaleRequest, intent.idempotencyKey, apiRequest)
             : submitMembershipTransferSale(intent.registerId, intent.body as MembershipTransferSaleRequest, intent.idempotencyKey));
       setUnknownIntent(null);
+      try {
+        const refreshed = await refreshLocalRoster();
+        if (refreshed) {
+          if (intent.rosterMarker) {
+            await clearMemberRosterUncertain(intent.body.member_id, intent.rosterMarker).catch(() => setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED));
+          }
+        } else {
+          setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+        }
+      } catch {
+        setCreditWarning(LOCAL_ROSTER_REFRESH_FAILED);
+      }
       await depositChange(intent.registerId, intent.body.member_id, intent.changeToCreditMinor);
       void loadMemberCredit(selectedMemberId);
       setResult({
@@ -485,6 +536,7 @@ export function LiveMembershipCheckout({
         setUnknownIntent(intent);
         setError('No se pudo confirmar si el servidor registró la venta. Conservamos la misma solicitud; reintentala para consultar el resultado sin crear otra intención.');
       } else {
+        if (intent.rosterMarker) await clearMemberRosterUncertain(intent.body.member_id, intent.rosterMarker).catch(() => {});
         setUnknownIntent(null);
         setError(reason instanceof Error ? reason.message : 'No se pudo registrar la venta.');
       }
@@ -495,7 +547,12 @@ export function LiveMembershipCheckout({
   }
 
   function submit(method: PaymentMethod, overrideCashAmountMinor?: number, creditMinor = 0, changeToCreditMinor = 0) {
-    if (!selectedMember || !version || !registerId || !shift || amountInvalid || submittingRef.current) return;
+    if (method !== 'cash' && !shift && overtimeSourceShiftId) {
+      setError('En overtime solo están permitidos los cobros de membresía en efectivo.');
+      return;
+    }
+    const methodShiftReady = method === 'cash' ? canSubmitCashSale : Boolean(shift);
+    if (!selectedMember || !version || !registerId || !methodShiftReady || amountInvalid || submittingRef.current) return;
     let finalAmountMinor = overrideCashAmountMinor !== undefined ? overrideCashAmountMinor : amountMinor;
     if (price !== null && finalAmountMinor !== undefined) {
       // Cash only covers what credit leaves (tender above it is change); the backend rejects a cash part of zero or above that.
@@ -512,7 +569,11 @@ export function LiveMembershipCheckout({
       ...(creditMinor > 0 ? { credit_minor: creditMinor } : {}),
     };
     const body: MembershipSaleRequest | MembershipTransferSaleRequest = method === 'cash'
-      ? { ...common, ...(finalAmountMinor !== undefined ? { cash_amount_minor: finalAmountMinor } : {}) }
+      ? {
+          ...common,
+          ...(!shift && overtimeSourceShiftId ? { source_shift_id: overtimeSourceShiftId } : {}),
+          ...(finalAmountMinor !== undefined ? { cash_amount_minor: finalAmountMinor } : {}),
+        }
       : common;
     void send({ method, registerId, body, idempotencyKey: crypto.randomUUID(), changeToCreditMinor });
   }
@@ -682,8 +743,8 @@ export function LiveMembershipCheckout({
               variant={operation === 'debt_payment' ? 'primary' : 'secondary'}
               className="button-sm"
               onClick={() => { setOperation('debt_payment'); setError(''); }}
-              disabled={submitting || Boolean(unknownIntent) || Boolean(unknownDebtIntent) || Boolean(pendingRentalIntent) || (Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0)}
-              title={Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0 ? 'El socio no tiene adeudos pendientes' : undefined}
+              disabled={submitting || Boolean(unknownIntent) || Boolean(unknownDebtIntent) || Boolean(pendingRentalIntent) || Boolean(!shift && overtimeSourceShiftId) || (Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0)}
+              title={!shift && overtimeSourceShiftId ? 'Los abonos a adeudos requieren un turno abierto' : Boolean(selectedMember) && !debtsLoading && debtEntries.length === 0 ? 'El socio no tiene adeudos pendientes' : undefined}
             >
               Liquidar adeudo
             </Button>
@@ -1071,12 +1132,13 @@ export function LiveMembershipCheckout({
                   className="current-purchase-card--modal"
                   title="Venta de membresía"
                   hasOpenShift={openShiftFlag}
+                  disabledMethods={!shift && overtimeSourceShiftId ? ['card', 'transfer'] : undefined}
                   step1Title="Membresía"
                   step2Title="Cobro"
                   totalMinor={price ?? 0}
                   allowCredit
                   assignedMember={selectedMember ? { id: selectedMember.id, name: selectedMember.name, creditMinor: memberCreditMinor } : null}
-                  step1ActionDisabled={!selectedMember || !version || !registerId || !shift || amountInvalid || submitting}
+                  step1ActionDisabled={!selectedMember || !version || !registerId || !canSubmitCashSale || amountInvalid || submitting}
                   step1ActionLabel={
                     !selectedMember
                       ? 'Selecciona un socio beneficiario'
@@ -1157,6 +1219,9 @@ export function LiveMembershipCheckout({
               {registerId && !shiftLoading && shift && (
                 <span>Turno abierto confirmado: {shift.id}</span>
               )}
+              {registerId && !shiftLoading && !shift && overtimeSourceShiftId && (
+                <span>Venta en overtime · turno anterior: {overtimeSourceShiftId}</span>
+              )}
               {registers.length === 0 && !loading && (
                 <p role="alert">No hay cajas con turno abierto.</p>
               )}
@@ -1185,7 +1250,7 @@ export function LiveMembershipCheckout({
                   <button
                     type="button"
                     onClick={() => submit('cash')}
-                    disabled={loading || submitting || !version || !shift || amountInvalid}
+                    disabled={loading || submitting || !version || !canSubmitCashSale || amountInvalid}
                   >
                     Cobrar en efectivo
                   </button>

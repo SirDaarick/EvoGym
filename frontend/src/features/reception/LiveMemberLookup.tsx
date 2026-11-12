@@ -49,7 +49,7 @@ export function LiveMemberLookup() {
     };
   }, [query, token, configError]);
 
-  async function selectMember(member: OperationalMember) {
+  async function selectMember(member: Pick<OperationalMember, 'id'>) {
     if (!token) return;
     searchGeneration.current += 1;
     const generation = ++detailGeneration.current;
@@ -99,6 +99,6 @@ export function LiveMemberLookup() {
       onClose={() => setCheckoutOpen(false)}
       onCompleted={() => void refresh()}
     />}
-    {registrationOpen && <LiveMemberRegistration onFindLater={memberNumber => { setRegistrationOpen(false); changeQuery(memberNumber); }} onUnresolvedChange={setRegistrationUnresolved} />}
+    {registrationOpen && <LiveMemberRegistration onFindLater={memberNumber => { setRegistrationOpen(false); changeQuery(memberNumber); }} onSelectMember={member => { setRegistrationOpen(false); void selectMember(member); }} onUnresolvedChange={setRegistrationUnresolved} />}
   </main>;
 }

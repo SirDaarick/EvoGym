@@ -15,7 +15,7 @@ const ALLOWED_DEMO_IMPORTS: Record<string, string[]> = {
   'features/members/MemberSearch.tsx': ['DemoProvider'],
   'features/members/Members.tsx': ['DemoProvider', 'attendanceOperations', 'operations'],
   'features/members/NewMemberRegistration.tsx': ['DemoProvider', 'newMemberRegistration', 'plans'],
-  'features/owner/AlertCenter.tsx': ['DemoProvider', 'adapter', 'alertCenterSelector'],
+  'features/owner/AlertCenter.tsx': ['DemoProvider', 'alertCenterSelector'],
   'features/owner/AttendanceAnalytics.tsx': ['DemoProvider', 'adapter', 'attendanceAnalyticsSelector'],
   'features/owner/ExpenseReport.tsx': ['DemoProvider', 'adapter', 'expenseReportSelector', 'financeReportSelector', 'fixedCostsStore'],
   'features/owner/History.tsx': ['DemoProvider', 'ownerOperations'],

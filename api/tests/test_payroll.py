@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -5,6 +6,30 @@ from app.db.models import Expense, StaffRosterProfile
 from app.main import create_app
 from test_admin_auth import FakeRecoveryDelivery, complete_device_login, configured_settings
 from test_staff_roster import _setup
+
+
+def test_advance_payment_methods_keep_outflows_outside_shift(tmp_path):
+    url, engine, factory, branch, _other, _desk_token, _branch_admin = _setup(tmp_path)
+    try:
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            token = complete_device_login(client, delivery, 'owner@example.invalid', 'synthetic-admin-password').json()['access_token']
+            admin = {'Authorization': f'Bearer {token}'}
+            profile = client.post(f'/api/v1/staff-roster/branches/{branch}', headers=admin,
+                                  json={'full_name': 'Employee', 'position': 'Staff'}).json()['id']
+            assert client.patch(f'/api/v1/staff-roster/{profile}', headers=admin,
+                                json={'monthly_salary_minor': 1400000}).status_code == 200
+            body = {'branch_id': str(branch), 'staff_profile_id': profile, 'week_start': '2026-10-26', 'amount_minor': 10000}
+            for method in ('cash', 'transfer'):
+                headers = {**admin, 'Idempotency-Key': f'advance-{method}'}
+                response = client.post('/api/v1/admin/payroll/advances', headers=headers, json={**body, 'payment_method': method})
+                assert response.status_code == 201, response.text
+                assert client.post('/api/v1/admin/payroll/advances', headers=headers, json={**body, 'payment_method': method}).json() == response.json()
+            with factory() as session:
+                expenses = session.scalars(select(Expense).where(Expense.branch_id == branch)).all()
+                assert [(e.payment_method, e.shift_id) for e in expenses] == [('cash', None), ('transfer', None)]
+    finally:
+        engine.dispose()
 
 
 def test_weekly_payroll_records_outflows_and_replays(tmp_path):
@@ -25,6 +50,8 @@ def test_weekly_payroll_records_outflows_and_replays(tmp_path):
             result = client.post('/api/v1/admin/payroll/advances', headers=headers, json=advance)
             assert result.status_code == 201, result.text
             assert client.post('/api/v1/admin/payroll/advances', headers=headers, json=advance).json() == result.json()
+            assert client.post('/api/v1/admin/payroll/advances', headers=headers, json={**advance, 'payment_method': 'transfer'}).json() == result.json()
+            assert client.post('/api/v1/admin/payroll/advances', headers=headers, json={**advance, 'payment_method': 'cash'}).status_code == 409
             assert client.post('/api/v1/admin/payroll/advances', headers=headers, json={**advance, 'amount_minor': 1}).status_code == 409
             payment = {'branch_id': str(branch), 'staff_profile_id': profile, 'week_start': week, 'payment_method': 'cash'}
             rows = client.get(f'/api/v1/admin/payroll/weeks/{week}?branch_id={branch}', headers=admin).json()['items']
@@ -108,7 +135,8 @@ def test_payroll_history_matches_expenses_without_double_counting(tmp_path):
             # Salary change after payment must not rewrite the paid snapshot in the history.
             client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'monthly_salary_minor': 2000000})
 
-            query = f'from=2026-10-26&to=2026-11-08&branch_id={branch}'
+            to_date = max(date(2026, 11, 8), date.today())
+            query = f'from=2026-10-26&to={to_date}&branch_id={branch}'
             history = client.get(f'/api/v1/admin/payroll/history?{query}', headers=admin)
             assert history.status_code == 200, history.text
             data = history.json()
@@ -137,3 +165,34 @@ def test_payroll_history_matches_expenses_without_double_counting(tmp_path):
             assert all_branches.status_code == 200 and all_branches.json()['outflow_minor'] == 370000
     finally:
         engine.dispose()
+
+def test_payroll_writes_reject_non_admins_missing_keys_and_ineligible_profiles(tmp_path):
+    url, engine, factory, branch, other, desk_token, branch_admin_token = _setup(tmp_path)
+    try:
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            token = complete_device_login(client, delivery, 'owner@example.invalid', 'synthetic-admin-password').json()['access_token']
+            admin = {'Authorization': f'Bearer {token}'}
+            profile = client.post(f'/api/v1/staff-roster/branches/{branch}', headers=admin,
+                                  json={'full_name': 'Emigdio', 'position': 'Staff'}).json()['id']
+            client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'monthly_salary_minor': 1400000})
+            advance = {'branch_id': str(branch), 'staff_profile_id': profile, 'week_start': '2026-10-26', 'amount_minor': 1000}
+            payment = {k: v for k, v in advance.items() if k != 'amount_minor'} | {'payment_method': 'cash'}
+            for name, bearer in (('desk', desk_token), ('branch admin', branch_admin_token)):
+                headers = {'Authorization': f'Bearer {bearer}', 'Idempotency-Key': f'{name}-key'}
+                assert client.post('/api/v1/admin/payroll/advances', headers=headers, json=advance).status_code in (401, 403), name
+                assert client.post('/api/v1/admin/payroll/payments', headers=headers, json=payment).status_code in (401, 403), name
+            assert client.post('/api/v1/admin/payroll/advances', headers=admin, json=advance).status_code == 422
+            assert client.post('/api/v1/admin/payroll/payments', headers=admin, json=payment).status_code == 422
+            keyed = {**admin, 'Idempotency-Key': 'k1'}
+            assert client.post('/api/v1/admin/payroll/advances', headers=keyed, json={**advance, 'week_start': '2026-10-27'}).status_code == 422
+            assert client.post('/api/v1/admin/payroll/advances', headers=keyed, json={**advance, 'amount_minor': 0}).status_code == 422
+            assert client.post('/api/v1/admin/payroll/advances', headers=keyed, json={**advance, 'branch_id': str(other)}).status_code in (403, 422)
+            assert client.patch(f'/api/v1/staff-roster/{profile}', headers=admin, json={'is_active': False}).status_code == 200
+            assert client.post('/api/v1/admin/payroll/advances', headers=keyed, json=advance).status_code == 422
+            assert client.post('/api/v1/admin/payroll/payments', headers=keyed, json=payment).status_code == 422
+            with factory() as session:
+                assert session.scalars(select(Expense).where(Expense.branch_id == branch)).all() == []
+    finally:
+        engine.dispose()
+

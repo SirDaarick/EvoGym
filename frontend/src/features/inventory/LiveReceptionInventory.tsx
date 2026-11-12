@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '../../shared/ui';
 import { ProductCard } from '../reception/ProductCard';
 import { MobileDetailPanel } from '../../shared/MobileDetailPanel';
@@ -8,12 +9,15 @@ import { useStockMovement } from './hooks/useStockMovement';
 import { useContainerOpening } from './hooks/useContainerOpening';
 import { InventoryCatalogPanel } from './components/InventoryCatalogPanel';
 import { InventoryReceiptPanel } from './components/InventoryReceiptPanel';
+import { PurchasePanel } from './components/PurchasePanel';
+import { queryKeys } from '../../api/queryKeys';
 import './Inventory.css';
 
 const messageOf = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 
 export function LiveReceptionInventory({ apiRequest }: { apiRequest: AuthenticatedRequest }) {
   const inv = useReceptionInventory(apiRequest);
+  const queryClient = useQueryClient();
   const movement = useStockMovement(apiRequest);
   const opening = useContainerOpening(apiRequest);
   const [movementKind, setMovementKind] = useState<'restock' | 'waste'>('restock');
@@ -137,6 +141,20 @@ export function LiveReceptionInventory({ apiRequest }: { apiRequest: Authenticat
             }}
             onConfirm={handleConfirmMovement}
           />
+          {branchId && <PurchasePanel
+            key={branchId}
+            request={apiRequest}
+            branchId={branchId}
+            products={inv.products.filter(product => (inv.quantities[product.id] ?? 0) > 0).map(product => ({
+              id: product.id, name: product.name, quantity: inv.quantities[product.id],
+            }))}
+            onQuantityChange={(id, qty) => changeQuantity(id, qty)}
+            onSuccess={() => {
+              inv.products.forEach(product => inv.resetQuantity(product.id));
+              void queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+              setMovementSuccess('Compra registrada.');
+            }}
+          />}
         </MobileDetailPanel>
       </div>
     </>

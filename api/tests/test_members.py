@@ -115,7 +115,7 @@ def _seed_sample_members(factory) -> list[Member]:
             notes="Suspended due to broken equipment dispute.",
             status="suspended",
             joined_on=date(2026, 3, 15),
-            credit_balance_minor=-5000,
+            credit_balance_minor=0,
             photo_url=None,
         ),
         Member(
@@ -1010,8 +1010,8 @@ def test_create_member_duplicate_number_conflict_409(tmp_path):
         engine.dispose()
 
 
-def test_create_member_shared_natural_identifiers_allowed(tmp_path):
-    """Two distinct members sharing the same full_name, phone, and email can both be created without conflict."""
+def test_members_can_share_phone(tmp_path):
+    """Different members can share the same phone on create and update."""
     url, engine, factory = _setup_db(tmp_path)
     try:
         branch_id = _seed_branch(factory)
@@ -1029,7 +1029,7 @@ def test_create_member_shared_natural_identifiers_allowed(tmp_path):
         member_b = {
             "member_number": "FAM-002",
             "full_name": "Familia Perez",
-            "phone": "555-444-1234",
+            "phone": "(555) 444 1234",
             "email": "familia.perez@example.com",
         }
 
@@ -1042,11 +1042,17 @@ def test_create_member_shared_natural_identifiers_allowed(tmp_path):
 
             res_b = client.post("/api/v1/members", headers=headers, json=member_b)
             assert res_b.status_code == 201
-            data_b = res_b.json()
-            assert data_b["member_number"] == "FAM-002"
-            assert data_b["full_name"] == "Familia Perez"
+            assert res_b.json()["id"] != data_a["id"]
+            assert client.get("/api/v1/members", headers=headers).json()["total"] == 2
 
-            assert data_a["id"] != data_b["id"]
+            other = client.post("/api/v1/members", headers=headers, json={**member_b, "member_number": "FAM-003", "phone": "555 444 9999"})
+            assert other.status_code == 201
+            other_id = other.json()["id"]
+            clash = client.patch(f"/api/v1/members/{other_id}", headers=headers, json={"phone": "(555)444-1234"})
+            assert clash.status_code == 200
+            assert client.get(f"/api/v1/members/{other_id}", headers=headers).json()["phone"] == "(555)444-1234"
+            same = client.patch(f"/api/v1/members/{other_id}", headers=headers, json={"phone": "5554449999", "full_name": "Otra"})
+            assert same.status_code == 200 and same.json()["phone"] == "5554449999"
     finally:
         engine.dispose()
 
@@ -1310,6 +1316,41 @@ def test_create_member_note_rejects_whitespace_body(tmp_path):
         engine.dispose()
 
 
+def test_member_list_uses_staff_branch_local_date(tmp_path, monkeypatch):
+    from app.db.models.memberships import MembershipPeriod
+    from app.members import queries
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 1, 1, 5, 30, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(queries, "datetime", FrozenDatetime)
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        mexico = _seed_branch(factory, code="mex", name="Mexico")
+        tokyo = _seed_branch(factory, code="tok", name="Tokyo")
+        staff_id, mexico_token = _seed_receptionist(factory, mexico, login="mex@example.com")
+        _, tokyo_token = _seed_receptionist(factory, tokyo, login="tok@example.com")
+        with factory.begin() as session:
+            session.get(Branch, mexico).timezone = "America/Mexico_City"
+            session.get(Branch, tokyo).timezone = "Asia/Tokyo"
+            member = Member(id=uuid4(), member_number="TZ-1", full_name="Timezone Test", phone="123", status="active")
+            session.add(member)
+            session.flush()
+            session.add(MembershipPeriod(id=uuid4(), member_id=member.id, order_item_id=uuid4(), plan_version_id=uuid4(), starts_on=date(2025, 11, 1), ends_on=date(2025, 12, 1), activated_by=staff_id))
+        app = create_app(configured_settings(url))
+        with TestClient(app) as client:
+            def status(token):
+                response = client.get('/api/v1/members?search=TZ-1', headers={'Authorization': f'Bearer {token}'})
+                assert response.status_code == 200
+                return response.json()['items'][0]['membership_status']
+            assert status(mexico_token) == 'expired'
+            assert status(tokyo_token) == 'inactive'
+    finally:
+        engine.dispose()
+
+
 def test_list_members_derives_membership_status_from_latest_period(tmp_path):
     from zoneinfo import ZoneInfo
     from app.db.models.memberships import MembershipPeriod
@@ -1334,6 +1375,12 @@ def test_list_members_derives_membership_status_from_latest_period(tmp_path):
                     activated_by=staff_id,
                 )
             )
+
+            for days in (0, 30, 31):
+                member_id = uuid4()
+                session.add(Member(id=member_id, member_number=f"BOUNDARY-{days}", full_name=f"Boundary {days}", phone=f"555-90{days}", status="active", joined_on=today - timedelta(days=100)))
+                session.flush()
+                session.add(MembershipPeriod(id=uuid4(), member_id=member_id, order_item_id=uuid4(), plan_version_id=uuid4(), starts_on=today - timedelta(days=90), ends_on=today - timedelta(days=days), activated_by=staff_id))
             # members[1]: Ana -> expired period 10 days ago (<= 31 days -> expired) + older period 90 days ago
             session.add_all([
                 MembershipPeriod(
@@ -1394,6 +1441,332 @@ def test_list_members_derives_membership_status_from_latest_period(tmp_path):
 
             assert by_number["SOC-0006"]["membership_status"] == "inactive"
             assert by_number["SOC-0006"]["membership_ends_on"] == (today - timedelta(days=45)).isoformat()
+            assert by_number["BOUNDARY-0"]["membership_status"] == "expired"
+            assert by_number["BOUNDARY-30"]["membership_status"] == "expired"
+            assert by_number["BOUNDARY-31"]["membership_status"] == "inactive"
     finally:
         engine.dispose()
 
+def test_list_members_sql_python_status_parity_and_latest_period(tmp_path):
+    """Verify SQL CASE derived status matches _derive_membership_status 1:1 across all branches."""
+    from zoneinfo import ZoneInfo
+    from app.db.models.memberships import MembershipPeriod
+    from app.members.queries import _derive_membership_status
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        today = datetime.now(ZoneInfo("America/Mexico_City")).date()
+
+        cases = [
+            ("PAR-ACT-NONE", "active", [], "active"),
+            ("PAR-ACT-MULTI", "active", [-60, 15, -10], "active"),
+            ("PAR-ACT-DAY0", "active", [0], "expired"),
+            ("PAR-ACT-DAY30", "active", [-30], "expired"),
+            ("PAR-ACT-DAY31", "active", [-31], "inactive"),
+            ("PAR-PEN-NONE", "pending", [], "inactive"),
+            ("PAR-PEN-FUT", "pending", [5], "active"),
+            ("PAR-PEN-EXP", "pending", [-15], "expired"),
+            ("PAR-PEN-INACT", "pending", [-31], "inactive"),
+            ("PAR-SUS-NONE", "suspended", [], "suspended"),
+            ("PAR-SUS-FUT", "suspended", [10], "suspended"),
+            ("PAR-INA-NONE", "inactive", [], "inactive"),
+            ("PAR-INA-FUT", "inactive", [10], "inactive"),
+            ("PAR-EXP-NONE", "expired", [], "expired"),
+            ("PAR-EXP-FUT", "expired", [10], "expired"),
+        ]
+
+        with factory.begin() as session:
+            for idx, (num, profile_status, offsets, _) in enumerate(cases):
+                member = Member(
+                    id=uuid4(),
+                    member_number=num,
+                    full_name=f"Member {idx:02d}",
+                    phone=f"555-20{idx:02d}",
+                    status=profile_status,
+                    joined_on=today - timedelta(days=100),
+                )
+                session.add(member)
+                session.flush()
+                for offset in offsets:
+                    ends_on = today + timedelta(days=offset)
+                    session.add(
+                        MembershipPeriod(
+                            id=uuid4(),
+                            member_id=member.id,
+                            order_item_id=uuid4(),
+                            plan_version_id=uuid4(),
+                            starts_on=ends_on - timedelta(days=30),
+                            ends_on=ends_on,
+                            activated_by=staff_id,
+                        )
+                    )
+
+        with factory() as session:
+            result = list_members(session, limit=50, sort_by="member_number", sort_dir="asc")
+            assert result.total == len(cases)
+            by_num = {m.member_number: m for m in result.items}
+            for num, profile_status, offsets, expected_status in cases:
+                member = by_num[num]
+                expected_ends_on = today + timedelta(days=max(offsets)) if offsets else None
+                assert member.membership_ends_on == expected_ends_on
+                assert member.membership_status == expected_status
+                assert member.membership_status == _derive_membership_status(
+                    profile_status, expected_ends_on, today
+                )
+
+        app = create_app(configured_settings(url), recovery_delivery=FakeRecoveryDelivery())
+        with TestClient(app) as client:
+            res = client.get("/api/v1/members?limit=50", headers={"Authorization": f"Bearer {token}"})
+            assert res.status_code == 200
+            api_by_num = {item["member_number"]: item for item in res.json()["items"]}
+            for num, _profile_status, offsets, expected_status in cases:
+                expected_ends_on = (today + timedelta(days=max(offsets))).isoformat() if offsets else None
+                assert api_by_num[num]["membership_status"] == expected_status
+                assert api_by_num[num]["membership_ends_on"] == expected_ends_on
+    finally:
+        engine.dispose()
+
+
+def test_list_members_membership_status_filter_and_validation(tmp_path):
+    """Verify additive membership_status filtering (items, total, pages) and validation."""
+    from zoneinfo import ZoneInfo
+    from app.db.models.memberships import MembershipPeriod
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        today = datetime.now(ZoneInfo("America/Mexico_City")).date()
+
+        seeds = [
+            ("FLT-ACT-1", "active", 10),
+            ("FLT-ACT-2", "active", 20),
+            ("FLT-ACT-3", "active", None),
+            ("FLT-EXP-1", "active", -5),
+            ("FLT-EXP-2", "expired", None),
+            ("FLT-INA-1", "active", -31),
+            ("FLT-INA-2", "inactive", 5),
+            ("FLT-PEN-1", "pending", None),
+            ("FLT-SUS-1", "suspended", 10),
+        ]
+
+        with factory.begin() as session:
+            for idx, (num, profile_status, offset) in enumerate(seeds):
+                member = Member(
+                    id=uuid4(),
+                    member_number=num,
+                    full_name=f"Filter Member {idx}",
+                    phone=f"555-30{idx:02d}",
+                    status=profile_status,
+                    joined_on=today - timedelta(days=60),
+                )
+                session.add(member)
+                session.flush()
+                if offset is not None:
+                    ends_on = today + timedelta(days=offset)
+                    session.add(
+                        MembershipPeriod(
+                            id=uuid4(),
+                            member_id=member.id,
+                            order_item_id=uuid4(),
+                            plan_version_id=uuid4(),
+                            starts_on=ends_on - timedelta(days=30),
+                            ends_on=ends_on,
+                            activated_by=staff_id,
+                        )
+                    )
+
+        with factory() as session:
+            for invalid in ("bogus", "   ", ""):
+                with pytest.raises(ValueError, match="Invalid membership status"):
+                    list_members(session, membership_status=invalid)
+
+            active_res = list_members(session, membership_status="active", limit=2, page=1, sort_by="member_number")
+            assert active_res.total == 3
+            assert active_res.pages == 2
+            assert [m.member_number for m in active_res.items] == ["FLT-ACT-1", "FLT-ACT-2"]
+
+            pending_profile_res = list_members(session, status="pending")
+            assert pending_profile_res.total == 1
+            assert pending_profile_res.items[0].member_number == "FLT-PEN-1"
+            assert pending_profile_res.items[0].membership_status == "inactive"
+
+        app = create_app(configured_settings(url), recovery_delivery=FakeRecoveryDelivery())
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            expected_by_filter = {
+                "active": {"FLT-ACT-1", "FLT-ACT-2", "FLT-ACT-3"},
+                "expired": {"FLT-EXP-1", "FLT-EXP-2"},
+                "inactive": {"FLT-INA-1", "FLT-INA-2", "FLT-PEN-1"},
+                "suspended": {"FLT-SUS-1"},
+                "pending": set(),
+            }
+            for filter_value, expected_nums in expected_by_filter.items():
+                res = client.get(
+                    f"/api/v1/members?membership_status={filter_value}&limit=2",
+                    headers=headers,
+                )
+                assert res.status_code == 200
+                body = res.json()
+                assert body["total"] == len(expected_nums)
+                expected_pages = max(1, (len(expected_nums) + 1) // 2)
+                assert body["pages"] == expected_pages
+                all_res = client.get(
+                    f"/api/v1/members?membership_status={filter_value}&limit=50",
+                    headers=headers,
+                )
+                assert all_res.status_code == 200
+                assert {item["member_number"] for item in all_res.json()["items"]} == expected_nums
+
+            combo_res = client.get(
+                "/api/v1/members?status=pending&membership_status=inactive",
+                headers=headers,
+            )
+            assert combo_res.status_code == 200
+            assert combo_res.json()["total"] == 1
+            assert combo_res.json()["items"][0]["member_number"] == "FLT-PEN-1"
+
+            for bad_val in ("bogus", ""):
+                bad_res = client.get(
+                    f"/api/v1/members?membership_status={bad_val}",
+                    headers=headers,
+                )
+                assert bad_res.status_code == 422
+    finally:
+        engine.dispose()
+
+
+def test_list_members_extended_sorting_and_deterministic_tie_breaking(tmp_path):
+    """Verify sorting by phone, membership_status, and membership_ends_on with NULLS LAST and ID tie-breaker."""
+    from zoneinfo import ZoneInfo
+    from app.db.models.memberships import MembershipPeriod
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        today = datetime.now(ZoneInfo("America/Mexico_City")).date()
+
+        id_1 = UUID("00000000-0000-0000-0000-000000000001")
+        id_2 = UUID("00000000-0000-0000-0000-000000000002")
+        id_3 = UUID("00000000-0000-0000-0000-000000000003")
+        id_4 = UUID("00000000-0000-0000-0000-000000000004")
+        id_5 = UUID("00000000-0000-0000-0000-000000000005")
+        id_6 = UUID("00000000-0000-0000-0000-000000000006")
+        id_7 = UUID("00000000-0000-0000-0000-000000000007")
+        id_8 = UUID("00000000-0000-0000-0000-000000000008")
+
+        specs = [
+            (id_2, "SRT-2", "555-0002", "active", 20),
+            (id_1, "SRT-1", "555-0002", "active", 20),
+            (id_3, "SRT-3", "555-0001", "active", 5),
+            (id_4, "SRT-4", "555-0004", "active", None),
+            (id_5, "SRT-5", "555-0003", "active", -10),
+            (id_6, "SRT-6", "555-0006", "suspended", 30),
+            (id_7, "SRT-7", "555-0005", "active", -40),
+            (id_8, "SRT-8", "555-0007", "inactive", None),
+        ]
+
+        with factory.begin() as session:
+            for member_id, num, phone, profile_status, offset in specs:
+                session.add(
+                    Member(
+                        id=member_id,
+                        member_number=num,
+                        full_name=f"Sort {num}",
+                        phone=phone,
+                        status=profile_status,
+                        joined_on=today - timedelta(days=90),
+                    )
+                )
+                session.flush()
+                if offset is not None:
+                    ends_on = today + timedelta(days=offset)
+                    session.add(
+                        MembershipPeriod(
+                            id=uuid4(),
+                            member_id=member_id,
+                            order_item_id=uuid4(),
+                            plan_version_id=uuid4(),
+                            starts_on=ends_on - timedelta(days=30),
+                            ends_on=ends_on,
+                            activated_by=staff_id,
+                        )
+                    )
+
+        app = create_app(configured_settings(url), recovery_delivery=FakeRecoveryDelivery())
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+
+            phone_asc = client.get("/api/v1/members?sort_by=phone&sort_dir=asc&limit=50", headers=headers)
+            assert phone_asc.status_code == 200
+            assert [m["member_number"] for m in phone_asc.json()["items"]] == [
+                "SRT-3", "SRT-1", "SRT-2", "SRT-5", "SRT-4", "SRT-7", "SRT-6", "SRT-8"
+            ]
+
+            phone_desc = client.get("/api/v1/members?sort_by=phone&sort_dir=desc&limit=50", headers=headers)
+            assert phone_desc.status_code == 200
+            assert [m["member_number"] for m in phone_desc.json()["items"]] == [
+                "SRT-8", "SRT-6", "SRT-7", "SRT-4", "SRT-5", "SRT-1", "SRT-2", "SRT-3"
+            ]
+
+            ends_asc = client.get(
+                "/api/v1/members?sort_by=membership_ends_on&sort_dir=asc&limit=50",
+                headers=headers,
+            )
+            assert ends_asc.status_code == 200
+            assert [m["member_number"] for m in ends_asc.json()["items"]] == [
+                "SRT-7", "SRT-5", "SRT-3", "SRT-1", "SRT-2", "SRT-6", "SRT-4", "SRT-8"
+            ]
+
+            ends_desc = client.get(
+                "/api/v1/members?sort_by=membership_ends_on&sort_dir=desc&limit=50",
+                headers=headers,
+            )
+            assert ends_desc.status_code == 200
+            assert [m["member_number"] for m in ends_desc.json()["items"]] == [
+                "SRT-6", "SRT-1", "SRT-2", "SRT-3", "SRT-5", "SRT-7", "SRT-4", "SRT-8"
+            ]
+
+            p1 = client.get(
+                "/api/v1/members?sort_by=membership_ends_on&sort_dir=asc&page=1&limit=4",
+                headers=headers,
+            ).json()["items"]
+            p2 = client.get(
+                "/api/v1/members?sort_by=membership_ends_on&sort_dir=asc&page=2&limit=4",
+                headers=headers,
+            ).json()["items"]
+            assert [m["member_number"] for m in p1 + p2] == [
+                "SRT-7", "SRT-5", "SRT-3", "SRT-1", "SRT-2", "SRT-6", "SRT-4", "SRT-8"
+            ]
+
+            status_asc = client.get(
+                "/api/v1/members?sort_by=membership_status&sort_dir=asc&limit=50",
+                headers=headers,
+            )
+            assert status_asc.status_code == 200
+            assert [m["member_number"] for m in status_asc.json()["items"]] == [
+                "SRT-1", "SRT-2", "SRT-3", "SRT-4",
+                "SRT-5",
+                "SRT-6",
+                "SRT-7", "SRT-8",
+            ]
+
+            status_desc = client.get(
+                "/api/v1/members?sort_by=membership_status&sort_dir=desc&limit=50",
+                headers=headers,
+            )
+            assert status_desc.status_code == 200
+            assert [m["member_number"] for m in status_desc.json()["items"]] == [
+                "SRT-7", "SRT-8",
+                "SRT-6",
+                "SRT-5",
+                "SRT-1", "SRT-2", "SRT-3", "SRT-4",
+            ]
+
+            bad_sort = client.get("/api/v1/members?sort_by=email", headers=headers)
+            assert bad_sort.status_code == 422
+    finally:
+        engine.dispose()

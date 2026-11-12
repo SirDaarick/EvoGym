@@ -86,4 +86,16 @@ describe('CurrentPurchaseCard saldo a favor', () => {
     fireEvent.change(screen.getByLabelText('Monto recibido'), { target: { value: '80' } });
     expect(screen.queryByLabelText(/como saldo a favor/)).not.toBeInTheDocument();
   });
+
+  it('prevents mixed payment selection and hides mixed hints when allowMixed is false', () => {
+    const onConfirm = renderStep2({ allowMixed: false, disabledMethods: ['transfer'], useLiveCardIntent: true });
+    expect(screen.getByRole('radio', { name: 'Transferencia' })).toBeDisabled();
+    expect(screen.queryByText(/Mantén presionado/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Efectivo' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Tarjeta' }), { ctrlKey: true });
+    expect(screen.queryByLabelText(/Parte 1/)).not.toBeInTheDocument();
+    confirm();
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ mode: 'single', method: 'card' }), false);
+  });
 });

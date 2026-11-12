@@ -17,9 +17,11 @@ class Member(Base):
             "status IN ('active', 'inactive', 'expired', 'suspended', 'pending')",
             name="ck_members_status",
         ),
+        CheckConstraint("credit_balance_minor >= 0", name="ck_members_credit_balance_nonnegative"),
         Index("ix_members_member_number", "member_number", unique=True),
         Index("ix_members_full_name", "full_name"),
         Index("ix_members_phone", "phone"),
+        Index("ix_members_phone_key", "phone_key"),
         Index("ix_members_status", "status"),
     )
 
@@ -28,6 +30,8 @@ class Member(Base):
     full_name: Mapped[str] = mapped_column(String(160), nullable=False)
     preferred_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Digits of `phone`, set by the member service; shared numbers are allowed.
+    phone_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     emergency_contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -122,4 +126,3 @@ class MemberEligibilityRecord(Base):
         if self.valid_until is not None and self.valid_until < date.today():
             return False
         return True
-

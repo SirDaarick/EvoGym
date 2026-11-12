@@ -815,3 +815,101 @@ def test_first_restock_race_reuses_the_winning_initialization(tmp_path):
             assert get_on_hand_stock(session, branch_id=branch_id, product_id=product_id) == 5
     finally:
         engine.dispose()
+
+
+def test_waste_batch_is_atomic_idempotent_and_rejects_excess_stock(tmp_path):
+    from test_shifts import _seed_branch, _seed_receptionist, _setup_db
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        central_id = _seed_branch(factory, "central", "Central")
+        north_id = _seed_branch(factory, "north", "North")
+        staff_id, staff_token = _seed_receptionist(factory, central_id)
+        with factory.begin() as session:
+            water = create_product(session, code="water", name="Water", price_minor=2000, cost_minor=800,
+                                   initial_quantity=5, initial_branch_id=central_id, created_by=staff_id)
+            bar = create_product(session, code="bar", name="Protein Bar", price_minor=4000, cost_minor=2000,
+                                 initial_quantity=2, initial_branch_id=central_id, created_by=staff_id)
+            water_id, bar_id = str(water.id), str(bar.id)
+
+        app = create_app(configured_settings(url))
+        staff_headers = {"Authorization": f"Bearer {staff_token}"}
+        with TestClient(app) as client:
+            # 1. Blank reason or duplicate product fails validation (422)
+            assert client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-blank-reason"},
+                json={"items": [{"product_id": water_id, "quantity": 1}], "reason": "   "},
+            ).status_code == 422
+            assert client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-dup"},
+                json={"items": [{"product_id": water_id, "quantity": 1}, {"product_id": water_id, "quantity": 1}], "reason": "Dup"},
+            ).status_code == 422
+
+            # 2. If second item exceeds stock, entire batch fails (409) and first item stays untouched
+            atomic_fail = client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-atomic-fail"},
+                json={
+                    "items": [
+                        {"product_id": water_id, "quantity": 2},
+                        {"product_id": bar_id, "quantity": 99},
+                    ],
+                    "reason": "Caja dañada",
+                },
+            )
+            assert atomic_fail.status_code == 409
+            stock_before = {
+                item["product_id"]: item["quantity"]
+                for item in client.get(f"/api/v1/inventory/branches/{central_id}/stock", headers=staff_headers).json()["items"]
+            }
+            assert stock_before[water_id] == 5 and stock_before[bar_id] == 2
+
+            # 3. Valid multi-item waste returns 201 and decrements both items
+            payload = {
+                "items": [
+                    {"product_id": bar_id, "quantity": 1},
+                    {"product_id": water_id, "quantity": 2},
+                ],
+                "reason": "Botellas y barra dañadas en bodega",
+            }
+            created = client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-ok-1"},
+                json=payload,
+            )
+            assert created.status_code == 201, created.text
+            assert len(created.json()["items"]) == 2
+
+            # 4. Idempotent replay returns 200 without deducting again
+            replay = client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-ok-1"},
+                json=payload,
+            )
+            assert replay.status_code == 200
+            assert len(replay.json()["items"]) == 2
+
+            # 5. Reusing same key with different items/reason returns 409
+            conflict = client.post(
+                f"/api/v1/inventory/branches/{central_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-ok-1"},
+                json={"items": [{"product_id": water_id, "quantity": 1}], "reason": "Otro motivo"},
+            )
+            assert conflict.status_code == 409
+
+            stock_after = {
+                item["product_id"]: item["quantity"]
+                for item in client.get(f"/api/v1/inventory/branches/{central_id}/stock", headers=staff_headers).json()["items"]
+            }
+            assert stock_after[water_id] == 3 and stock_after[bar_id] == 1
+
+            # 6. Cross-branch waste is forbidden (403)
+            assert client.post(
+                f"/api/v1/inventory/branches/{north_id}/waste",
+                headers={**staff_headers, "Idempotency-Key": "batch-cross"},
+                json={"items": [{"product_id": water_id, "quantity": 1}], "reason": "No autorizado"},
+            ).status_code == 403
+    finally:
+        engine.dispose()

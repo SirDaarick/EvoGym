@@ -962,3 +962,19 @@ def test_create_app_includes_member_reads_router():
     assert "/api/v1/members/{member_id}/reload" in app.openapi()["paths"]
 
 
+
+
+def test_branch_today_uses_branch_local_date_not_utc(tmp_path):
+    from app.members.read_queries import branch_today
+
+    engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory)
+        with factory.begin() as session:
+            session.get(Branch, branch_id).timezone = "America/Mexico_City"
+        now = datetime(2026, 11, 8, 2, 0, tzinfo=timezone.utc)  # 20:00 on Nov 7 in Mexico City
+        with factory() as session:
+            assert branch_today(session, branch_id, now) == date(2026, 11, 7)
+            assert branch_today(session, uuid4(), now) == date(2026, 11, 8)  # unknown branch: UTC fallback
+    finally:
+        engine.dispose()

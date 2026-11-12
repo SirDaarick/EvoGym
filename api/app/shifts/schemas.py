@@ -1,5 +1,6 @@
 """DTOs and schemas for payment terminals, cash registers, and shifts."""
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_serializer, field_validator, model_validator
 
@@ -61,6 +62,8 @@ class CashRegisterDTO(BaseModel):
     default_terminal_id: str | None = None
     status: str
     has_open_shift: bool = False
+    last_closed_shift_id: str | None = None
+    expected_opening_cash_minor: int | None = None
     created_at: datetime | str
     updated_at: datetime | str
 
@@ -69,7 +72,7 @@ class CashRegisterDTO(BaseModel):
     def _coerce_uuid(cls, value: object) -> str:
         return str(value)
 
-    @field_validator("default_terminal_id", mode="before")
+    @field_validator("default_terminal_id", "last_closed_shift_id", mode="before")
     @classmethod
     def _coerce_optional_uuid(cls, value: object) -> str | None:
         return str(value) if value is not None else None
@@ -105,9 +108,13 @@ class ShiftDTO(BaseModel):
     inventory_review: "ShiftInventoryReviewDTO | None" = None
     expected_cash_at_close_minor: int | None = None
     current_expected_cash_minor: int | None = None
+    expected_opening_cash_minor: int | None = None
+    opening_difference_minor: int | None = None
     counted_cash_minor: int | None = None
     difference_minor: int | None = None
+    notes: str | None = None
     closing_notes: str | None = None
+    closing_draft: "ShiftCloseDraftDTO | None" = None
 
     @field_serializer("opened_at", "closed_at")
     def _serialize_timestamps(self, value: datetime | str | None) -> str | None:
@@ -138,6 +145,13 @@ class OpenShiftDTO(BaseModel):
     )
     inventory_snapshot_id: UUID
     inventory_observations: list["ShiftInventoryObservationInputDTO"] = Field(default_factory=list, max_length=10000)
+    notes: str | None = Field(None, max_length=500, description="Optional opening comment; required when opening cash differs from expected baseline.")
+    opening_notes: str | None = Field(None, max_length=500, description="Alias for notes.")
+
+    @field_validator("notes", "opening_notes")
+    @classmethod
+    def _normalize_opening_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
 
     @model_validator(mode="after")
     def _validate_opening_total(self) -> "OpenShiftDTO":
@@ -184,20 +198,63 @@ class ShiftClosingDenominationCountDTO(BaseModel):
     quantity: StrictInt = Field(..., ge=0, le=MAX_MINOR_UNITS)
 
 
+class ShiftCloseDraftInputDTO(BaseModel):
+    """Progressive cash-cut draft persisted while a shift stays open."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["denominations", "manual"] = "denominations"
+    entry_mode: Literal["units", "amount"] = "units"
+    denomination_counts: list[ShiftClosingDenominationCountDTO] = Field(
+        default_factory=list, max_length=64
+    )
+    manual_total: str = Field("", max_length=32)
+    closing_notes: str = Field("", max_length=500)
+
+    @field_validator("manual_total")
+    @classmethod
+    def _normalize_manual_total(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _validate_denominations(self) -> "ShiftCloseDraftInputDTO":
+        seen: set[int] = set()
+        for item in self.denomination_counts:
+            if item.denomination_minor in seen:
+                raise ValueError("Closing denomination counts cannot contain duplicates.")
+            seen.add(item.denomination_minor)
+        return self
+
+
+class ShiftCloseDraftDTO(ShiftCloseDraftInputDTO):
+    """Persisted progressive cash-cut draft returned with ShiftDTO."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    updated_at: datetime | str | None = None
+
+    @field_serializer("updated_at")
+    def _serialize_updated_at(self, value: datetime | str | None) -> str | None:
+        return _serialize_datetime(value)
+
+
 class CloseShiftDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     denomination_counts: list[ShiftClosingDenominationCountDTO] | None = Field(None, min_length=1, max_length=64)
     counted_cash_minor: StrictInt | None = Field(None, ge=0, le=MAX_MINOR_UNITS)
     closing_notes: str | None = Field(None, max_length=500)
+    notes: str | None = Field(None, max_length=500, description="Alias for closing_notes.")
 
-    @field_validator("closing_notes")
+    @field_validator("closing_notes", "notes")
     @classmethod
     def _normalize_closing_notes(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 
     @model_validator(mode="after")
     def _validate_counts(self) -> "CloseShiftDTO":
+        if self.closing_notes is None and self.notes is not None:
+            self.closing_notes = self.notes
         if (self.denomination_counts is None) == (self.counted_cash_minor is None):
             raise ValueError("Provide either denomination counts or an explicit counted cash total.")
         seen: set[int] = set()
@@ -229,6 +286,7 @@ class ShiftSummaryPaymentDTO(BaseModel):
     status: str
     amount_minor: int
     recorded_at: datetime | str
+    is_overtime: bool = False
 
     @field_serializer("recorded_at")
     def _serialize_recorded_at(self, value: datetime | str) -> str:

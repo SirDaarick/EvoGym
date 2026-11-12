@@ -23,6 +23,8 @@ afterAll(() => {
   HTMLDialogElement.prototype.close = originalClose;
 });
 beforeEach(() => {
+  offline.on = false;
+  offline.dispatch.mockClear();
   localStorage.clear();
   vi.stubGlobal('navigator', Object.create(window.navigator, { locks: { value: { request: async (_name: string, _options: unknown, callback: (lock: object) => Promise<void>) => callback({}) } } }));
 });
@@ -103,9 +105,10 @@ describe('ShiftCloseDialog', () => {
     await screen.findByRole('dialog', { name: 'Cerrar turno · Matutino' });
     await user.selectOptions(await screen.findByLabelText('Forma de conteo'), 'manual');
     await user.type(await screen.findByLabelText('Efectivo contado (MXN)'), '10');
+    await user.type(await screen.findByLabelText('Observaciones del cierre'), 'Ajuste de caja');
     await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/solicitud falló|revisa los datos/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/solicitud falló|revisa los datos|invalid close/i);
     expect(screen.getByRole('dialog', { name: 'Cerrar turno · Matutino' })).toHaveAttribute('open');
     expect(onSuccess).not.toHaveBeenCalled();
   });
@@ -264,6 +267,191 @@ describe('ShiftCloseDialog', () => {
     const saved = JSON.parse(localStorage.getItem('evogym.demo.operational.v1')!);
     expect(saved.drafts['demo-shift-01']['quantity-50000']).toBe('3');
     expect(saved.drafts['demo-shift-01']['amount-50000']).toBe('1500');
+  });
+
+  it('persists progressive close draft via PUT /close-draft while keeping the shift open', async () => {
+    const updatedShift = {
+      id: 'shift-draft-1',
+      status: 'open',
+      closing_draft: {
+        mode: 'manual',
+        entry_mode: 'units',
+        denomination_counts: [],
+        manual_total: '500',
+        closing_notes: 'Mitad de conteo',
+        updated_at: '2026-11-11T18:00:00Z',
+      },
+    };
+    const apiRequest = vi.fn(async () => new Response(JSON.stringify(updatedShift), { status: 200 }));
+    const onDraftSaved = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <ShiftCloseDialog
+        isOpen
+        shiftId="shift-draft-1"
+        shiftName="Matutino"
+        expectedCashMinor={50000}
+        apiRequest={apiRequest}
+        onDraftSaved={onDraftSaved}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+    await user.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
+    await user.type(screen.getByLabelText(/Observaciones del cierre/), 'Mitad de conteo');
+    await user.click(screen.getByRole('button', { name: 'Guardar avance' }));
+
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        '/api/v1/shifts/shift-draft-1/close-draft',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({
+            mode: 'manual',
+            entry_mode: 'units',
+            denomination_counts: [],
+            manual_total: '500',
+            closing_notes: 'Mitad de conteo',
+          }),
+        }),
+      ),
+    );
+    expect(onDraftSaved).toHaveBeenCalledWith(updatedShift);
+    expect(await screen.findByText('Avance guardado en el servidor. El turno sigue abierto y puedes seguir vendiendo.')).toBeInTheDocument();
+    const stored = JSON.parse(localStorage.getItem('evogym.shift.closeDraft.v1.shift-draft-1')!);
+    expect(stored.synced).toBe(true);
+    expect(stored.draft.manualTotal).toBe('500');
+  });
+
+  it('syncs dirty draft on Volver al turno and restores server draft against updated expected cash on reopen', async () => {
+    const serverDraft = {
+      mode: 'manual' as const,
+      entry_mode: 'units' as const,
+      denomination_counts: [],
+      manual_total: '500',
+      closing_notes: 'Avance turno',
+      updated_at: '2099-01-01T12:00:00Z',
+    };
+    const apiRequest = vi.fn(async () => new Response(JSON.stringify({ id: 'shift-draft-2', status: 'open', closing_draft: serverDraft }), { status: 200 }));
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+
+    const view = render(
+      <ShiftCloseDialog
+        isOpen
+        shiftId="shift-draft-2"
+        shiftName="Matutino"
+        expectedCashMinor={50000}
+        apiRequest={apiRequest}
+        onClose={onClose}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+    await user.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
+    await user.type(screen.getByLabelText(/Observaciones del cierre/), 'Avance turno');
+    await user.click(screen.getByRole('button', { name: 'Volver al turno' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/v1/shifts/shift-draft-2/close-draft', expect.objectContaining({ method: 'PUT' })));
+
+    view.unmount();
+
+    render(
+      <ShiftCloseDialog
+        isOpen
+        shiftId="shift-draft-2"
+        shiftName="Matutino"
+        expectedCashMinor={75000}
+        initialDraft={serverDraft}
+        apiRequest={apiRequest}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Efectivo contado (MXN)')).toHaveValue('500');
+    expect(screen.getByLabelText(/Observaciones del cierre/)).toHaveValue('Avance turno');
+    expect(screen.getByText('$750.00 MXN')).toBeInTheDocument();
+    expect(screen.getByText('-$250.00 MXN')).toBeInTheDocument();
+  });
+
+  it('saves close draft locally when offline and clears local draft after offline arqueo_close', async () => {
+    offline.on = true;
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
+    try {
+      render(
+        <ShiftCloseDialog
+          isOpen
+          shiftId="shift-off-1"
+          shiftName="Matutino"
+          expectedCashMinor={50000}
+          apiRequest={vi.fn()}
+          onClose={vi.fn()}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      await user.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+      await user.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
+      await user.click(screen.getByRole('button', { name: 'Guardar avance' }));
+
+      expect(await screen.findByText('Avance guardado en este navegador (sin conexión). El turno sigue abierto.')).toBeInTheDocument();
+      const stored = JSON.parse(localStorage.getItem('evogym.shift.closeDraft.v1.shift-off-1')!);
+      expect(stored.synced).toBe(false);
+      expect(stored.draft.manualTotal).toBe('500');
+
+      await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+      await user.click(screen.getByRole('button', { name: 'Confirmar cierre' }));
+
+      await waitFor(() => expect(offline.dispatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'shift.arqueo_close' }), 'offline-staff'));
+      expect(localStorage.getItem('evogym.shift.closeDraft.v1.shift-off-1')).toBeNull();
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    } finally {
+      offline.on = false;
+    }
+  });
+
+  it('cancels review and notifies cashier when expectedCashMinor updates mid-review', async () => {
+    const user = userEvent.setup();
+    const apiRequest = vi.fn();
+    const { rerender } = render(
+      <ShiftCloseDialog
+        isOpen
+        shiftId="shift-live-rev"
+        shiftName="Matutino"
+        expectedCashMinor={50000}
+        apiRequest={apiRequest}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Forma de conteo'), 'manual');
+    await user.type(screen.getByLabelText('Efectivo contado (MXN)'), '500');
+    await user.click(screen.getByRole('button', { name: 'Revisar cierre' }));
+    expect(screen.getByRole('button', { name: 'Confirmar cierre' })).toBeInTheDocument();
+
+    rerender(
+      <ShiftCloseDialog
+        isOpen
+        shiftId="shift-live-rev"
+        shiftName="Matutino"
+        expectedCashMinor={65000}
+        apiRequest={apiRequest}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar cierre' })).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Revisar cierre' })).toBeInTheDocument();
+    expect(screen.getByText('El efectivo esperado se actualizó con nuevos movimientos; verifica tu conteo antes de confirmar.')).toBeInTheDocument();
   });
 });
 

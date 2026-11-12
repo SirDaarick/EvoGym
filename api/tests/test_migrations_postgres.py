@@ -7,6 +7,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 
 
 API_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -61,6 +62,94 @@ def _version_width(engine, schema: str) -> int:
             ),
             {"schema": schema},
         ).scalar_one()
+
+
+def _seed_card_payment_orders(connection, count):
+    branch, staff, register, shift = (uuid4() for _ in range(4))
+    connection.execute(text("insert into branches (id, code, name) values (:id, 'intent-proof', 'Intent Proof')"), {"id": branch})
+    connection.execute(text("insert into staff_users (id, login_identifier) values (:id, 'intent-proof@example.invalid')"), {"id": staff})
+    connection.execute(text("insert into cash_registers (id, branch_id, code, name) values (:id, :branch, 'intent-proof', 'Proof')"), {"id": register, "branch": branch})
+    connection.execute(text("insert into shifts (id, cash_register_id, opened_by, opening_cash_minor) values (:id, :register, :staff, 0)"), {"id": shift, "register": register, "staff": staff})
+    orders = [uuid4() for _ in range(count)]
+    for index, order in enumerate(orders):
+        connection.execute(text("insert into orders (id, branch_id, register_id, shift_id, seller_id, order_kind, idempotency_key, request_fingerprint, total_minor) values (:id, :branch, :register, :shift, :staff, 'product', :key, :fingerprint, 100)"), {"id": order, "branch": branch, "register": register, "shift": shift, "staff": staff, "key": f"intent-proof-{index}", "fingerprint": "a" * 64})
+    return staff, orders
+
+
+def _insert_card_payment(connection, order, staff, intent):
+    connection.execute(text("insert into payments (id, order_id, method, status, amount_minor, received_by, mp_payment_intent_id) values (:id, :order, 'card', 'confirmed', 100, :staff, :intent)"), {"id": uuid4(), "order": order, "staff": staff, "intent": intent})
+
+
+def test_postgresql_0064_duplicate_payments_abort_without_data_loss(postgres_migration_target):
+    url, _ = postgres_migration_target
+    config = _config()
+    command.upgrade(config, "0063_member_credit_nonnegative")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            staff, orders = _seed_card_payment_orders(connection, 2)
+            for order in orders:
+                _insert_card_payment(connection, order, staff, "duplicated-intent")
+        with pytest.raises(RuntimeError, match="Resolve payments sharing a card intent"):
+            command.upgrade(config, "0064_unique_card_intent")
+        with engine.connect() as connection:
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0063_member_credit_nonnegative"
+            assert connection.execute(text("select count(*) from payments where mp_payment_intent_id = 'duplicated-intent'")).scalar_one() == 2
+            assert connection.execute(text("select to_regclass('ux_payments_mp_payment_intent_id')")).scalar_one() is None
+    finally:
+        engine.dispose()
+
+
+def test_postgresql_0064_unique_nonnull_intent_and_multiple_nulls(postgres_migration_target):
+    url, _ = postgres_migration_target
+    config = _config()
+    command.upgrade(config, "0064_unique_card_intent")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            staff, orders = _seed_card_payment_orders(connection, 4)
+            _insert_card_payment(connection, orders[0], staff, "unique-intent")
+            _insert_card_payment(connection, orders[1], staff, None)
+            _insert_card_payment(connection, orders[2], staff, None)
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                _insert_card_payment(connection, orders[3], staff, "unique-intent")
+        with engine.connect() as connection:
+            assert connection.execute(text("select count(*) from payments")).scalar_one() == 3
+            assert connection.execute(text("select count(*) from payments where mp_payment_intent_id is null")).scalar_one() == 2
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("legacy_unique", [True, False])
+def test_postgresql_0065_allows_shared_phone_without_removing_members(postgres_migration_target, legacy_unique):
+    url, _ = postgres_migration_target
+    config = _config()
+    command.upgrade(config, "0064_unique_card_intent")
+    engine = create_engine(url)
+    member_a, member_b = uuid4(), uuid4()
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("insert into members (id, member_number, full_name, phone, phone_key) values (:id, :number, :name, :phone, :key)"), [
+                {"id": member_a, "number": "SOC-PROOF-A", "name": "Member A", "phone": "5550001", "key": "5550001"},
+                {"id": member_b, "number": "SOC-PROOF-B", "name": "Member B", "phone": "5550002", "key": "5550002" if legacy_unique else "5550001"},
+            ])
+            if legacy_unique:
+                connection.execute(text("drop index ix_members_phone_key"))
+                connection.execute(text("create unique index ux_members_phone_key on members (phone_key)"))
+        command.upgrade(config, "0065_shared_member_phones")
+        with engine.begin() as connection:
+            connection.execute(text("update members set phone_key='5550001' where id=:id"), {"id": member_b})
+            assert connection.execute(text("select count(*) from members where phone_key='5550001'")).scalar_one() == 2
+            assert connection.execute(text("select to_regclass('ux_members_phone_key')")).scalar_one() is None
+            assert connection.execute(text("select to_regclass('ix_members_phone_key')")).scalar_one() is not None
+        command.downgrade(config, "0064_unique_card_intent")
+        with engine.connect() as connection:
+            assert connection.execute(text("select count(*) from members where phone_key='5550001'")).scalar_one() == 2
+            assert connection.execute(text("select to_regclass('ix_members_phone_key')")).scalar_one() is not None
+            assert connection.execute(text("select version_num from alembic_version")).scalar_one() == "0064_unique_card_intent"
+    finally:
+        engine.dispose()
 
 
 def test_postgresql_fresh_full_upgrade_and_repeated_head_preserve_inventory_rows(postgres_migration_target):

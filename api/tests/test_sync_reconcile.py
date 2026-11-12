@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.api.deps import get_session, get_session_factory
@@ -181,6 +181,49 @@ def _bootstrap(client, branch_id):
     return data["token"], data["device_prefix"]
 
 
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_offline_check_in_reuses_uncertain_online_request_key(recon_env, confirmed):
+    from hashlib import sha256
+    from sqlalchemy import func, select
+    from app.db.models.member_check_ins import MemberCheckIn
+    from app.memberships.service import apply_member_check_in
+
+    client, factory = recon_env["client"], recon_env["factory"]
+    branch, period, staff = recon_env["branch_id"], recon_env["period_id"], recon_env["staff_id"]
+    key = "checkin-uncertain"
+    now = datetime.now(timezone.utc)
+    fingerprint = sha256((f"{branch}\n{period}\n{staff}" + ("\nconfirmed" if confirmed else "")).encode()).hexdigest()
+    with factory.begin() as session:
+        original = apply_member_check_in(session, branch_id=branch, period_id=period, actor_id=staff,
+                                         occurred_at=now, idempotency_key=key,
+                                         request_fingerprint=fingerprint, enforce_access=False,
+                                         confirm_outstanding_balance=confirmed)
+        original_id = original.check_in.id
+
+    token, prefix = _bootstrap(client, branch)
+    payload = {"member_id": str(recon_env["m1_id"]), "period_id": str(period), "branch_id": str(branch),
+               "local_access_decision": "valid", "online_idempotency_key": key,
+               "confirm_outstanding_balance": confirmed}
+    event = {"event_id": f"{prefix}-00001", "seq": 1, "event_type": "attendance.check_in", "schema_version": 1,
+             "actor_staff_id": str(staff), "payload": payload, "payload_hash": payload_hash(payload),
+             "client_recorded_at": now.isoformat(), "clock_anchor_utc": now.isoformat(), "clock_monotonic_delta_ms": 0}
+    response = client.post("/api/v1/sync/contingency-events", json={"events": [event]}, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["ingested"][0]["status"] == "accepted"
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
+        assert session.scalar(select(MemberCheckIn.id)) == original_id
+
+    changed_payload = {**payload, "period_id": str(uuid4())}
+    changed_event = {**event, "event_id": f"{prefix}-00002", "seq": 2,
+                     "payload": changed_payload, "payload_hash": payload_hash(changed_payload)}
+    rejected = client.post("/api/v1/sync/contingency-events", json={"events": [changed_event]}, headers={"Authorization": f"Bearer {token}"})
+    assert rejected.status_code == 409
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
+        assert session.scalar(select(MemberCheckIn.id)) == original_id
+
+
 def test_reconcile_attendance_denied_on_sync_flags_audit(recon_env):
     client = recon_env["client"]
     branch_id = recon_env["branch_id"]
@@ -220,6 +263,13 @@ def test_reconcile_attendance_denied_on_sync_flags_audit(recon_env):
     data = res.json()["ingested"][0]
     assert data["status"] == "flagged_audit"
     assert data["reason_code"] == "entitlement_denied_on_sync"
+    replay = client.post("/api/v1/sync/contingency-events", json={"events": [ev]}, headers={"Authorization": f"Bearer {token}"})
+    assert replay.status_code == 200
+    assert replay.json()["ingested"][0]["status"] == "flagged_audit"
+    from sqlalchemy import func, select
+    from app.db.models.member_check_ins import MemberCheckIn
+    with recon_env["factory"]() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
 
     # Verify audit flag in API
     flags_res = client.get(
@@ -247,6 +297,23 @@ def test_reconcile_attendance_denied_on_sync_flags_audit(recon_env):
     )
     assert flags_res2.status_code == 200
     assert len(flags_res2.json()) == 0
+
+
+def test_offline_confirmed_checkin_preserves_confirmation_on_replay(recon_env):
+    from sqlalchemy import select
+    from app.db.models.member_check_ins import MemberCheckIn
+    client, branch = recon_env["client"], recon_env["branch_id"]
+    token, prefix = _bootstrap(client, branch)
+    payload = {"member_id": str(recon_env["m1_id"]), "period_id": str(recon_env["period_id"]),
+               "branch_id": str(branch), "local_access_decision": "valid_with_outstanding_balance",
+               "confirm_outstanding_balance": True}
+    first = _post_event(recon_env, token, prefix, 1, "attendance.check_in", payload)
+    second = _post_event(recon_env, token, prefix, 1, "attendance.check_in", payload)
+    assert first["status"] == second["status"] == "flagged_audit"
+    with recon_env["factory"]() as session:
+        entries = session.scalars(select(MemberCheckIn)).all()
+        assert len(entries) == 1
+        assert "outstanding_balance_confirmed" in entries[0].access_warnings
 
 
 def test_reconcile_shift_open_and_close_with_discrepancy(recon_env):
@@ -409,3 +476,249 @@ def test_arqueo_close_of_an_already_closed_shift_is_flagged_and_does_not_block_t
     # The device watermark advanced, so the next event is accepted in sequence.
     open_payload = {"register_id": str(recon_env["reg_id"]), "opening_cash_minor": 0, "denomination_counts": []}
     assert _post_event(recon_env, token, prefix, 2, "shift.open", open_payload)["status"] == "accepted"
+
+
+def test_reconcile_offline_check_in_with_debt_when_confirmed(recon_env):
+    from app.db.models import Payment
+    from app.db.models.member_check_ins import MemberCheckIn
+    from app.db.models.membership_debts import MembershipDebt
+    from app.db.models.memberships import MembershipPeriod
+    from sqlalchemy import func, select
+
+    client, factory = recon_env["client"], recon_env["factory"]
+    branch_id, staff_id = recon_env["branch_id"], recon_env["staff_id"]
+    m1_id, period_id = recon_env["m1_id"], recon_env["period_id"]
+
+    today = datetime.now(timezone.utc).date()
+    with factory.begin() as session:
+        period = session.get(MembershipPeriod, period_id)
+        period.starts_on = today - timedelta(days=5)
+        period.ends_on = today + timedelta(days=25)
+        order_id = session.scalar(select(Order.id).where(Order.member_id == m1_id))
+        session.add(Payment(order_id=order_id, method="cash", amount_minor=35000, status="confirmed", received_by=staff_id))
+        debt = MembershipDebt(
+            order_id=order_id,
+            member_id=m1_id,
+            initial_outstanding_minor=15000,
+        )
+        session.add(debt)
+
+    token, prefix = _bootstrap(client, branch_id)
+    payload = {
+        "member_id": str(m1_id),
+        "period_id": str(period_id),
+        "branch_id": str(branch_id),
+        "local_access_decision": "valid_with_outstanding_balance",
+        "confirm_outstanding_balance": True,
+    }
+    ingested = _post_event(recon_env, token, prefix, 1, "attendance.check_in", payload)
+    assert ingested["status"] == "accepted"
+    assert ingested["reason_code"] is None
+
+    with factory() as session:
+        check_ins = session.scalars(select(MemberCheckIn).where(MemberCheckIn.member_id == m1_id)).all()
+        assert len(check_ins) == 1
+        assert check_ins[0].access_reason == "valid_with_outstanding_balance"
+        assert "outstanding_balance" in check_ins[0].access_warnings
+        assert "outstanding_balance_confirmed" in check_ins[0].access_warnings
+
+    replayed = _post_event(recon_env, token, prefix, 1, "attendance.check_in", payload)
+    assert replayed["status"] == "accepted"
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
+
+
+def test_reconcile_offline_check_in_with_debt_when_unconfirmed_omits_confirmation_marker(recon_env):
+    from app.db.models import Payment
+    from app.db.models.member_check_ins import MemberCheckIn
+    from app.db.models.membership_debts import MembershipDebt
+    from app.db.models.memberships import MembershipPeriod
+    from sqlalchemy import select
+
+    client, factory = recon_env["client"], recon_env["factory"]
+    branch_id, staff_id = recon_env["branch_id"], recon_env["staff_id"]
+    m1_id, period_id = recon_env["m1_id"], recon_env["period_id"]
+
+    today = datetime.now(timezone.utc).date()
+    with factory.begin() as session:
+        period = session.get(MembershipPeriod, period_id)
+        period.starts_on = today - timedelta(days=5)
+        period.ends_on = today + timedelta(days=25)
+        order_id = session.scalar(select(Order.id).where(Order.member_id == m1_id))
+        session.add(Payment(order_id=order_id, method="cash", amount_minor=35000, status="confirmed", received_by=staff_id))
+        debt = MembershipDebt(
+            order_id=order_id,
+            member_id=m1_id,
+            initial_outstanding_minor=15000,
+        )
+        session.add(debt)
+
+    token, prefix = _bootstrap(client, branch_id)
+    # Stale local cache: check-in recorded offline without debt confirmation
+    payload = {
+        "member_id": str(m1_id),
+        "period_id": str(period_id),
+        "branch_id": str(branch_id),
+        "local_access_decision": "valid",
+        "confirm_outstanding_balance": False,
+    }
+    ingested = _post_event(recon_env, token, prefix, 1, "attendance.check_in", payload)
+    assert ingested["status"] == "accepted"
+    assert ingested["reason_code"] is None
+
+    with factory() as session:
+        check_ins = session.scalars(select(MemberCheckIn).where(MemberCheckIn.member_id == m1_id)).all()
+        assert len(check_ins) == 1
+        assert check_ins[0].access_reason == "valid_with_outstanding_balance"
+        assert "outstanding_balance" in check_ins[0].access_warnings
+        # S2 requirement: confirmation marker is ONLY set when reception explicitly confirmed
+        assert "outstanding_balance_confirmed" not in check_ins[0].access_warnings
+
+
+def test_reconcile_offline_check_in_with_debt_uncertain_online_replay(recon_env):
+    from hashlib import sha256
+    from app.db.models import Payment
+    from app.db.models.member_check_ins import MemberCheckIn
+    from app.db.models.membership_debts import MembershipDebt
+    from app.db.models.memberships import MembershipPeriod
+    from app.memberships.service import apply_member_check_in
+    from sqlalchemy import func, select
+
+    client, factory = recon_env["client"], recon_env["factory"]
+    branch_id, staff_id = recon_env["branch_id"], recon_env["staff_id"]
+    m1_id, period_id = recon_env["m1_id"], recon_env["period_id"]
+
+    today = datetime.now(timezone.utc).date()
+    with factory.begin() as session:
+        period = session.get(MembershipPeriod, period_id)
+        period.starts_on = today - timedelta(days=2)
+        period.ends_on = today + timedelta(days=28)
+        order_id = session.scalar(select(Order.id).where(Order.member_id == m1_id))
+        session.add(Payment(order_id=order_id, method="cash", amount_minor=30000, status="confirmed", received_by=staff_id))
+        debt = MembershipDebt(
+            order_id=order_id,
+            member_id=m1_id,
+            initial_outstanding_minor=20000,
+        )
+        session.add(debt)
+
+    # 1. An uncertain online check-in reached server with confirm_outstanding_balance=True
+    key = "uncertain-debt-checkin"
+    now = datetime.now(timezone.utc)
+    fingerprint = sha256(f"{branch_id}\n{period_id}\n{staff_id}\nconfirmed".encode()).hexdigest()
+    with factory.begin() as session:
+        original = apply_member_check_in(
+            session,
+            branch_id=branch_id,
+            period_id=period_id,
+            actor_id=staff_id,
+            occurred_at=now,
+            idempotency_key=key,
+            request_fingerprint=fingerprint,
+            enforce_access=True,
+            confirm_outstanding_balance=True,
+        )
+        original_checkin_id = original.check_in.id
+
+    token, prefix = _bootstrap(client, branch_id)
+    # 2. Offline contingency event replays with the same key and confirmed=True
+    payload = {
+        "member_id": str(m1_id),
+        "period_id": str(period_id),
+        "branch_id": str(branch_id),
+        "local_access_decision": "valid_with_outstanding_balance",
+        "online_idempotency_key": key,
+        "confirm_outstanding_balance": True,
+    }
+    event = {
+        "event_id": f"{prefix}-00001",
+        "seq": 1,
+        "event_type": "attendance.check_in",
+        "schema_version": 1,
+        "actor_staff_id": str(staff_id),
+        "payload": payload,
+        "payload_hash": payload_hash(payload),
+        "client_recorded_at": now.isoformat(),
+        "clock_anchor_utc": now.isoformat(),
+        "clock_monotonic_delta_ms": 0,
+    }
+    response = client.post("/api/v1/sync/contingency-events", json={"events": [event]}, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["ingested"][0]["status"] == "accepted"
+
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
+        checkin = session.scalar(select(MemberCheckIn).where(MemberCheckIn.id == original_checkin_id))
+        assert "outstanding_balance" in checkin.access_warnings
+        assert "outstanding_balance_confirmed" in checkin.access_warnings
+
+    # 3. If offline event contradicts online confirmation state, it produces a 409 conflict
+    conflicting_payload = {**payload, "confirm_outstanding_balance": False}
+    conflicting_event = {
+        **event,
+        "event_id": f"{prefix}-00002",
+        "seq": 2,
+        "payload": conflicting_payload,
+        "payload_hash": payload_hash(conflicting_payload),
+    }
+    conflict_res = client.post("/api/v1/sync/contingency-events", json={"events": [conflicting_event]}, headers={"Authorization": f"Bearer {token}"})
+    assert conflict_res.status_code == 409
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(MemberCheckIn)) == 1
+
+def test_arqueo_close_of_an_already_closed_shift_identical_replay_is_accepted_without_flag(recon_env):
+    token, prefix = _bootstrap(recon_env["client"], recon_env["branch_id"])
+    with recon_env["factory"].begin() as session:
+        shift = Shift(
+            cash_register_id=recon_env["reg_id"],
+            opened_by=recon_env["staff_id"],
+            status="open",
+            opened_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            opening_cash_minor=10000,
+        )
+        session.add(shift)
+        session.flush()
+        shift_id = shift.id
+
+    close_payload = {
+        "shift_ref": str(shift_id),
+        "denomination_counts": [{"denomination_minor": 5000, "quantity": 2}],
+        "voucher_count": 0,
+        "closing_notes": "Identical close notes",
+    }
+    # Initial close: closes the shift cleanly
+    first = _post_event(recon_env, token, prefix, 1, "shift.arqueo_close", close_payload)
+    assert first["status"] == "accepted"
+
+    with recon_env["factory"]() as session:
+        closed_shift = session.get(Shift, shift_id)
+        assert closed_shift.status == "closed"
+        assert closed_shift.counted_cash_minor == 10000
+        flags = session.scalars(select(SyncAuditFlag).where(SyncAuditFlag.shift_id == shift_id)).all()
+        assert len(flags) == 0
+
+    # Resend identical close from another event_id (retry of the close):
+    # D-A8: Identical retry on an already-closed shift is accepted without raising an AuditFlag
+    retry = _post_event(recon_env, token, prefix, 2, "shift.arqueo_close", close_payload)
+    assert retry["status"] == "accepted"
+    assert retry.get("reason_code") is None
+
+    with recon_env["factory"]() as session:
+        flags = session.scalars(select(SyncAuditFlag).where(SyncAuditFlag.shift_id == shift_id)).all()
+        assert len(flags) == 0
+
+    # Differing close payload for the same closed shift: must be flagged for review!
+    diff_payload = {
+        "shift_ref": str(shift_id),
+        "denomination_counts": [{"denomination_minor": 5000, "quantity": 3}],
+        "voucher_count": 0,
+        "closing_notes": "Different count",
+    }
+    different = _post_event(recon_env, token, prefix, 3, "shift.arqueo_close", diff_payload)
+    assert (different["status"], different["reason_code"]) == ("flagged_audit", "orphan_shift_reference")
+
+    with recon_env["factory"]() as session:
+        flags = session.scalars(select(SyncAuditFlag).where(SyncAuditFlag.shift_id == shift_id)).all()
+        assert len(flags) == 1
+        assert flags[0].kind == "orphan_shift_reference"
+

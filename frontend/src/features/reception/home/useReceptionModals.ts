@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export type ModalKey = 'devoluciones' | 'guantes' | 'casilleros' | 'extra' | 'gasto' | 'suplementos';
+export type ModalKey = 'devoluciones' | 'merma' | 'guantes' | 'casilleros' | 'extra' | 'gasto' | 'suplementos';
 
 /** At most one reception modal is open at a time. */
 export function useReceptionModals() {

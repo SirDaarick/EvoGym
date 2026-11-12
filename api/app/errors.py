@@ -11,8 +11,8 @@ from app.observability.logging import request_id
 
 
 DomainCode = Literal[
-    "membership_access_denied", "class_sample_already_used", "class_sample_payment_unavailable",
-    "class_sample_payment_not_received", "wrong_branch",
+    "membership_access_denied", "debt_confirmation_required", "class_sample_already_used", "class_sample_payment_unavailable",
+    "class_sample_payment_not_received", "wrong_branch", "member_phone_exists",
     "sync_device_revoked", "sync_device_expired", "sync_snapshot_required", "sync_batch_too_large",
 ]
 
@@ -157,10 +157,12 @@ class ValidationErrorResponse(BaseModel):
 _STATUS_OVERRIDES = {"sync_device_revoked": 401, "sync_device_expired": 401, "sync_batch_too_large": 413}
 _PUBLIC_MESSAGES = {
     "membership_access_denied": "Membership access was denied.",
+    "debt_confirmation_required": "Confirm entry despite the outstanding balance.",
     "class_sample_already_used": "The class sample has already been used.",
     "class_sample_payment_unavailable": "The class sample payment is unavailable.",
     "class_sample_payment_not_received": "The class sample payment has not been received.",
     "wrong_branch": "The entitlement belongs to another branch.",
+    "member_phone_exists": "Another member already uses this phone number.",
     "sync_device_revoked": "The device was revoked; sync again from a session with internet access.",
     "sync_device_expired": "The device authorization expired; sync again with internet access.",
     "sync_snapshot_required": "A full data download (bootstrap) is required before continuing.",

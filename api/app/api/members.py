@@ -86,17 +86,34 @@ Principal = Annotated[MemberActorPrincipal, Depends(get_member_actor_principal)]
 @router.get("", response_model=MemberListResponseDTO)
 def list_members_endpoint(
     principal: Principal,
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    search: str | None = Query(None, max_length=100),
-    status: str | None = Query(None, max_length=24),
-    sort_by: str = Query("full_name", pattern="^(full_name|joined_on|member_number)$"),
-    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
-    *, factory: SessionFactoryDep,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    status: Annotated[str | None, Query(max_length=24)] = None,
+    membership_status: Annotated[
+        str | None,
+        Query(pattern="^(active|expired|inactive|suspended|pending)$"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Query(pattern="^(full_name|joined_on|member_number|phone|membership_status|membership_ends_on)$"),
+    ] = "full_name",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+    *,
+    factory: SessionFactoryDep,
 ) -> MemberListResponseDTO:
     """List members with pagination, optional search, status filtering, and sorting."""
-    return service.list_members(factory, page=page, limit=limit, search=search, status=status,
-                                sort_by=sort_by, sort_dir=sort_dir)
+    return service.list_members(
+        factory,
+        principal=principal,
+        page=page,
+        limit=limit,
+        search=search,
+        status=status,
+        membership_status=membership_status,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
 
 
 @router.post("", response_model=MemberDetailDTO, status_code=201)

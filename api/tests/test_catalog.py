@@ -549,3 +549,22 @@ def test_plan_status_patch_is_admin_only_and_preserves_versions(tmp_path):
             assert len(client.get(detail, headers=admin_headers).json()["versions"]) == 1
     finally:
         engine.dispose()
+
+def test_eligibility_filter_matches_only_the_current_version(tmp_path):
+    from app.catalog.queries import publish_plan_version
+    _url, engine, factory = _setup_db(tmp_path)
+    try:
+        with factory() as session:
+            svc = create_service(session, code="gym", name="Gym Area")
+            session.commit()
+            terms = dict(price_minor=45000, duration_value=1, duration_unit="month",
+                         services=[PlanVersionServiceCreateDTO(service_id=str(svc.id))])
+            plan = create_plan(session, code="gym_student", name="Gym", initial_version=PublishPlanVersionDTO(
+                name="Student v1", eligibility_type="student", **terms))
+            session.commit()
+            assert [p.code for p in list_plans(session, eligibility_type="student")] == ["gym_student"]
+            publish_plan_version(session, plan.id, PublishPlanVersionDTO(name="General v2", eligibility_type=None, **terms))
+            session.commit()
+            assert list_plans(session, eligibility_type="student") == []
+    finally:
+        engine.dispose()

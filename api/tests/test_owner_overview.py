@@ -569,3 +569,169 @@ def test_owner_overview_without_branch_id_uses_first_branch_by_name_and_reports_
             assert client.get(f"/api/v1/owner/overview?branch_id={beta}", headers=headers).json()["period"]["branch_id"] == str(beta)
     finally:
         engine.dispose()
+
+
+
+def test_owner_overview_and_alerts_include_inventory_waste(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory)
+        actor, reception_token = _seed_receptionist(factory, branch)
+        seed_admin(factory)
+        with factory.begin() as session:
+            product = create_product(
+                session, name="Electrolitos", created_by=actor,
+                price_minor=3500, cost_minor=1800, initial_quantity=10, initial_branch_id=branch,
+            )
+            product_id = str(product.id)
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            waste_res = client.post(
+                f"/api/v1/inventory/branches/{branch}/waste",
+                headers={"Authorization": f"Bearer {reception_token}", "Idempotency-Key": "waste-alert-1"},
+                json={"items": [{"product_id": product_id, "quantity": 2}], "reason": "Envase roto en recepción"},
+            )
+            assert waste_res.status_code == 201, waste_res.text
+
+            headers = approved_admin_headers(client, delivery)
+            alerts_res = client.get(f"/api/v1/owner/overview/alerts?branch_id={branch}", headers=headers)
+            assert alerts_res.status_code == 200, alerts_res.text
+            alerts_body = alerts_res.json()
+            assert alerts_body["inventory_waste_count"] == 1
+            waste_alerts = [a for a in alerts_body["alerts"] if a["category"] == "inventory_waste"]
+            assert len(waste_alerts) == 1
+            alert = waste_alerts[0]
+            assert alert["product_name"] == "Electrolitos"
+            assert alert["quantity"] == 2
+            assert alert["unit_cost_minor"] == 1800
+            assert alert["total_cost_minor"] == 3600
+            assert alert["reason"] == "Envase roto en recepción"
+            assert alert["recorded_by_name"]
+
+            overview_res = client.get(f"/api/v1/owner/overview?branch_id={branch}", headers=headers)
+            assert overview_res.status_code == 200, overview_res.text
+            overview_body = overview_res.json()
+            assert {"category": "Mermas de inventario", "count": 1} in overview_body["alerts"]["category_counts"]
+    finally:
+        engine.dispose()
+
+
+def test_owner_alerts_include_sales_pending_payments_transfers_refunds_and_branch_scope(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch = _seed_branch(factory)
+        other = _seed_branch(factory, "other-sales-alerts", "Sucursal Norte")
+        actor, _ = _seed_receptionist(factory, branch)
+        other_actor, _ = _seed_receptionist(factory, other, "other-sales-seller")
+        seed_admin(factory)
+        with factory.begin() as session:
+            member = Member(member_number="MEM-SALES-1", full_name="Ana Perez", phone="5550199")
+            plan = Plan(code="sales-alert-plan", name="Plan Mensual", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id, version_number=1, name="Mensualidad Base",
+                price_minor=12000, currency="MXN", duration_value=1, duration_unit="month", is_active=True,
+            )
+            session.add(version)
+            product = create_product(
+                session, name="Proteina Whey", created_by=actor,
+                price_minor=10000, cost_minor=6000, initial_quantity=10, initial_branch_id=branch,
+            )
+            register = create_cash_register(session, branch, "sales-alert-reg", "Caja Ventas")
+            open_shift(session, register_id=register.id, opened_by=actor,
+                       denomination_counts=[{"denomination_minor": 100, "quantity": 0}])
+
+            # 1. Partial product sale with subsequent debt payment (remains open: 10000 - 4000 - 1000 = 5000)
+            debt_order, _ = post_cash_product_sale(
+                session, register_id=register.id, actor_id=actor, member_id=member.id,
+                items=[ProductCartLineRequest(product_id=product.id, quantity=1)],
+                expected_total_minor=10000, idempotency_key="sales-alert-partial",
+                cash_amount_minor=4000, cash_amount_provided=True,
+            )
+            post_membership_debt_payment(
+                session, register_id=register.id, actor_id=actor, authorized_branch_id=branch,
+                order_id=debt_order.id, amount_minor=1000, idempotency_key="sales-alert-partial-pay",
+            )
+
+            # 2. Fully settled debt sale (must NOT appear as pending_payment)
+            settled_order, _ = post_cash_product_sale(
+                session, register_id=register.id, actor_id=actor, member_id=member.id,
+                items=[ProductCartLineRequest(product_id=product.id, quantity=1)],
+                expected_total_minor=10000, idempotency_key="sales-alert-settled",
+                cash_amount_minor=5000, cash_amount_provided=True,
+            )
+            post_membership_debt_payment(
+                session, register_id=register.id, actor_id=actor, authorized_branch_id=branch,
+                order_id=settled_order.id, amount_minor=5000, idempotency_key="sales-alert-settled-pay",
+            )
+
+            # 3. Full sale followed by product return (product_refund)
+            refund_order, _ = post_cash_product_sale(
+                session, register_id=register.id, actor_id=actor, member_id=member.id,
+                items=[ProductCartLineRequest(product_id=product.id, quantity=1)],
+                expected_total_minor=10000, idempotency_key="sales-alert-refundable",
+                cash_amount_minor=10000, cash_amount_provided=True,
+            )
+            post_product_return(
+                session, register_id=register.id, actor_id=actor,
+                order_item_id=refund_order.items[0].id,
+                reason="Producto abierto", disposition="restock", payout_method="cash",
+                idempotency_key="sales-alert-refund-1",
+            )
+
+            # 4. Membership sale with pending transfer
+            post_membership_cash_sale(
+                session, register_id=register.id, actor_id=actor, authorized_branch_id=branch,
+                member_id=member.id, plan_version_id=version.id,
+                idempotency_key="sales-alert-transfer", payment_method="transfer",
+            )
+
+            # 5. Cancelled product sale in another branch (tests branch_id scoping)
+            session.add(ProductSaleCancellation(
+                seller_id=other_actor, branch_id=other,
+                idempotency_key="other-branch-cancel", request_fingerprint="f" * 64,
+            ))
+
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            headers = approved_admin_headers(client, delivery)
+            res = client.get(f"/api/v1/owner/overview/alerts?branch_id={branch}", headers=headers)
+            assert res.status_code == 200, res.text
+            body = res.json()
+            assert body["sales_count"] == 3
+            sales = [a for a in body["alerts"] if a["category"] == "sales"]
+            assert len(sales) == 3
+
+            by_subtype = {a["subtype"]: a for a in sales}
+            assert set(by_subtype) == {"pending_payment", "product_refund", "pending_transfer"}
+
+            debt = by_subtype["pending_payment"]
+            assert debt["amount_minor"] == 5000
+            assert debt["total_minor"] == 10000
+            assert debt["paid_minor"] == 5000
+            assert debt["member_name"] == "Ana Perez"
+            assert debt["order_kind"] == "product"
+            assert "Proteina Whey" in debt["items_summary"]
+
+            refund = by_subtype["product_refund"]
+            assert refund["amount_minor"] == 10000
+            assert refund["payout_method"] == "cash"
+            assert refund["disposition"] == "restock"
+            assert refund["reason"] == "Producto abierto"
+
+            transfer = by_subtype["pending_transfer"]
+            assert transfer["amount_minor"] == 12000
+            assert transfer["order_kind"] == "membership"
+            assert transfer["payment_status"] in ("pending", "under_review")
+
+            all_res = client.get("/api/v1/owner/overview/alerts", headers=headers)
+            assert all_res.status_code == 200, all_res.text
+            all_body = all_res.json()
+            assert all_body["sales_count"] == 4
+            assert any(
+                a["category"] == "sales" and a["subtype"] == "sale_cancellation"
+                for a in all_body["alerts"]
+            )
+    finally:
+        engine.dispose()

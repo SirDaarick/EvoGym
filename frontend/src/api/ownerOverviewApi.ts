@@ -27,17 +27,141 @@ export interface OwnerOverviewResponse {
   alerts: { total_count: number; category_counts: { category: string; count: number }[] };
 }
 
-export async function getOwnerOverview(request: AuthenticatedRequest, period?: { from: string; to: string; branchId?: string }): Promise<OwnerOverviewResponse> {
+export async function getOwnerOverview(request: AuthenticatedRequest, period?: { from?: string; to?: string; branchId?: string }): Promise<OwnerOverviewResponse> {
   const params = new URLSearchParams();
   if (period) {
-    params.set('from', period.from);
-    params.set('to', period.to);
+    if (period.from) params.set('from', period.from);
+    if (period.to) params.set('to', period.to);
     if (period.branchId) params.set('branch_id', period.branchId);
   }
   const query = params.toString();
   const response = await request(`/api/v1/owner/overview${query ? `?${query}` : ''}`);
   if (!response.ok) throw new Error('No se pudo cargar el resumen del negocio.');
   return response.json() as Promise<OwnerOverviewResponse>;
+}
+
+export interface DebtOverrideCheckInAlert {
+  id: string;
+  category: 'debt_override_checkin';
+  branch_id: string;
+  branch_name?: string;
+  member_id: string;
+  member_name: string;
+  member_number?: string;
+  authorized_by_id?: string;
+  authorized_by_name: string;
+  occurred_at: string;
+  notes?: string;
+}
+
+export interface AttendanceCorrectionAlert {
+  id: string;
+  category: 'attendance_correction';
+  branch_id: string;
+  branch_name?: string;
+  staff_profile_id: string;
+  staff_member_name: string;
+  corrected_by_id?: string;
+  corrected_by_name: string;
+  reason: string;
+  details?: string;
+  occurred_at: string;
+}
+
+export interface CostIncreaseAlert {
+  id?: string;
+  category?: 'cost_increase';
+  purchase_id: string;
+  product_id: string;
+  product_name: string;
+  previous_cost_minor: number;
+  unit_cost_minor: number;
+  recorded_at: string;
+}
+
+export interface InventoryWasteAlert {
+  id: string;
+  category: 'inventory_waste';
+  branch_id: string;
+  branch_name?: string;
+  product_id: string;
+  product_name: string;
+  product_unit: string;
+  quantity: number;
+  unit_cost_minor: number;
+  unit_price_minor: number;
+  total_cost_minor: number;
+  total_price_minor: number;
+  reason: string;
+  recorded_by_id?: string;
+  recorded_by_name: string;
+  occurred_at: string;
+}
+
+export type SalesAlertSubtype =
+  | 'pending_payment'
+  | 'pending_transfer'
+  | 'product_refund'
+  | 'failed_payment'
+  | 'sale_cancellation';
+
+export interface SalesAlert {
+  id: string;
+  category: 'sales';
+  subtype: SalesAlertSubtype;
+  subtype_label?: string;
+  branch_id: string;
+  branch_name?: string;
+  order_id?: string | null;
+  order_kind?: 'product' | 'membership';
+  member_id?: string | null;
+  member_name?: string | null;
+  member_number?: string | null;
+  items_summary: string;
+  product_name?: string;
+  quantity?: number;
+  amount_minor: number;
+  total_minor?: number | null;
+  paid_minor?: number | null;
+  payment_method?: string | null;
+  payment_status?: string | null;
+  payout_method?: 'cash' | 'card' | null;
+  disposition?: 'restock' | 'waste' | null;
+  reason?: string | null;
+  recorded_by_id?: string;
+  recorded_by_name: string;
+  occurred_at: string;
+}
+
+export type OwnerOverviewAlert =
+  | DebtOverrideCheckInAlert
+  | AttendanceCorrectionAlert
+  | CostIncreaseAlert
+  | InventoryWasteAlert
+  | SalesAlert;
+
+export interface OwnerOverviewAlertsResponse {
+  alerts: OwnerOverviewAlert[];
+  total?: number;
+  sales_count?: number;
+}
+
+export async function getOwnerOverviewAlerts(
+  request: AuthenticatedRequest,
+  branchId?: string
+): Promise<OwnerOverviewAlertsResponse> {
+  const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+  const response = await request(`/api/v1/owner/overview/alerts${query}`);
+  if (!response.ok) throw new Error('No se pudieron cargar las alertas del negocio.');
+  const data = await response.json() as unknown;
+  if (Array.isArray(data)) {
+    return { alerts: data as OwnerOverviewAlert[], total: data.length };
+  }
+  const record = data as { alerts?: OwnerOverviewAlert[]; total?: number };
+  return {
+    alerts: Array.isArray(record.alerts) ? record.alerts : [],
+    total: typeof record.total === 'number' ? record.total : (record.alerts?.length ?? 0),
+  };
 }
 
 /** Formats a shift window ("04 nov, 09:00 – 18:30") in the branch timezone; empty when the API sent no times. */

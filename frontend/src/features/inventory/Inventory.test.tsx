@@ -12,6 +12,36 @@ function StateProbe() {
 }
 
 describe('Inventory catalog preview', () => {
+  it('registers selected inventory as a purchase and immediately refreshes stock and reference cost', async () => {
+    localStorage.removeItem('evogym:inventory-purchase:branch');
+    const items = [{ product_id: 'water', code: 'water', name: 'Agua', category: 'Bebidas', price_minor: 500, cost_minor: 100, is_active: true, unit: 'piece', initialized: true, opening_quantity: 5, restocked_quantity: 0, waste_quantity: 0, quantity: 5, initialized_at: null }];
+    let stockCalls = 0;
+    const request = vi.fn(async (path: string, _init?: RequestInit) => {
+      if (path === '/api/v1/inventory/branches') return new Response(JSON.stringify([{ id: 'branch', name: 'Central', code: 'central' }]));
+      if (path.includes('/stock?')) {
+        stockCalls += 1;
+        const currentItems = stockCalls > 1
+          ? [{ ...items[0], quantity: 7, cost_minor: 125 }]
+          : items;
+        return new Response(JSON.stringify({ items: currentItems, total: 1 }));
+      }
+      if (path.endsWith('/purchases')) return new Response(JSON.stringify({ id: 'purchase', total_minor: 250, expense_id: 'expense' }), { status: 201 });
+      throw new Error(path);
+    });
+    renderWithQuery(<Inventory role="RECEPTION" apiRequest={request} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Seleccionar Agua/ }));
+    expect(screen.getByText('Stock: 5')).toBeVisible();
+    expect(screen.getByText('$1.00')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Costo total de Agua'), { target: { value: '2.50' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar compra' }));
+    expect(await screen.findByText('Compra registrada.')).toBeVisible();
+    const call = request.mock.calls.find(([path]) => path.endsWith('/purchases'));
+    expect(JSON.parse(call?.[1]?.body as string)).toEqual({ items: [{ product_id: 'water', quantity: 1, cost_minor: 250 }], pay_from_drawer: false });
+    // After query invalidation, refreshed stock and unit reference cost are reflected in the UI
+    expect(await screen.findByText('Stock: 7')).toBeVisible();
+    expect(await screen.findByText('$1.25')).toBeVisible();
+  });
+
   it('opens a linked container and pre-fills scoop waste', async () => {
     sessionStorage.clear();
     const items = [{ product_id: 'scoop', code: 'scoop', name: 'Protein', category: 'Supplements', price_minor: 500, cost_minor: 100, is_active: true, unit: 'scoop', servings_per_container: 30, container_product_id: 'bottle', initialized: true, opening_quantity: 5, restocked_quantity: 0, waste_quantity: 0, quantity: 5, initialized_at: null }];

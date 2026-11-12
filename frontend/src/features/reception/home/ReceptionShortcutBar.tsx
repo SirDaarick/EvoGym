@@ -2,7 +2,7 @@ import { Button } from '@/shared/ui';
 import { shortcutIcons } from '../ReceptionHome';
 import type { ModalKey } from './useReceptionModals';
 
-type ShortcutKey = Exclude<ModalKey, 'devoluciones'>;
+type ShortcutKey = Exclude<ModalKey, 'devoluciones' | 'merma'>;
 const SHORTCUTS: ReadonlyArray<{ key: ShortcutKey; label: string }> = [
   { key: 'gasto', label: 'Gasto' },
   { key: 'extra', label: 'Extra' },

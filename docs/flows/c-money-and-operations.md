@@ -1,6 +1,9 @@
 # EvoGym application flows - C. Money and operations
 
 How each end-to-end flow should ideally work, plus its current implementation status.
+Owner decisions from the latest review and remaining verification are recorded in
+[`c-review-decisions.md`](c-review-decisions.md). They describe intended behavior, not implementation;
+some supersede earlier rules referenced below.
 Rule ids (D-xxx, R-xxx, BK-xxx) refer to `docs/backend-plan/02-business-rules-and-decisions.md`.
 API paths omit the `/api/v1` prefix. Code paths are relative to the repository root.
 

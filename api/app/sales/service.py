@@ -165,26 +165,38 @@ def get_product_sale_intent(factory, principal: Principal):
         return _intent_response(session.get(ProductSaleIntent, principal.staff_id))
 
 
+def _cash_amount_args(payload: CashProductSaleRequest) -> tuple[int | None, bool]:
+    provided = "cash_amount_minor" in payload.model_fields_set
+    if provided and payload.cash_amount_minor is None:
+        raise HttpStatusError(422)
+    return payload.cash_amount_minor, provided
+
+
 def prepare_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
-    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
+    cash_amount_minor, cash_amount_provided = _cash_amount_args(payload)
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409), (ValueError, 422)):
         with factory() as session:
             _require_product_sales_access(session, principal)
             intent = q.prepare_product_sale(
                 session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                 items=payload.items, expected_total_minor=payload.expected_total_minor,
-                idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
+                idempotency_key=idempotency_key, credit_minor=payload.credit_minor,
+                cash_amount_minor=cash_amount_minor, cash_amount_provided=cash_amount_provided)
             result = _intent_response(intent)
             session.commit()
             return result
 
 
 def _fingerprint_of(register_id, payload):
+    cash_amount_minor, _ = _cash_amount_args(payload)
     return q.product_sale_fingerprint(
-        register_id, payload.member_id, payload.items, payload.expected_total_minor, payload.credit_minor)
+        register_id, payload.member_id, payload.items, payload.expected_total_minor, payload.credit_minor,
+        cash_amount_minor)
 
 
 def post_cash_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
     """Returns (dto, replayed)."""
+    cash_amount_minor, cash_amount_provided = _cash_amount_args(payload)
     try:
         with http_errors(*_PRODUCT_ERRORS):
             with factory() as session:
@@ -200,7 +212,8 @@ def post_cash_product_sale(factory, principal: Principal, register_id: UUID, pay
                 order, replayed = q.post_cash_product_sale(
                     session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                     items=payload.items, expected_total_minor=payload.expected_total_minor,
-                    idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
+                    idempotency_key=idempotency_key, credit_minor=payload.credit_minor,
+                    cash_amount_minor=cash_amount_minor, cash_amount_provided=cash_amount_provided)
                 session.commit()
                 return _product_sale_dto(order, session), replayed
     except IntegrityError:
@@ -213,13 +226,15 @@ def post_cash_product_sale(factory, principal: Principal, register_id: UUID, pay
 
 
 def resolve_product_sale(factory, principal: Principal, register_id: UUID, payload, idempotency_key: str):
-    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409)):
+    cash_amount_minor, cash_amount_provided = _cash_amount_args(payload)
+    with http_errors((CashSaleNotFoundError, 404), (CashSaleConflictError, 409), (ValueError, 422)):
         with factory() as session:
             _require_product_sales_access(session, principal)
             order = q.resolve_product_sale(
                 session, register_id=register_id, actor_id=principal.staff_id, member_id=payload.member_id,
                 items=payload.items, expected_total_minor=payload.expected_total_minor,
-                idempotency_key=idempotency_key, credit_minor=payload.credit_minor)
+                idempotency_key=idempotency_key, credit_minor=payload.credit_minor,
+                cash_amount_minor=cash_amount_minor, cash_amount_provided=cash_amount_provided)
             intent = session.get(ProductSaleIntent, principal.staff_id)
             if (intent is not None and intent.register_id == register_id
                     and intent.idempotency_key == idempotency_key
@@ -234,10 +249,12 @@ def resolve_product_sale(factory, principal: Principal, register_id: UUID, paylo
 def resolve_intent_as_admin(session, admin_id: UUID, seller_id: UUID, intent: ProductSaleIntent) -> dict:
     """Admin resolution of a seller's pending intent inside the caller's transaction (caller commits)."""
     payload = CashProductSaleRequest.model_validate(intent.payload)
+    cash_amount_minor, cash_amount_provided = _cash_amount_args(payload)
     order = q.resolve_product_sale(
         session, register_id=intent.register_id, actor_id=seller_id, member_id=payload.member_id,
         items=payload.items, expected_total_minor=payload.expected_total_minor,
-        idempotency_key=intent.idempotency_key, credit_minor=payload.credit_minor)
+        idempotency_key=intent.idempotency_key, credit_minor=payload.credit_minor,
+        cash_amount_minor=cash_amount_minor, cash_amount_provided=cash_amount_provided)
     result = "completed" if order is not None else "cancelled"
     session.add(ProductSaleResolution(actor_id=admin_id, seller_id=seller_id, register_id=intent.register_id,
                                       idempotency_key=intent.idempotency_key, result=result))

@@ -87,6 +87,7 @@ export function useReceptionInventory(apiRequest: AuthenticatedRequest) {
     quantities,
     changeQuantity,
     resetQuantity,
+    products: activeProducts,
     matchingProducts,
     selectedProduct,
     selectedStock,

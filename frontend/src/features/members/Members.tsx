@@ -1,6 +1,6 @@
 import { memberStatus, membershipRenewalStreak } from '@/domain/membership';
 import { openAttendance } from '@/domain/attendance';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, memo, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
   flexRender,
@@ -8,7 +8,8 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import type { ColumnDef, SortingState } from '@tanstack/react-table';
+import type { ColumnDef, OnChangeFn, Row, SortingState } from '@tanstack/react-table';
+import JellyRadio, { type JellyRadioItem } from '../catalog/react-bits/JellyRadio';
 import type { DemoState, GloveItem, GloveRentalRecord, LockerItem, LockerRentalRecord, Member, PaymentMethod, Role } from '../../domain/models';
 import { rolePath } from '../../app/navigation';
 import { DemoProvider, useDemo } from '../../demo/DemoProvider';
@@ -39,16 +40,118 @@ function getMemberInitials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-type LiveMemberStatus = { status: string; memberNumber?: string; searchAliases?: string };
+export type MemberStatusFilter = 'all' | 'active' | 'expired' | 'inactive' | 'suspended' | 'pending';
 
-export function Members({ role, liveData }: { role: Role; liveData?: {
+type LiveMemberStatus = {
+  status: string;
+  memberNumber?: string;
+  searchAliases?: string;
+  endsOn?: string | null;
+};
+
+export interface LiveMembersData {
   members: Member[];
   statuses: Record<string, LiveMemberStatus>;
   loading: boolean;
+  refreshing?: boolean;
   error: string;
   onRefresh: () => void;
-} }) {
-  if (liveData) return <MemberDirectory role={role} members={liveData.members} statuses={liveData.statuses} loading={liveData.loading} error={liveData.error} onRefresh={liveData.onRefresh} />;
+  serverDriven?: boolean;
+  total?: number;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  fetchNextPage?: () => void;
+  query?: string;
+  onQueryChange?: (value: string) => void;
+  statusFilter?: MemberStatusFilter;
+  onStatusFilterChange?: (value: MemberStatusFilter) => void;
+  sorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
+}
+
+const EMPTY_SORTING: SortingState = [];
+
+const STATUS_FILTER_ITEMS: JellyRadioItem[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'active', label: 'Activos' },
+  { value: 'expired', label: 'Vencidos' },
+  { value: 'inactive', label: 'Inactivos' },
+  { value: 'suspended', label: 'Suspendidos' },
+  { value: 'pending', label: 'Pendientes' },
+];
+
+function formatMembersCount(count: number): string {
+  return `${count} ${count === 1 ? 'socio' : 'socios'}`;
+}
+
+const MembersTableRows = memo(function MembersTableRows({
+  rows,
+  columnsCount,
+  isServerDriven,
+  sentinelIndex,
+  sentinelRef,
+  isFetchingNextPage,
+}: {
+  rows: Row<Member>[];
+  columnsCount: number;
+  isServerDriven: boolean;
+  sentinelIndex: number;
+  sentinelRef: RefObject<HTMLTableRowElement | null>;
+  isFetchingNextPage: boolean;
+}) {
+  return (
+    <tbody>
+      {rows.map((row, index) => (
+        <tr
+          key={row.id}
+          ref={isServerDriven && index === sentinelIndex ? sentinelRef : undefined}
+        >
+          {row.getVisibleCells().map(cell => (
+            <td key={cell.id}>
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </td>
+          ))}
+        </tr>
+      ))}
+      {isFetchingNextPage && (
+        <tr className="members-loading-more-row">
+          <td colSpan={columnsCount}>
+            <div className="members-loading-more" role="status">
+              <span className="members-spinner" aria-hidden="true" />
+              <span>Cargando más socios…</span>
+            </div>
+          </td>
+        </tr>
+      )}
+    </tbody>
+  );
+});
+
+export function Members({ role, liveData }: { role: Role; liveData?: LiveMembersData }) {
+  if (liveData) {
+    return (
+      <MemberDirectory
+        role={role}
+        members={liveData.members}
+        statuses={liveData.statuses}
+        loading={liveData.loading}
+        refreshing={liveData.refreshing}
+        error={liveData.error}
+        onRefresh={liveData.onRefresh}
+        serverDriven={liveData.serverDriven}
+        total={liveData.total}
+        hasNextPage={liveData.hasNextPage}
+        isFetchingNextPage={liveData.isFetchingNextPage}
+        fetchNextPage={liveData.fetchNextPage}
+        controlledQuery={liveData.query}
+        onQueryChange={liveData.onQueryChange}
+        statusFilter={liveData.statusFilter}
+        onStatusFilterChange={liveData.onStatusFilterChange}
+        controlledSorting={liveData.sorting}
+        onSortingChange={liveData.onSortingChange}
+      />
+    );
+  }
   return <DemoMemberDirectory role={role} />;
 }
 
@@ -57,7 +160,30 @@ function DemoMemberDirectory({ role }: { role: Role }) {
   return <MemberDirectory role={role} members={state.members} demoClock={state.demoClock} attendanceVisits={state.attendance} sales={state.sales} supplementSales={state.supplementSales} />;
 }
 
-function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, supplementSales, statuses, loading = false, error = '', onRefresh }: {
+function MemberDirectory({
+  role,
+  members,
+  demoClock,
+  attendanceVisits,
+  sales,
+  supplementSales,
+  statuses,
+  loading = false,
+  refreshing = false,
+  error = '',
+  onRefresh,
+  serverDriven = false,
+  total,
+  hasNextPage = false,
+  isFetchingNextPage = false,
+  fetchNextPage,
+  controlledQuery,
+  onQueryChange,
+  statusFilter = 'all',
+  onStatusFilterChange,
+  controlledSorting,
+  onSortingChange,
+}: {
   role: Role;
   members: Member[];
   demoClock?: string;
@@ -66,21 +192,41 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
   supplementSales?: DemoState['supplementSales'];
   statuses?: Record<string, LiveMemberStatus>;
   loading?: boolean;
+  refreshing?: boolean;
   error?: string;
   onRefresh?: () => void;
+  serverDriven?: boolean;
+  total?: number;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  fetchNextPage?: () => void;
+  controlledQuery?: string;
+  onQueryChange?: (value: string) => void;
+  statusFilter?: MemberStatusFilter;
+  onStatusFilterChange?: (value: MemberStatusFilter) => void;
+  controlledSorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
 }) {
-  const [query, setQuery] = useState('');
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [localQuery, setLocalQuery] = useState('');
+  const [localSorting, setLocalSorting] = useState<SortingState>([]);
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
+
+  const isServerDriven = Boolean(serverDriven);
+  const activeQuery = isServerDriven ? (controlledQuery ?? '') : localQuery;
+  const handleQueryChange = isServerDriven && onQueryChange ? onQueryChange : setLocalQuery;
+  const activeSorting = isServerDriven ? (controlledSorting ?? EMPTY_SORTING) : localSorting;
+  const handleSortingChange = isServerDriven && onSortingChange ? onSortingChange : setLocalSorting;
 
   const filteredMembers = useMemo(() => {
-    const q = query.trim().toLocaleLowerCase('es-MX');
+    if (isServerDriven) return members;
+    const q = localQuery.trim().toLocaleLowerCase('es-MX');
     if (!q) return members;
     return members.filter(member =>
       `${member.name} ${member.phone} ${member.id} ${statuses?.[member.id]?.memberNumber ?? ''} ${statuses?.[member.id]?.searchAliases ?? ''} ${member.membership?.planName ?? ''}`
         .toLocaleLowerCase('es-MX')
         .includes(q)
     );
-  }, [members, query, statuses]);
+  }, [isServerDriven, members, localQuery, statuses]);
 
   const columns = useMemo<ColumnDef<Member>[]>(
     () => [
@@ -123,7 +269,7 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
       },
       {
         id: 'membership',
-        accessorFn: member => member.membership?.planName || '',
+        accessorFn: member => member.membership?.planName || statuses?.[member.id]?.status || '',
         header: statuses ? 'Estado' : 'Membresia',
         cell: ({ row }) => {
           const member = row.original;
@@ -141,11 +287,11 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
       },
       {
         id: 'endsOn',
-        accessorFn: member => member.membership?.endsOn || '',
+        accessorFn: member => member.membership?.endsOn ?? statuses?.[member.id]?.endsOn ?? '',
         header: 'Fecha vencimiento',
         cell: ({ row }) => {
           const member = row.original;
-          const endsOn = member.membership?.endsOn;
+          const endsOn = member.membership?.endsOn ?? statuses?.[member.id]?.endsOn ?? null;
           const info = getMemberStatusInfo(member, demoClock ?? new Date().toISOString());
           const isExpired = member.membership && (info.status === 'expired' || info.status === 'inactive');
           const isExpiryToday = member.membership && (info.provisional || member.demoScenario === 'expiry-today');
@@ -185,11 +331,38 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
   const table = useReactTable({
     data: filteredMembers,
     columns,
-    state: { sorting },
-    onSortingChange: setSorting,
+    getRowId: row => row.id,
+    defaultColumn: { sortDescFirst: false },
+    state: { sorting: activeSorting },
+    onSortingChange: handleSortingChange,
+    manualSorting: isServerDriven,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    ...(isServerDriven ? {} : { getSortedRowModel: getSortedRowModel() }),
   });
+
+  const rows = table.getRowModel().rows;
+  const sentinelIndex = rows.length > 0 ? Math.max(0, rows.length - 10) : -1;
+  const sentinelRowId = sentinelIndex >= 0 ? rows[sentinelIndex]?.id : undefined;
+
+  useEffect(() => {
+    if (!isServerDriven || !hasNextPage || isFetchingNextPage || refreshing || Boolean(error) || !fetchNextPage) return;
+    if (typeof IntersectionObserver === 'undefined') return;
+    const target = sentinelRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        observer.disconnect();
+        fetchNextPage();
+      }
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isServerDriven, hasNextPage, isFetchingNextPage, refreshing, error, fetchNextPage, rows.length, sentinelRowId]);
+
+  const displayTotal = isServerDriven && typeof total === 'number' ? total : filteredMembers.length;
+  const countLabel = formatMembersCount(displayTotal);
+  const hasActiveFilters = Boolean(activeQuery.trim() || (isServerDriven && statusFilter && statusFilter !== 'all'));
 
   return (
     <>
@@ -204,7 +377,7 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
         action={
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <Link className="button button-primary" to={rolePath(role, 'members/new')}>Nuevo socio</Link>
-            {onRefresh && <Button variant="secondary" disabled={loading} onClick={onRefresh}>Actualizar</Button>}
+            {onRefresh && <Button variant="secondary" disabled={loading || refreshing} onClick={onRefresh}>Actualizar</Button>}
           </div>
         }
       />
@@ -218,83 +391,126 @@ function MemberDirectory({ role, members, demoClock, attendanceVisits, sales, su
         />
       )}
       <Panel>
-        <Field
-          id="member-search"
-          label="Buscar socio"
-          placeholder="Nombre, teléfono o referencia local"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-        />
-        {error ? <Notice tone="error">{error}</Notice> : loading ? <div role="status">Cargando socios…</div> : filteredMembers.length ? (
-          <div className="members-table-card">
-            <div
-              className="members-table-region"
-              role="region"
-              aria-label="Socios registrados"
-              tabIndex={0}
-            >
-              <table className="members-table" aria-label="Socios registrados">
-                <caption>{filteredMembers.length} socios registrados</caption>
-                <thead>
-                  {table.getHeaderGroups().map(group => (
-                    <tr key={group.id}>
-                      {group.headers.map(header => {
-                        const isSorted = header.column.getIsSorted();
-                        const indicator = isSorted === 'asc' ? '▲' : isSorted === 'desc' ? '▼' : '↕';
-                        return (
-                          <th
-                            key={header.id}
-                            scope="col"
-                            aria-sort={
-                              header.column.getCanSort()
-                                ? isSorted === 'asc'
-                                  ? 'ascending'
-                                  : isSorted === 'desc'
-                                    ? 'descending'
-                                    : 'none'
-                                : undefined
-                            }
-                          >
-                            {header.isPlaceholder ? null : header.column.getCanSort() ? (
-                              <button
-                                type="button"
-                                className="members-table-sort-btn"
-                                aria-label={`Ordenar por ${String(header.column.columnDef.header)}`}
-                                onClick={header.column.getToggleSortingHandler()}
-                              >
-                                <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
-                                <span className="sort-indicator" aria-hidden="true">
-                                  {indicator}
-                                </span>
-                              </button>
-                            ) : (
-                              flexRender(header.column.columnDef.header, header.getContext())
-                            )}
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map(row => (
-                    <tr key={row.id}>
-                      {row.getVisibleCells().map(cell => (
-                        <td key={cell.id}>
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <div className="members-toolbar">
+          <div className="members-search-field">
+            <Field
+              id="member-search"
+              label="Buscar socio"
+              placeholder={statuses ? 'Nombre, teléfono o número de socio' : 'Nombre, teléfono o referencia local'}
+              value={activeQuery}
+              onChange={event => handleQueryChange(event.target.value)}
+            />
           </div>
-        ) : (
-          <EmptyState title={members.length ? 'Sin coincidencias' : 'Sin socios registrados'}>
-            {members.length ? 'Busca otro nombre o registra un socio.' : 'La API no devolvió socios para esta consulta.'}
-          </EmptyState>
+          {(!loading || rows.length > 0) && !error && (
+            <span className="members-total-badge">{countLabel}</span>
+          )}
+        </div>
+        {isServerDriven && onStatusFilterChange && (
+          <div className="members-status-chips">
+            <JellyRadio
+              items={STATUS_FILTER_ITEMS}
+              value={statusFilter}
+              onChange={value => onStatusFilterChange(value as MemberStatusFilter)}
+              size="sm"
+              swell={0.08}
+              barge={2}
+              shrink={0.02}
+              chipColor="var(--color-soft)"
+              activeColor="var(--color-primary)"
+              textColor="var(--color-ink)"
+              activeTextColor="var(--color-primary-text)"
+              ariaLabel="Filtrar por estado"
+            />
+          </div>
         )}
+        {error && <Notice tone="error">{error}</Notice>}
+        {loading && rows.length === 0 ? (
+          <div className="members-skeleton" role="status" aria-label="Cargando socios">
+            <span className="sr-only">Cargando socios…</span>
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="members-skeleton-row" aria-hidden="true">
+                <span className="members-skeleton-avatar" />
+                <span className="members-skeleton-line members-skeleton-line-lg" />
+                <span className="members-skeleton-line members-skeleton-line-md" />
+                <span className="members-skeleton-line members-skeleton-line-sm" />
+              </div>
+            ))}
+          </div>
+        ) : rows.length > 0 ? (
+          <>
+            <div className="members-table-card">
+              <div
+                className="members-table-region"
+                role="region"
+                aria-label="Socios registrados"
+                tabIndex={0}
+              >
+                <table className="members-table" aria-label="Socios registrados">
+                  <caption>{`${countLabel} en el directorio`}</caption>
+                  <thead>
+                    {table.getHeaderGroups().map(group => (
+                      <tr key={group.id}>
+                        {group.headers.map(header => {
+                          const isSorted = header.column.getIsSorted();
+                          const indicator = isSorted === 'asc' ? '▲' : isSorted === 'desc' ? '▼' : '↕';
+                          return (
+                            <th
+                              key={header.id}
+                              scope="col"
+                              aria-sort={
+                                header.column.getCanSort()
+                                  ? isSorted === 'asc'
+                                    ? 'ascending'
+                                    : isSorted === 'desc'
+                                      ? 'descending'
+                                      : 'none'
+                                  : undefined
+                              }
+                            >
+                              {header.isPlaceholder ? null : header.column.getCanSort() ? (
+                                <button
+                                  type="button"
+                                  className="members-table-sort-btn"
+                                  aria-label={`Ordenar por ${String(header.column.columnDef.header)}`}
+                                  onClick={header.column.getToggleSortingHandler()}
+                                >
+                                  <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                                  <span className="sort-indicator" aria-hidden="true">
+                                    {indicator}
+                                  </span>
+                                </button>
+                              ) : (
+                                flexRender(header.column.columnDef.header, header.getContext())
+                              )}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </thead>
+                  <MembersTableRows
+                    rows={rows}
+                    columnsCount={columns.length}
+                    isServerDriven={isServerDriven}
+                    sentinelIndex={sentinelIndex}
+                    sentinelRef={sentinelRef}
+                    isFetchingNextPage={isFetchingNextPage}
+                  />
+                </table>
+              </div>
+            </div>
+            <div className="members-list-status" aria-live="polite">
+              <span>
+                {`Mostrando ${rows.length} de ${countLabel}`}
+                {!hasNextPage && !isFetchingNextPage ? ' · Fin de la lista' : ''}
+              </span>
+            </div>
+          </>
+        ) : !error ? (
+          <EmptyState title={hasActiveFilters ? 'Sin coincidencias' : 'Sin socios registrados'}>
+            {hasActiveFilters ? 'Busca otro nombre o ajusta los filtros.' : 'La API no devolvió socios para esta consulta.'}
+          </EmptyState>
+        ) : null}
       </Panel>
     </>
   );

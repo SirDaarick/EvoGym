@@ -12,6 +12,9 @@ from app.auth.sessions import validate_session
 from app.inventory import service
 from app.inventory.schemas import (
     BranchDTO,
+    InventoryPurchaseCreateDTO,
+    InventoryWasteBatchDTO,
+    InventoryWasteCreateDTO,
     OpenContainerDTO,
     ProductCreateDTO,
     ProductDTO,
@@ -156,6 +159,40 @@ def record_movement_endpoint(
     if not is_new:
         response.status_code = 200
     return dto
+
+
+@router.post("/branches/{branch_id}/waste", response_model=InventoryWasteBatchDTO, status_code=201)
+def create_waste_batch_endpoint(
+    branch_id: UUID,
+    payload: InventoryWasteCreateDTO,
+    request: Request,
+    response: Response,
+    principal: InventoryActorPrincipal = Depends(_actor),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    dto, is_new = service.create_waste_batch(_factory(request), principal, branch_id, payload, idempotency_key)
+    if not is_new:
+        response.status_code = 200
+    return dto
+
+
+@router.post("/branches/{branch_id}/purchases", status_code=201)
+def create_purchase_endpoint(
+    branch_id: UUID, payload: InventoryPurchaseCreateDTO, request: Request, response: Response,
+    principal: InventoryActorPrincipal = Depends(_actor),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    purchase, is_new = service.create_purchase(_factory(request), principal, branch_id, payload, idempotency_key)
+    if not is_new:
+        response.status_code = 200
+    return purchase
+
+
+@router.get("/branches/{branch_id}/purchase-cost-alerts")
+def list_purchase_cost_alerts_endpoint(
+    branch_id: UUID, request: Request, actor_id: UUID = Depends(_admin),
+):
+    return service.list_purchase_cost_alerts(_factory(request), actor_id, branch_id)
 
 
 @router.get("/branches/{branch_id}/movements", response_model=StockMovementPageDTO)

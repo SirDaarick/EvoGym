@@ -45,6 +45,26 @@ describe('cash product sale API', () => {
     await expect(submitCashProductSale(request, 'register', { ...payload, member_id: 'member-1', credit_minor: 500 }, 'key')).resolves.toBeDefined();
   });
 
+  it('accepts partial cash_amount_minor (including 0) and rejects mismatched cash payment amounts', async () => {
+    for (const cashMinor of [200, 0]) {
+      const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        order: { id: 'order', total_minor: 500 }, items: [],
+        payment: { method: 'cash', status: 'confirmed', amount_minor: cashMinor },
+      }), { status: 201 }));
+      const withPartial = { ...payload, member_id: 'member-1', cash_amount_minor: cashMinor };
+      await expect(submitCashProductSale(request, 'register', withPartial, `key-${cashMinor}`)).resolves.toBeDefined();
+      expect(JSON.parse(request.mock.calls[0][1].body as string)).toMatchObject({ cash_amount_minor: cashMinor });
+    }
+
+    const mismatched = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      order: { id: 'order', total_minor: 500 }, items: [],
+      payment: { method: 'cash', status: 'confirmed', amount_minor: 500 },
+    }), { status: 201 }));
+    await expect(submitCashProductSale(
+      mismatched, 'register', { ...payload, member_id: 'member-1', cash_amount_minor: 200 }, 'key-bad',
+    )).rejects.toThrow();
+  });
+
   it('does not accept malformed success as a confirmed sale', async () => {
     const request = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     await expect(submitCashProductSale(request, 'register', payload, 'key')).rejects.toThrow();

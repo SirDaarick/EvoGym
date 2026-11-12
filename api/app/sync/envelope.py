@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 EVENT_ID_PATTERN = r"^[A-Z]+-[A-Z0-9]{2,8}-[0-9]{5,}$"
 MAX_SAFE_INTEGER = 2**53 - 1  # JS Number.MAX_SAFE_INTEGER; both canonicalizers must agree on this bound
@@ -57,6 +57,8 @@ class CheckInPayload(_Strict):
     period_id: UUID
     branch_id: UUID
     local_access_decision: Literal["valid", "valid_with_outstanding_balance", "denied"]
+    online_idempotency_key: str | None = Field(default=None, min_length=1, max_length=128, pattern=IDEMPOTENCY_KEY_PATTERN)
+    confirm_outstanding_balance: StrictBool = False
 
 
 class CashSaleItem(_Strict):

@@ -41,3 +41,125 @@ it('shows real payroll history in the live report without demo or local stores',
   expect(screen.queryByText('Ajustar costos fijos')).not.toBeInTheDocument();
   expect(request).toHaveBeenCalledWith(expect.stringContaining('/api/v1/admin/payroll/history?from=2026-10-01&to=2026-10-31'), undefined);
 });
+
+it('displays review warning when voiding a purchase expense whose products were already sold (L16)', async () => {
+  const base = {
+    id: 'exp-purchase-1',
+    branch_id: 'b',
+    shift_id: null,
+    category: 'consumibles',
+    concept: 'Compra de inventario #1',
+    payee_name: 'Distribuidora',
+    payment_method: 'cash',
+    amount_minor: 50000,
+    voucher_reference: null,
+    evidence_url: null,
+    recorded_by_name: 'Admin',
+    recorded_at: '2026-10-10T12:00:00Z',
+    voided_at: null,
+    voided_by_name: null,
+    void_reason: null,
+  };
+  const request = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.startsWith('/api/v1/admin/expenses?')) {
+      return new Response(JSON.stringify({ items: [base], branches: [{ id: 'b', name: 'Central' }] }));
+    }
+    if (path.startsWith('/api/v1/admin/pending-money')) {
+      return new Response(JSON.stringify({ items: [], total_items: 0, total_pending_minor: 0 }));
+    }
+    if (path === '/api/v1/expenses/exp-purchase-1/void' && init?.method === 'POST') {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 'purchase_cancellation_requires_review',
+            message: 'Purchase has products already sold or consumed; administrator review is required.',
+          },
+        }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('[]');
+  });
+
+  render(
+    <MemoryRouter initialEntries={['/owner/expenses?tab=gastos&from=2026-10-01&to=2026-10-31']}>
+      <ExpenseReport apiRequest={request} />
+    </MemoryRouter>
+  );
+
+  expect((await screen.findAllByText('Compra de inventario #1')).length).toBeGreaterThan(0);
+  const voidButton = screen.getByRole('button', { name: 'Anular' });
+  await userEvent.click(voidButton);
+
+  expect(screen.getByRole('heading', { name: 'Anular gasto' })).toBeInTheDocument();
+  const reasonInput = screen.getByLabelText(/Motivo/);
+  await userEvent.type(reasonInput, 'Error en captura');
+
+  const confirmButton = screen.getByRole('button', { name: 'Confirmar anulación' });
+  await userEvent.click(confirmButton);
+
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent(
+    'Esta compra tiene productos que ya fueron vendidos o consumidos; requiere revisión de un administrador.'
+  );
+  expect(screen.getByRole('heading', { name: 'Anular gasto' })).toBeInTheDocument();
+});
+
+it('successfully voids an expense when stock is intact', async () => {
+  let isVoided = false;
+  const base = {
+    id: 'exp-purchase-2',
+    branch_id: 'b',
+    shift_id: null,
+    category: 'consumibles',
+    concept: 'Compra de toallas',
+    payee_name: 'Distribuidora',
+    payment_method: 'cash',
+    amount_minor: 30000,
+    voucher_reference: null,
+    evidence_url: null,
+    recorded_by_name: 'Admin',
+    recorded_at: '2026-10-10T12:00:00Z',
+    voided_at: null,
+    voided_by_name: null,
+    void_reason: null,
+  };
+
+  const request = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.startsWith('/api/v1/admin/expenses?')) {
+      const item = isVoided
+        ? { ...base, voided_at: '2026-10-11T12:00:00Z', void_reason: 'Devolución al proveedor' }
+        : base;
+      return new Response(JSON.stringify({ items: [item], branches: [{ id: 'b', name: 'Central' }] }));
+    }
+    if (path.startsWith('/api/v1/admin/pending-money')) {
+      return new Response(JSON.stringify({ items: [], total_items: 0, total_pending_minor: 0 }));
+    }
+    if (path === '/api/v1/expenses/exp-purchase-2/void' && init?.method === 'POST') {
+      isVoided = true;
+      return new Response(
+        JSON.stringify({ ...base, voided_at: '2026-10-11T12:00:00Z', void_reason: 'Devolución al proveedor' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('[]');
+  });
+
+  render(
+    <MemoryRouter initialEntries={['/owner/expenses?tab=gastos&from=2026-10-01&to=2026-10-31']}>
+      <ExpenseReport apiRequest={request} />
+    </MemoryRouter>
+  );
+
+  expect((await screen.findAllByText('Compra de toallas')).length).toBeGreaterThan(0);
+  await userEvent.click(screen.getByRole('button', { name: 'Anular' }));
+
+  const reasonInput = screen.getByLabelText(/Motivo/);
+  await userEvent.type(reasonInput, 'Devolución al proveedor');
+  await userEvent.click(screen.getByRole('button', { name: 'Confirmar anulación' }));
+
+  await vi.waitFor(() => {
+    expect(screen.queryByRole('heading', { name: 'Anular gasto' })).not.toBeInTheDocument();
+  });
+  expect((await screen.findAllByText('Anulado')).length).toBeGreaterThan(0);
+});

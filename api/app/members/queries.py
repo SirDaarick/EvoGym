@@ -1,10 +1,11 @@
 """Member query functions."""
-from datetime import date, datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,26 +16,44 @@ from app.db.models.memberships import MembershipPeriod
 from app.members.schemas import CreateMemberDTO, UpdateMemberDTO
 
 
-ALLOWED_SORT_FIELDS = {
+DIRECT_SORT_COLUMNS = {
     "full_name": Member.full_name,
     "joined_on": Member.joined_on,
     "member_number": Member.member_number,
+    "phone": Member.phone,
 }
-
-_BUSINESS_TZ = ZoneInfo("America/Mexico_City")
-
+ALLOWED_SORT_FIELDS = frozenset({*DIRECT_SORT_COLUMNS, "membership_status", "membership_ends_on"})
+ALLOWED_MEMBERSHIP_STATUSES = frozenset({"active", "expired", "inactive", "suspended", "pending"})
 
 def _derive_membership_status(member_status: str, ends_on: date | None, today: date) -> str:
     """Derive operational membership status from latest period end date and profile status."""
-    if member_status in ("inactive", "suspended"):
+    if member_status == "suspended":
+        return "suspended"
+    if member_status in ("inactive",):
         return "inactive"
     if member_status == "expired":
         return "expired"
     if ends_on is None:
         return "active" if member_status == "active" else "inactive"
-    if ends_on >= today:
+    if ends_on > today:
         return "active"
-    return "expired" if (today - ends_on).days <= 31 else "inactive"
+    return "expired" if (today - ends_on).days < 31 else "inactive"
+
+
+def _build_derived_status_expr(ends_on_expr, today: date, expired_cutoff: date):
+    """Build SQL CASE expression mirroring `_derive_membership_status`."""
+    return case(
+        (Member.status == "suspended", "suspended"),
+        (Member.status == "inactive", "inactive"),
+        (Member.status == "expired", "expired"),
+        (
+            ends_on_expr.is_(None),
+            case((Member.status == "active", "active"), else_="inactive"),
+        ),
+        (ends_on_expr > today, "active"),
+        (ends_on_expr > expired_cutoff, "expired"),
+        else_="inactive",
+    )
 
 
 class MemberListResult(NamedTuple):
@@ -52,8 +71,10 @@ def list_members(
     limit: int = 20,
     search: str | None = None,
     status: str | None = None,
+    membership_status: str | None = None,
     sort_by: str = "full_name",
     sort_dir: str = "asc",
+    branch_timezone: str = "America/Mexico_City",
 ) -> MemberListResult:
     """Retrieve paginated members with search, filter, and sorting.
 
@@ -62,9 +83,12 @@ def list_members(
         page: 1-indexed page number (>= 1).
         limit: Number of items per page (>= 1).
         search: Optional case-insensitive substring for full_name, phone, or member_number.
-        status: Optional exact status filter.
-        sort_by: Field to sort by ('full_name', 'joined_on', or 'member_number').
+        status: Optional exact profile status filter.
+        membership_status: Optional derived operational membership status filter.
+        sort_by: Field to sort by ('full_name', 'joined_on', 'member_number', 'phone',
+            'membership_status', or 'membership_ends_on').
         sort_dir: Direction ('asc' or 'desc').
+        branch_timezone: IANA timezone name for branch-local date boundaries.
 
     Returns:
         MemberListResult containing (items, total, pages).
@@ -77,56 +101,106 @@ def list_members(
         raise ValueError("page must be >= 1")
     if limit < 1:
         raise ValueError("limit must be >= 1")
+    normalized_membership_status: str | None = None
+    if membership_status is not None:
+        normalized_membership_status = membership_status.strip()
+        if normalized_membership_status not in ALLOWED_MEMBERSHIP_STATUSES:
+            raise ValueError(f"Invalid membership status: {membership_status}")
+
+    today = datetime.now(ZoneInfo(branch_timezone)).date()
+    expired_cutoff = today - timedelta(days=31)
+
+    # Correlated lookup only evaluates the 50 page rows for direct sorts; when
+    # filtering or sorting across all members by derived period fields, a single
+    # grouped index-only aggregation avoids repeated per-row SubPlan lookups.
+    needs_full_period_scan = (
+        normalized_membership_status is not None or sort_by not in DIRECT_SORT_COLUMNS
+    )
+    if needs_full_period_scan:
+        latest_period_sq = (
+            select(
+                MembershipPeriod.member_id.label("member_id"),
+                func.max(MembershipPeriod.ends_on).label("max_ends_on"),
+            )
+            .group_by(MembershipPeriod.member_id)
+            .subquery()
+        )
+        ends_on_expr = latest_period_sq.c.max_ends_on
+    else:
+        latest_period_sq = None
+        ends_on_expr = (
+            select(func.max(MembershipPeriod.ends_on))
+            .where(MembershipPeriod.member_id == Member.id)
+            .correlate(Member)
+            .scalar_subquery()
+        )
+
+    derived_status_expr = _build_derived_status_expr(ends_on_expr, today, expired_cutoff)
 
     filters = []
     if search is not None and search.strip():
         term = f"%{search.strip()}%"
-        filters.append(
-            or_(
-                Member.full_name.ilike(term),
-                Member.preferred_name.ilike(term),
-                Member.phone.ilike(term),
-                Member.member_number.ilike(term),
-            )
-        )
+        digits = "".join(ch for ch in search if ch.isdigit())
+        conditions = [
+            Member.full_name.ilike(term),
+            Member.preferred_name.ilike(term),
+            Member.phone.ilike(term),
+            Member.member_number.ilike(term),
+        ]
+        if digits:
+            conditions.append(Member.phone_key.ilike(f"%{digits}%"))
+        filters.append(or_(*conditions))
     if status is not None and status.strip():
         filters.append(Member.status == status.strip())
+    if normalized_membership_status is not None:
+        filters.append(derived_status_expr == normalized_membership_status)
 
     count_stmt = select(func.count()).select_from(Member)
+    if latest_period_sq is not None and normalized_membership_status is not None:
+        count_stmt = count_stmt.outerjoin(
+            latest_period_sq, latest_period_sq.c.member_id == Member.id
+        )
     if filters:
         count_stmt = count_stmt.where(*filters)
     total = session.scalar(count_stmt) or 0
 
     pages = max(1, (total + limit - 1) // limit)
 
-    sort_col = ALLOWED_SORT_FIELDS[sort_by]
-    order_clause = sort_col.asc() if sort_dir == "asc" else sort_col.desc()
-
-    latest_period_sq = (
-        select(
-            MembershipPeriod.member_id.label("member_id"),
-            func.max(MembershipPeriod.ends_on).label("max_ends_on"),
+    if sort_by in DIRECT_SORT_COLUMNS:
+        sort_col = DIRECT_SORT_COLUMNS[sort_by]
+        order_clauses = [sort_col.asc() if sort_dir == "asc" else sort_col.desc(), Member.id.asc()]
+    elif sort_by == "membership_ends_on":
+        ends_on_nulls_last = case((ends_on_expr.is_(None), 1), else_=0).asc()
+        ends_on_dir = ends_on_expr.asc() if sort_dir == "asc" else ends_on_expr.desc()
+        order_clauses = [ends_on_nulls_last, ends_on_dir, Member.id.asc()]
+    else:
+        status_rank = case(
+            {"active": 0, "expired": 1, "pending": 2, "suspended": 3},
+            value=derived_status_expr,
+            else_=4,
         )
-        .group_by(MembershipPeriod.member_id)
-        .subquery()
-    )
+        rank_dir = status_rank.asc() if sort_dir == "asc" else status_rank.desc()
+        ends_on_nulls_last = case((ends_on_expr.is_(None), 1), else_=0).asc()
+        order_clauses = [rank_dir, ends_on_nulls_last, ends_on_expr.desc(), Member.id.asc()]
 
-    stmt = (
-        select(Member, latest_period_sq.c.max_ends_on)
-        .outerjoin(latest_period_sq, latest_period_sq.c.member_id == Member.id)
+    stmt = select(
+        Member,
+        ends_on_expr.label("membership_ends_on"),
+        derived_status_expr.label("derived_status"),
     )
+    if latest_period_sq is not None:
+        stmt = stmt.outerjoin(latest_period_sq, latest_period_sq.c.member_id == Member.id)
     if filters:
         stmt = stmt.where(*filters)
     stmt = (
-        stmt.order_by(order_clause, Member.id.asc())
+        stmt.order_by(*order_clauses)
         .offset((page - 1) * limit)
         .limit(limit)
     )
-    today = datetime.now(_BUSINESS_TZ).date()
     items: list[Member] = []
-    for member, max_ends_on in session.execute(stmt).all():
-        member.membership_ends_on = max_ends_on
-        member.membership_status = _derive_membership_status(member.status, max_ends_on, today)
+    for member, ends_on, derived_status in session.execute(stmt).all():
+        member.membership_ends_on = ends_on
+        member.membership_status = derived_status
         items.append(member)
 
     return MemberListResult(items=items, total=total, pages=pages)
@@ -189,6 +263,10 @@ class DuplicateMemberNumberError(Exception):
     pass
 
 
+def phone_key(phone: str) -> str | None:
+    return re.sub(r"[^0-9]", "", phone)[-32:] or None
+
+
 def create_member(
     session: Session,
     data: CreateMemberDTO,
@@ -218,6 +296,7 @@ def create_member(
     )
     if existing is not None:
         raise DuplicateMemberNumberError(f"Member number '{member_number}' already exists.")
+    key = phone_key(data.phone)
 
     joined_on = data.joined_on if data.joined_on is not None else date.today()
     initial_note = (
@@ -231,6 +310,7 @@ def create_member(
         full_name=data.full_name,
         preferred_name=data.preferred_name.strip() if data.preferred_name is not None and data.preferred_name.strip() else None,
         phone=data.phone,
+        phone_key=key,
         email=data.email.strip() if data.email is not None and data.email.strip() else None,
         birth_date=data.birth_date,
         emergency_contact_name=(
@@ -293,7 +373,9 @@ def update_member(
     if data.preferred_name is not None:
         member.preferred_name = data.preferred_name.strip() if data.preferred_name.strip() else None
     if data.phone is not None:
+        key = phone_key(data.phone)
         member.phone = data.phone
+        member.phone_key = key
     if data.email is not None:
         member.email = data.email.strip() if data.email.strip() else None
     if "birth_date" in data.model_fields_set:

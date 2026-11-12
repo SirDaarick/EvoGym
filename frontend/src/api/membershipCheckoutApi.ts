@@ -17,6 +17,8 @@ export interface ActiveMembershipPlan {
 export interface CheckoutRegister {
   id: string;
   has_open_shift: boolean;
+  last_closed_shift_id?: string | null;
+  expected_opening_cash_minor?: number | null;
   [key: string]: unknown;
 }
 
@@ -201,6 +203,26 @@ export function createMemberNumber(): string {
   return `M${crypto.randomUUID().replaceAll('-', '').slice(0, 31)}`;
 }
 
+export async function findMembersByPhone(phone: string): Promise<CreatedMember[]> {
+  const digits = phone.replace(/\D/g, '');
+  if (!digits) throw new Error('Ingresa un teléfono con números.');
+  const matches: CreatedMember[] = [];
+  let page = 1;
+  let pages = 1;
+  do {
+    const result = await request<{ items: CreatedMember[]; pages: number }>(`/api/v1/members?page=${page}&limit=100`);
+    if (!Array.isArray(result.items) || !Number.isSafeInteger(result.pages) || result.pages < 0 ||
+        !result.items.every(member => isRecord(member) && isIdentifier(member.id) &&
+          isIdentifier(member.member_number) && isIdentifier(member.full_name) && typeof member.phone === 'string')) {
+      throw new Error('No se pudo verificar el teléfono.');
+    }
+    matches.push(...result.items.filter(member => typeof member.phone === 'string' && member.phone.replace(/\D/g, '') === digits));
+    pages = result.pages;
+    page += 1;
+  } while (page <= pages);
+  return matches;
+}
+
 export async function createMember(requestBody: CreateMemberRequest): Promise<CreatedMember> {
   try {
     return await request<CreatedMember>('/api/v1/members', {
@@ -209,6 +231,7 @@ export async function createMember(requestBody: CreateMemberRequest): Promise<Cr
     });
   } catch (error) {
     if (!(error instanceof CheckoutApiHttpError) || error.status !== 409) throw error;
+    if (error.code === 'member_phone_exists') throw error;
 
     const query = new URLSearchParams({
       page: '1',

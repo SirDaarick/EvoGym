@@ -67,9 +67,20 @@ describe('API product routes', () => {
   });
 
   it('renders member DTOs through the authenticated product route without mounting demo state', async () => {
-    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    admin.request.mockImplementation(async path => {
+      if (path.startsWith('/api/v1/members?')) {
+        const search = new URLSearchParams(path.split('?')[1]).get('search') ?? '';
+        const items = search === 'not-a-member' ? [] : [member];
+        return new Response(JSON.stringify({ items, total: items.length, page: 1, limit: 50, pages: items.length ? 1 : 0 }));
+      }
+      return new Response(JSON.stringify({}));
+    });
+    render(withQuery(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-    expect(admin.request).toHaveBeenCalledWith(expect.stringContaining('/api/v1/members?'), expect.any(Object));
+    expect(admin.request).toHaveBeenCalledWith(
+      '/api/v1/members?page=1&limit=50&sort_by=full_name&sort_dir=asc',
+      expect.objectContaining({ headers: { Accept: 'application/json' }, signal: expect.any(AbortSignal) }),
+    );
     expect(screen.queryByTestId('demo-provider')).not.toBeInTheDocument();
     expect(screen.getByText('M-100')).toBeInTheDocument();
     expect(screen.getByText('Activo')).toBeInTheDocument();
@@ -77,10 +88,14 @@ describe('API product routes', () => {
     expect(screen.getByRole('button', { name: 'Ordenar por Socio' })).toBeInTheDocument();
     const search = screen.getByRole('textbox', { name: 'Buscar socio' });
     await userEvent.type(search, 'M-100');
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith(
+      expect.stringContaining('search=M-100'),
+      expect.any(Object),
+    ));
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     await userEvent.clear(search);
     await userEvent.type(search, 'not-a-member');
-    expect(screen.getByText('Sin coincidencias')).toBeInTheDocument();
+    expect(await screen.findByText('Sin coincidencias')).toBeInTheDocument();
   });
 
   it('loads shift registers and current/history through the mounted authenticated API route', async () => {
@@ -244,15 +259,15 @@ describe('API product routes', () => {
   });
 
   it('does not substitute demo rows when the API member response is empty', async () => {
-    admin.request.mockResolvedValueOnce(new Response(JSON.stringify({ items: [], total: 0, page: 1, limit: 100, pages: 0 })));
-    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    admin.request.mockResolvedValueOnce(new Response(JSON.stringify({ items: [], total: 0, page: 1, limit: 50, pages: 0 })));
+    render(withQuery(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>));
     await waitFor(() => expect(screen.getByText(/sin socios registrados/i)).toBeInTheDocument());
     expect(screen.queryByText(/maría/i)).not.toBeInTheDocument();
   });
 
   it('keeps the existing member screen and reports an API authorization error without demo rows', async () => {
     admin.request.mockResolvedValueOnce(new Response('{}', { status: 403 }));
-    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByText('No tienes autorización para consultar estos datos.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Buscar socio' })).toBeInTheDocument();
     expect(screen.queryByText('María López')).not.toBeInTheDocument();
@@ -331,9 +346,9 @@ describe('API product routes', () => {
     expect(screen.queryByText('María López')).not.toBeInTheDocument();
   });
 
-  it('loads and searches members beyond the first API page, then opens the matched DTO', async () => {
+  it('loads the first API page lazily and searches server-side beyond it, then opens the matched DTO', async () => {
     const laterMember = { ...member, id: '223e4567-e89b-42d3-a456-426614174099', member_number: 'M-101', full_name: 'Later Page Member' };
-    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({
       ...member,
       id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, '0')}`,
       member_number: `M-${String(index + 1).padStart(3, '0')}`,
@@ -341,8 +356,12 @@ describe('API product routes', () => {
     }));
     admin.request.mockImplementation(async path => {
       if (path.startsWith('/api/v1/members?')) {
-        const page = new URLSearchParams(path.split('?')[1]).get('page');
-        return new Response(JSON.stringify({ items: page === '2' ? [laterMember] : firstPage, total: 101, page: Number(page ?? 1), limit: 100, pages: 2 }));
+        const params = new URLSearchParams(path.split('?')[1]);
+        const search = params.get('search') ?? '';
+        if (search === 'M-101') {
+          return new Response(JSON.stringify({ items: [laterMember], total: 1, page: 1, limit: 50, pages: 1 }));
+        }
+        return new Response(JSON.stringify({ items: firstPage, total: 51, page: 1, limit: 50, pages: 2 }));
       }
       if (path.endsWith('/reload?visit_limit=12')) return new Response(JSON.stringify({
         profile: {}, active_periods: [], class_samples: [], financial: { has_pending_balance: false, credit_balance_minor: 0,
@@ -352,11 +371,14 @@ describe('API product routes', () => {
       return new Response('{}');
     });
 
-    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    render(withQuery(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByRole('link', { name: 'Member 1' })).toBeInTheDocument();
-    await waitFor(() => expect(admin.request).toHaveBeenCalledWith('/api/v1/members?page=2&limit=100', expect.any(Object)));
+    expect(admin.request.mock.calls.filter(([path]) => path.startsWith('/api/v1/members?'))).toHaveLength(1);
+    expect(admin.request).not.toHaveBeenCalledWith(expect.stringContaining('page=2'), expect.anything());
     const search = screen.getByRole('textbox', { name: 'Buscar socio' });
     await userEvent.type(search, 'M-101');
+    await waitFor(() => expect(admin.request).toHaveBeenCalledWith(expect.stringContaining('search=M-101'), expect.any(Object)));
+    expect(await screen.findByText('Later Page Member', {}, { timeout: 3000 })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Later Page Member' }));
     expect(await screen.findByText('Later Page Member')).toBeInTheDocument();
     expect(admin.request).toHaveBeenCalledWith(`/api/v1/members/${laterMember.id}`, expect.any(Object));
@@ -364,14 +386,25 @@ describe('API product routes', () => {
 
   it('searches API-backed members by preferred name, legal name, and member number', async () => {
     const namedMember = { ...member, preferred_name: 'Fixture Member', full_name: 'Synthetic Member One', member_number: 'SYN0001' };
-    admin.request.mockResolvedValueOnce(new Response(JSON.stringify({ items: [namedMember], total: 1, page: 1, limit: 100, pages: 1 })));
-    render(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>);
+    admin.request.mockImplementation(async path => {
+      if (path.startsWith('/api/v1/members?')) {
+        const search = new URLSearchParams(path.split('?')[1]).get('search') ?? '';
+        const matches = !search || ['Synthetic Member One', 'SYN0001', 'Fixture Member'].includes(search);
+        return new Response(JSON.stringify({ items: matches ? [namedMember] : [], total: matches ? 1 : 0, page: 1, limit: 50, pages: matches ? 1 : 0 }));
+      }
+      return new Response('{}');
+    });
+    render(withQuery(<MemoryRouter initialEntries={['/owner/members']}><ProductRoutes /></MemoryRouter>));
     expect(await screen.findByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
     const search = screen.getByRole('textbox', { name: 'Buscar socio' });
     for (const term of ['Synthetic Member One', 'SYN0001', 'Fixture Member']) {
       await userEvent.clear(search);
       await userEvent.type(search, term);
-      expect(screen.getByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
+      await waitFor(() => expect(admin.request).toHaveBeenCalledWith(
+        expect.stringContaining(`search=${encodeURIComponent(term).replace(/%20/g, '+')}`),
+        expect.any(Object),
+      ));
+      expect(await screen.findByRole('link', { name: 'Fixture Member' })).toBeInTheDocument();
     }
   });
 

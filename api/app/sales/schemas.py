@@ -18,6 +18,10 @@ class CashProductSaleRequest(BaseModel):
     items: list[ProductCartLineRequest] = Field(min_length=1, max_length=100)
     expected_total_minor: StrictInt = Field(ge=0, le=2**63 - 1)
     credit_minor: StrictInt = Field(default=0, ge=0, le=2**63 - 1, description="Part of the total paid from saldo a favor.")
+    cash_amount_minor: StrictInt | None = Field(
+        default=None, ge=0, le=2**63 - 1,
+        description="Cash collected at sale time when partial; remainder becomes member debt.",
+    )
 
 
 class CardProductSaleRequest(BaseModel):

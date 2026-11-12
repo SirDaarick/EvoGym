@@ -1,11 +1,35 @@
 ﻿import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LiveMemberRegistration } from './LiveMemberRegistration';
-const api = vi.hoisted(() => ({ create: vi.fn(), number: vi.fn() }));
-vi.mock('../../api/membershipCheckoutApi', () => ({ createMember: api.create, createMemberNumber: api.number }));
+const api = vi.hoisted(() => ({ create: vi.fn(), number: vi.fn(), lookup: vi.fn() }));
+vi.mock('../../api/membershipCheckoutApi', () => ({ createMember: api.create, createMemberNumber: api.number, findMembersByPhone: api.lookup }));
 vi.mock('./LiveMembershipCheckout', () => ({ LiveMembershipCheckout: ({ member, onClose }: { member: { id: string }; onClose: () => void }) => <section><h3>Venta de membresía</h3><p>{member.id}</p><button type="button" onClick={onClose}>Cerrar</button></section> }));
-beforeEach(() => { vi.clearAllMocks(); api.number.mockReturnValue('M' + 'a'.repeat(31)); });
+beforeEach(() => { vi.clearAllMocks(); api.number.mockReturnValue('M' + 'a'.repeat(31)); api.lookup.mockResolvedValue([]); });
 describe('LiveMemberRegistration', () => {
+  it('shows matching members and allows registering someone else with the same phone', async () => {
+    api.lookup.mockResolvedValue([{ id: 'existing', member_number: 'FAM-1', full_name: 'Ana Pérez', phone: '5551234567' }]);
+    api.create.mockResolvedValue({ id: 'new', member_number: 'M' + 'a'.repeat(31), full_name: 'Luis Pérez', phone: '5551234567' });
+    render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Luis Pérez' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    expect(await screen.findByText('Ana Pérez')).toBeInTheDocument();
+    expect(api.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar otra persona' }));
+    expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
+    expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ full_name: 'Luis Pérez', phone: '5551234567' }));
+  });
+  it('opens the selected existing member without creating another record', async () => {
+    api.lookup.mockResolvedValue([{ id: 'existing', member_number: 'FAM-1', full_name: 'Ana Pérez', phone: '5551234567' }]);
+    const findLater = vi.fn();
+    render(<LiveMemberRegistration onFindLater={findLater} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana Pérez' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ana Pérez · FAM-1' }));
+    expect(findLater).toHaveBeenCalledWith('FAM-1');
+    expect(api.create).not.toHaveBeenCalled();
+  });
   it('creates the member before handing its backend identity to checkout', async () => {
     api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana Pérez', phone: '5551234567' });
     render(<LiveMemberRegistration onFindLater={vi.fn()} onUnresolvedChange={vi.fn()} />);
@@ -16,6 +40,20 @@ describe('LiveMemberRegistration', () => {
     expect(await screen.findByRole('heading', { name: /Venta de membresía/ })).toBeInTheDocument();
     expect(api.create).toHaveBeenCalledWith({ member_number: 'M' + 'a'.repeat(31), full_name: 'Ana Pérez', phone: '5551234567', email: 'ana@example.com' });
     expect(screen.getByText('Identificador backend: backend-uuid')).toBeInTheDocument();
+  });
+  it('blocks a duplicate phone and offers to search the existing member instead of regenerating a number', async () => {
+    api.create.mockRejectedValue(Object.assign(new Error('conflict'), { code: 'member_phone_exists' }));
+    const onFindLater = vi.fn();
+    render(<LiveMemberRegistration onFindLater={onFindLater} onUnresolvedChange={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: ' 5551234567 ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe un socio con este teléfono');
+    expect(screen.queryByRole('button', { name: /Generar otro número/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar socio con este teléfono' }));
+    expect(onFindLater).toHaveBeenCalledWith('5551234567');
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5559999999' } });
+    expect(screen.queryByRole('button', { name: 'Buscar socio con este teléfono' })).not.toBeInTheDocument();
   });
   it('sends the preferred name when provided and omits it when blank', async () => {
     api.create.mockResolvedValue({ id: 'backend-uuid', member_number: 'M' + 'a'.repeat(31), full_name: 'Ana', phone: '5551234567' });

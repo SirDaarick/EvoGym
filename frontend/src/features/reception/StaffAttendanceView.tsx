@@ -1079,10 +1079,17 @@ export function StaffAttendanceView({ liveRequest, liveStaff, branchId }: { live
                                   required
                                   value={correctionValue}
                                   onChange={e => setCorrectionValue(e.target.value)}
-                                  placeholder="Nuevo valor"
+                                  placeholder={correctionField === 'clock_in_at' || correctionField === 'clock_out_at' ? 'YYYY-MM-DDTHH:mm:ss-06:00' : correctionField === 'status' ? 'present | late' : 'Nuevo valor'}
                                   style={{ fontSize: '12px', padding: '4px' }}
                                   disabled={correctionSubmitting}
                                 />
+                                <span className="muted" style={{ fontSize: '10px', marginTop: '2px', display: 'block' }}>
+                                  {correctionField === 'clock_in_at' || correctionField === 'clock_out_at'
+                                    ? 'Formato ISO con offset (ej: 2026-11-10T08:00:00-06:00)'
+                                    : correctionField === 'status'
+                                    ? 'Valores permitidos: present, late'
+                                    : 'Texto libre para notas'}
+                                </span>
                               </div>
                               <div className="field">
                                 <label htmlFor={`reason-input-${rec.id}`} style={{ fontSize: '11px' }}>Motivo *</label>

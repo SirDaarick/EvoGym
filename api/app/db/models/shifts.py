@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -184,6 +185,10 @@ class Shift(Base):
     )
     closing_notes: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+    closing_draft: Mapped[dict | None] = mapped_column(
+        JSON,
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(

@@ -12,7 +12,11 @@ const api = vi.hoisted(() => ({
   debtPayment: vi.fn(),
   getMember: vi.fn(),
   deposit: vi.fn(),
+  refreshRoster: vi.fn(),
+  markRoster: vi.fn(),
+  clearRoster: vi.fn(),
 }));
+vi.mock('../../offline/flushManager', () => ({ refreshLocalRoster: api.refreshRoster, markMemberRosterUncertain: api.markRoster, clearMemberRosterUncertain: api.clearRoster }));
 vi.mock('../../api/membersApi', () => ({ getMember: api.getMember }));
 vi.mock('../../api/memberCreditApi', () => ({ depositMemberCredit: api.deposit }));
 vi.mock('../../api/membershipCheckoutApi', () => ({
@@ -44,6 +48,9 @@ const sampleDebt = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.refreshRoster.mockResolvedValue(true);
+  api.markRoster.mockResolvedValue('marker');
+  api.clearRoster.mockResolvedValue(undefined);
   api.plans.mockResolvedValue([plan]);
   api.registers.mockResolvedValue([register]);
   api.shift.mockResolvedValue(shift);
@@ -76,6 +83,7 @@ describe('LiveMembershipCheckout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cobrar en efectivo' }));
 
     await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.refreshRoster).toHaveBeenCalledTimes(1);
     const [, request, key] = api.cash.mock.calls[0];
     expect(request).toEqual({ member_id: member.id, plan_version_id: 'version-live-id' });
     expect(typeof key).toBe('string');
@@ -427,5 +435,135 @@ describe('LiveMembershipCheckout', () => {
 
     const debtButton = screen.getByRole('button', { name: 'Liquidar adeudo' });
     await waitFor(() => expect(debtButton).toBeDisabled());
+  });
+
+  it('triggers immediate local roster refresh after successful debt repayment', async () => {
+    render(
+      <LiveMembershipCheckout
+        member={member}
+        initialOperation="debt_payment"
+        onClose={vi.fn()}
+      />,
+    );
+    await screen.findByLabelText('Adeudo pendiente');
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar abono en efectivo' }));
+
+    await waitFor(() => expect(api.debtPayment).toHaveBeenCalledTimes(1));
+    expect(api.refreshRoster).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('heading', { name: 'Abono registrado' })).toBeInTheDocument();
+  });
+
+  it('handles post-checkout local refresh failure gracefully without hiding sale confirmation', async () => {
+    api.refreshRoster.mockRejectedValueOnce(new Error('Network dropped during delta fetch'));
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('Plan de membresía'), { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(api.shift).toHaveBeenCalledWith(register.id));
+    fireEvent.click(screen.getByRole('button', { name: 'Cobrar en efectivo' }));
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.refreshRoster).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/Pago confirmado/)).toBeInTheDocument();
+    expect(screen.getByText(/La operación se registró, pero no se pudo actualizar la copia local de socios/)).toBeInTheDocument();
+  });
+
+  it('handles debt repayment local refresh failure gracefully without hiding receipt', async () => {
+    api.refreshRoster.mockRejectedValueOnce(new Error('Network dropped during delta fetch'));
+    render(
+      <LiveMembershipCheckout
+        member={member}
+        initialOperation="debt_payment"
+        onClose={vi.fn()}
+      />,
+    );
+    await screen.findByLabelText('Adeudo pendiente');
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar abono en efectivo' }));
+
+    await waitFor(() => expect(api.debtPayment).toHaveBeenCalledTimes(1));
+    expect(api.refreshRoster).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('heading', { name: 'Abono registrado' })).toBeInTheDocument();
+    expect(screen.getByText(/La operación se registró, pero no se pudo actualizar la copia local de socios/)).toBeInTheDocument();
+  });
+
+  it('excludes inactive plans from sale options and offers only single current version per active plan (D-A4)', async () => {
+    const activePlan1 = {
+      id: 'plan-active-1',
+      name: 'Plan Activo 1',
+      status: 'active',
+      current_version: { id: 'version-current-1', name: 'Plan Activo 1 v2', price_minor: 60000 },
+      versions: [
+        { id: 'version-old-1', name: 'Plan Activo 1 v1', price_minor: 50000 },
+        { id: 'version-current-1', name: 'Plan Activo 1 v2', price_minor: 60000 },
+      ],
+    };
+    const inactivePlan = {
+      id: 'plan-inactive-2',
+      name: 'Plan Inactivo Viejo',
+      status: 'inactive',
+      current_version: { id: 'version-inactive-2', name: 'Plan Inactivo v1', price_minor: 40000 },
+      versions: [{ id: 'version-inactive-2', name: 'Plan Inactivo v1', price_minor: 40000 }],
+    };
+    api.plans.mockResolvedValueOnce([activePlan1, inactivePlan]);
+
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+
+    // Active plan should be present in checkout options
+    const planSelect = (await screen.findByLabelText('Plan de membresía')) as HTMLSelectElement;
+    const optionTexts = Array.from(planSelect.options).map(o => o.text);
+
+    expect(optionTexts).toContain('Plan Activo 1');
+
+    // Inactive plan should NOT be present in options
+    expect(optionTexts).not.toContain('Plan Inactivo Viejo');
+
+    // Historical versions should NOT be listed as separate options
+    expect(optionTexts).not.toContain('Plan Activo 1 v1');
+
+    // Complete the checkout action on Plan Activo 1 and assert payload uses the single current version
+    fireEvent.change(planSelect, { target: { value: activePlan1.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: register.id } });
+    await waitFor(() => expect(api.shift).toHaveBeenCalledWith(register.id));
+    fireEvent.click(screen.getByRole('button', { name: 'Cobrar en efectivo' }));
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    const [, request] = api.cash.mock.calls[0];
+    expect(request).toEqual({ member_id: member.id, plan_version_id: 'version-current-1' });
+    expect(screen.getByText(/Pago confirmado/)).toBeInTheDocument();
+  });
+
+  it('enables overtime cash membership checkout against last closed shift without calling current shift', async () => {
+    const overtimeRegister = {
+      id: 'register-ot-1',
+      name: 'Caja cierre OT',
+      has_open_shift: false,
+      last_closed_shift_id: 'closed-shift-prev-1',
+    };
+    api.registers.mockResolvedValueOnce([overtimeRegister]);
+    api.openDebts.mockResolvedValueOnce([]);
+
+    render(<LiveMembershipCheckout member={member} onClose={vi.fn()} />);
+
+    const planSelect = await screen.findByLabelText('Plan de membresía');
+    fireEvent.change(planSelect, { target: { value: plan.id } });
+    fireEvent.change(screen.getByLabelText('Caja abierta'), { target: { value: overtimeRegister.id } });
+
+    expect(await screen.findByText(/Venta en overtime · turno anterior: closed-shift-prev-1/)).toBeInTheDocument();
+    expect(api.shift).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Transferencia bancaria' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Liquidar adeudo' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cobrar en efectivo' }));
+
+    await waitFor(() => expect(api.cash).toHaveBeenCalledTimes(1));
+    expect(api.cash).toHaveBeenCalledWith(
+      overtimeRegister.id,
+      {
+        member_id: member.id,
+        plan_version_id: 'version-live-id',
+        source_shift_id: 'closed-shift-prev-1',
+      },
+      expect.any(String),
+    );
+    expect(await screen.findByText(/Pago confirmado/)).toBeInTheDocument();
   });
 });

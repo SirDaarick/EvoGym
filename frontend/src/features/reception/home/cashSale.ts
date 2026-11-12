@@ -1,11 +1,21 @@
 import type { AuthenticatedRequest } from '@/api/inventoryApi';
 import {
-  ProductSaleError, prepareProductSale, resolveCashProductSale, submitCashProductSale, type PendingProductSale,
+  ProductSaleError, prepareProductSale, resolveCashProductSale, submitCashProductSale,
+  type PendingProductSale, type ProductSaleInput,
 } from '@/api/productSalesApi';
+import { formatMoney } from '@/shared/formatters/money';
 import type { ProductSaleIntentApi } from './useProductSaleIntent';
 import { openLocalDb } from '@/offline/db';
 import { dispatch, type CashSaleItemPayload } from '@/offline/dispatcher';
 import { isOnlineHint } from '@/offline/connectivity';
+
+export function saleSuccessMessage(payload: ProductSaleInput): string {
+  const due = payload.expected_total_minor - (payload.credit_minor ?? 0);
+  if (payload.cash_amount_minor !== undefined && payload.cash_amount_minor < due) {
+    return `Compra registrada con saldo pendiente de ${formatMoney(due - payload.cash_amount_minor)} MXN.`;
+  }
+  return 'Compra registrada.';
+}
 
 export interface SaleUi {
   setMessage(message: string): void;
@@ -78,13 +88,16 @@ export async function executeOfflineCashSale(ctx: SaleContext, onlineIdempotency
 export async function runCashSale(ctx: SaleContext) {
   const { request, submitted, intents, ui } = ctx;
   const isOnline = isOnlineHint();
-  // Contingency sales cannot spend saldo a favor, so a sale with credit never goes offline.
+  // Contingency sales cannot spend saldo a favor or leave member debt, so neither ever goes offline.
   const usesCredit = (submitted.payload.credit_minor ?? 0) > 0;
+  const isPartialCash = submitted.payload.cash_amount_minor !== undefined;
 
   if (!isOnline) {
-    if (usesCredit) {
+    if (usesCredit || isPartialCash) {
       ui.setError(true);
-      ui.setMessage('Sin conexión no se puede usar saldo a favor. Desmarca el saldo a favor o espera a recuperar la conexión.');
+      ui.setMessage(isPartialCash
+        ? 'Sin conexión no se puede dejar saldo pendiente. Cobra el total en efectivo o espera a recuperar la conexión.'
+        : 'Sin conexión no se puede usar saldo a favor. Desmarca el saldo a favor o espera a recuperar la conexión.');
       intents.clearIntent?.();
       return;
     }
@@ -107,11 +120,11 @@ export async function runCashSale(ctx: SaleContext) {
     ui.resetCart(); ui.invalidateStock();
     const warning = await ctx.afterSale?.();
     if (warning) { ui.setError(true); ui.setMessage(warning); return; }
-    ui.setMessage(morePending ? MORE_PENDING : 'Compra registrada.');
+    ui.setMessage(morePending ? MORE_PENDING : saleSuccessMessage(submitted.payload));
   } catch (failure) {
     if (failure instanceof ProductSaleError && failure.definitelyRejected) {
       await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
-    } else if (usesCredit) {
+    } else if (usesCredit || isPartialCash) {
       await handleSaleFailure(failure, ctx, NOT_CONFIRMED);
     } else {
       // Network error or uncertain response: fallback to offline dispatch with online_idempotency_key

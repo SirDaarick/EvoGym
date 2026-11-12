@@ -15,7 +15,7 @@ from app.inventory.schemas import RegisterInventorySnapshotDTO
 from app.shifts import service
 from app.shifts.schemas import (
     CashRegisterDTO, CloseShiftDTO, CreateCashRegisterDTO, CreatePaymentTerminalDTO, OpenShiftDTO,
-    PaymentTerminalDTO, ShiftDTO, ShiftPageDTO, ShiftSummaryDTO,
+    PaymentTerminalDTO, ShiftCloseDraftInputDTO, ShiftDTO, ShiftPageDTO, ShiftSummaryDTO,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["shifts"])
@@ -125,6 +125,13 @@ def close_shift_endpoint(
     if replayed:
         response.status_code = 200
     return dto
+
+
+@router.put("/shifts/{shift_id}/close-draft", response_model=ShiftDTO)
+def save_close_draft_endpoint(
+    shift_id: UUID, payload: ShiftCloseDraftInputDTO, principal: Principal, *, session: SessionDep,
+) -> ShiftDTO:
+    return service.save_close_draft(session, principal, shift_id, payload)
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftDTO)

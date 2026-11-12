@@ -20,6 +20,7 @@ import { GimiDashboard } from '../features/gimi/GimiDashboard';
 import { GimiChatWidget } from '../features/gimi/GimiChatWidget';
 import { Button, EmptyState, PageHeader, Panel } from '../shared/ui';
 import { OfflineStatusBadge } from '../offline/OfflineStatusBadge';
+import { PendingCheckInLog } from '../offline/PendingCheckInLog';
 import { ApplicationShell, type ProductNavigationItem, type ShellIconName } from './ApplicationShell';
 import { homePath, navigation, rolePath } from './navigation';
 import type { Role } from '../domain/models';
@@ -67,7 +68,7 @@ export function ApiProductApp() {
 
   const items: ProductNavigationItem[] = navigation
     .filter(item => item.roles.includes(role))
-    .filter(item => !isAdmin || canManageEmployees || !['staff', 'alerts'].includes(item.slug))
+    .filter(item => !isAdmin || canManageEmployees || item.slug !== 'staff')
     .map(item => ({
       label: isAdmin && item.slug === 'staff' ? 'Personal' : item.roleLabels?.[role] ?? item.label,
       to: rolePath(role, item.slug),
@@ -163,6 +164,7 @@ export function ApiProductApp() {
     </>}
     headerActionsBeforeTheme={<>
       <OfflineStatusBadge />
+      {role === 'RECEPTION' && <PendingCheckInLog />}
       <Button variant="secondary" onClick={() => navigate(rolePath(role, 'shifts'))}>Turno</Button>
     </>}
     headerActionsAfterTheme={isPhoneEmployee ? <>

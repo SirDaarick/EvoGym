@@ -13,14 +13,30 @@ export interface CashContributionDTO extends CashContributionInput { id: string;
 export interface MovementPage<T> { items: T[]; total_minor: number }
 
 export class ExpenseApiError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = 'ExpenseApiError'; }
+  constructor(readonly status: number, message: string, readonly code?: string) { super(message); this.name = 'ExpenseApiError'; }
 }
 
 async function json<T>(request: ApiRequest, path: string, init?: RequestInit): Promise<T> {
   const response = await request(path, init);
   if (!response.ok) {
+    let code: string | undefined;
+    let backendMessage: string | undefined;
+    try {
+      const data = await response.json();
+      code = data?.error?.code ?? data?.code;
+      backendMessage = data?.error?.message ?? data?.message;
+    } catch {
+      // not JSON
+    }
+    if (code === 'purchase_cancellation_requires_review') {
+      throw new ExpenseApiError(
+        response.status,
+        'Esta compra tiene productos que ya fueron vendidos o consumidos; requiere revisión de un administrador.',
+        code,
+      );
+    }
     const messages: Record<number, string> = { 401: 'La sesión expiró o fue revocada.', 403: 'No tienes autorización para esta operación.', 409: 'El turno o el registro cambió. Actualiza e intenta nuevamente.', 422: 'Revisa los datos enviados e intenta nuevamente.', 501: 'La carga de fotos no está disponible.' };
-    throw new ExpenseApiError(response.status, messages[response.status] ?? 'No se pudo completar la operación.');
+    throw new ExpenseApiError(response.status, backendMessage || messages[response.status] || 'No se pudo completar la operación.', code);
   }
   return response.json() as Promise<T>;
 }

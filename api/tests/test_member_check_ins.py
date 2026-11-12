@@ -1,16 +1,22 @@
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 import app.memberships.service as check_in_api
 
-from app.db.models import Member, MembershipPeriod, MemberCheckIn, Plan, PlanVersion
+from app.db.models import Branch, Member, MembershipPeriod, MemberCheckIn, Plan, PlanVersion
 from app.main import create_app
 from app.shifts.queries import create_cash_register
 from test_admin_auth import FakeRecoveryDelivery, configured_settings, seed_admin
 from admin_session_helpers import approved_admin_headers
 from test_shifts import _seed_branch, _seed_receptionist, _setup_db, open_shift
+
+
+def _local_today(factory, branch_id):
+    with factory() as session:
+        return datetime.now(ZoneInfo(session.get(Branch, branch_id).timezone)).date()
 
 
 def _seed_membership(factory, branch_id, receptionist_id, code):
@@ -91,8 +97,8 @@ def test_member_checkin_denies_expired_membership_and_records_no_event(tmp_path)
             period_id = UUID(sale.json()["membership"]["id"])
             with factory.begin() as session:
                 period = session.get(MembershipPeriod, period_id)
-                period.starts_on = date.today() - timedelta(days=30)
-                period.ends_on = date.today()
+                period.starts_on = _local_today(factory, branch_id) - timedelta(days=30)
+                period.ends_on = _local_today(factory, branch_id)  # end-exclusive: the last day is already expired
             response = client.post(f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}",
                 headers={"Authorization": f"Bearer {receptionist_token}", "Idempotency-Key": "expired-checkin"})
             assert response.status_code == 409
@@ -103,6 +109,97 @@ def test_member_checkin_denies_expired_membership_and_records_no_event(tmp_path)
                 assert session.scalar(select(MemberCheckIn.id).where(MemberCheckIn.period_id == period_id)) is None
                 from app.db.models.member_check_ins import MemberCheckInVisit
                 assert session.scalar(select(MemberCheckInVisit.id).where(MemberCheckInVisit.member_id == member_id)) is None
+    finally:
+        engine.dispose()
+
+
+def test_member_checkin_denies_future_period_and_records_no_event(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "member-checkin-future", "Future Checkin")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "FUTURE")
+        with TestClient(create_app(configured_settings(url))) as client:
+            sale = client.post(f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "future-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)})
+            period_id = UUID(sale.json()["membership"]["id"])
+            with factory.begin() as session:
+                period = session.get(MembershipPeriod, period_id)
+                period.starts_on = _local_today(factory, branch_id) + timedelta(days=2)
+                period.ends_on = period.starts_on + timedelta(days=30)
+            response = client.post(f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "future-checkin"})
+            assert response.status_code == 409
+            assert response.json()["error"]["metadata"] == {"status": "not_yet_valid", "reason": "period_not_started"}
+            with factory() as session:
+                assert session.scalar(select(MemberCheckIn.id).where(MemberCheckIn.period_id == period_id)) is None
+    finally:
+        engine.dispose()
+
+
+def test_member_checkin_with_outstanding_debt_requires_confirmation(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "member-checkin-debt", "Debt Checkin")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        seed_admin(factory)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "DEBT")
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            sale = client.post(f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "debt-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 4000})
+            assert sale.status_code == 201, sale.text
+            period_id = sale.json()["membership"]["id"]
+            path = f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}"
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "debt-checkin"}
+            denied = client.post(path, headers=headers)
+            assert denied.status_code == 409
+            with factory() as session:
+                assert session.scalar(select(MemberCheckIn.id).where(MemberCheckIn.member_id == member_id)) is None
+            response = client.post(path, headers=headers, json={"confirm_outstanding_balance": True})
+            assert response.status_code == 201, response.text
+            assert response.json()["access_reason"] == "valid_with_outstanding_balance"
+            assert "outstanding_balance" in response.json()["access_warnings"]
+            replay = client.post(path, headers=headers, json={"confirm_outstanding_balance": True})
+            assert replay.status_code == 200
+            assert replay.json()["id"] == response.json()["id"]
+            assert client.post(path, headers=headers).status_code == 409
+            alert_path = f"/api/v1/member-check-ins/branches/{branch_id}/debt-alerts"
+            assert client.get(alert_path, headers={"Authorization": f"Bearer {token}"}).status_code == 403
+            alerts = client.get(alert_path, headers=approved_admin_headers(client, delivery))
+            assert alerts.status_code == 200
+            assert [item["id"] for item in alerts.json()] == [response.json()["id"]]
+            with factory() as session:
+                event = session.scalar(select(MemberCheckIn).where(MemberCheckIn.member_id == member_id))
+                assert event is not None and "outstanding_balance" in event.access_warnings
+    finally:
+        engine.dispose()
+
+
+def test_checkin_requires_confirmation_for_debt_from_another_membership(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "other-debt", "Other debt")
+        staff_id, token = _seed_receptionist(factory, branch_id)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, staff_id, "OTHERDEBT")
+        with TestClient(create_app(configured_settings(url))) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            path = f"/api/v1/registers/{register_id}/membership-sales"
+            body = {"member_id": str(member_id), "plan_version_id": str(version_id)}
+            first = client.post(path, headers={**headers, "Idempotency-Key": "first"}, json={**body, "cash_amount_minor": 4000})
+            assert first.status_code == 201
+            second = client.post(path, headers={**headers, "Idempotency-Key": "second"}, json=body)
+            assert second.status_code == 201
+            period = second.json()["membership"]["id"]
+            with factory.begin() as session:
+                current = session.get(MembershipPeriod, UUID(period))
+                current.starts_on = _local_today(factory, branch_id) - timedelta(days=1)
+                current.ends_on = _local_today(factory, branch_id) + timedelta(days=29)
+            checkin = client.post(f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period}", headers={**headers, "Idempotency-Key": "other-debt-checkin"})
+            assert checkin.status_code == 409
+            assert checkin.json()["error"]["code"] == "debt_confirmation_required"
     finally:
         engine.dispose()
 
@@ -183,3 +280,130 @@ def test_member_checkin_immediately_reflects_in_member_reload(tmp_path):
             assert visits[0]["branch_id"] == str(branch_id)
     finally:
         engine.dispose()
+
+
+def test_checkin_without_debt_even_with_confirmation_does_not_alert_admin(tmp_path):
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "no-debt-checkin", "No Debt Checkin")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        seed_admin(factory)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "NODEBT")
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            sale = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "nodebt-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id)},
+            )
+            assert sale.status_code == 201, sale.text
+            period_id = sale.json()["membership"]["id"]
+            path = f"/api/v1/member-check-ins/branches/{branch_id}/periods/{period_id}"
+            headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "nodebt-checkin"}
+            response = client.post(path, headers=headers, json={"confirm_outstanding_balance": True})
+            assert response.status_code == 201
+            assert response.json()["access_reason"] == "valid"
+            assert "outstanding_balance" not in response.json()["access_warnings"]
+            alert_path = f"/api/v1/member-check-ins/branches/{branch_id}/debt-alerts"
+            alerts = client.get(alert_path, headers=approved_admin_headers(client, delivery))
+            assert alerts.status_code == 200
+            assert alerts.json() == []
+    finally:
+        engine.dispose()
+
+
+def test_debt_alerts_include_reconciled_offline_confirmed_checkins_only(tmp_path):
+    from hashlib import sha256
+    from datetime import timezone
+    from app.sync.reconcile import reconcile_event
+    from app.db.models import ContingencyEvent, SyncDevice
+    from app.settings import Settings
+
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "offline-alerts-branch", "Offline Alerts Branch")
+        receptionist_id, token = _seed_receptionist(factory, branch_id)
+        seed_admin(factory)
+        member_id, version_id, register_id = _seed_membership(factory, branch_id, receptionist_id, "OFFALERT")
+        delivery = FakeRecoveryDelivery()
+        with TestClient(create_app(configured_settings(url), recovery_delivery=delivery)) as client:
+            sale = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "off-sale"},
+                json={"member_id": str(member_id), "plan_version_id": str(version_id), "cash_amount_minor": 3000},
+            )
+            assert sale.status_code == 201
+            period_id = UUID(sale.json()["membership"]["id"])
+
+            device = SyncDevice(
+                branch_id=branch_id,
+                device_prefix="OFF-ALERT",
+                token_digest=sha256(b"token").hexdigest(),
+                provisioned_by=receptionist_id,
+                issued_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+            with factory.begin() as session:
+                session.add(device)
+                session.flush()
+                device_id = device.id
+                ev_unconfirmed = ContingencyEvent(
+                    device_id=device_id,
+                    event_id="OFF-ALERT-00001",
+                    seq=1,
+                    event_type="attendance.check_in",
+                    schema_version=1,
+                    actor_staff_id=receptionist_id,
+                    payload={
+                        "member_id": str(member_id),
+                        "period_id": str(period_id),
+                        "branch_id": str(branch_id),
+                        "local_access_decision": "valid",
+                        "confirm_outstanding_balance": False,
+                    },
+                    payload_hash="0" * 64,
+                    client_recorded_at=datetime.now(timezone.utc),
+                    status="accepted",
+                )
+                session.add(ev_unconfirmed)
+                session.flush()
+                reconcile_event(session, device, ev_unconfirmed, Settings(environment="test", debug=True, _env_file=None))
+
+            admin_headers = approved_admin_headers(client, delivery)
+            alert_path = f"/api/v1/member-check-ins/branches/{branch_id}/debt-alerts"
+            alerts = client.get(alert_path, headers=admin_headers)
+            assert alerts.status_code == 200
+            assert alerts.json() == []
+
+            with factory.begin() as session:
+                d = session.get(SyncDevice, device_id)
+                ev_confirmed = ContingencyEvent(
+                    device_id=device_id,
+                    event_id="OFF-ALERT-00002",
+                    seq=2,
+                    event_type="attendance.check_in",
+                    schema_version=1,
+                    actor_staff_id=receptionist_id,
+                    payload={
+                        "member_id": str(member_id),
+                        "period_id": str(period_id),
+                        "branch_id": str(branch_id),
+                        "local_access_decision": "valid_with_outstanding_balance",
+                        "confirm_outstanding_balance": True,
+                    },
+                    payload_hash="0" * 64,
+                    client_recorded_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+                    status="accepted",
+                )
+                session.add(ev_confirmed)
+                session.flush()
+                reconcile_event(session, d, ev_confirmed, Settings(environment="test", debug=True, _env_file=None))
+                confirmed_check_in_id = str(ev_confirmed.result_check_in_id)
+
+            alerts2 = client.get(alert_path, headers=admin_headers)
+            assert alerts2.status_code == 200
+            assert len(alerts2.json()) == 1
+            assert alerts2.json()[0]["id"] == confirmed_check_in_id
+    finally:
+        engine.dispose()
+

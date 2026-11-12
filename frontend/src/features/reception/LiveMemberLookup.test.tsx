@@ -6,9 +6,9 @@ const search = vi.fn();
 const detail = vi.fn();
 const tokenRead = vi.fn();
 const clear = vi.fn();
-const checkoutApi = vi.hoisted(() => ({ plans: vi.fn(), registers: vi.fn(), shift: vi.fn(), cash: vi.fn(), transfer: vi.fn(), createMember: vi.fn(), createMemberNumber: vi.fn() }));
+const checkoutApi = vi.hoisted(() => ({ plans: vi.fn(), registers: vi.fn(), shift: vi.fn(), cash: vi.fn(), transfer: vi.fn(), createMember: vi.fn(), createMemberNumber: vi.fn(), findMembersByPhone: vi.fn() }));
 vi.mock('../../api/membershipCheckoutApi', () => ({
-  createMember: checkoutApi.createMember, createMemberNumber: checkoutApi.createMemberNumber,
+  createMember: checkoutApi.createMember, createMemberNumber: checkoutApi.createMemberNumber, findMembersByPhone: checkoutApi.findMembersByPhone,
   getActiveMembershipPlans: checkoutApi.plans, getRegisters: checkoutApi.registers, getCurrentRegisterShift: checkoutApi.shift,
   submitMembershipCashSale: checkoutApi.cash, submitMembershipTransferSale: checkoutApi.transfer,
 }));
@@ -20,7 +20,7 @@ vi.mock('../../api/receptionApi', () => ({
 }));
 
 const member = { id: 'a7f91bba-5722-4ed7-8bed-10d7f3f6c351', member_number: 'M-10', full_name: 'Socio Real', preferred_name: null, phone: '5551234567', status: 'active' };
-beforeEach(() => { vi.clearAllMocks(); tokenRead.mockReturnValue('live-token'); search.mockResolvedValue([member]); detail.mockResolvedValue({ ...member, pending_balance_minor: 3250, has_pending_balance: true }); checkoutApi.plans.mockResolvedValue([]); checkoutApi.registers.mockResolvedValue([]); });
+beforeEach(() => { vi.clearAllMocks(); tokenRead.mockReturnValue('live-token'); search.mockResolvedValue([member]); detail.mockResolvedValue({ ...member, pending_balance_minor: 3250, has_pending_balance: true }); checkoutApi.plans.mockResolvedValue([]); checkoutApi.registers.mockResolvedValue([]); checkoutApi.findMembersByPhone.mockResolvedValue([]); });
 
 describe('LiveMemberLookup', () => {
   it('uses only live API results and displays then clears positive balance warning after refresh', async () => {
@@ -100,6 +100,19 @@ describe('LiveMemberLookup', () => {
     expect(screen.getByLabelText('Nombre completo')).toBeRequired();
     expect(screen.getByLabelText('Teléfono')).toBeRequired();
     expect(screen.getByLabelText('Correo electrónico (opcional)')).not.toBeRequired();
+  });
+
+  it('opens the selected phone match directly from registration', async () => {
+    checkoutApi.findMembersByPhone.mockResolvedValue([member]);
+    render(<LiveMemberLookup />);
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio nuevo' }));
+    fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5551234567' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar socio' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Socio Real · M-10' }));
+    expect(await screen.findByRole('heading', { name: 'Socio Real' })).toBeInTheDocument();
+    expect(detail).toHaveBeenCalledWith(member.id, 'live-token');
+    expect(checkoutApi.createMember).not.toHaveBeenCalled();
   });
 
   it('blocks leaving live registration while create reconciliation is unresolved', async () => {

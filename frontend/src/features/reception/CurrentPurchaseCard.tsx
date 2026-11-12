@@ -60,6 +60,9 @@ export interface CurrentPurchaseCardProps {
   paymentMethod?: PaymentMethod;
   onPaymentMethodChange?: (method: PaymentMethod) => void;
   cashOnly?: boolean;
+  /** Allows combining two payment methods; defaults to true. */
+  allowMixed?: boolean;
+  disabledMethods?: PaymentMethod[];
   useLiveCardIntent?: boolean;
 }
 
@@ -118,6 +121,8 @@ export function CurrentPurchaseCard({
   statusMessage,
   statusType = 'success',
   cashOnly = false,
+  allowMixed = true,
+  disabledMethods = [],
   useLiveCardIntent = false,
   paymentMethod,
   onPaymentMethodChange,
@@ -168,6 +173,7 @@ export function CurrentPurchaseCard({
   }, []);
 
   const toggleMixedMethod = (m: PaymentMethod) => {
+    if (!allowMixed) return;
     setSelectedMethods(prev => {
       if (prev.includes(m)) {
         return prev.length > 1 ? prev.filter(x => x !== m) : prev;
@@ -186,6 +192,7 @@ export function CurrentPurchaseCard({
   };
 
   const handleTilePointerDown = (m: PaymentMethod) => {
+    if (disabled || disabledMethods.includes(m) || !allowMixed) return;
     didLongPressRef.current[m] = false;
     setHoldingMethod(m);
     holdTimerRef.current[m] = window.setTimeout(() => {
@@ -204,12 +211,13 @@ export function CurrentPurchaseCard({
   };
 
   const handleTileClick = (m: PaymentMethod, e: React.MouseEvent) => {
+    if (disabled || disabledMethods.includes(m)) return;
     if (didLongPressRef.current[m]) {
       didLongPressRef.current[m] = false;
       return;
     }
 
-    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+    if (allowMixed && (e.ctrlKey || e.metaKey || e.shiftKey)) {
       toggleMixedMethod(m);
       return;
     }
@@ -551,6 +559,7 @@ export function CurrentPurchaseCard({
                     role="radio"
                     aria-label={methodNames[m]}
                     aria-checked={isSelected}
+                    disabled={disabled || disabledMethods.includes(m)}
                     title={
                       isMixed
                         ? isM1Completed
@@ -558,7 +567,9 @@ export function CurrentPurchaseCard({
                           : isCurrentlyPaying
                           ? `${methodNames[m]} (Cobro en curso)`
                           : `${methodNames[m]} (Siguiente método)`
-                        : `${methodNames[m]} (Mantén presionado para pago mixto)`
+                        : allowMixed
+                        ? `${methodNames[m]} (Mantén presionado para pago mixto)`
+                        : methodNames[m]
                     }
                     className={tileClasses}
                     onPointerDown={() => handleTilePointerDown(m)}
@@ -590,7 +601,7 @@ export function CurrentPurchaseCard({
               })}
             </div>}
 
-            {selectedMethods.length === 1 && (
+            {allowMixed && selectedMethods.length === 1 && (
               <p className="cart-payment-methods-hint">
                 Mantén presionado otro método para combinar en pago mixto.
               </p>
@@ -600,7 +611,9 @@ export function CurrentPurchaseCard({
             {selectedMethods.length === 0 && !fullyCoveredByCredit && (
               <div className="cart-payment-context" style={{ marginTop: '12px' }}>
                 <Notice tone="neutral">
-                  Selecciona un método de cobro arriba para continuar. Mantén presionado un segundo método para combinar en pago mixto.
+                  {allowMixed
+                    ? 'Selecciona un método de cobro arriba para continuar. Mantén presionado un segundo método para combinar en pago mixto.'
+                    : 'Selecciona un método de cobro arriba para continuar.'}
                 </Notice>
               </div>
             )}

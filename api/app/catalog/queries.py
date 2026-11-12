@@ -277,7 +277,9 @@ def list_plans(
     if status is not None:
         stmt = stmt.where(Plan.status == status)
     if eligibility_type is not None:
-        stmt = stmt.join(Plan.versions).where(PlanVersion.eligibility_type == eligibility_type)
+        # Match the current (latest) version only, never a superseded one.
+        latest = select(func.max(PlanVersion.version_number)).where(PlanVersion.plan_id == Plan.id).correlate(Plan).scalar_subquery()
+        stmt = stmt.join(Plan.versions).where(PlanVersion.version_number == latest, PlanVersion.eligibility_type == eligibility_type)
 
     stmt = stmt.order_by(Plan.code.asc())
     return list(session.scalars(stmt).unique().all())

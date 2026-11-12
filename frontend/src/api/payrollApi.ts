@@ -3,6 +3,7 @@ import type { ApiRequest } from './shiftsApi';
 export interface PayrollItem {
   profile_id: string; full_name: string; base_minor: number; advances_minor: number; net_minor: number; daily_minor: number;
   paid: { payment_method: 'cash' | 'transfer'; paid_at: string } | null;
+  advance_payment_method?: 'cash' | 'transfer' | null;
 }
 export interface PayrollWeek { items: PayrollItem[]; base_minor: number; advances_minor: number; net_minor: number }
 export interface PayrollTarget { branch_id: string; staff_profile_id: string; week_start: string }
@@ -20,7 +21,7 @@ function post(body: unknown, key: string): RequestInit {
 
 export const getPayrollWeek = (request: ApiRequest, branch: string, week: string) =>
   json<PayrollWeek>(request, `/api/v1/admin/payroll/weeks/${encodeURIComponent(week)}?branch_id=${encodeURIComponent(branch)}`);
-export const recordPayrollAdvance = (request: ApiRequest, body: PayrollTarget & { amount_minor: number; notes?: string }, key: string) =>
+export const recordPayrollAdvance = (request: ApiRequest, body: PayrollTarget & { amount_minor: number; notes?: string; payment_method: 'cash' | 'transfer' }, key: string) =>
   json<unknown>(request, '/api/v1/admin/payroll/advances', post(body, key));
 export const payPayrollWeek = (request: ApiRequest, body: PayrollTarget & { payment_method: 'cash' | 'transfer' }, key: string) =>
   json<unknown>(request, '/api/v1/admin/payroll/payments', post(body, key));

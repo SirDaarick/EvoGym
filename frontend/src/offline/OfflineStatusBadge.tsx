@@ -58,6 +58,10 @@ export function OfflineStatusBadge() {
     );
   }
 
+  if (pendingCount > 0) {
+    return <div role="status">Pending sync ({pendingCount})</div>;
+  }
+
   // Synced
   const timeFormatted = lastSyncAt ? lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 

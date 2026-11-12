@@ -120,9 +120,15 @@ class ProductPageDTO(BaseModel):
     total: int
 
 
+
+
+
 class StockPageDTO(BaseModel):
     items: list[StockRowDTO]
     total: int
+
+
+
 
 
 class StockInitializationDTO(BaseModel):
@@ -152,6 +158,30 @@ class StockMovementCreateDTO(BaseModel):
         return self
 
 
+class InventoryPurchaseLineDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_id: UUID
+    quantity: int = Field(strict=True, gt=0, le=2**63 - 1)
+    cost_minor: int = Field(strict=True, gt=0, le=2**63 - 1)
+
+
+class InventoryPurchaseCreateDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[InventoryPurchaseLineDTO] = Field(min_length=1, max_length=100)
+    pay_from_drawer: bool = Field(strict=True)
+    register_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_purchase(self) -> "InventoryPurchaseCreateDTO":
+        if self.pay_from_drawer != (self.register_id is not None):
+            raise ValueError("A register is required only for drawer-funded purchases.")
+        if len({line.product_id for line in self.items}) != len(self.items):
+            raise ValueError("Each product may occur only once.")
+        if sum(line.cost_minor for line in self.items) > 2**63 - 1:
+            raise ValueError("Purchase total exceeds supported limits.")
+        return self
+
+
 class OpenContainerDTO(BaseModel):
     product_id: UUID
     idempotency_key: str = Field(min_length=1, max_length=128)
@@ -174,6 +204,9 @@ class StockMovementDTO(BaseModel):
 class StockMovementPageDTO(BaseModel):
     items: list[StockMovementDTO]
     total: int
+
+
+
 
 
 class InventorySnapshotItemDTO(BaseModel):
@@ -201,3 +234,30 @@ class RegisterInventorySnapshotDTO(BaseModel):
     missing_count: int
     source_state: str
     items: list[InventorySnapshotItemDTO]
+
+
+
+class InventoryWasteLineDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_id: UUID
+    quantity: int = Field(strict=True, gt=0, le=2**63 - 1)
+
+
+class InventoryWasteCreateDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[InventoryWasteLineDTO] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=240)
+
+    @model_validator(mode="after")
+    def validate_waste_batch(self) -> "InventoryWasteCreateDTO":
+        cleaned = self.reason.strip()
+        if not cleaned:
+            raise ValueError("Reason is required for waste stock movements.")
+        if len({line.product_id for line in self.items}) != len(self.items):
+            raise ValueError("Each product may occur only once.")
+        self.reason = cleaned
+        return self
+
+
+class InventoryWasteBatchDTO(BaseModel):
+    items: list[StockMovementDTO]

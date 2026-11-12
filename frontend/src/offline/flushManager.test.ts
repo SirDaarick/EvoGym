@@ -1,7 +1,8 @@
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openLocalDb, type EvoGymLocalDB, type LocalEvent } from './db';
-import { catchUpRosterDelta, flushQueue } from './flushManager';
+import { openLocalDb, EvoGymLocalDB, type LocalEvent } from './db';
+import * as localDb from './db';
+import { catchUpRosterDelta, flushQueue, refreshLocalRoster, markMemberRosterUncertain, clearMemberRosterUncertain } from './flushManager';
 import * as syncApi from './syncApi';
 import * as bootstrap from './bootstrap';
 
@@ -68,6 +69,170 @@ describe('flushManager', () => {
     expect(result.flushedCount).toBe(0);
     expect(result.remainingCount).toBe(0);
     expect(deltaSpy).toHaveBeenCalled();
+  });
+
+  it('loads all roster delta pages before completing catch-up', async () => {
+    const db = open();
+    await db.open();
+    await db.meta.put({ key: 'last_roster_cursor', value: 'start|m0' });
+    const row = (id: string) => ({ member_id: id, member_number: id, full_name: id, phone_last4: '', status: 'active', active_periods: [], has_debt: true, changed_at: '2026-11-05T10:00:00Z' });
+    const delta = vi.spyOn(syncApi, 'getRosterDelta')
+      .mockResolvedValueOnce({ members: [row('m1')], removed_member_ids: [], registers: [], next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm1' }, has_more: true, snapshot_required: false })
+      .mockResolvedValueOnce({ members: [row('m2')], removed_member_ids: [], registers: [], next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm2' }, has_more: false, snapshot_required: false });
+    expect(await catchUpRosterDelta(db, 'token')).toBe(true);
+    expect(delta).toHaveBeenCalledTimes(2);
+    expect((await db.members.get('m2'))?.has_debt).toBe(true);
+  });
+
+  it('reports failure when the roster could not be refreshed', async () => {
+    const db = open();
+    await db.open();
+    vi.spyOn(syncApi, 'getRosterDelta').mockRejectedValueOnce(new Error('Network dropped'));
+    expect(await catchUpRosterDelta(db, 'token')).toBe(false);
+  });
+
+  it('refreshes the local debt state from the server after a membership operation', async () => {
+    const db = open();
+    await db.open();
+    await db.device.put({ id: 'current', token: 'token' });
+    await db.meta.put({ key: 'last_roster_cursor', value: 'start|m0' });
+    await db.members.put({ member_id: 'm1', has_debt: false });
+    vi.spyOn(localDb, 'openLocalDb').mockReturnValue(db);
+    vi.spyOn(syncApi, 'getRosterDelta').mockResolvedValueOnce({
+      members: [{ member_id: 'm1', member_number: '1', full_name: 'Ana', phone_last4: '', status: 'active', active_periods: [], has_debt: true, changed_at: '2026-11-05T10:00:00Z' }],
+      removed_member_ids: [], registers: [], next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm1' }, has_more: false, snapshot_required: false,
+    });
+    expect(await refreshLocalRoster()).toBe(true);
+    await db.open();
+    expect((await db.members.get('m1'))?.has_debt).toBe(true);
+  });
+
+  it('keeps an uncertain membership mutation until its matching refresh succeeds', async () => {
+    const db = open();
+    await db.open();
+    vi.spyOn(localDb, 'openLocalDb').mockImplementation(() => new EvoGymLocalDB(db.name));
+    const first = await markMemberRosterUncertain('m1');
+    const second = await markMemberRosterUncertain('m1');
+    await clearMemberRosterUncertain('m1', first);
+    expect(await db.meta.get(`member-roster-uncertain:m1:${second}`)).toBeDefined();
+    await clearMemberRosterUncertain('m1', second);
+    expect(await db.meta.get(`member-roster-uncertain:m1:${second}`)).toBeUndefined();
+  });
+
+  it('serializes overlapping refreshes when browser locks are unavailable', async () => {
+    const db = open();
+    await db.open();
+    await db.device.put({ id: 'current', token: 'token' });
+    await db.meta.put({ key: 'last_roster_cursor', value: 'start|m0' });
+    vi.spyOn(localDb, 'openLocalDb').mockImplementation(() => new EvoGymLocalDB(db.name));
+    const originalLocks = navigator.locks;
+    Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true });
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const delta = vi.spyOn(syncApi, 'getRosterDelta').mockImplementation(async () => {
+      if (delta.mock.calls.length === 1) await waiting;
+      return { members: [], removed_member_ids: [], registers: [], next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm1' }, has_more: false, snapshot_required: false };
+    });
+    try {
+      const first = refreshLocalRoster();
+      await vi.waitFor(() => expect(delta).toHaveBeenCalledTimes(1));
+      const second = refreshLocalRoster();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(delta).toHaveBeenCalledTimes(1);
+      release();
+      expect(await Promise.all([first, second])).toEqual([true, true]);
+      expect(delta).toHaveBeenCalledTimes(2);
+    } finally {
+      release();
+      Object.defineProperty(navigator, 'locks', { value: originalLocks, configurable: true });
+    }
+  });
+
+  it('serializes direct concurrent catchUpRosterDelta calls preventing overlapping delta races', async () => {
+    const db = open();
+    await db.open();
+    await db.meta.put({ key: 'last_roster_cursor', value: 'start|m0' });
+    let releaseFirst!: () => void;
+    const firstCallWaiting = new Promise<void>(resolve => { releaseFirst = resolve; });
+    let activeDeltaCalls = 0;
+    let maxConcurrentDeltaCalls = 0;
+
+    const delta = vi.spyOn(syncApi, 'getRosterDelta').mockImplementation(async () => {
+      activeDeltaCalls++;
+      maxConcurrentDeltaCalls = Math.max(maxConcurrentDeltaCalls, activeDeltaCalls);
+      if (delta.mock.calls.length === 1) {
+        await firstCallWaiting;
+      }
+      activeDeltaCalls--;
+      return {
+        members: [],
+        removed_member_ids: [],
+        registers: [],
+        next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm1' },
+        has_more: false,
+        snapshot_required: false,
+      };
+    });
+
+    const first = catchUpRosterDelta(db, 'token-1');
+    await vi.waitFor(() => expect(delta).toHaveBeenCalledTimes(1));
+    const second = catchUpRosterDelta(db, 'token-2');
+
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(maxConcurrentDeltaCalls).toBe(1);
+    expect(delta).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    const results = await Promise.all([first, second]);
+    expect(results).toEqual([true, true]);
+    expect(maxConcurrentDeltaCalls).toBe(1);
+    expect(delta).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes concurrent periodic queue flush and local roster refresh without overlapping races', async () => {
+    const db = open();
+    await db.open();
+    await db.device.put({ id: 'current', token: 'token-abc' });
+    await db.meta.put({ key: 'last_roster_cursor', value: 'start|m0' });
+    vi.spyOn(localDb, 'openLocalDb').mockImplementation(() => new EvoGymLocalDB(db.name));
+
+    let releaseFlush!: () => void;
+    const flushWaiting = new Promise<void>(resolve => { releaseFlush = resolve; });
+    let activeDeltaCalls = 0;
+    let maxConcurrentDeltaCalls = 0;
+
+    const delta = vi.spyOn(syncApi, 'getRosterDelta').mockImplementation(async () => {
+      activeDeltaCalls++;
+      maxConcurrentDeltaCalls = Math.max(maxConcurrentDeltaCalls, activeDeltaCalls);
+      if (delta.mock.calls.length === 1) {
+        await flushWaiting;
+      }
+      activeDeltaCalls--;
+      return {
+        members: [],
+        removed_member_ids: [],
+        registers: [],
+        next_cursor: { changed_at: '2026-11-05T10:00:00Z', id: 'm1' },
+        has_more: false,
+        snapshot_required: false,
+      };
+    });
+
+    const flushPromise = flushQueue(db);
+    await vi.waitFor(() => expect(delta).toHaveBeenCalledTimes(1));
+
+    const refreshPromise = refreshLocalRoster();
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    expect(maxConcurrentDeltaCalls).toBe(1);
+    expect(delta).toHaveBeenCalledTimes(1);
+
+    releaseFlush();
+    const [flushRes, refreshRes] = await Promise.all([flushPromise, refreshPromise]);
+    expect(flushRes.errors).toEqual([]);
+    expect(refreshRes).toBe(true);
+    expect(maxConcurrentDeltaCalls).toBe(1);
+    expect(delta).toHaveBeenCalledTimes(2);
   });
 
   it('flushes queued events and moves accepted ones to receipts table', async () => {

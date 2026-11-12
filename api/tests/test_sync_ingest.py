@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.api.deps import get_session, get_session_factory
@@ -183,6 +183,13 @@ def test_sync_ingest_pos_cash_sale_sequential(ingest_env):
     assert len(data["ingested"]) == 2
     assert data["ingested"][0]["event_id"] == f"{prefix}-00001"
     assert data["ingested"][0]["status"] == "accepted"
+    sale = data["ingested"][1]
+    # The offline shift ref is not a server UUID, so the sale is reconciled onto the open shift and flagged.
+    assert (sale["status"], sale["reason_code"]) == ("flagged_audit", "orphan_shift_reference")
+    with ingest_env["factory"]() as session:
+        opened = session.scalar(select(Shift).where(Shift.cash_register_id == reg_id, Shift.status == "open"))
+        order = session.scalar(select(Order).where(Order.idempotency_key == f"contingency:{prefix}-00002"))
+        assert order is not None and order.total_minor == 3000 and order.shift_id == opened.id
 
 
 def test_sync_ingest_idempotent_replay(ingest_env):

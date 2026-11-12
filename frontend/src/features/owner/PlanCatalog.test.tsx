@@ -319,4 +319,49 @@ describe('PlanCatalog owner screen', () => {
     expect(plan.current_version).toMatchObject({ name: 'Student Monthly', price_minor: 50000, eligibility_type: 'student', restriction_notes: 'Student documentation required' });
   });
 
+  it('manages plan status with active/inactive switch and does not offer an archive option (D-A4)', async () => {
+    const user = userEvent.setup();
+    const planId = '123e4567-e89b-42d3-a456-426614174001';
+    const serviceId = '423e4567-e89b-42d3-a456-426614174001';
+    const plan = {
+      id: planId, code: 'box-monthly', name: 'Box Monthly', kind: 'membership', status: 'active',
+      current_version: { id: '523e4567-e89b-42d3-a456-426614174001', plan_id: planId, version_number: 1,
+        name: 'Box Monthly', price_minor: 80000, currency: 'MXN', reference_amount_minor: null,
+        duration_value: 1, duration_unit: 'month', entitlement_mode: 'period', eligibility_type: 'general',
+        restriction_notes: '', is_active: true,
+        services: [{ service_id: serviceId, service_code: 'box', session_limit: null }] },
+      versions: [],
+    };
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/catalog/services') return new Response(JSON.stringify([
+        { id: serviceId, code: 'box', name: 'Box', status: 'active' },
+      ]));
+      if (path === `/api/v1/catalog/plans/${planId}` && init?.method === 'PATCH') {
+        return new Response(JSON.stringify({ ...plan, status: 'inactive' }), { status: 200 });
+      }
+      if (path === '/api/v1/catalog/plans' || path === `/api/v1/catalog/plans/${planId}`) return new Response(JSON.stringify(path.endsWith(planId) ? plan : [plan]));
+      return new Response('{}', { status: 404 });
+    });
+    render(<DemoProvider><PlanCatalog apiRequest={request} /></DemoProvider>);
+    await screen.findByText('Box Monthly');
+
+    // Confirm active/inactive button exists and no archive option is shown
+    expect(screen.queryByRole('button', { name: /archivar/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/archivar/i)).not.toBeInTheDocument();
+
+    const deactivateBtn = screen.getByRole('button', { name: 'Desactivar Box Monthly' });
+    expect(deactivateBtn).toBeInTheDocument();
+    await user.click(deactivateBtn);
+
+    // Confirm dialog appears
+    const confirmBtn = await screen.findByRole('button', { name: 'Confirmar desactivación' });
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      const patchCall = request.mock.calls.find(([path, init]) => path === `/api/v1/catalog/plans/${planId}` && init?.method === 'PATCH');
+      expect(patchCall).toBeDefined();
+      expect(JSON.parse(patchCall![1]!.body as string)).toEqual({ status: 'inactive' });
+    });
+  });
+
 });

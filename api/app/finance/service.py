@@ -11,13 +11,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth.authorization import AuthorizationDenied, Permission, authorize
 from app.db.models import Expense, PayrollAdvance, PayrollPayment
-from app.errors import HttpStatusError
+from app.errors import HttpStatusError, session_factory
 from app.finance import queries as q
 from app.finance.schemas import PendingMoneyItem, PendingMoneyResponse
 from app.rentals.payments import (
     charge_collectable_minor, charges_for_rental, clean_idempotency_key, fingerprint,
 )
-from app.errors import session_factory
 from app.staff.roster import weekly_base
 
 
@@ -192,9 +191,10 @@ def payroll_week(factory, principal, branch_id, week_start):
         for profile in q.payroll_profiles(session, branch_id):
             payment = q.week_payment(session, profile.id, week_start)
             base, advances = (payment.base_minor, payment.advances_minor) if payment else _amounts(session, profile, week_start)
+            adv_method = q.advance_payment_method(session, profile.id, week_start) if advances else None
             items.append({"profile_id": str(profile.id), "full_name": profile.full_name,
-                "base_minor": base, "advances_minor": advances, "net_minor": base - advances,
-                "daily_minor": (base + 2) // 5,
+                "base_minor": base, "advances_minor": advances, "advance_payment_method": adv_method,
+                "net_minor": base - advances, "daily_minor": (base + 2) // 5,
                 "paid": {"payment_method": payment.payment_method, "paid_at": payment.created_at.isoformat()} if payment else None})
         return {"items": items, "base_minor": sum(row["base_minor"] for row in items),
                 "advances_minor": sum(row["advances_minor"] for row in items), "net_minor": sum(row["net_minor"] for row in items)}
@@ -217,6 +217,7 @@ def payroll_history(factory, principal, from_date, to_date, branch_id):
         for branch in branches:
             advances, payments = q.payroll_activity(session, branch.id, first_week, to_date)
             profiles = q.profiles_by_ids(session, {r.staff_profile_id for r in (*advances, *payments)})
+            adv_methods = q.expense_payment_methods(session, {a.expense_id for a in advances})
             by_week = {}
             for row in (*advances, *payments):
                 by_week.setdefault(row.week_start, set()).add(row.staff_profile_id)
@@ -225,14 +226,17 @@ def payroll_history(factory, principal, from_date, to_date, branch_id):
                 for pid in profile_ids:
                     profile = profiles[pid]
                     payment = next((p for p in payments if p.staff_profile_id == pid and p.week_start == week_start), None)
+                    week_advances = [a for a in advances if a.staff_profile_id == pid and a.week_start == week_start]
                     if payment:
                         base, adv = payment.base_minor, payment.advances_minor
                     else:
                         base = weekly_base(profile.monthly_salary_minor)
-                        adv = sum(a.amount_minor for a in advances if a.staff_profile_id == pid and a.week_start == week_start)
+                        adv = sum(a.amount_minor for a in week_advances)
+                    adv_method = adv_methods.get(week_advances[-1].expense_id) if week_advances else None
                     paid = payment.net_minor if payment else 0
                     items.append({"profile_id": str(pid), "full_name": profile.full_name, "base_minor": base,
-                        "advances_minor": adv, "net_minor": base - adv, "paid_minor": paid, "outflow_minor": adv + paid,
+                        "advances_minor": adv, "advance_payment_method": adv_method,
+                        "net_minor": base - adv, "paid_minor": paid, "outflow_minor": adv + paid,
                         "paid": {"payment_method": payment.payment_method, "paid_at": payment.created_at.isoformat()} if payment else None})
                 items.sort(key=lambda r: (r["full_name"], r["profile_id"]))
                 weeks.append({"week_start": week_start.isoformat(), "branch_id": str(branch.id), "branch_name": branch.name,
@@ -249,7 +253,8 @@ def _payroll_totals(rows):
 
 def record_advance(factory, principal, payload, key):
     key = _key(key)
-    request_hash = fingerprint(payload.model_dump(mode="json"))
+    request_data = payload.model_dump(mode="json", exclude={"payment_method"} if payload.payment_method == "transfer" else set())
+    request_hash = fingerprint(request_data)
     try:
         with factory.begin() as session:
             _authorize(session, principal, payload.branch_id)
@@ -265,9 +270,9 @@ def record_advance(factory, principal, payload, key):
             base, advances = _amounts(session, profile, payload.week_start)
             if payload.amount_minor > base - advances:
                 raise HttpStatusError(422)
-            expense_id = _expense(session, payload, profile, principal, key, request_hash, payload.amount_minor, "transfer", "advance")
+            expense_id = _expense(session, payload, profile, principal, key, request_hash, payload.amount_minor, payload.payment_method, "advance")
             return _dto(q.add(session, PayrollAdvance(
-                **payload.model_dump(), expense_id=expense_id, recorded_by_id=principal.staff_id,
+                **payload.model_dump(exclude={"payment_method"}), expense_id=expense_id, recorded_by_id=principal.staff_id,
                 idempotency_key=key, request_fingerprint=request_hash)))
     except IntegrityError:
         raise HttpStatusError(409) from None

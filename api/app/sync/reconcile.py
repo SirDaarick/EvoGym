@@ -15,7 +15,7 @@ from app.memberships.service import apply_member_check_in
 from app.sales.queries import post_contingency_cash_sale
 from app.sales.schemas import ProductCartLineRequest
 from app.settings import Settings
-from app.shifts.queries import close_shift, open_shift
+from app.shifts.queries import ShiftCloseConflictError, close_shift, open_shift
 from app.sync.clock import classify_clock
 from app.sync.envelope import (
     ArqueoClosePayload,
@@ -95,14 +95,20 @@ def reconcile_event(
         payload = parse_payload(event_row.event_type, event_row.payload)
         assert isinstance(payload, CheckInPayload)
         import hashlib
-        fingerprint = hashlib.sha256(f"contingency:{event_row.event_id}:{payload.member_id}".encode()).hexdigest()
+        key = payload.online_idempotency_key or f"contingency:{event_row.event_id}"
+        fingerprint_text = (f"{device.branch_id}\n{payload.period_id}\n{event_row.actor_staff_id}"
+                            if payload.online_idempotency_key else f"contingency:{event_row.event_id}:{payload.member_id}")
+        if payload.online_idempotency_key and payload.confirm_outstanding_balance:
+            fingerprint_text += "\nconfirmed"
+        fingerprint = hashlib.sha256(fingerprint_text.encode()).hexdigest()
         res = apply_member_check_in(
             session,
             branch_id=device.branch_id,
             period_id=payload.period_id,
+            confirm_outstanding_balance=payload.confirm_outstanding_balance,
             actor_id=event_row.actor_staff_id,
             occurred_at=event_row.client_recorded_at,
-            idempotency_key=f"contingency:{event_row.event_id}",
+            idempotency_key=key,
             request_fingerprint=fingerprint,
             enforce_access=False,
         )
@@ -255,6 +261,7 @@ def reconcile_event(
                 inventory_snapshot_id=snapshot.id,
                 opening_cash_minor=payload.opening_cash_minor,
                 now=event_row.client_recorded_at,
+                require_notes_on_discrepancy=False,
             )
             event_row.result_shift_id = shift.id
 
@@ -277,21 +284,7 @@ def reconcile_event(
         ) != device.branch_id:
             shift = None  # a device may only close shifts of its own branch
 
-        if shift is not None and shift.status != "open":
-            # Closed or closing already: keep the event journaled and flag it instead of failing the whole batch.
-            event_row.result_shift_id = shift.id
-            flags.append(
-                raise_flag(
-                    session,
-                    event_row_id=event_row.id,
-                    branch_id=device.branch_id,
-                    shift_id=shift.id,
-                    kind="orphan_shift_reference",
-                    details={"shift_ref": payload.shift_ref, "reason": f"shift_{shift.status}"},
-                    now=current_time,
-                )
-            )
-        elif shift is None:
+        if shift is None:
             flags.append(
                 raise_flag(
                     session,
@@ -303,39 +296,69 @@ def reconcile_event(
                     now=current_time,
                 )
             )
+        elif shift.status == "closing":
+            event_row.result_shift_id = shift.id
+            flags.append(
+                raise_flag(
+                    session,
+                    event_row_id=event_row.id,
+                    branch_id=device.branch_id,
+                    shift_id=shift.id,
+                    kind="orphan_shift_reference",
+                    details={"shift_ref": payload.shift_ref, "reason": "shift_closing"},
+                    now=current_time,
+                )
+            )
         else:
             event_row.result_shift_id = shift.id
             counts = (
-                [{"denomination_minor": d.denomination_minor, "quantity": d.quantity} for d in payload.denomination_counts]
+                {str(k): int(v) for k, v in payload.denomination_counts.items()}
+                if isinstance(payload.denomination_counts, dict)
+                else [{"denomination_minor": d.denomination_minor, "quantity": d.quantity} for d in payload.denomination_counts]
                 if payload.denomination_counts
                 else None
             )
             total_counted = payload.counted_cash_minor or 0  # legacy [] close = zero count
-            close_res = close_shift(
-                session,
-                shift_id=shift.id,
-                closed_by=event_row.actor_staff_id,
-                denomination_counts=counts,
-                counted_cash_minor=total_counted if counts is None else None,
-                closing_notes=payload.closing_notes,
-                now=event_row.client_recorded_at,
-            )
-            if close_res.shift.difference_minor != 0:
+            try:
+                close_res = close_shift(
+                    session,
+                    shift_id=shift.id,
+                    closed_by=event_row.actor_staff_id,
+                    denomination_counts=counts,
+                    counted_cash_minor=total_counted if counts is None else None,
+                    closing_notes=payload.closing_notes,
+                    now=event_row.client_recorded_at,
+                    require_notes_on_discrepancy=False,
+                )
+            except ShiftCloseConflictError:
                 flags.append(
                     raise_flag(
                         session,
                         event_row_id=event_row.id,
                         branch_id=device.branch_id,
-                        shift_id=close_res.shift.id,
-                        kind="cash_discrepancy",
-                        details={
-                            "difference_minor": close_res.shift.difference_minor,
-                            "expected_minor": close_res.shift.expected_cash_at_close_minor,
-                            "counted_minor": close_res.shift.counted_cash_minor,
-                        },
+                        shift_id=shift.id,
+                        kind="orphan_shift_reference",
+                        details={"shift_ref": payload.shift_ref, "reason": f"shift_{shift.status}"},
                         now=current_time,
                     )
                 )
+            else:
+                if not close_res.replayed and close_res.shift.difference_minor != 0:
+                    flags.append(
+                        raise_flag(
+                            session,
+                            event_row_id=event_row.id,
+                            branch_id=device.branch_id,
+                            shift_id=close_res.shift.id,
+                            kind="cash_discrepancy",
+                            details={
+                                "difference_minor": close_res.shift.difference_minor,
+                                "expected_minor": close_res.shift.expected_cash_at_close_minor,
+                                "counted_minor": close_res.shift.counted_cash_minor,
+                            },
+                            now=current_time,
+                        )
+                    )
 
     # 4. Finalize event status
     if flags:

@@ -10,7 +10,7 @@ from app.db.models.sessions import StaffSession
 from app.db.models.reception_stations import ReceptionStation
 from app.db.models.staff import SecurityEvent, StaffCredential, StaffUser
 from app.db.models.staff_roster import StaffRosterProfile
-from app.db.models.staff_attendance import StaffAttendanceCheckout, StaffAttendanceRecord
+from app.db.models.staff_attendance import StaffAttendanceCheckout, StaffAttendanceCorrection, StaffAttendanceRecord
 from app.db.models.staff_schedules import StaffScheduleException, StaffScheduleSeries
 from app.db.models.enrollment import StaffEnrollmentCode
 from app.db.models.devices import StaffDevicePairingCode, StaffPairedDevice
@@ -29,6 +29,8 @@ from app.db.models.rentals import (
 from app.db.models.catalog import Plan, PlanVersion, PlanVersionService, Service
 from app.db.models.shifts import CashRegister, PaymentTerminal, Shift, ShiftDenominationCount, ShiftClosingDenominationCount, ShiftInventoryReview, ShiftInventoryObservation
 from app.db.models.inventory import (
+    InventoryPurchase,
+    InventoryPurchaseLine,
     Product,
     RegisterInventorySnapshot,
     RegisterInventorySnapshotItem,
@@ -131,6 +133,9 @@ __all__ = [
     "StaffRosterProfile",
     "StaffAttendanceRecord",
     "StaffAttendanceCheckout",
+    "StaffAttendanceCorrection",
+    "InventoryPurchase",
+    "InventoryPurchaseLine",
     "StaffScheduleSeries",
     "StaffScheduleException",
     "StaffUser",

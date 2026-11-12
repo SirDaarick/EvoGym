@@ -21,7 +21,7 @@ import './DevicePairingModal.css';
 export interface DevicePairingModalProps {
   isOpen: boolean;
   staff: StaffProfile | null;
-  serverIdentity?: { staffId: string; staffName: string; contextId: string };
+  serverIdentity?: { staffId: string; staffName: string; contextId: string; staffLogin?: string };
   onClose: () => void;
 }
 

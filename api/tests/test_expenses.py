@@ -138,7 +138,7 @@ def test_expense_can_exceed_expected_cash_and_close_shows_difference(tmp_path):
             assert created.status_code == 201
             summary = client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers).json()
             assert summary["expected_cash_minor"] == -600
-            closed = client.post(f"/api/v1/shifts/{shift_id}/close", headers=headers, json={"counted_cash_minor": 0})
+            closed = client.post(f"/api/v1/shifts/{shift_id}/close", headers=headers, json={"counted_cash_minor": 0, "closing_notes": "Diferencia por gasto"})
             assert closed.status_code == 201
             assert closed.json()["expected_cash_at_close_minor"] == -600
             assert closed.json()["difference_minor"] == 600

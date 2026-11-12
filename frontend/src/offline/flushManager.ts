@@ -3,7 +3,7 @@
  */
 
 import { applyBootstrapSnapshot } from './bootstrap';
-import type { EvoGymLocalDB, LocalEvent } from './db';
+import { openLocalDb, type EvoGymLocalDB, type LocalEvent } from './db';
 import { applyRosterDelta } from './rosterDelta';
 import {
   getRosterDelta,
@@ -15,6 +15,20 @@ import {
 
 const FLUSH_LOCK_NAME = 'evogym-flush';
 const BATCH_SIZE = 50;
+let fallbackLock: Promise<unknown> = Promise.resolve();
+let catchUpLock: Promise<unknown> = Promise.resolve();
+
+function withFallbackLock<T>(operation: () => Promise<T>): Promise<T> {
+  const next = fallbackLock.then(operation, operation);
+  fallbackLock = next.catch(() => {});
+  return next;
+}
+
+function withCatchUpLock<T>(operation: () => Promise<T>): Promise<T> {
+  const next = catchUpLock.then(operation, operation);
+  catchUpLock = next.catch(() => {});
+  return next;
+}
 
 export interface FlushResult {
   flushedCount: number;
@@ -52,7 +66,46 @@ export async function flushQueue(db: EvoGymLocalDB): Promise<FlushResult> {
     });
     return result;
   }
-  return executeFlush(db);
+  return withFallbackLock(() => executeFlush(db));
+}
+
+export async function refreshLocalRoster(): Promise<boolean> {
+  const db = openLocalDb();
+  try {
+    const token = (await db.device.get('current'))?.token;
+    if (!token) return false;
+    const refresh = () => catchUpRosterDelta(db, token);
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      let result = false;
+      await navigator.locks.request(FLUSH_LOCK_NAME, {}, async () => { result = await refresh(); });
+      return result;
+    }
+    return await withFallbackLock(refresh);
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
+export async function markMemberRosterUncertain(memberId: string): Promise<string> {
+  const id = crypto.randomUUID();
+  const db = openLocalDb();
+  try {
+    await db.meta.put({ key: `member-roster-uncertain:${memberId}:${id}`, value: true });
+    return id;
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearMemberRosterUncertain(memberId: string, id: string): Promise<void> {
+  const db = openLocalDb();
+  try {
+    await db.meta.delete(`member-roster-uncertain:${memberId}:${id}`);
+  } finally {
+    db.close();
+  }
 }
 
 async function executeFlush(db: EvoGymLocalDB): Promise<FlushResult> {
@@ -123,26 +176,35 @@ async function executeFlush(db: EvoGymLocalDB): Promise<FlushResult> {
   return { flushedCount, remainingCount: remaining, errors };
 }
 
-export async function catchUpRosterDelta(db: EvoGymLocalDB, token: string): Promise<void> {
+export async function catchUpRosterDelta(db: EvoGymLocalDB, token: string): Promise<boolean> {
+  return withCatchUpLock(() => runCatchUpRosterDelta(db, token));
+}
+
+async function runCatchUpRosterDelta(db: EvoGymLocalDB, token: string): Promise<boolean> {
   try {
     const cursorRow = await db.meta.get('last_roster_cursor');
-    const cursorStr = typeof cursorRow?.value === 'string' ? cursorRow.value : null;
+    let cursorStr = typeof cursorRow?.value === 'string' ? cursorRow.value : null;
 
-    const delta = await getRosterDelta({ cursor: cursorStr, limit: 500 }, token);
-
-    if (delta.snapshot_required) {
-      // Re-bootstrap
-      const branchRow = await db.meta.get('branch');
-      const branchId = (branchRow?.value as { id?: string })?.id;
-      const dev = await db.device.get('current');
-      const stationCode = dev?.devicePrefix?.split('-')[1] || 'SUR1';
-
-      const snapshot = await postBootstrap({ station_code: stationCode }, token, branchId);
-      await applyBootstrapSnapshot(db, snapshot);
-    } else {
+    while (true) {
+      const delta = await getRosterDelta({ cursor: cursorStr, limit: 500 }, token);
+      if (delta.snapshot_required) {
+        // Re-bootstrap
+        const branchRow = await db.meta.get('branch');
+        const branchId = (branchRow?.value as { id?: string })?.id;
+        const dev = await db.device.get('current');
+        const stationCode = dev?.devicePrefix?.split('-')[1] || 'SUR1';
+        const snapshot = await postBootstrap({ station_code: stationCode }, token, branchId);
+        await applyBootstrapSnapshot(db, snapshot);
+        break;
+      }
       await applyRosterDelta(db, delta);
+      if (!delta.has_more) break;
+      const next = delta.next_cursor ? `${delta.next_cursor.changed_at}|${delta.next_cursor.id}` : null;
+      if (!next || next === cursorStr) throw new Error('Roster cursor did not advance');
+      cursorStr = next;
     }
+    return true;
   } catch {
-    // Ignore delta catch-up errors during offline operations
+    return false;
   }
 }

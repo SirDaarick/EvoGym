@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 from uuid import UUID
 
-from app.errors import HttpStatusError
+from app.errors import HttpStatusError, PublicDomainError
 from app.memberships.eligibility import evaluate_membership_access
 from app.members import queries as q, read_queries as rq
 from app.members.queries import DuplicateMemberNumberError
@@ -68,6 +68,8 @@ def _to_eligibility_dto(record) -> MemberEligibilityDTO:
 
 def _to_member_detail_dto(member, is_admin: bool, pending_balance_minor: int = 0) -> MemberDetailDTO:
     notes = member.notes if is_admin else None
+    derived = getattr(member, "membership_status", None)
+    effective_status = derived if (derived in ("expired", "inactive") and member.status == "active") else member.status
     return MemberDetailDTO(
         id=str(member.id),
         member_number=member.member_number,
@@ -79,12 +81,14 @@ def _to_member_detail_dto(member, is_admin: bool, pending_balance_minor: int = 0
         emergency_contact_name=member.emergency_contact_name,
         emergency_contact_phone=member.emergency_contact_phone,
         notes=notes,
-        status=member.status,
+        status=effective_status,
         joined_on=member.joined_on,
         credit_balance_minor=member.credit_balance_minor,
         photo_url=member.photo_url,
         pending_balance_minor=pending_balance_minor,
         has_pending_balance=pending_balance_minor > 0,
+        membership_ends_on=getattr(member, "membership_ends_on", None),
+        membership_status=derived or member.status,
     )
 
 
@@ -114,10 +118,33 @@ def resolve_caller_branch(session, principal: Principal, query_branch_id: UUID |
     return UUID("00000000-0000-0000-0000-000000000001")
 
 
-def list_members(factory, *, page, limit, search, status, sort_by, sort_dir) -> MemberListResponseDTO:
+def list_members(
+    factory,
+    *,
+    principal,
+    page,
+    limit,
+    search,
+    status,
+    sort_by,
+    sort_dir,
+    membership_status: str | None = None,
+) -> MemberListResponseDTO:
     with factory() as session:
+        from app.db.models.authorization import Branch
+
+        branch_id = resolve_caller_branch(session, principal, None, None)
+        branch = session.get(Branch, branch_id)
         result = q.list_members(
-            session, page=page, limit=limit, search=search, status=status, sort_by=sort_by, sort_dir=sort_dir,
+            session,
+            page=page,
+            limit=limit,
+            search=search,
+            status=status,
+            membership_status=membership_status,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            branch_timezone=branch.timezone if branch else "America/Mexico_City",
         )
         return MemberListResponseDTO(
             items=[
@@ -127,7 +154,7 @@ def list_members(factory, *, page, limit, search, status, sort_by, sort_dir) -> 
                     full_name=item.full_name,
                     preferred_name=item.preferred_name,
                     phone=item.phone,
-                    status=item.status,
+                    status=getattr(item, "membership_status", item.status),
                     joined_on=item.joined_on,
                     credit_balance_minor=item.credit_balance_minor,
                     emergency_contact_name=item.emergency_contact_name,
@@ -158,8 +185,22 @@ def create_member(factory, principal: Principal, payload) -> MemberDetailDTO:
 
 def get_member(factory, principal: Principal, member_id: UUID) -> MemberDetailDTO:
     with factory() as session:
+        from zoneinfo import ZoneInfo
+        from app.db.models.authorization import Branch
+        from app.db.models.memberships import MembershipPeriod
+        from sqlalchemy import func, select
+
         member = _require_member(session, member_id)
         pending_balance_minor = q.get_member_pending_balance_minor(session, member.id)
+        branch_id = resolve_caller_branch(session, principal, None, None)
+        branch = session.get(Branch, branch_id)
+        branch_tz = branch.timezone if branch else "America/Mexico_City"
+        today = datetime.now(ZoneInfo(branch_tz)).date()
+        max_ends_on = session.scalar(
+            select(func.max(MembershipPeriod.ends_on)).where(MembershipPeriod.member_id == member.id)
+        )
+        member.membership_ends_on = max_ends_on
+        member.membership_status = q._derive_membership_status(member.status, max_ends_on, today)
         return _to_member_detail_dto(member, principal.is_admin, pending_balance_minor)
 
 

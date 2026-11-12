@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -28,8 +28,10 @@ from app.db.models import (
     StaffCredential,
     StaffUser,
     StockInitialization,
+    StockMovement,
+    ShiftInventoryObservation,
 )
-from app.inventory.queries import capture_register_inventory_snapshot
+from app.inventory.queries import capture_register_inventory_snapshot, get_on_hand_stock
 from app.main import create_app
 from app.shifts.queries import (
     CashRegisterNotFoundError,
@@ -50,7 +52,7 @@ from admin_session_helpers import approved_admin_headers
 
 
 def open_shift(session, *, register_id, opened_by, denomination_counts, opening_cash_minor=None,
-               inventory_snapshot_id=None, inventory_observations=None):
+               inventory_snapshot_id=None, inventory_observations=None, notes=None):
     """Provide an explicitly captured empty-catalog presentation for legacy domain tests."""
     if inventory_snapshot_id is None:
         snapshot = capture_register_inventory_snapshot(session, register_id=register_id, actor_id=opened_by)
@@ -63,6 +65,7 @@ def open_shift(session, *, register_id, opened_by, denomination_counts, opening_
         opening_cash_minor=opening_cash_minor,
         inventory_snapshot_id=inventory_snapshot_id,
         inventory_observations=inventory_observations,
+        notes=notes,
     )
 
 
@@ -237,7 +240,7 @@ def test_close_shift_endpoint_persists_server_owned_cash_cut(tmp_path):
 
         app = create_app(configured_settings(url))
         headers = {"Authorization": f"Bearer {token}"}
-        body = {"denomination_counts": [{"denomination_minor": 500, "quantity": 2}]}
+        body = {"denomination_counts": [{"denomination_minor": 500, "quantity": 2}], "closing_notes": "Sobrante al cierre"}
         with TestClient(app) as client:
             response = client.post(f"/api/v1/shifts/{shift_id}/close", json=body, headers=headers)
             assert response.status_code == 201, response.text
@@ -253,7 +256,7 @@ def test_close_shift_endpoint_persists_server_owned_cash_cut(tmp_path):
             assert retry.json() == closed
             conflict = client.post(
                 f"/api/v1/shifts/{shift_id}/close",
-                json={"denomination_counts": [{"denomination_minor": 1000, "quantity": 1}]},
+                json={"denomination_counts": [{"denomination_minor": 1000, "quantity": 1}], "closing_notes": "Sobrante al cierre"},
                 headers=headers,
             )
             assert conflict.status_code == 409
@@ -324,7 +327,7 @@ def test_open_shift_read_exposes_live_expected_cash_without_freezing_close_total
 
             with factory.begin() as session:
                 open_shift(session, register_id=UUID(closed.json()["cash_register_id"]), opened_by=staff_id,
-                           denomination_counts=[{"denomination_minor": 100, "quantity": 1}])
+                           denomination_counts=[{"denomination_minor": 100, "quantity": 1}], notes="Ajuste de fondo inicial")
 
             history = client.get(f"/api/v1/shifts?register_id={closed.json()['cash_register_id']}&limit=1", headers=headers)
             assert history.status_code == 200, history.text
@@ -576,6 +579,7 @@ def test_shift_closing_denomination_constraints_reject_invalid_and_duplicate_row
                 shift_id=shift.id,
                 closed_by=staff_id,
                 denomination_counts=[{"denomination_minor": 100, "quantity": 1}],
+                closing_notes="Sobrante al cierre",
             )
             shift_id = result.shift.id
 
@@ -868,6 +872,7 @@ def test_shift_open_lifecycle_and_single_active_invariant(tmp_path):
                 opened_by=staff2_id,
                 opening_cash_minor=60000,
                 denomination_counts=[{"denomination_minor": 1, "quantity": 60000}],
+                notes="Fondo adicional al abrir",
             )
             session.commit()
             assert shift3.id is not None
@@ -1235,3 +1240,512 @@ def test_shifts_and_registers_rbac_and_api(tmp_path):
             assert len(res_a_all_regs.json()) == 2
     finally:
         engine.dispose()
+
+
+def test_opening_cash_discrepancy_requires_comment(tmp_path):
+    """Opening cash discrepancy against the previous closing baseline requires a comment."""
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "open-disc", "Open Discrepancy Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "open-disc@example.invalid")
+        headers = {"Authorization": f"Bearer {token}"}
+        app = create_app(configured_settings(url))
+
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "open-disc", "Discrepancy Register")
+            reg_id = str(register.id)
+            # Baseline shift closed with 1000 cash
+            s1 = open_shift(session, register_id=register.id, opened_by=staff_id,
+                            denomination_counts=[{"denomination_minor": 100, "quantity": 10}])
+            close_shift(session, shift_id=s1.id, closed_by=staff_id, denomination_counts=None, counted_cash_minor=1000)
+
+        with factory() as session:
+            snap = capture_register_inventory_snapshot(session, register_id=UUID(reg_id), actor_id=staff_id)
+            session.commit()
+            snap_id = str(snap.id)
+
+        # Direct domain validation check
+        with factory() as session:
+            with pytest.raises(ValueError, match="A comment is required when there is a cash difference at opening"):
+                _open_shift(session, register_id=UUID(reg_id), opened_by=staff_id, opening_cash_minor=1200,
+                            denomination_counts=[{"denomination_minor": 100, "quantity": 12}],
+                            inventory_snapshot_id=UUID(snap_id))
+
+        with TestClient(app) as client:
+            # 1. Opening with 1200 cash (surplus of 200) without notes -> 422
+            res_fail = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": reg_id,
+                    "inventory_snapshot_id": snap_id,
+                    "opening_cash_minor": 1200,
+                    "denomination_counts": [{"denomination_minor": 100, "quantity": 12}],
+                },
+            )
+            assert res_fail.status_code == 422
+
+            # 2. Opening with 1200 cash WITH notes -> 201
+            res_ok = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": reg_id,
+                    "inventory_snapshot_id": snap_id,
+                    "opening_cash_minor": 1200,
+                    "denomination_counts": [{"denomination_minor": 100, "quantity": 12}],
+                    "notes": "Fondo adicional provisto por administracion",
+                },
+            )
+            assert res_ok.status_code == 201
+            data = res_ok.json()
+            assert data["opening_cash_minor"] == 1200
+            assert data["expected_opening_cash_minor"] == 1000
+            assert data["opening_difference_minor"] == 200
+            assert data["notes"] == "Fondo adicional provisto por administracion"
+            assert data["closing_notes"] == "Fondo adicional provisto por administracion"
+
+            # 3. GET /api/v1/shifts/current matches
+            curr = client.get(f"/api/v1/shifts/current?register_id={reg_id}", headers=headers).json()
+            assert curr["expected_opening_cash_minor"] == 1000
+            assert curr["opening_difference_minor"] == 200
+            assert curr["notes"] == "Fondo adicional provisto por administracion"
+    finally:
+        engine.dispose()
+
+
+def test_closing_cash_discrepancy_requires_comment(tmp_path):
+    """Closing cash discrepancy against expected cash requires a comment for shortage or surplus."""
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "close-disc", "Close Discrepancy Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "close-disc@example.invalid")
+        headers = {"Authorization": f"Bearer {token}"}
+        app = create_app(configured_settings(url))
+
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "close-disc", "Close Register")
+            reg_id = str(register.id)
+            shift = open_shift(session, register_id=register.id, opened_by=staff_id,
+                               denomination_counts=[{"denomination_minor": 100, "quantity": 10}])  # 1000 float
+            shift_id = str(shift.id)
+
+        # Direct domain validation check
+        with factory() as session:
+            with pytest.raises(ValueError, match="A comment is required when there is a cash difference at closing"):
+                close_shift(session, shift_id=UUID(shift_id), closed_by=staff_id,
+                            denomination_counts=None, counted_cash_minor=800)
+
+        with TestClient(app) as client:
+            # 1. Shortage: counted 800 (expected 1000) without notes -> 422
+            res_short_no_notes = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                headers=headers,
+                json={"counted_cash_minor": 800},
+            )
+            assert res_short_no_notes.status_code == 422
+
+            # 2. Surplus: counted 1200 (expected 1000) without notes -> 422
+            res_surplus_no_notes = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                headers=headers,
+                json={"counted_cash_minor": 1200},
+            )
+            assert res_surplus_no_notes.status_code == 422
+
+            # 3. Shortage: counted 800 WITH closing_notes -> 201
+            res_ok = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                headers=headers,
+                json={
+                    "counted_cash_minor": 800,
+                    "closing_notes": "Faltante de 200 en monedas de cambio",
+                },
+            )
+            assert res_ok.status_code == 201
+            data = res_ok.json()
+            assert data["counted_cash_minor"] == 800
+            assert data["difference_minor"] == -200
+            assert "Faltante de 200" in data["closing_notes"]
+            assert "Faltante de 200" in data["notes"]
+    finally:
+        engine.dispose()
+
+
+def test_shift_close_draft_persists_during_live_sales_and_clears_on_close(tmp_path):
+    """Progressive close drafts persist on open shifts during live sales and clear once closed."""
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "draft-close", "Draft Close Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "draft-close@example.invalid")
+        headers = {"Authorization": f"Bearer {token}"}
+        app = create_app(configured_settings(url))
+
+        with factory.begin() as session:
+            member = Member(member_number="SOC-DRAFT-1", full_name="Draft Member", phone="5550191")
+            plan = Plan(code="draft-plan", name="Draft Plan", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id,
+                version_number=1,
+                name="Draft Plan",
+                price_minor=10000,
+                currency="MXN",
+                duration_value=1,
+                duration_unit="month",
+                is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            register = create_cash_register(session, branch_id, "draft-reg", "Draft Register")
+            shift = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 1000, "quantity": 5}],
+            )
+            register_id, member_id, version_id, shift_id = str(register.id), str(member.id), str(version.id), str(shift.id)
+
+        with TestClient(app) as client:
+            # Duplicate denomination counts -> 422
+            res_dup = client.put(
+                f"/api/v1/shifts/{shift_id}/close-draft",
+                headers=headers,
+                json={
+                    "mode": "denominations",
+                    "entry_mode": "units",
+                    "denomination_counts": [
+                        {"denomination_minor": 1000, "quantity": 2},
+                        {"denomination_minor": 1000, "quantity": 3},
+                    ],
+                },
+            )
+            assert res_dup.status_code == 422
+
+            # Extra fields -> 422
+            res_extra = client.put(
+                f"/api/v1/shifts/{shift_id}/close-draft",
+                headers=headers,
+                json={"mode": "manual", "manual_total": "50", "unexpected": True},
+            )
+            assert res_extra.status_code == 422
+
+            # Save valid draft while shift remains open
+            res_save = client.put(
+                f"/api/v1/shifts/{shift_id}/close-draft",
+                headers=headers,
+                json={
+                    "mode": "denominations",
+                    "entry_mode": "units",
+                    "denomination_counts": [{"denomination_minor": 1000, "quantity": 5}],
+                    "manual_total": "50",
+                    "closing_notes": "Avance inicial",
+                },
+            )
+            assert res_save.status_code == 200, res_save.text
+            saved = res_save.json()
+            assert saved["status"] == "open"
+            assert saved["closing_draft"]["mode"] == "denominations"
+            assert saved["closing_draft"]["entry_mode"] == "units"
+            assert saved["closing_draft"]["denomination_counts"] == [{"denomination_minor": 1000, "quantity": 5}]
+            assert saved["closing_draft"]["manual_total"] == "50"
+            assert saved["closing_draft"]["closing_notes"] == "Avance inicial"
+            assert saved["closing_draft"]["updated_at"] is not None
+
+            # Record live cash sale while close draft is saved
+            res_sale = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={**headers, "Idempotency-Key": "draft-live-cash-sale"},
+                json={"member_id": member_id, "plan_version_id": version_id, "cash_amount_minor": 4000},
+            )
+            assert res_sale.status_code == 201, res_sale.text
+
+            # Current shift reflects updated expected cash AND preserves the saved close draft
+            res_curr = client.get(f"/api/v1/shifts/current?register_id={register_id}", headers=headers)
+            assert res_curr.status_code == 200
+            curr = res_curr.json()
+            assert curr["current_expected_cash_minor"] == 9000
+            assert curr["closing_draft"]["closing_notes"] == "Avance inicial"
+
+            res_summary = client.get(f"/api/v1/shifts/{shift_id}/summary", headers=headers)
+            assert res_summary.status_code == 200
+            assert res_summary.json()["expected_cash_minor"] == 9000
+
+            # Final close succeeds and clears closing_draft
+            res_close = client.post(
+                f"/api/v1/shifts/{shift_id}/close",
+                headers=headers,
+                json={
+                    "denomination_counts": [{"denomination_minor": 1000, "quantity": 9}],
+                    "closing_notes": "Cierre final",
+                },
+            )
+            assert res_close.status_code == 201, res_close.text
+            assert res_close.json()["closing_draft"] is None
+
+            res_get = client.get(f"/api/v1/shifts/{shift_id}", headers=headers)
+            assert res_get.status_code == 200
+            assert res_get.json()["closing_draft"] is None
+
+            # Saving draft on closed shift returns 409
+            res_after_close = client.put(
+                f"/api/v1/shifts/{shift_id}/close-draft",
+                headers=headers,
+                json={"mode": "manual", "manual_total": "90"},
+            )
+            assert res_after_close.status_code == 409
+    finally:
+        engine.dispose()
+
+
+def test_register_expected_opening_cash_includes_overtime_and_summary_flags_overtime_payments(tmp_path):
+    """Registers surface prior close + overtime cash; opening the next shift marks those payments is_overtime."""
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "reg-overtime", "Register Overtime Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "reg-overtime@example.invalid")
+        headers = {"Authorization": f"Bearer {token}"}
+        app = create_app(configured_settings(url))
+
+        with factory.begin() as session:
+            member = Member(member_number="SOC-OT-1", full_name="Overtime Member", phone="5550192")
+            plan = Plan(code="ot-plan", name="Overtime Plan", kind="membership", status="active")
+            session.add_all([member, plan])
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan.id,
+                version_number=1,
+                name="Overtime Plan",
+                price_minor=10000,
+                currency="MXN",
+                duration_value=1,
+                duration_unit="month",
+                is_active=True,
+            )
+            session.add(version)
+            session.flush()
+            register = create_cash_register(session, branch_id, "ot-reg", "Overtime Register")
+            shift1 = open_shift(
+                session,
+                register_id=register.id,
+                opened_by=staff_id,
+                denomination_counts=[{"denomination_minor": 1000, "quantity": 5}],
+            )
+            close_shift(
+                session,
+                shift_id=shift1.id,
+                closed_by=staff_id,
+                denomination_counts=[{"denomination_minor": 1000, "quantity": 5}],
+            )
+            register_id, member_id, version_id, shift1_id = str(register.id), str(member.id), str(version.id), str(shift1.id)
+
+        with TestClient(app) as client:
+            res_regs_before = client.get("/api/v1/registers", headers=headers)
+            assert res_regs_before.status_code == 200
+            reg_before = next(item for item in res_regs_before.json() if item["id"] == register_id)
+            assert reg_before["has_open_shift"] is False
+            assert reg_before["last_closed_shift_id"] == shift1_id
+            assert reg_before["expected_opening_cash_minor"] == 5000
+
+            # Overtime cash membership sale recorded against prior closed shift
+            res_ot = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={**headers, "Idempotency-Key": "ot-cash-sale-1"},
+                json={
+                    "member_id": member_id,
+                    "plan_version_id": version_id,
+                    "cash_amount_minor": 3000,
+                    "source_shift_id": shift1_id,
+                },
+            )
+            assert res_ot.status_code == 201, res_ot.text
+
+            # Register expected_opening_cash_minor now reflects counted cash + overtime cash
+            res_regs_ot = client.get("/api/v1/registers", headers=headers)
+            assert res_regs_ot.status_code == 200
+            reg_ot = next(item for item in res_regs_ot.json() if item["id"] == register_id)
+            assert reg_ot["has_open_shift"] is False
+            assert reg_ot["last_closed_shift_id"] == shift1_id
+            assert reg_ot["expected_opening_cash_minor"] == 8000
+
+            # Open next shift counting expected 8000 minor
+            with factory() as session:
+                snap = capture_register_inventory_snapshot(session, register_id=UUID(register_id), actor_id=staff_id)
+                session.commit()
+                snap_id = str(snap.id)
+
+            res_open2 = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": register_id,
+                    "inventory_snapshot_id": snap_id,
+                    "opening_cash_minor": 8000,
+                    "denomination_counts": [{"denomination_minor": 1000, "quantity": 8}],
+                },
+            )
+            assert res_open2.status_code == 201, res_open2.text
+            shift2_id = res_open2.json()["id"]
+
+            # Once open, expected_opening_cash_minor is cleared on register list
+            res_regs_open = client.get("/api/v1/registers", headers=headers)
+            assert res_regs_open.status_code == 200
+            reg_open = next(item for item in res_regs_open.json() if item["id"] == register_id)
+            assert reg_open["has_open_shift"] is True
+            assert reg_open["expected_opening_cash_minor"] is None
+
+            # Record a normal in-shift sale on Shift 2 to contrast is_overtime flags
+            res_in_shift = client.post(
+                f"/api/v1/registers/{register_id}/membership-sales",
+                headers={**headers, "Idempotency-Key": "s2-normal-cash-sale"},
+                json={"member_id": member_id, "plan_version_id": version_id, "cash_amount_minor": 2000},
+            )
+            assert res_in_shift.status_code == 201, res_in_shift.text
+
+            res_sum2 = client.get(f"/api/v1/shifts/{shift2_id}/summary", headers=headers)
+            assert res_sum2.status_code == 200, res_sum2.text
+            sum2 = res_sum2.json()
+            assert sum2["expected_cash_minor"] == 10000  # 8000 float (already includes 3000 OT) + 2000 in-shift
+            ot_payment = next(item for item in sum2["payments"] if item["amount_minor"] == 3000)
+            normal_payment = next(item for item in sum2["payments"] if item["amount_minor"] == 2000)
+            assert ot_payment["is_overtime"] is True
+            assert normal_payment["is_overtime"] is False
+    finally:
+        engine.dispose()
+
+
+def test_opening_inventory_discrepancy_requires_comment_and_adjusts_stock(tmp_path):
+    """Inventory count discrepancy at opening requires reason and automatically generates stock adjustment."""
+    url, engine, factory = _setup_db(tmp_path)
+    try:
+        branch_id = _seed_branch(factory, "inv-disc", "Inventory Discrepancy Branch")
+        staff_id, token = _seed_receptionist(factory, branch_id, "inv-disc@example.invalid")
+        headers = {"Authorization": f"Bearer {token}"}
+        app = create_app(configured_settings(url))
+
+        with factory.begin() as session:
+            register = create_cash_register(session, branch_id, "inv-disc", "Inventory Register")
+            reg_id = str(register.id)
+            prod = Product(code="water-bottle-500", name="Agua 500ml", created_by=staff_id)
+            session.add(prod)
+            session.flush()
+            prod_id = prod.id
+            session.add(StockInitialization(
+                branch_id=branch_id, product_id=prod_id, quantity=10, initialized_by=staff_id
+            ))
+            session.flush()
+
+        # Capture opening inventory snapshot (expected = 10)
+        with factory() as session:
+            snap1 = capture_register_inventory_snapshot(session, register_id=UUID(reg_id), actor_id=staff_id)
+            session.commit()
+            snap1_id = str(snap1.id)
+
+        # Direct domain validation check
+        with factory() as session:
+            with pytest.raises(ValueError, match="A reason is required when physical inventory differs"):
+                _open_shift(session, register_id=UUID(reg_id), opened_by=staff_id, opening_cash_minor=5000,
+                            denomination_counts=[{"denomination_minor": 100, "quantity": 50}],
+                            inventory_snapshot_id=UUID(snap1_id),
+                            inventory_observations=[{"product_id": prod_id, "physical_quantity": 7}])
+
+        with TestClient(app) as client:
+            # 1. Report physical quantity = 7 (shortage of 3) WITHOUT reason -> 422
+            res_fail = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": reg_id,
+                    "inventory_snapshot_id": snap1_id,
+                    "opening_cash_minor": 5000,
+                    "denomination_counts": [{"denomination_minor": 100, "quantity": 50}],
+                    "inventory_observations": [
+                        {"product_id": str(prod_id), "physical_quantity": 7}
+                    ],
+                },
+            )
+            assert res_fail.status_code == 422
+
+            # 2. Report physical quantity = 7 WITH reason -> 201
+            res_ok = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": reg_id,
+                    "inventory_snapshot_id": snap1_id,
+                    "opening_cash_minor": 5000,
+                    "denomination_counts": [{"denomination_minor": 100, "quantity": 50}],
+                    "inventory_observations": [
+                        {"product_id": str(prod_id), "physical_quantity": 7, "reason": "3 botellas rotas en bodega"}
+                    ],
+                },
+            )
+            assert res_ok.status_code == 201
+            shift1_id = res_ok.json()["id"]
+
+            # Verify in DB: StockMovement kind="open_out", quantity=3 was recorded and stock is now 7
+            with factory() as session:
+                obs = session.scalars(
+                    select(ShiftInventoryObservation).where(ShiftInventoryObservation.reason.is_not(None))
+                ).all()
+                assert len(obs) == 1
+                assert obs[0].physical_quantity == 7
+                assert obs[0].reason == "3 botellas rotas en bodega"
+
+                movements = session.scalars(
+                    select(StockMovement).where(StockMovement.product_id == prod_id)
+                ).all()
+                assert len(movements) == 1
+                assert movements[0].kind == "open_out"
+                assert movements[0].quantity == 3
+                assert movements[0].reason == "3 botellas rotas en bodega"
+
+                # Check on-hand stock via inventory queries
+                stock = get_on_hand_stock(session, branch_id=branch_id, product_id=prod_id)
+                assert stock == 7
+
+            # Close shift 1 cleanly
+            res_close = client.post(
+                f"/api/v1/shifts/{shift1_id}/close",
+                headers=headers,
+                json={"counted_cash_minor": 5000},
+            )
+            assert res_close.status_code == 201
+
+            # 3. Capture second snapshot: expected stock is now 7
+            with factory() as session:
+                snap2 = capture_register_inventory_snapshot(session, register_id=UUID(reg_id), actor_id=staff_id)
+                session.commit()
+                snap2_id = str(snap2.id)
+
+            # Open shift 2 reporting surplus: physical 9 (surplus of 2) WITH reason -> 201
+            res_ok2 = client.post(
+                "/api/v1/shifts/open",
+                headers=headers,
+                json={
+                    "cash_register_id": reg_id,
+                    "inventory_snapshot_id": snap2_id,
+                    "opening_cash_minor": 5000,
+                    "denomination_counts": [{"denomination_minor": 100, "quantity": 50}],
+                    "inventory_observations": [
+                        {"product_id": str(prod_id), "physical_quantity": 9, "reason": "Se encontraron 2 botellas en almacen"}
+                    ],
+                },
+            )
+            assert res_ok2.status_code == 201
+
+            # Verify in DB: StockMovement kind="open_in", quantity=2 was recorded and stock is now 9
+            with factory() as session:
+                movements = session.scalars(
+                    select(StockMovement).where(StockMovement.product_id == prod_id, StockMovement.kind == "open_in")
+                ).all()
+                assert len(movements) == 1
+                assert movements[0].quantity == 2
+                assert movements[0].reason == "Se encontraron 2 botellas en almacen"
+
+                stock = get_on_hand_stock(session, branch_id=branch_id, product_id=prod_id)
+                assert stock == 9
+    finally:
+        engine.dispose()
+

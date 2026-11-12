@@ -20,7 +20,7 @@ import { Badge, Button, Field, Notice, PageHeader, Panel, TableRegion } from '..
 import { ShiftCloseDialog } from './ShiftCloseDialog';
 import { ShiftOpenModal } from './ShiftOpenModal';
 import {
-  ShiftApiError, getCurrentShift, getShiftHistory, getShiftSummary,
+  ShiftApiError, getCurrentShift, getShift, getShiftHistory, getShiftSummary,
   getShiftSnapshot, listCashRegisters, openShift as openApiShift,
   type ApiRequest, type CashRegisterDTO, type InventorySnapshotDTO, type ShiftDTO, type ShiftSummaryDTO,
 } from '../../api/shiftsApi';
@@ -39,7 +39,21 @@ type ShiftActivityViewRow = Omit<ShiftActivityRow, 'family'> & { family: string 
 
 interface ShiftDashboardViewProps {
   role: Role;
-  shift: { id: string; status: 'open' | 'closed'; openedAt: string; window: ShiftWindow; closedAt?: string; expectedCashAtCloseMinor?: number | null; countedCashMinor?: number | null; cashDifferenceMinor?: number | null; closingNotes?: string | null; cashDenominations?: { valueMinor: number; quantity: number }[] } | null;
+  shift: {
+    id: string;
+    status: 'open' | 'closed';
+    openedAt: string;
+    window: ShiftWindow;
+    closedAt?: string;
+    expectedCashAtCloseMinor?: number | null;
+    countedCashMinor?: number | null;
+    cashDifferenceMinor?: number | null;
+    expectedOpeningCashMinor?: number | null;
+    openingDifferenceMinor?: number | null;
+    notes?: string | null;
+    closingNotes?: string | null;
+    cashDenominations?: { valueMinor: number; quantity: number }[];
+  } | null;
   isCurrentOpenShift: boolean;
   hasClosedCurrentShift: boolean;
   shiftOptions?: ReactNode;
@@ -146,6 +160,9 @@ function ShiftDashboardView({ role, shift, isCurrentOpenShift, hasClosedCurrentS
     <Panel className="mt-6"><h2><HugeiconsIcon icon={PackageIcon} size={20} /> Movimientos de inventario</h2>{dashboard.inventoryRows ? <ShiftInventoryTable key={`inventory-${shift.id}`} rows={dashboard.inventoryRows} /> : <p>Historial no disponible en esta integración.</p>}</Panel>
     {(shift.status === 'closed' || hasClosedCurrentShift) && <Panel className="mt-6"><h2>Cierre y continuidad</h2><p className="muted">Reapertura y correcciones excepcionales no disponibles.</p>{shift.closedAt && <p>Cierre: {shift.closedAt}</p>}
       {shift.status === 'closed' && (shift.cashDenominations?.length ? <TableRegion label="Conteo registrado"><table><caption>Desglose de efectivo guardado al cerrar</caption><thead><tr><th scope="col">Valor MXN</th><th scope="col">Cantidad</th><th scope="col">Subtotal MXN</th></tr></thead><tbody>{shift.cashDenominations.filter(row => row.quantity > 0).map(row => <tr key={row.valueMinor}><td>{formatMoney(row.valueMinor)}</td><td>{row.quantity}</td><td>{formatMoney(row.valueMinor * row.quantity)}</td></tr>)}</tbody></table></TableRegion> : <p>Sin desglose por denominación registrado.</p>)}
+      {shift.notes && <p>Observaciones de apertura: {shift.notes}</p>}
+      {shift.expectedOpeningCashMinor != null && <p>Fondo inicial esperado: {cash(shift.expectedOpeningCashMinor)}</p>}
+      {shift.openingDifferenceMinor != null && shift.openingDifferenceMinor !== 0 && <p>Diferencia de apertura: {cash(shift.openingDifferenceMinor)}</p>}
       {shift.closingNotes && <p>Observaciones del cierre: {shift.closingNotes}</p>}{shift.countedCashMinor != null && <p>Efectivo contado: {cash(shift.countedCashMinor)}</p>}{shift.cashDifferenceMinor != null && <p>Diferencia: {cash(shift.cashDifferenceMinor)}</p>}
       {hasClosedCurrentShift && <div className="mt-6 clay-card" style={{ padding: '1.25rem', border: '1px solid var(--color-divider)', borderRadius: '18px', background: 'var(--color-surface)', boxShadow: 'var(--shadow-clay)' }}>
         <h3>Abrir siguiente turno</h3>
@@ -337,8 +354,12 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
       let activeShift: ShiftDTO | null = null;
       try { activeShift = await getCurrentShift(apiRequest, targetRegister); }
       catch (reason) { if (!isNotFound(reason)) throw reason; }
+      const freshRegisters = await listCashRegisters(apiRequest).catch(() => null);
       const merged = activeShift ? [activeShift, ...all.filter(row => row.id !== activeShift!.id)] : all;
       if (sequence.current !== current) return false;
+      if (freshRegisters) {
+        setRegisters(freshRegisters.filter(register => register.status === 'active'));
+      }
       setShifts(merged);
       const nextSelected = chooseCurrent ? activeShift?.id ?? merged[0]?.id ?? '' : selectedId;
       setSelectedId(merged.some(row => row.id === nextSelected) ? nextSelected : merged[0]?.id ?? '');
@@ -363,13 +384,46 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
   useEffect(() => {
     if (!shift) { setSummary(null); setSummaryLoaded(false); return; }
     let active = true;
-    setSummary(null);
-    setSummaryLoaded(false);
+    if (summary?.shift_id !== shift.id) {
+      setSummary(null);
+      setSummaryLoaded(false);
+    }
     void getShiftSummary(apiRequest, shift.id).then(value => { if (active) { setSummary(value); setSummaryLoaded(true); } }).catch(reason => {
       if (active) { setSummary(null); setSummaryLoaded(true); setMessage(reason instanceof Error ? reason.message : 'No se pudo cargar el resumen del turno.'); setError(true); }
     });
     return () => { active = false; };
   }, [apiRequest, shift?.id, summaryRefresh]);
+
+  useEffect(() => {
+    if (!closeModalOpen || shift?.status !== 'open') return;
+    const shiftIdToRefresh = shift.id;
+    const refreshLiveTotals = () => {
+      setSummaryRefresh(c => c + 1);
+      void getShift(apiRequest, shiftIdToRefresh).then(fresh => {
+        setShifts(prev => prev.map(row => row.id === fresh.id ? fresh : row));
+      }).catch(() => {
+        // Ignore transient background refresh failures while counting.
+      });
+    };
+    const intervalId = window.setInterval(refreshLiveTotals, 10_000);
+    window.addEventListener('focus', refreshLiveTotals);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshLiveTotals);
+    };
+  }, [apiRequest, closeModalOpen, shift?.id, shift?.status]);
+
+  function openCloseDialog() {
+    setCloseModalOpen(true);
+    setSummaryRefresh(c => c + 1);
+    if (shift?.status === 'open') {
+      void getShift(apiRequest, shift.id).then(fresh => {
+        setShifts(prev => prev.map(row => row.id === fresh.id ? fresh : row));
+      }).catch(() => {
+        // Proceed with the currently loaded shift state if refresh fails transiently.
+      });
+    }
+  }
 
   const branchId = registers.find(item => item.id === registerId)?.branch_id;
   useEffect(() => {
@@ -383,9 +437,9 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
       listBranchInventory(apiRequest, branchId).catch(() => ({ items: [], total: 0 })),
     ]).then(([movementsPage, inventoryPage]) => {
       if (!active) return;
-      setStockMovements(movementsPage.items);
+      setStockMovements(movementsPage?.items ?? []);
       const catalog: Record<string, { name: string; unit: string }> = {};
-      for (const item of inventoryPage.items) {
+      for (const item of (inventoryPage?.items ?? [])) {
         catalog[item.product_id] = { name: item.name, unit: item.unit };
       }
       setProductCatalog(catalog);
@@ -398,7 +452,13 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     setMessage('');
     setError(false);
     try {
-      const captured = await getShiftSnapshot(apiRequest, registerId);
+      const [captured, freshRegisters] = await Promise.all([
+        getShiftSnapshot(apiRequest, registerId),
+        listCashRegisters(apiRequest).catch(() => null),
+      ]);
+      if (freshRegisters) {
+        setRegisters(freshRegisters.filter(register => register.status === 'active'));
+      }
       openIntent.current = { registerId, snapshotId: captured.id };
       setInventorySnapshot(captured);
       setOpenModalOpen(true);
@@ -408,7 +468,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     }
   }
 
-  async function confirmOpening(data: { openingCashMinor: number; cashDenominations?: { valueMinor: number; quantity: number }[]; counts?: { productId: string; quantity: number; reason?: string }[] }) {
+  async function confirmOpening(data: { openingCashMinor: number; cashDenominations?: { valueMinor: number; quantity: number }[]; counts?: { productId: string; quantity: number; reason?: string }[]; notes?: string }) {
     const intent = openIntent.current;
     if (!intent || !inventorySnapshot || intent.registerId !== registerId) throw new Error('La caja o el conteo inicial cambió. Captura nuevamente antes de abrir.');
     const openingIntent = intent;
@@ -417,6 +477,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
       inventory_snapshot_id: intent.snapshotId,
       ...(data.cashDenominations ? { denomination_counts: data.cashDenominations.map(row => ({ denomination_minor: row.valueMinor, quantity: row.quantity })) } : { opening_cash_minor: data.openingCashMinor }),
       inventory_observations: (data.counts ?? []).map(row => ({ product_id: row.productId, physical_quantity: row.quantity, ...(row.reason ? { reason: row.reason } : {}) })),
+      ...(data.notes ? { notes: data.notes } : {}),
     };
     setMessage('');
     setError(false);
@@ -502,6 +563,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
   const dashboardRows: ShiftActivityViewRow[] | null = summary?.payments.map(item => ({
     id: item.id, family: 'Sin clasificar', description: item.description, method: item.method,
     status: item.status === 'confirmed' ? 'confirmed' : 'pending', amountMinor: item.amount_minor, recordedAt: item.recorded_at,
+    isOvertime: Boolean(item.is_overtime),
   })) ?? null;
   const viewShift = shift ? {
     id: shift.id,
@@ -512,6 +574,9 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     expectedCashAtCloseMinor: shift.expected_cash_at_close_minor,
     countedCashMinor: shift.counted_cash_minor,
     cashDifferenceMinor: shift.difference_minor,
+    expectedOpeningCashMinor: shift.expected_opening_cash_minor,
+    openingDifferenceMinor: shift.opening_difference_minor,
+    notes: shift.notes,
     closingNotes: shift.closing_notes,
     cashDenominations: shift.closing_denomination_counts.length ? shift.closing_denomination_counts.map(row => ({ valueMinor: row.denomination_minor, quantity: row.quantity })) : undefined,
   } : null;
@@ -539,7 +604,7 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
       const shiftStart = new Date(shift.opened_at).getTime();
       const shiftEnd = shift.closed_at ? new Date(shift.closed_at).getTime() : Infinity;
 
-      const movementRows: ShiftInventoryRow[] = stockMovements.filter(item => {
+      const movementRows: ShiftInventoryRow[] = (stockMovements ?? []).filter(item => {
         const time = new Date(item.recorded_at).getTime();
         return time >= shiftStart && time <= shiftEnd;
       }).map(item => {
@@ -564,9 +629,9 @@ function ApiShifts({ role, apiRequest, actorId, actorName }: ApiShiftsProps) {
     emptyMessage={!current && shifts.length === 0 && !loading ? 'No hay turnos registrados para esta caja.' : undefined}
     contextControls={registers.length > 1 && <div className="field"><label htmlFor="shift-register-selection">Caja</label><select id="shift-register-selection" value={registerId} onChange={event => { setRegisterId(event.target.value); setShifts([]); setSelectedId(''); }}><option value="">Selecciona una caja</option>{registers.map(item => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></div>}
     shiftOptions={role === 'OWNER' && shifts.length > 0 && <div className="field"><label htmlFor="shift-selection">Turno a consultar</label><select id="shift-selection" value={selectedId} onChange={event => setSelectedId(event.target.value)}>{shifts.map(item => <option key={item.id} value={item.id}>{windowFor(item.opened_at)} · {new Date(item.opened_at).toLocaleDateString('es-MX')} · {item.status === 'open' ? 'Turno en curso' : 'Turno cerrado'}</option>)}</select></div>}
-    dashboard={dashboardViewData} message={!loading ? message : ''} error={error} onOpen={() => void startOpening()} onClose={() => setCloseModalOpen(true)}
+    dashboard={dashboardViewData} message={!loading ? message : ''} error={error} onOpen={() => void startOpening()} onClose={openCloseDialog}
     onSellMembership={() => setMembershipModalOpen(true)}
     membershipDialog={membershipModalOpen ? <LiveMembershipCheckout apiRequest={apiRequest} onClose={() => setMembershipModalOpen(false)} onCompleted={async () => { setMembershipModalOpen(false); await reloadRegister(registerId, false); }} /> : null}
-    closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor, extrasMinor: summary.extra_minor, expensesMinor: summary.expense_minor }} apiRequest={apiRequest} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
-    openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={confirmOpening} /> : null} />;
+    closeDialog={closeModalOpen && shift?.status === 'open' && summary ? <ShiftCloseDialog isOpen shiftId={shift.id} shiftName={shiftName} expectedCashMinor={summary.expected_cash_minor} expectedCashBreakdown={{ openingMinor: shift.opening_cash_minor, receiptsMinor: summary.confirmed_cash_minor, extrasMinor: summary.extra_minor, expensesMinor: summary.expense_minor }} apiRequest={apiRequest} initialDraft={shift.closing_draft} onDraftSaved={updated => setShifts(prev => prev.map(row => row.id === updated.id ? updated : row))} onClose={() => setCloseModalOpen(false)} onSuccess={async () => { setCloseModalOpen(false); setMessage('Cierre registrado.'); setError(false); await reloadRegister(registerId, false); }} /> : null}
+    openDialog={openModalOpen && inventorySnapshot ? <ShiftOpenModal isOpen liveInventory={{ products: inventorySnapshot.items.map(item => ({ id: item.product_id, name: item.name, expectedQuantity: item.initialized ? item.expected_quantity : null, initialized: item.initialized })), window: windowFor(new Date().toISOString()), openerName: actorName, expectedOpeningCashMinor: registers.find(r => r.id === registerId)?.expected_opening_cash_minor ?? shifts.find(s => s.status === 'closed')?.counted_cash_minor ?? null }} onClose={() => { setOpenModalOpen(false); setInventorySnapshot(null); openIntent.current = null; }} onConfirm={confirmOpening} /> : null} />;
 }

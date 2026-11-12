@@ -26,6 +26,7 @@ export interface ShiftOpenConfirmData {
     quantity: number;
     reason?: string;
   }[];
+  notes?: string;
 }
 
 interface ShiftOpenModalProps {
@@ -35,6 +36,7 @@ interface ShiftOpenModalProps {
     products: { id: string; name: string; category?: string | null; expectedQuantity: number | null; initialized: boolean }[];
     window: ShiftWindow;
     openerName: string;
+    expectedOpeningCashMinor?: number | null;
     registers?: { id: string; name: string }[];
     registerId?: string;
     onRegisterChange?: (registerId: string) => void;
@@ -47,6 +49,7 @@ type CountMode = 'denominations' | 'manual';
 
 const PRESET_WASTE_REASONS = [
   'Merma detectada al abrir',
+  'Sobrante detectado al abrir',
   'Producto dañado / roto',
   'Caducidad',
   'Consumo previo no registrado',
@@ -82,6 +85,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [manualTotal, setManualTotal] = useState('');
+  const [openingNotes, setOpeningNotes] = useState('');
   const [step1Error, setStep1Error] = useState('');
 
   // Step 2: Inventory verification
@@ -100,6 +104,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
     setQuantities({});
     setAmounts({});
     setManualTotal('');
+    setOpeningNotes('');
     setStep1Error('');
     setInventorySearch('');
     
@@ -148,6 +153,10 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
   const denominationTotalMinor = cashCountTotal(counts);
   const parsedManualMinor = parseMoney(manualTotal);
   const calculatedOpeningCashMinor = mode === 'denominations' ? denominationTotalMinor : parsedManualMinor;
+  const expectedOpeningCashMinor = liveInventory?.expectedOpeningCashMinor ?? null;
+  const openingCashDifference = (expectedOpeningCashMinor !== null && calculatedOpeningCashMinor !== null)
+    ? calculatedOpeningCashMinor - expectedOpeningCashMinor
+    : null;
 
   const responsibleStaff = staffList.find(s => s.id === staffId);
   const responsibleName = liveInventory?.openerName ?? responsibleStaff?.name ?? 'No asignado';
@@ -204,6 +213,10 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
         : 'Ingresa un monto válido para el fondo inicial.');
       return;
     }
+    if (expectedOpeningCashMinor !== null && openingCashDifference !== 0 && !openingNotes.trim()) {
+      setStep1Error('Se requiere un comentario cuando hay diferencia en el fondo inicial de efectivo.');
+      return;
+    }
     setStep1Error('');
     setStep(2);
   }
@@ -228,6 +241,11 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
 
   async function handleConfirmOpening() {
     if (submittingRef.current || calculatedOpeningCashMinor === null || calculatedOpeningCashMinor < 0) return;
+    if (expectedOpeningCashMinor !== null && openingCashDifference !== 0 && !openingNotes.trim()) {
+      setStep1Error('Se requiere un comentario cuando hay diferencia en el fondo inicial de efectivo.');
+      setStep(1);
+      return;
+    }
 
     // Collect inventory adjustments
     const adjustments: ShiftOpenConfirmData['stockAdjustments'] = [];
@@ -282,6 +300,7 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
         responsibleStaffName: responsibleStaff?.name,
         stockAdjustments: adjustments.length ? adjustments : undefined,
         counts: countRecords,
+        notes: openingNotes.trim() || undefined,
       });
       submittingRef.current = false;
       closeDialog();
@@ -349,8 +368,9 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
           <button
             type="button"
             className={`shift-step-pill ${step === 2 ? 'is-active' : ''} ${step > 2 ? 'is-completed' : ''}`}
-            onClick={() => {
-              if (calculatedOpeningCashMinor !== null && calculatedOpeningCashMinor >= 0) setStep(2);
+            onClick={e => {
+              if (step === 1) handleNextToInventory(e);
+              else if (calculatedOpeningCashMinor !== null && calculatedOpeningCashMinor >= 0) setStep(2);
             }}
             disabled={calculatedOpeningCashMinor === null || calculatedOpeningCashMinor < 0}
           >
@@ -591,6 +611,33 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
                 </div>
               )}
 
+              {expectedOpeningCashMinor !== null && expectedOpeningCashMinor !== undefined && (
+                <div className="shift-open-expected-cash-row" style={{ margin: '0.75rem 0', fontSize: '0.875rem' }}>
+                  <span>Fondo esperado: <strong>{formatMoney(expectedOpeningCashMinor)} MXN</strong></span>
+                  {openingCashDifference !== null && openingCashDifference !== 0 && (
+                    <span style={{ marginLeft: '0.5rem', color: openingCashDifference < 0 ? 'var(--color-danger, #dc2626)' : 'var(--color-success, #16a34a)' }}>
+                      · Diferencia: <strong>{formatMoney(openingCashDifference)} MXN</strong>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="shift-open-notes-field field" style={{ margin: '1rem 0' }}>
+                <label htmlFor="shift-opening-notes">
+                  Observaciones del fondo inicial {openingCashDifference !== null && openingCashDifference !== 0 ? '*' : '(opcional)'}
+                </label>
+                <textarea
+                  id="shift-opening-notes"
+                  rows={2}
+                  placeholder="Comentario sobre el fondo inicial..."
+                  value={openingNotes}
+                  onChange={e => {
+                    setOpeningNotes(e.target.value);
+                    setStep1Error('');
+                  }}
+                />
+              </div>
+
               {step1Error && (
                 <div role="alert" style={{ marginTop: '1rem' }}>
                   <Notice tone="error">{step1Error}</Notice>
@@ -759,7 +806,24 @@ export function ShiftOpenModal({ isOpen, state, liveInventory, onClose, onConfir
                       ? `Desglose por monedas y billetes (${counts.filter(c => c.quantity > 0).length} denominaciones registradas)`
                       : 'Ingresado como total manual'}
                   </p>
+                  {expectedOpeningCashMinor !== null && expectedOpeningCashMinor !== undefined && (
+                    <p className="shift-open-summary-detail" style={{ marginTop: '0.25rem' }}>
+                      Esperado: {formatMoney(expectedOpeningCashMinor)} MXN
+                      {openingCashDifference !== 0 && (
+                        <span> · Diferencia: {formatMoney(openingCashDifference ?? 0)} MXN</span>
+                      )}
+                    </p>
+                  )}
                 </div>
+
+                {openingNotes.trim() && (
+                  <div className="shift-open-summary-card">
+                    <h4>Observaciones de Apertura</h4>
+                    <div className="shift-open-summary-val" style={{ fontSize: '1rem', fontWeight: 500 }}>
+                      {openingNotes.trim()}
+                    </div>
+                  </div>
+                )}
 
                 <div className="shift-open-summary-card">
                   <h4>Estado del Inventario</h4>

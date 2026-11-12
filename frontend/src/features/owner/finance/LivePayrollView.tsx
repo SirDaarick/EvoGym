@@ -28,7 +28,7 @@ export function LivePayrollView({ apiRequest, range, branchId }: Props) {
     <Panel>
       <p className="eyebrow">NÓMINA REGISTRADA</p>
       <h2>Pagos y anticipos de nómina</h2>
-      <p className="muted">Egresos reales de nómina semanal del periodo; también aparecen como gastos generales, sin doble conteo.</p>
+      <p className="muted">Egresos reales de nómina semanal del periodo (salen de la cuenta del dueño, no descuenta de la caja del turno); también aparecen como gastos generales, sin doble conteo.</p>
       {error && <p role="alert">{error}</p>}
       {loading && <p role="status">Cargando nómina…</p>}
     </Panel>
@@ -47,7 +47,11 @@ export function LivePayrollView({ apiRequest, range, branchId }: Props) {
                 <th className="numeric">Anticipos</th><th className="numeric">Neto</th><th>Estado</th></tr></thead>
               <tbody>{history.weeks.flatMap(week => week.items.map(item => <tr key={`${week.week_start}-${week.branch_id}-${item.profile_id}`}>
                 <td>{week.week_start}</td><td>{week.branch_name}</td><td>{item.full_name}</td>
-                <td className="numeric">{mxn(item.base_minor)}</td><td className="numeric">{mxn(item.advances_minor)}</td>
+                <td className="numeric">{mxn(item.base_minor)}</td>
+                <td className="numeric">
+                  {mxn(item.advances_minor)}
+                  {item.advance_payment_method ? ` (${item.advance_payment_method === 'cash' ? 'efectivo' : 'transferencia'})` : ''}
+                </td>
                 <td className="numeric">{mxn(item.net_minor)}</td>
                 <td>{item.paid ? `Pagado (${item.paid.payment_method === 'cash' ? 'efectivo' : 'transferencia'})` : 'Pendiente'}</td>
               </tr>))}</tbody>

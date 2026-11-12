@@ -1,6 +1,7 @@
 """Reloadable member read queries for operational profile projection (P2.3)."""
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.orm import Session
@@ -48,6 +49,15 @@ def register_member_home_branch(member_id: UUID, branch_id: UUID) -> None:
 def register_period_branch(period_id: UUID, branch_id: UUID | None) -> None:
     """Register explicit branch restriction (or None for multi-branch) for a period."""
     _PERIOD_BRANCH_OVERRIDES[period_id] = branch_id
+
+
+def branch_today(session: Session, branch_id: UUID, now: datetime):
+    """Local calendar date of the branch (periods are [start, end) in branch time); UTC date if the zone is unusable."""
+    zone = session.scalar(select(Branch.timezone).where(Branch.id == branch_id))
+    try:
+        return now.astimezone(ZoneInfo(zone)).date()
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return now.astimezone(timezone.utc).date()
 
 
 def _ensure_utc(dt: datetime) -> datetime:
@@ -122,7 +132,7 @@ def get_member_reload_data(
 
     # 2. Active Membership Periods
     now_utc = datetime.now(timezone.utc)
-    today = now_utc.date()
+    today = branch_today(session, caller_branch_id, now_utc)
 
     period_rows = session.execute(
         select(MembershipPeriod, OrderItem, PlanVersion, Order)
@@ -157,23 +167,20 @@ def get_member_reload_data(
         else:
             # For multi-branch entitlements (period_branch_id is None), evaluate against order branch
             eval_branch = period_branch_id or (order.branch_id if order else caller_branch_id)
-            try:
-                decision = evaluate_membership_access(session, period.id, today, eval_branch)
-                if decision.status == MembershipAccessStatus.EXPIRED:
-                    access_status = "expired"
-                elif decision.status == MembershipAccessStatus.WRONG_BRANCH and period_branch_id is not None:
-                    access_status = "branch_restricted"
-                elif decision.status == MembershipAccessStatus.BLOCKED_MISSING_FUNDS:
-                    if decision.reason == "admin_payment_restriction":
-                        access_status = "restricted_admin"
-                    else:
-                        access_status = "restricted_unpaid"
-                elif decision.allowed:
-                    access_status = "eligible"
-                else:
+            decision = evaluate_membership_access(session, period.id, today, eval_branch)
+            if decision.status == MembershipAccessStatus.EXPIRED:
+                access_status = "expired"
+            elif decision.status == MembershipAccessStatus.WRONG_BRANCH and period_branch_id is not None:
+                access_status = "branch_restricted"
+            elif decision.status == MembershipAccessStatus.BLOCKED_MISSING_FUNDS:
+                access_status = "restricted_admin" if decision.reason == "admin_payment_restriction" else "restricted_unpaid"
+            elif decision.allowed:
+                if "outstanding_balance" in decision.warnings or decision.outstanding_minor > 0:
                     access_status = "restricted_unpaid"
-            except Exception:
-                access_status = "eligible" if is_current else "expired"
+                else:
+                    access_status = "eligible"
+            else:
+                access_status = "restricted_unpaid"
 
         plan_name = (
             item.description_snapshot
@@ -433,13 +440,15 @@ def purchase_item(session: Session, row) -> dict:
         return {"description": "Rental payment", "amount_minor": receipt.amount_minor,
                 "method": receipt.method, "status": "paid" if receipt.status == "confirmed" else "pending"}
     payment = session.get(MembershipDebtPayment, row.id)
-    return {"description": "Membership debt payment", "amount_minor": payment.amount_minor,
+    order = session.get(Order, payment.order_id)
+    description = "Product debt payment" if order and order.order_kind == "product" else "Membership debt payment"
+    return {"description": description, "amount_minor": payment.amount_minor,
             "method": "credit" if payment.credit_minor == payment.amount_minor else "cash", "status": "paid"}
 
 
 def summary_data(session: Session, member_id: UUID, branch: UUID, now: datetime) -> dict:
     """Raw rows for the member summary card; `rental_debt` is already summed."""
-    today = now.date()
+    today = branch_today(session, branch, now)
     period = session.execute(
         select(MembershipPeriod, OrderItem)
         .join(OrderItem, OrderItem.id == MembershipPeriod.order_item_id)

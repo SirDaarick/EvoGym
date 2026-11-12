@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMember,
   createMemberNumber,
+  findMembersByPhone,
   getActiveMembershipPlans,
   getCurrentRegisterShift,
   getRegisters,
@@ -27,6 +28,19 @@ beforeEach(() => {
 });
 
 describe('membership checkout API', () => {
+  it('finds shared numbers across pages regardless of phone formatting', async () => {
+    const first = { id: 'a', member_number: 'A', full_name: 'Ana', phone: '555-123' };
+    const second = { id: 'b', member_number: 'B', full_name: 'Luis', phone: '(555) 123' };
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [first], pages: 2 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [second], pages: 2 }), { status: 200 }));
+    await expect(findMembersByPhone('555123')).resolves.toEqual([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('rejects malformed member matches rather than offering an invalid identity', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [{ phone: '555123' }], pages: 1 }), { status: 200 }));
+    await expect(findMembersByPhone('555123')).rejects.toThrow('No se pudo verificar el teléfono.');
+  });
   it('generates a compact unique member number within the backend limit', () => {
     const number = createMemberNumber();
     expect(number).toMatch(/^M[a-f0-9]{31}$/);

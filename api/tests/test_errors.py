@@ -177,7 +177,7 @@ def test_checkin_openapi_declares_domain_conflicts_and_safe_validation_responses
         assert responses["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ValidationErrorResponse")
     definitions = schema["components"]["schemas"]
     assert set(definitions["PublicDomainErrorBody"]["properties"]["code"]["enum"]) == {
-        "membership_access_denied", "class_sample_already_used", "class_sample_payment_unavailable",
+        "membership_access_denied", "debt_confirmation_required", "member_phone_exists", "class_sample_already_used", "class_sample_payment_unavailable",
         "class_sample_payment_not_received", "wrong_branch",
         "sync_device_revoked", "sync_device_expired", "sync_snapshot_required", "sync_batch_too_large",
     }

@@ -66,4 +66,13 @@ describe('OfflineStatusBadge', () => {
     render(<OfflineStatusBadge />);
     expect(screen.getByText('Sincronizado')).toBeDefined();
   });
+
+  it('does not claim synchronization while queued events remain', () => {
+    vi.spyOn(syncProvider, 'useSync').mockReturnValue({
+      status: 'synced', isOnline: true, pendingCount: 2, lastSyncAt: null, error: null, flushNow: vi.fn(),
+    });
+    render(<OfflineStatusBadge />);
+    expect(screen.getByText('Pending sync (2)')).toBeInTheDocument();
+    expect(screen.queryByText('Sincronizado')).not.toBeInTheDocument();
+  });
 });
